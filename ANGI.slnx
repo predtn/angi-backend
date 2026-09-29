@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ANGI.Application/ANGI.Application.csproj" />
+  <Project Path="ANGI.Domain/ANGI.Domain.csproj" />
+  <Project Path="ANGI.Infrastructure/ANGI.Infrastructure.csproj" />
+  <Project Path="ANGI.Test/ANGI.Test.csproj" />
+  <Project Path="ANGI.WebApi/ANGI.WebApi.csproj" />
+</Solution>
