@@ -52,3 +52,27 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# IDE / editor
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# Secrets and local config
+.env
+.env.*
+appsettings.*.local.json
+appsettings.Local.json
+secrets.json
+
+# Code coverage
+coverage*.xml
+coverage*.json
+*.coverage
+*.coveragexml
+
+# Claude Code local files
+.claude/
