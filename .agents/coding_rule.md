@@ -10,7 +10,7 @@ ANGI.Domain/
 
 ANGI.Application/
   Common/
-    Exceptions/     ← BadRequestException.cs, NotFoundException.cs, UnauthorizedException.cs, ForbiddenException.cs, ConflictException.cs
+    Exceptions/     ← AppException.cs (base, carries ErrorCode), BadRequestException.cs, NotFoundException.cs, UnauthorizedException.cs, ForbiddenException.cs, ConflictException.cs, ServiceUnavailableException.cs
     Interfaces/
       Repositories/ ← IUserRepository, IUnitOfWork, ...
       Services/     ← IJwtService, IPasswordService, ICurrentUserService, ...
@@ -35,7 +35,7 @@ ANGI.Infrastructure/
   DependencyInjection.cs
 
 ANGI.WebAPI/
-  Configs/          ← JwtConfig, CorsConfig, SwaggerConfig
+  Configs/          ← JwtConfig, CorsConfig, OpenApiConfig (OpenAPI + Scalar), RateLimitConfig
   Controllers/      ← Thin controllers only
   Middlewares/      ← ExceptionHandlingMiddleware
   Common/
@@ -123,16 +123,24 @@ Every new feature must follow this order:
 WebAPI/Common/Models/ApiResponse.cs  ← HTTP response shape, used in Controllers + Middleware
 ```
 
-All HTTP responses — success and error — must use `ApiResponse<T>`:
+All HTTP responses — success and error — must use `ApiResponse<T>`. This is the format defined in `ANGI_API_Design_Ver1.6` (sheet *Tổng quan* → "Định dạng response", sheet *DTO* → `ApiResponse<T>`). The fields described for each endpoint in the API Design are the content of `Data`.
 
 ```csharp
 public class ApiResponse<T>
 {
     public bool Success { get; set; }
-    public string? Message { get; set; }
-    public T? Data { get; set; }
+    public string? Message { get; set; }      // user-facing message, usually null on success
+    public string? ErrorCode { get; set; }    // null on success; on error a code from sheet "Mã lỗi"
+    public T? Data { get; set; }              // null on error or when the endpoint returns nothing
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string[]>? Errors { get; set; }  // only for VALIDATION_FAILED: field → messages
 }
 ```
+
+JSON uses camelCase: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`.
+
+The internal Recommendation API (FastAPI) is **not** wrapped; only the backend reads it.
 
 ### Success path (Controllers)
 
@@ -142,7 +150,10 @@ Controllers set both the HTTP status code **and** the body:
 |---|---|---|
 | Fetch / update | 200 OK | `Success = true`, `Data = dto` |
 | Create new resource | 201 Created | `Success = true`, `Data = dto` |
-| Delete / no content | 200 OK | `Success = true`, `Data = null` |
+| Delete / no content (logout, resend email, change password, ...) | 200 OK | `Success = true`, `Data = null` |
+| Background job accepted (only RM-10, IMP-01) | 202 Accepted | `Success = true`, `Data = dto` |
+
+Never return `204 No Content` or `NoContent()`: every response has an `ApiResponse` body. Use exactly the status written in the API Design for each endpoint.
 
 ```csharp
 // GET / PUT
@@ -165,9 +176,19 @@ await context.Response.WriteAsJsonAsync(new ApiResponse<object>   // body
 {
     Success = false,
     Message = exception.Message,
+    ErrorCode = exception.ErrorCode,   // e.g. "RESTAURANT_NOT_FOUND"
     Data = null
 });
 ```
+
+Responses that do not pass through the middleware must use the same shape:
+
+| Case | Where to configure | Status / ErrorCode |
+|---|---|---|
+| Missing or invalid token | `JwtBearerEvents.OnChallenge` | 401 `UNAUTHORIZED` |
+| Wrong role / missing permission | `JwtBearerEvents.OnForbidden` (or an `IAuthorizationMiddlewareResultHandler`) | 403 `FORBIDDEN` |
+| Model binding fails (bad JSON, wrong type) | `ApiBehaviorOptions.InvalidModelStateResponseFactory` | 400 `VALIDATION_FAILED` + `Errors` |
+| Rate limit exceeded | `RateLimiterOptions.OnRejected` (also set `Retry-After`) | 429 `TOO_MANY_REQUESTS` |
 
 - Never construct raw JSON error objects outside of `ApiResponse<T>`.
 - Never set only the status code without a body, or only the body without the status code.
@@ -231,27 +252,41 @@ All expected and unexpected errors must be thrown as exceptions.
 
 Examples:
 
+Every custom exception inherits `AppException` and carries an `ErrorCode`. Error codes and their HTTP status come from sheet **Mã lỗi** of `ANGI_API_Design_Ver1.6`; the errors specific to an endpoint are in column *Mã lỗi riêng* of sheet *Backend API*. Do not invent a code that is not in the API Design; add it there first.
+
 ```csharp
-throw new BadRequestException("Invalid request.");
-throw new NotFoundException("User not found.");
-throw new UnauthorizedException("Invalid credentials.");
-throw new ForbiddenException("You do not have permission.");
-throw new ConflictException("Email already exists.");
+public abstract class AppException : Exception
+{
+    public string ErrorCode { get; }
+    protected AppException(string errorCode, string message) : base(message) => ErrorCode = errorCode;
+}
+
+throw new BadRequestException("TOKEN_EXPIRED", "Liên kết đã hết hạn.");
+throw new NotFoundException("RESTAURANT_NOT_FOUND", "Không tìm thấy nhà hàng.");
+throw new UnauthorizedException("INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng.");
+throw new ForbiddenException("NOT_OWNER", "Bạn không phải chủ sở hữu.");
+throw new ConflictException("REVIEW_ALREADY_EXISTS", "Bạn đã đánh giá nhà hàng này.");
+throw new ServiceUnavailableException("SERVICE_UNAVAILABLE", "Hệ thống gợi ý tạm thời không phản hồi.");
 ```
+
+`Message` is shown to the user, so write it in Vietnamese. The client branches on `ErrorCode`, never on `Message`.
 
 ### Exception Mapping
 
 `ExceptionHandlingMiddleware` must map exceptions to HTTP status codes:
 
 ```text
-ValidationException      -> 400 Bad Request
-BadRequestException      -> 400 Bad Request
-UnauthorizedException    -> 401 Unauthorized
-ForbiddenException       -> 403 Forbidden
-NotFoundException        -> 404 Not Found
-ConflictException        -> 409 Conflict
-Exception                -> 500 Internal Server Error
+ValidationException          -> 400 Bad Request          ErrorCode = VALIDATION_FAILED, Errors = failures grouped by property (camelCase)
+BadRequestException          -> 400 Bad Request          ErrorCode from the exception
+UnauthorizedException        -> 401 Unauthorized         ErrorCode from the exception
+ForbiddenException           -> 403 Forbidden            ErrorCode from the exception
+NotFoundException            -> 404 Not Found            ErrorCode from the exception
+ConflictException            -> 409 Conflict             ErrorCode from the exception
+ServiceUnavailableException  -> 503 Service Unavailable  ErrorCode from the exception
+Exception                    -> 500 Internal Server Error ErrorCode = INTERNAL_ERROR, generic message, log the real exception
 ```
+
+The API Design has no 422, 410, 413, 415 or 204: data and business-rule errors (expired token, file too large, wrong file type, ...) are all `BadRequestException` with their own `ErrorCode`. Never return exception details or stack traces in `Message` for a 500.
 
 ---
 
@@ -310,7 +345,7 @@ Controllers must be **thin** — receive request, call use case, return response
 
 ```csharp
 [ApiController]
-[Route("api/restaurantItems")]
+[Route("api/v1/restaurantItems")]
 public class RestaurantItemController : ControllerBase
 {
     private readonly ICreateRestaurantItemUseCase _createRestaurantItem;
@@ -323,7 +358,7 @@ public class RestaurantItemController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Get(long id, CancellationToken ct)
     {
         var result = await _getRestaurantItem.ExecuteAsync(id, ct);
         return Ok(new ApiResponse<RestaurantItemResponseDto> { Success = true, Data = result });
