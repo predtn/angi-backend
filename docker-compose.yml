@@ -1,0 +1,29 @@
+name: angi
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    container_name: angi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Copy .env.example to .env first}
+      POSTGRES_DB: ${ANGI_DB_NAME:-angi}
+      ANGI_BACKEND_DB_USER: ${ANGI_BACKEND_DB_USER:-angi_backend}
+      ANGI_BACKEND_DB_PASSWORD: ${ANGI_BACKEND_DB_PASSWORD:?Copy .env.example to .env first}
+      ANGI_RECO_DB_USER: ${ANGI_RECO_DB_USER:-angi_reco}
+      ANGI_RECO_DB_PASSWORD: ${ANGI_RECO_DB_PASSWORD:?Copy .env.example to .env first}
+      TZ: UTC
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - angi-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  angi-pgdata:
