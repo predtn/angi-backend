@@ -1,3 +1,5 @@
+using ANGI.Application.Common.Interfaces.Services;
+using ANGI.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,6 +11,7 @@ namespace ANGI.Infrastructure
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            services.AddScoped<ICloudinaryService, CloudinaryService>();
             return services;
         }
     }
