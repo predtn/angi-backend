@@ -4,7 +4,7 @@
 
 ```
 ANGI.Domain/
-  Common/           ← BaseEntity only
+  Common/           ← BaseEntity, IHasCreatedAt, IHasUpdatedAt, ISoftDelete
   Entities/         ← Pure C# classes, no framework attributes
   Enums/            ← Business enums only
 

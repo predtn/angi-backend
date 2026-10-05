@@ -49,7 +49,7 @@ Recommendation is built in all three iterations inside a **separate service** (s
 | API docs | OpenAPI + Scalar (`/scalar`, Development only) | ✅ |
 | Testing | xUnit, Moq, FluentAssertions 7.x | ✅ package |
 | Hosting | Render (backend, recommendation service, PostgreSQL), Vercel (frontend) | 🔲 |
-| Local dev | Docker Compose: PostgreSQL 16 + pgvector (backend and reco run from the IDE or in the same compose) | 🔲 |
+| Local dev | Docker Compose: PostgreSQL 16 + pgvector (backend and reco run from the IDE or in the same compose) | ✅ |
 
 ### External services 🔲
 
@@ -187,7 +187,7 @@ app.MapControllers();
 
 ## 6. Database
 
-### Setup 🔲
+### Setup ✅
 
 ```csharp
 services.AddDbContext<ANGIContext>(options =>
@@ -233,25 +233,20 @@ Rules:
 | Status / enum | `varchar` + `CHECK` with lowercase snake_case values (e.g. `pending_verification`). Domain enums are mapped to exactly those strings with a value converter; valid values: API Design, sheet "Enum". |
 | Email | `citext` (case-insensitive unique). |
 
-### Base classes 🔲
+### Base classes ✅
 
 ```csharp
-public abstract class BaseEntity<TKey>
-{
-    public TKey Id { get; set; } = default!;
-    public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-}
-
-public interface ISoftDelete
-{
-    DateTime? DeletedAt { get; set; }
-}
+public abstract class BaseEntity<TKey> { public TKey Id { get; set; } = default!; }
+public interface IHasCreatedAt { DateTime CreatedAt { get; set; } }
+public interface IHasUpdatedAt { DateTime UpdatedAt { get; set; } }
+public interface ISoftDelete    { DateTime? DeletedAt { get; set; } }
 ```
 
-- Columns follow the Data Dictionary exactly: an entity has only the timestamp columns its table has (e.g. `audit_logs` is append-only, no `updated_at`).
-- Timestamps are set automatically in `ANGIContext.SaveChangesAsync`. Use cases never set them.
-- **Soft delete** only for tables with `deleted_at` (users, restaurants, roadmaps, blogs, blog comments): delete = set `DeletedAt`. A global filter `HasQueryFilter(e => e.DeletedAt == null)` hides deleted rows.
+- Columns follow the Data Dictionary exactly: an entity implements only the interfaces for the timestamp columns its table has (e.g. `audit_logs` is append-only, no `updated_at`). Tables with a composite key (`role_permissions`, `dish_tags`, `blog_likes`, ...) and `review_replies` (key = `review_id`) do not inherit `BaseEntity`.
+- `CreatedAt` / `UpdatedAt` are set automatically in `ANGIContext.SaveChangesAsync`. Use cases never set them.
+- **Soft delete** only for tables with `deleted_at` (users, restaurants, roadmaps, blogs, blog comments): the use case sets `DeletedAt = DateTime.UtcNow`; never call `Remove()` on these entities. A global filter (`DeletedAt == null`) hides deleted rows; use `IgnoreQueryFilters()` when deleted rows are needed. A required navigation to a soft-deleted row (e.g. `Blog.Author`) loads as `null`.
+- Required FKs are `RESTRICT` unless the configuration sets `Cascade` (owned child rows: images, business hours, dish tags, menu items, roadmap days/items, ...).
+- A column with a constant database default (`dish_form = 'other'`, `is_available = true`) also gets that default as the C# property initializer; EF always sends the value.
 - Unique indexes must skip deleted rows: `.IsUnique().HasFilter("deleted_at IS NULL")`.
 - Audit logs (Admin "View System Audits Log", Mod "View User Audit Log") use `core.audit_logs`.
 
@@ -264,13 +259,17 @@ dotnet ef migrations add <Name> -p ANGI.Infrastructure -s ANGI.WebApi -o Persist
 dotnet ef database update -p ANGI.Infrastructure -s ANGI.WebApi
 ```
 
-One migration per feature change, PascalCase name (e.g. `AddRestaurant`). Never edit generated files. Things EF cannot express (outbox triggers, `CHECK` constraints, `citext` extension) go into the migration with `migrationBuilder.Sql(...)`.
+One migration per feature change, PascalCase name (e.g. `AddRestaurant`). Never edit generated files. `CHECK` constraints for enum columns are generated from the enums (`ApplyEnumConventions`); other `CHECK`s use `HasCheckConstraint`; `citext` uses `HasPostgresExtension`. Only what EF cannot express (outbox triggers, sequence fixes after seeding) goes into the migration with `migrationBuilder.Sql(...)`.
+
+Lookup data seeded in `InitialCreate` with `HasData`: `roles` (1 TRAVELER, 2 RESTAURANT_OWNER, 3 MOD, 4 ADMIN), `permissions` (13 codes from sheet "Enum"), `role_permissions` (MOD: first 10, ADMIN: all 13).
 
 ---
 
 ## 7. Backend → Recommendation sync (transactional outbox) 🔲
 
 Dish changes and like/dislike must reach reco even if reco is down, and must never be applied twice.
+
+Outbox rows are written by database triggers created in `InitialCreate` ✅ (`trg_dishes_outbox`, `trg_dish_feedbacks_outbox`), so use cases only write `dishes` / `dish_feedbacks`. Changing `is_available` or `price` writes no event. The worker is 🔲.
 
 ```
 UseCase writes core (dishes / dish_feedbacks)
