@@ -1,4 +1,5 @@
 using ANGI.Domain.Common;
+using ANGI.Domain.Enums;
 
 namespace ANGI.Domain.Entities
 {
@@ -9,6 +10,10 @@ namespace ANGI.Domain.Entities
         public DateOnly? StartDate { get; set; }
         public short NumDays { get; set; }
         public decimal? BudgetAmount { get; set; }
+        public RoadmapOriginMode OriginMode { get; set; } = RoadmapOriginMode.None;
+        public decimal? OriginLatitude { get; set; }
+        public decimal? OriginLongitude { get; set; }
+        public string? OriginLabel { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public DateTime? DeletedAt { get; set; }

@@ -6,8 +6,8 @@ Source documents (when this file and a document disagree, the document wins and 
 
 | Document | Covers |
 |---|---|
-| `ANGI_Data_Dictionary_Ver1.0.xlsx` | Every table and column of schemas `core` and `recommendation` |
-| `ANGI_API_Design_Ver1.6.xlsx` | Every backend endpoint, the internal Reco API, error codes, enums, sample JSON |
+| `ANGI_Data_Dictionary_Ver1.1.xlsx` | Every table and column of schemas `core` and `recommendation` |
+| `ANGI_API_Design_Ver1.7.xlsx` | Every backend endpoint, the internal Reco API, error codes, enums, sample JSON |
 | `Recommendation_System_Design_Ver1.0.docx` | Recommendation algorithm and the backend ↔ reco split |
 | `ANGI_Use_Case_Basic_Descriptions_Ver1.0.docx` | The 66 use cases |
 
@@ -59,9 +59,21 @@ Each one = an interface in `Application/Common/Interfaces/Services/` + an implem
 |---|---|
 | Brevo | Email (verification, reset password) |
 | Cloudinary | Image and document upload (`core.media_files`) |
-| Map / routing API | Travel time between roadmap stops (provider TBD) |
+| Mapbox Directions | Distance and travel time of each leg of a roadmap day (RM-14), see below |
 | AI provider | Roadmap generation (`core.roadmap_generation_jobs`) |
 | Recommendation service | Ranking of dishes (see below and §7) |
+
+### Map / routing (Mapbox)
+
+Used only by RM-14 (`GET /roadmaps/{roadmapId}/days/{dayId}/route`). Nothing about routes is stored in the database.
+
+- `IRouteService` (Application) → `MapboxRouteService` (Infrastructure, typed `HttpClient`) calling `GET https://api.mapbox.com/directions/v5/mapbox/{profile}/{lng,lat;lng,lat;...}?access_token=...`. One call per day, up to 25 points; read `routes[0].legs[].distance` (m) and `.duration` (s). Profiles: `driving` (default), `walking`, `cycling`.
+- Points in order: origin (if any) → items of the day sorted by meal slot, then `sortOrder`. Origin = GPS sent by the app, else the roadmap's pinned point, else none (no first leg). Drop the first leg when the origin is more than 30 km (straight line) from the first item.
+- Cache with `IMemoryCache`, 24 hours, key = profile + coordinates (origin rounded to 3 decimals, about 100 m).
+- Timeout 3 s. On error or timeout, do not fail the request: estimate each leg as straight-line distance × 1.3 at 25 km/h (driving), 12 km/h (cycling), 4 km/h (walking) and return `isEstimated = true`.
+- The secret token lives only in backend config. The frontend uses its own public token (`pk.*`) just to draw maps and pick points. The "Open in Google Maps" button is a link the frontend builds; no backend call.
+
+Origin of a roadmap (`roadmaps.origin_mode`): `pinned` = point chosen on the map, stored in `origin_latitude/longitude/label`; `gps` = current position, never stored, sent by the app on each RM-10 / RM-14 call; `none` = the user only chose a province. "Nearby" filters (DISH-01, DISH-03, RM-06, RM-10) run in the backend before reco; the reco formula does not change.
 
 ### Recommendation service
 
@@ -161,7 +173,7 @@ app.MapControllers();
 | Method | Registers |
 |---|---|
 | `AddApplication()` | Use cases, validators |
-| `AddInfrastructure(config)` | `ANGIContext`, repositories, `IUnitOfWork`, external service clients, outbox worker (`BackgroundService`) |
+| `AddInfrastructure(config)` | `ANGIContext`, repositories, `IUnitOfWork`, external service clients (incl. Mapbox), `IMemoryCache`, outbox worker (`BackgroundService`) |
 | `AddWebApi()` | Controllers, OpenAPI, JWT, CORS, `ExceptionHandlingMiddleware` |
 
 ### Configuration
@@ -177,11 +189,12 @@ app.MapControllers();
   "Brevo":          { "ApiKey": "", "SenderEmail": "" },
   "Cloudinary":     { "CloudName": "", "ApiKey": "", "ApiSecret": "" },
   "Recommendation": { "BaseUrl": "", "ApiKey": "", "TimeoutMilliseconds": 800 },
+  "Mapbox":         { "BaseUrl": "https://api.mapbox.com", "AccessToken": "", "TimeoutMilliseconds": 3000, "CacheHours": 24 },
   "Outbox":         { "PollSeconds": 2, "BatchSize": 50, "MaxAttempts": 10 }
 }
 ```
 
-**Never commit secrets.** Local: `dotnet user-secrets` or `appsettings.Local.json` (git-ignored). Render: environment variables, e.g. `ConnectionStrings__Default`, `Jwt__SecretKey`.
+**Never commit secrets.** Local: `dotnet user-secrets` or `appsettings.Local.json` (git-ignored). Render: environment variables, e.g. `ConnectionStrings__Default`, `Jwt__SecretKey`, `Mapbox__AccessToken`.
 
 ---
 
@@ -229,7 +242,7 @@ Rules:
 | Naming | snake_case, generated automatically: `RestaurantImage` → `restaurant_images`, `PasswordHash` → `password_hash`. Never rename by hand. |
 | Primary key | As in the Data Dictionary: `integer` for `users`, `dishes`; `bigint` for most other tables; `smallint` for lookup tables (`roles`, `permissions`, `tags`). Identity columns. |
 | Date/time | Always **UTC** (`DateTime.UtcNow`) → `timestamptz`. Npgsql throws on local time. |
-| Location | `latitude`, `longitude` as `numeric(9,6)`. "Nearby" = bounding-box filter, then Haversine. Travel time comes from the map API. No PostGIS. |
+| Location | `latitude`, `longitude` as `numeric(9,6)`; required on `restaurants`. "Nearby" = bounding-box filter, then Haversine. Travel time comes from Mapbox (§2), never stored. No PostGIS. |
 | Status / enum | `varchar` + `CHECK` with lowercase snake_case values (e.g. `pending_verification`). Domain enums are mapped to exactly those strings with a value converter; valid values: API Design, sheet "Enum". |
 | Email | `citext` (case-insensitive unique). |
 
