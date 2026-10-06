@@ -23,6 +23,9 @@ ANGI.Application/
     ...             ← one subfolder per feature
   UseCases/         ← Use case implementations
     Validators/     ← FluentValidations
+    AuthenticationModule/     ← LoginUseCase, LogoutUseCase, RegisterAccountUseCase, ...
+    AdminModule/              ← PermissionManagementUseCase, ...  
+    ...
   DependencyInjection.cs
 
 ANGI.Infrastructure/
