@@ -37,7 +37,7 @@ ANGI.Infrastructure/
 ANGI.WebApi/
   Configs/          ← CorsConfig, JwtConfig + JwtSettings, RateLimitConfig + RateLimitSettings
   Controllers/      ← Thin controllers only
-  Middlewares/      ← ExceptionHandlingMiddleware, RateLimitPartitionMiddleware
+  Middlewares/      ← ExceptionHandlingMiddleware, RateLimitPartitionMiddleware, LoginFailureLimitMiddleware
   Common/Models/ApiResponse.cs  ← ApiResponse<T>, used by controllers and middlewares
   DependencyInjection.cs
   Program.cs
@@ -421,6 +421,7 @@ app.UseMiddleware<ExceptionHandlingMiddleware>(); // must be first
 app.UseHttpsRedirection();
 app.UseCors(CorsConfig.PolicyName);
 app.UseMiddleware<RateLimitPartitionMiddleware>();
+app.UseMiddleware<LoginFailureLimitMiddleware>();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
