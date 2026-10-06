@@ -22,7 +22,7 @@ Source documents win over this file; when they disagree, fix this file.
 - **Out of scope:** payment, ordering/delivery, table booking, third-party data import, native mobile app
 - **Performance:** recommendation and roadmap requests answer within 3 s
 
-**Modules**: use these names for feature folders (`DTOs/<Feature>/`, `Validators/<Feature>/`) and commit scopes.
+**Modules**: these names are the `<Module>` folders in Application (`coding_rule.md` §1) and, lowercase, the commit scopes.
 
 | Iteration | Modules |
 |---|---|
