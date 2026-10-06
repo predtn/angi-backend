@@ -28,6 +28,7 @@ app.UseHttpsRedirection();
 
 app.UseCors(ANGI.WebApi.Configs.CorsConfig.PolicyName);
 app.UseMiddleware<RateLimitPartitionMiddleware>();
+app.UseMiddleware<LoginFailureLimitMiddleware>();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();

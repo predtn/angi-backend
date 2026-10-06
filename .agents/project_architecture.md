@@ -107,8 +107,9 @@ ExceptionHandlingMiddleware      every exception → ApiResponse error (coding_r
 HTTPS redirection
 CORS (policy "Frontend")
 RateLimitPartitionMiddleware     reads the email of login / resend / forgot-password for the rate-limit key
+LoginFailureLimitMiddleware      after 5 INVALID_CREDENTIALS per email + IP in 15 min → 429 until the window ends; success clears the count
 Authentication (JWT)             401 UNAUTHORIZED as ApiResponse
-Rate limiter                     429 TOO_MANY_REQUESTS + Retry-After
+Rate limiter                     resend / forgot-password and general limits → 429 TOO_MANY_REQUESTS + Retry-After
 Authorization                    403 FORBIDDEN as ApiResponse
 Controllers → use case → repositories → ANGIContext → PostgreSQL (core)
 ```
