@@ -32,6 +32,16 @@ dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5432;Da
 
 Use the port and password from your `.env` if you changed them.
 
+### Migrations run on startup (Development only)
+
+Running the API in Development (`dotnet run --project ANGI.WebApi`, or F5 in the IDE) applies pending EF migrations before it starts, so after `git pull` you do not need `dotnet ef database update`. Other environments never migrate on startup; they run migrations as a deploy step.
+
+| What you see | Meaning |
+|---|---|
+| `fail: ... Failed executing DbCommand ... __EFMigrationsHistory` on the first run | Normal on an empty database: EF looks for its history table before creating it |
+| `PendingModelChangesWarning: The model for context 'ANGIContext' has pending changes` | You changed an entity or configuration without a migration. Run `dotnet ef migrations add <Name> -p ANGI.Infrastructure -s ANGI.WebApi -o Persistences/Migrations` |
+| `Failed to connect to 127.0.0.1:5432` | The database is not running: `docker compose up -d --wait` |
+
 ### Connection details
 
 | | Backend | Recommendation service |

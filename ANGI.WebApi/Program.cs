@@ -1,5 +1,6 @@
 using ANGI.Application;
 using ANGI.Infrastructure;
+using ANGI.Infrastructure.Persistences;
 using ANGI.WebApi;
 using ANGI.WebApi.Middlewares;
 using Scalar.AspNetCore;
@@ -16,6 +17,9 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
+    // Keep the local database in sync on every run; never in other environments
+    await app.Services.MigrateDatabaseAsync();
+
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
