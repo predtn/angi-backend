@@ -259,6 +259,8 @@ dotnet ef migrations add <Name> -p ANGI.Infrastructure -s ANGI.WebApi -o Persist
 dotnet ef database update -p ANGI.Infrastructure -s ANGI.WebApi
 ```
 
+In Development the API applies pending migrations at startup (`app.Services.MigrateDatabaseAsync()` in `Program.cs`, implemented in `Infrastructure/Persistences/DatabaseMigrationExtensions.cs`); it refuses to start when the model has changes without a migration. Staging/production never migrate on startup: migrations run as a separate deploy step.
+
 One migration per feature change, PascalCase name (e.g. `AddRestaurant`). Never edit generated files. `CHECK` constraints for enum columns are generated from the enums (`ApplyEnumConventions`); other `CHECK`s use `HasCheckConstraint`; `citext` uses `HasPostgresExtension`. Only what EF cannot express (outbox triggers, sequence fixes after seeding) goes into the migration with `migrationBuilder.Sql(...)`.
 
 Lookup data seeded in `InitialCreate` with `HasData`: `roles` (1 TRAVELER, 2 RESTAURANT_OWNER, 3 MOD, 4 ADMIN), `permissions` (13 codes from sheet "Enum"), `role_permissions` (MOD: first 10, ADMIN: all 13).
