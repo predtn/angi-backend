@@ -53,9 +53,10 @@ namespace ANGI.Test.WebApi.Configs
             policy.SupportsCredentials.Should().BeFalse();
         }
 
-        // TEST-03: Verify that login requests are rejected after the email-and-IP limit is exceeded.
+        // TEST-03: Verify that the rate limiter no longer counts login attempts; only failed logins are
+        // limited, by LoginFailureLimitMiddleware (see LoginFailureLimitMiddlewareTests).
         [Fact]
-        public async Task RateLimiter_ShouldRejectLoginAfterConfiguredEmailAndIpLimit()
+        public async Task RateLimiter_ShouldNotLimitLoginByLoginPermitLimit()
         {
             using var serviceProvider = BuildServiceProvider();
             var options = serviceProvider.GetRequiredService<IOptions<RateLimiterOptions>>().Value;
@@ -64,13 +65,11 @@ namespace ANGI.Test.WebApi.Configs
             httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Loopback;
             httpContext.Items[RateLimitPartitionMiddleware.EmailItemKey] = "user@angi.test";
 
-            using var firstLease = await options.GlobalLimiter!.AcquireAsync(httpContext);
-            using var secondLease = await options.GlobalLimiter.AcquireAsync(httpContext);
-            using var rejectedLease = await options.GlobalLimiter.AcquireAsync(httpContext);
-
-            firstLease.IsAcquired.Should().BeTrue();
-            secondLease.IsAcquired.Should().BeTrue();
-            rejectedLease.IsAcquired.Should().BeFalse();
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                using var lease = await options.GlobalLimiter!.AcquireAsync(httpContext);
+                lease.IsAcquired.Should().BeTrue();
+            }
         }
 
         // TEST-04: Verify that the rate-limit middleware normalizes email and rewinds the request body.
