@@ -84,9 +84,10 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 |---|---|
 | Base URL, JSON | `/api/v1`, camelCase, every response wrapped in `ApiResponse<T>` (`coding_rule.md` §5) |
 | Tokens | Access token 15 min; refresh token 30 days, rotated on every use (`core.user_sessions`). Claims: `sub`, `role`, `email_verified` |
-| Mod / Admin permissions | Role default + allow − deny (`core.user_permissions`), read from the database with a short cache, never from the JWT |
+| Access | Column "Auth / Role" of the API Design: `Public` needs no token; `Public (token tùy chọn)` personalizes when a token is sent; a named role allows only that role (403 otherwise). A `suspended` or `banned` account is rejected on every endpoint that needs a token |
+| Mod / Admin permissions | Effective permissions = role default + allow − deny (`core.user_permissions`), read from the database with a short cache, never from the JWT. Admin has every permission |
 | Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId` |
-| Time, money, ids | ISO 8601 UTC; business hours `HH:mm` Vietnam time; integer VND; `int` / `long` ids, `uuid` only for `requestId` and `eventUuid` |
+| Time, money, ids | ISO 8601 UTC; dates `yyyy-MM-dd`; business hours `HH:mm` Vietnam time; integer VND; `int` / `long` ids, `uuid` only for `requestId` and `eventUuid` |
 | Delete | Soft delete for users, restaurants, roadmaps, blogs, comments; 200 with `data: null` |
 | Rate limit | Login 5 failures / 15 min per email + IP; resend and forgot-password 1 / 60 s; everything else 100 / min per user (per IP when anonymous) |
 
@@ -153,7 +154,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 ### Mapbox Directions (RM-14)
 
 - One Directions call per day (`/directions/v5/mapbox/{profile}/{lng,lat;...}`), at most 25 points; read `routes[0].legs[].distance` (m) and `.duration` (s). Profiles `driving` (default), `walking`, `cycling`.
-- Points: origin (if any) → the day's items by meal slot, then `sortOrder`. Origin = GPS sent by the app, else the pinned point, else none. Skip the first leg when the origin is more than 30 km (straight line) from the first item.
+- Points: origin (if any) → the day's items by meal slot, then `sortOrder`. Origin = GPS sent by the app (`originLat` and `originLng` together), else the pinned point, else none. Skip the first leg and return `originSkipped = true` when the origin is more than 30 km (straight line) from the first item. A day with fewer than 2 points returns empty `legs`.
 - Cache in `IMemoryCache` for `CacheHours`, key = profile + coordinates (origin rounded to 3 decimals ≈ 100 m). Timeout 3 s; on failure estimate straight line × 1.3 at 25 / 12 / 4 km/h and return `isEstimated = true`.
 - Travel distance and time are never stored. The secret token stays in backend config; the frontend has its own public `pk.*` token. "Open in Google Maps" is a link the frontend builds.
 
