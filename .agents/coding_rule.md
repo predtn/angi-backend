@@ -258,7 +258,7 @@ public class RoadmapsController : ControllerBase
 }
 ```
 
-Put the API Design endpoint id (`// RM-01`) above each action.
+Name the API Design endpoint id in the comment above each action: `// RM-01`, or inside its XML `<summary>` (`Receives an AUTH-04 request ...`).
 
 ## 12. Dependency injection
 

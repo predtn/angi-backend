@@ -4,9 +4,11 @@ using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services;
 using ANGI.Infrastructure.Services.Auth;
+using ANGI.Infrastructure.Services.Recommendation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ANGI.Infrastructure
 {
@@ -16,6 +18,7 @@ namespace ANGI.Infrastructure
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            services.TryAddSingleton(TimeProvider.System);
             services.AddDbContext<ANGIContext>(options =>
                 options.UseNpgsql(configuration.GetConnectionString("Default"),
                                   npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", ANGIContext.Schema))
@@ -23,6 +26,7 @@ namespace ANGI.Infrastructure
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddScoped<ICloudinaryService, CloudinaryService>();
             services.AddAuthInfrastructure(configuration);
+            services.AddRecommendationInfrastructure(configuration);
 
             return services;
         }
