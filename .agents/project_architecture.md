@@ -55,7 +55,7 @@ Each service = an interface in `Application/Common/Interfaces/Services/` + an im
 | Cloudinary | `ICloudinaryService` | Image and document upload (`core.media_files`); private files get signed URLs valid 5 min |
 | Brevo | planned | Email: verification, password reset |
 | Google | planned | Verify Google ID tokens (`Google.Apis.Auth`) |
-| Recommendation service | `IRecommendationService` (planned) | Dish ranking |
+| Recommendation service | `IRecommendationService` | Survey status for login and refresh (RECO-09); survey, ranking and impressions are planned (T146) |
 | Mapbox Directions | `IRouteService` (planned) | Distance and time of each leg of a roadmap day (RM-14) |
 | AI provider | planned | Roadmap generation (`core.roadmap_generation_jobs`) |
 
@@ -148,7 +148,8 @@ Conventions every endpoint follows (from the API Design):
 | `Cors` | `AllowedOrigins` |
 | `RateLimit` | `GeneralPermitLimit`, `GeneralWindowSeconds`, `LoginPermitLimit`, `LoginWindowMinutes`, `SensitiveAuthPermitLimit`, `SensitiveAuthWindowSeconds` |
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
-| Planned | `Google:ClientId`; `Brevo:ApiKey, SenderEmail`; `Recommendation:BaseUrl, ApiKey, TimeoutMilliseconds (800)`; `Mapbox:BaseUrl, AccessToken, TimeoutMilliseconds (3000), CacheHours (24)`; `Outbox:PollSeconds (2), BatchSize (50), MaxAttempts (10)` |
+| `Recommendation` | `BaseUrl`, `ApiKey` (= `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
+| Planned | `Google:ClientId`; `Brevo:ApiKey, SenderEmail`; `Mapbox:BaseUrl, AccessToken, TimeoutMilliseconds (3000), CacheHours (24)`; `Outbox:PollSeconds (2), BatchSize (50), MaxAttempts (10)` |
 
 **Secrets are never committed.**
 
@@ -246,14 +247,15 @@ Rows with the same `aggregate_key` (`dish:<id>`, `user:<id>`) are sent in order;
 
 ---
 
-## 8. Status (07/10/2026)
+## 8. Status (08/10/2026)
 
 | Area | Done | Planned |
 |---|---|---|
 | Local environment | Docker Compose (PostgreSQL 16 + pgvector, 2 roles), user secrets, auto-migrate in Development | — |
-| Database | 38 `core` tables matching Data Dictionary 1.1, outbox triggers, lookup seed | Seed data (T137) |
+| Database | 38 `core` tables matching Data Dictionary 1.2, outbox triggers, lookup seed | Seed data (T137) |
 | WebApi | `ApiResponse<T>`, exception middleware, JWT, CORS, rate limit, model-binding errors | `UseForwardedHeaders` before deploying behind Render's proxy; `ApiResponse` body for unknown routes (404/405) |
-| Application | Exceptions, `IUnitOfWork`, validator registration | `IJwtService`, `IPasswordService`, `ICurrentUserService`, use cases, controllers (Sprint 1) |
-| External services | Cloudinary | Brevo, Google, Recommendation, Mapbox, AI provider |
+| Application | Exceptions, `IUnitOfWork`, validator registration; Auth: login, refresh, logout (`AuthenticationController`, `IAuthenticationTokenService`, `IPasswordService`, `ICurrentUserService`) | Other Sprint 1 use cases and controllers |
+| External services | Cloudinary; Recommendation survey status (RECO-09) | Brevo, Google, rest of Recommendation (T146), Mapbox, AI provider |
+| Recommendation service (angi-reco) | FastAPI skeleton, schema `recommendation` (Alembic `0001`), X-Api-Key, `/health` (ANGI-28) | RECO-01..06, 09 and the vector loop (T147–T156) |
 | Background | — | Outbox worker (T145) |
 | Delivery | CI on GitHub Actions: build, test, missing-migration check on every PR to `dev` / `main` (`README.md` → CI) | Render + Vercel staging (T193) |
