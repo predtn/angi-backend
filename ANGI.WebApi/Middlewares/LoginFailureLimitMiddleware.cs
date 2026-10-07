@@ -81,8 +81,10 @@ namespace ANGI.WebApi.Middlewares
                     return;
                 }
 
-                var expiresAt = now.AddMinutes(_settings.LoginWindowMinutes);
-                _cache.Set(key, new FailureWindow { Failures = 1, ExpiresAt = expiresAt }, expiresAt);
+                // The cache evicts by its own clock, not TimeProvider, so give it a duration;
+                // ExpiresAt (TimeProvider time) decides whether the window is still active.
+                var duration = TimeSpan.FromMinutes(_settings.LoginWindowMinutes);
+                _cache.Set(key, new FailureWindow { Failures = 1, ExpiresAt = now.Add(duration) }, duration);
             }
         }
 
