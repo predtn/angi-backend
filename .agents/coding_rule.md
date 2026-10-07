@@ -156,6 +156,7 @@ JSON: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`
 | Wrong role or missing permission | `JwtBearerEvents.OnForbidden` or an `IAuthorizationMiddlewareResultHandler` | 403 `FORBIDDEN` |
 | Model binding fails (bad JSON, wrong type) | `ApiBehaviorOptions.InvalidModelStateResponseFactory` | 400 `VALIDATION_FAILED` + `Errors` |
 | Rate limit exceeded | `RateLimiterOptions.OnRejected`, with `Retry-After` | 429 `TOO_MANY_REQUESTS` |
+| Unknown path / wrong HTTP method | `UseStatusCodePages` handler (`StatusCodePagesConfig`) | 404 `ROUTE_NOT_FOUND` / 405 `METHOD_NOT_ALLOWED` |
 
 - Never write a raw JSON error, and never set the status code without the body or the body without the status code.
 
@@ -203,7 +204,7 @@ ServiceUnavailableException  → 503  ErrorCode from the exception
 any other Exception          → 500  INTERNAL_ERROR, generic message; log the exception, never return its details
 ```
 
-The API Design has no 410, 413, 415, 422 or 204: data and business-rule errors (expired token, file too large, wrong file type) are `BadRequestException` with their own `ErrorCode`.
+The API Design uses only 400, 401, 403, 404, 405 (wrong method only), 409, 429, 500 and 503; there is no 410, 413, 415, 422 or 204: data and business-rule errors (expired token, file too large, wrong file type) are `BadRequestException` with their own `ErrorCode`.
 
 ## 9. Queries
 

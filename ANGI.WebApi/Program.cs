@@ -2,6 +2,7 @@ using ANGI.Application;
 using ANGI.Infrastructure;
 using ANGI.Infrastructure.Persistences;
 using ANGI.WebApi;
+using ANGI.WebApi.Configs;
 using ANGI.WebApi.Middlewares;
 using Scalar.AspNetCore;
 
@@ -14,6 +15,7 @@ builder.Services.AddWebApi(builder.Configuration);
 var app = builder.Build();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseApiStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {
