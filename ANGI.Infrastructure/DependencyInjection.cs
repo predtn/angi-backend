@@ -4,6 +4,7 @@ using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services;
 using ANGI.Infrastructure.Services.Auth;
+using ANGI.Infrastructure.Services.Recommendation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,7 @@ namespace ANGI.Infrastructure
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddScoped<ICloudinaryService, CloudinaryService>();
             services.AddAuthInfrastructure(configuration);
+            services.AddRecommendationInfrastructure(configuration);
 
             return services;
         }
