@@ -144,10 +144,10 @@ JSON: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`
 |---|---|---|
 | Read, update | 200 OK | `Success = true`, `Data = dto` |
 | Create | 201 Created | `Success = true`, `Data = dto` |
-| Delete or nothing to return (logout, resend email, change password) | 200 OK | `Success = true`, `Data = null` |
+| Nothing to return (most deletes, logout, resend email, change password) | 200 OK | `Success = true`, `Data = null` |
 | Background job accepted (RM-10, IMP-01 only) | 202 Accepted | `Success = true`, `Data = dto` |
 
-- Use exactly the status the API Design gives the endpoint. Never return 204 or `NoContent()`.
+- Use exactly the status and `Data` the API Design gives the endpoint (a delete may return data, e.g. BLOG-09). Never return 204 or `NoContent()`.
 - Responses produced outside the exception middleware use the same shape:
 
 | Case | Configured in | Status / ErrorCode |
@@ -307,7 +307,7 @@ public interface ISoftDelete    { DateTime? DeletedAt { get; set; } }
 - An entity implements only the interfaces for the columns its table has. Composite-key tables and `review_replies` (key `review_id`) do not inherit `BaseEntity`.
 - `CreatedAt` / `UpdatedAt` are set by `ANGIContext.SaveChangesAsync`; never set them in a use case.
 - Soft delete (users, restaurants, roadmaps, blogs, blog_comments): set `DeletedAt` to the current UTC time, never call `Remove()`. A global filter hides deleted rows (`IgnoreQueryFilters()` to include them); a required navigation to a deleted row loads as `null`. Unique indexes skip deleted rows: `HasFilter("deleted_at IS NULL")`.
-- Foreign keys are `Restrict` unless the configuration sets `Cascade` for owned child rows (images, business hours, dish tags, menu items, roadmap days and items, sessions and tokens). `roadmap_item_id` in `dish_feedbacks` and `restaurant_reviews` is `SetNull`.
+- `OnDelete` follows column "Khóa" of the Data Dictionary: `ON DELETE CASCADE` → `Cascade` (child rows owned by the parent: images, tags, business hours, menu items, roadmap days and items, sessions, tokens, permissions), `ON DELETE SET NULL` → `SetNull`, nothing written → `Restrict`.
 - A constant database default (`dish_form = 'other'`, `is_available = true`) is repeated as the C# property initializer, because EF always sends the value.
 - Never map or query schema `recommendation`.
 
