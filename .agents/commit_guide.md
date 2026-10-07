@@ -140,6 +140,7 @@ feat/ANGI-12-login-usecase ──PR──▶ dev ──(khi quyết định phá
 - Tiêu đề PR theo cùng format commit: `feat(auth): add login use case`.
 - Dòng đầu mô tả PR ghi mã task: `Jira: ANGI-12`. Mô tả ngắn gồm: làm gì, vì sao, cách kiểm tra.
 - Cần **1 approve** của người review được phân công trên Jira trước khi merge.
+- **CI phải xanh** (GitHub Actions, check `build-test` ở backend, `lint-test` ở reco). CI đỏ thì người mở PR sửa rồi push lại; CI tự chạy lại.
 - Người review phải review trong **24 giờ** kể từ lúc PR được mở. Có comment thì người mở PR sửa rồi báo lại, không để PR treo qua ngày code due.
 - **Code freeze mỗi iteration:** hết ngày code due (20/10, 03/11, 17/11) mọi PR phải được merge vào `dev`. Ngày hôm sau Dũng chạy toàn hệ thống từ `dev`, smoke test và gắn tag `iteration-N`. Từ lúc freeze đến khi phát hành bản của iteration, `dev` chỉ nhận PR fix bug.
 - **Luôn merge bằng squash.** Tiêu đề PR chính là commit message cuối cùng → phải đúng format, và thêm `Refs: ANGI-xxx` vào phần body khi squash.
