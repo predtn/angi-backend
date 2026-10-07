@@ -20,6 +20,8 @@ namespace ANGI.Infrastructure.Services.Auth
             services.AddScoped<IPasswordService, PasswordService>();
             services.AddScoped<IAuthenticationTokenService, AuthenticationTokenService>();
             services.AddScoped<ICurrentUserService, CurrentUserService>();
+            services.AddMemoryCache();
+            services.AddScoped<IAccountStatusCache, AccountStatusCache>();
             services.AddHttpContextAccessor();
 
             services.AddOptions<JwtTokenSettings>()

@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.Repositories.Auth;
+using ANGI.Application.Common.Models.Auth;
 using ANGI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +23,16 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                 .Include(user => user.Role)
                 .Include(user => user.AvatarMedia)
                 .FirstOrDefaultAsync(user => user.Email == normalizedEmail, ct);
+        }
+
+        /// <summary>Projects the status fields of a user; the soft-delete filter hides deleted users.</summary>
+        public Task<AccountStatusSnapshot?> GetAccountStatusAsync(int userId, CancellationToken ct)
+        {
+            return _context.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => new AccountStatusSnapshot(user.Status, user.SuspendedUntil))
+                .FirstOrDefaultAsync(ct);
         }
 
         /// <summary>Loads a session by refresh-token hash without a row lock; used by logout.</summary>
