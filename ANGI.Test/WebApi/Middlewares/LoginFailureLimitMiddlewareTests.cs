@@ -33,7 +33,7 @@ namespace ANGI.Test.WebApi.Middlewares
             _middleware = new LoginFailureLimitMiddleware(new MemoryCache(new MemoryCacheOptions()), _time, settings);
         }
 
-        // TEST-05: Verify that the login after the configured number of failures is rejected with 429 and Retry-After.
+        // TEST-01: Verify that the login after the configured number of failures is rejected with 429 and Retry-After.
         [Fact]
         public async Task InvokeAsync_ShouldRejectWithTooManyRequests_AfterConfiguredFailures()
         {
@@ -52,7 +52,7 @@ namespace ANGI.Test.WebApi.Middlewares
             ReadErrorCode(context).Should().Be("TOO_MANY_REQUESTS");
         }
 
-        // TEST-06: Verify that a failed login is still rethrown so the exception middleware returns 401.
+        // TEST-02: Verify that a failed login is still rethrown so the exception middleware returns 401.
         [Fact]
         public async Task InvokeAsync_ShouldRethrowInvalidCredentials()
         {
@@ -61,7 +61,7 @@ namespace ANGI.Test.WebApi.Middlewares
             await act.Should().ThrowAsync<UnauthorizedException>();
         }
 
-        // TEST-07: Verify that a successful login clears the failure counter.
+        // TEST-03: Verify that a successful login clears the failure counter.
         [Fact]
         public async Task InvokeAsync_ShouldClearFailures_AfterSuccessfulLogin()
         {
@@ -81,7 +81,7 @@ namespace ANGI.Test.WebApi.Middlewares
             context.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
-        // TEST-08: Verify that only INVALID_CREDENTIALS counts as a failure.
+        // TEST-04: Verify that only INVALID_CREDENTIALS counts as a failure.
         [Fact]
         public async Task InvokeAsync_ShouldNotCount_OtherErrors()
         {
@@ -107,7 +107,7 @@ namespace ANGI.Test.WebApi.Middlewares
             nextCalled.Should().BeTrue();
         }
 
-        // TEST-09: Verify that Retry-After counts down and the limit lifts when the window ends.
+        // TEST-05: Verify that Retry-After counts down and the limit lifts when the window ends.
         [Fact]
         public async Task InvokeAsync_ShouldAllowLoginAgain_WhenWindowEnds()
         {
@@ -128,7 +128,7 @@ namespace ANGI.Test.WebApi.Middlewares
             allowed.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
-        // TEST-10: Verify that failures are counted per email and per IP address.
+        // TEST-06: Verify that failures are counted per email and per IP address.
         [Fact]
         public async Task InvokeAsync_ShouldCountPerEmailAndIp()
         {
@@ -146,7 +146,7 @@ namespace ANGI.Test.WebApi.Middlewares
             otherIp.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
-        // TEST-11: Verify that requests other than POST /api/v1/auth/login are never limited.
+        // TEST-07: Verify that requests other than POST /api/v1/auth/login are never limited.
         [Fact]
         public async Task InvokeAsync_ShouldIgnoreOtherRequests()
         {

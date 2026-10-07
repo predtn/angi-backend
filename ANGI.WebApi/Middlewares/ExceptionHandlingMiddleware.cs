@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
+using ANGI.Application.DTOs.Auth;
 using ANGI.WebApi.Common.Models;
 using FluentValidation;
 
@@ -57,6 +58,16 @@ namespace ANGI.WebApi.Middlewares
                     ErrorCode = ValidationFailedCode,
                     Data = null,
                     Errors = GroupValidationErrors(validationException)
+                }),
+                AccountSuspendedException suspendedException => (StatusCodes.Status403Forbidden, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = suspendedException.Message,
+                    ErrorCode = suspendedException.ErrorCode,
+                    Data = new AccountSuspendedErrorDto
+                    {
+                        SuspendedUntil = suspendedException.SuspendedUntil
+                    }
                 }),
                 AppException appException => (GetStatusCode(appException), new ApiResponse<object>
                 {
