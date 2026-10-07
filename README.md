@@ -1,6 +1,26 @@
 # angi-backend
 Backend for ANGI-Capstone Project
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request to `dev` or `main` and on every push to them. A pull request can be merged only when the `build-test` check is green.
+
+| Step | Fails when |
+|---|---|
+| Build (Release) | The solution does not compile |
+| Test | A unit test fails (Cloudinary live tests are skipped) |
+| Check for missing EF migration | An entity or configuration changed without `dotnet ef migrations add` |
+
+Run the same checks locally before pushing:
+
+```bash
+dotnet build ANGI.slnx -c Release
+dotnet test ANGI.slnx -c Release --no-build
+dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi --configuration Release --no-build
+```
+
+The last command needs the user secrets from [Local database](#local-database) (or any value for `ConnectionStrings:Default` and `Jwt:SecretKey`); it does not connect to the database. Test results (`.trx`) of each run are attached to the run as the `test-results` artifact.
+
 ## Local database
 
 PostgreSQL 16 + pgvector runs in Docker. One database `angi`, two schemas, two roles (see `.agents/project_architecture.md` §6):
