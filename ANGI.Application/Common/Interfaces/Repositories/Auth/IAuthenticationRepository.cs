@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models.Auth;
 using ANGI.Domain.Entities;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Auth
@@ -10,6 +11,9 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
     {
         /// <summary>Finds a user by normalized email and loads the data required for the authentication result.</summary>
         Task<User?> GetUserByEmailAsync(string normalizedEmail, CancellationToken ct);
+
+        /// <summary>Reads only the status fields of a user; null when the user does not exist or is soft-deleted.</summary>
+        Task<AccountStatusSnapshot?> GetAccountStatusAsync(int userId, CancellationToken ct);
 
         /// <summary>Finds a session by refresh-token hash for operations that do not require a row lock, such as logout.</summary>
         Task<UserSession?> GetSessionByRefreshTokenHashAsync(string refreshTokenHash, CancellationToken ct);

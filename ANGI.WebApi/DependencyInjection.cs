@@ -14,6 +14,7 @@ namespace ANGI.WebApi
         {
             services.AddScoped<ExceptionHandlingMiddleware>();
             services.AddScoped<RateLimitPartitionMiddleware>();
+            services.AddScoped<AccountStatusMiddleware>();
 
             services.AddControllers()
                 .ConfigureApiBehaviorOptions(options =>

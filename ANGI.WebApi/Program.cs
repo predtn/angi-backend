@@ -34,6 +34,7 @@ app.UseMiddleware<LoginFailureLimitMiddleware>();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
+app.UseMiddleware<AccountStatusMiddleware>();
 
 app.MapControllers();
 

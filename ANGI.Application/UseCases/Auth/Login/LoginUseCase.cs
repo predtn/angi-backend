@@ -6,7 +6,6 @@ using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Domain.Entities;
-using ANGI.Domain.Enums;
 using FluentValidation;
 
 namespace ANGI.Application.UseCases.Auth.Login
@@ -61,7 +60,7 @@ namespace ANGI.Application.UseCases.Auth.Login
                 throw new UnauthorizedException("INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng.");
             }
 
-            EnsureLoginAllowed(user);
+            AccountStatusRules.EnsureActive(user.Status, user.SuspendedUntil);
 
             var now = _timeProvider.GetUtcNow().UtcDateTime;
             var tokens = _tokenService.CreateTokens(user);
@@ -105,26 +104,6 @@ namespace ANGI.Application.UseCases.Auth.Login
 
             var completed = await _recommendationService.GetSurveyCompletionAsync(user.Id, ct);
             return completed.HasValue ? !completed.Value : null;
-        }
-
-        /// <summary>Blocks login and raises the corresponding error code when the account is not Active.</summary>
-        private static void EnsureLoginAllowed(User user)
-        {
-            switch (user.Status)
-            {
-                case UserStatus.Active:
-                    return;
-                case UserStatus.PendingVerification:
-                    throw new ForbiddenException("EMAIL_NOT_VERIFIED", "Email chưa được xác minh.");
-                case UserStatus.Suspended:
-                    throw new AccountSuspendedException(user.SuspendedUntil);
-                case UserStatus.Banned:
-                    throw new ForbiddenException("ACCOUNT_BANNED", "Tài khoản đã bị cấm.");
-                case UserStatus.Deactivated:
-                    throw new ForbiddenException("ACCOUNT_DEACTIVATED", "Tài khoản đã bị vô hiệu hóa.");
-                default:
-                    throw new ForbiddenException("ACCOUNT_DEACTIVATED", "Tài khoản không thể đăng nhập.");
-            }
         }
     }
 }
