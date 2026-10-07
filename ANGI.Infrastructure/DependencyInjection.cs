@@ -3,6 +3,7 @@ using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services;
+using ANGI.Infrastructure.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,9 +20,9 @@ namespace ANGI.Infrastructure
                 options.UseNpgsql(configuration.GetConnectionString("Default"),
                                   npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", ANGIContext.Schema))
                        .UseSnakeCaseNamingConvention());
-
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddScoped<ICloudinaryService, CloudinaryService>();
+            services.AddAuthInfrastructure(configuration);
 
             return services;
         }
