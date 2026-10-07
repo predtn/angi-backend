@@ -65,6 +65,7 @@ Order in `Program.cs`. Keep it; a new middleware goes where its dependencies are
 
 ```
 ExceptionHandlingMiddleware      every exception → ApiResponse error
+Status code pages                empty 404 / 405 → ApiResponse ROUTE_NOT_FOUND / METHOD_NOT_ALLOWED
 [Development] migrate database, OpenAPI + Scalar (/scalar)
 HTTPS redirection
 CORS (policy "Frontend")
