@@ -11,8 +11,11 @@ namespace ANGI.Infrastructure.Persistences
     {
         public const string Schema = "core";
 
-        public ANGIContext(DbContextOptions<ANGIContext> options) : base(options)
+        private readonly TimeProvider _timeProvider;
+
+        public ANGIContext(DbContextOptions<ANGIContext> options, TimeProvider timeProvider) : base(options)
         {
+            _timeProvider = timeProvider;
         }
 
         public DbSet<Role> Roles { get; set; } = null!;
@@ -97,7 +100,7 @@ namespace ANGI.Infrastructure.Persistences
         // Soft delete is explicit: the use case sets DeletedAt instead of calling Remove().
         private void ApplyAuditRules()
         {
-            var now = DateTime.UtcNow;
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
 
             foreach (var entry in ChangeTracker.Entries())
             {
