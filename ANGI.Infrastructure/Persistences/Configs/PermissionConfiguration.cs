@@ -15,7 +15,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
 
             builder.HasIndex(x => x.Code).IsUnique();
 
-            // Codes from sheet "Enum" of ANGI_API_Design_Ver1.6
+            // Codes from sheet "Enum" of ANGI_API_Design_Ver1.8
             builder.HasData(
                 new Permission { Id = 1, Code = "USER_VIEW_AUDIT", Description = "Xem nhật ký hoạt động của người dùng" },
                 new Permission { Id = 2, Code = "USER_SUSPEND", Description = "Tạm khóa và mở khóa người dùng" },
