@@ -8,6 +8,7 @@ using ANGI.Infrastructure.Services.Recommendation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ANGI.Infrastructure
 {
@@ -17,6 +18,7 @@ namespace ANGI.Infrastructure
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            services.TryAddSingleton(TimeProvider.System);
             services.AddDbContext<ANGIContext>(options =>
                 options.UseNpgsql(configuration.GetConnectionString("Default"),
                                   npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", ANGIContext.Schema))
