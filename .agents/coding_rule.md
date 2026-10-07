@@ -136,7 +136,7 @@ Every new feature must follow this order:
 WebApi/Common/Models/ApiResponse.cs  ← HTTP response shape, used in Controllers + Middleware
 ```
 
-All HTTP responses — success and error — must use `ApiResponse<T>`. This is the format defined in `ANGI_API_Design_Ver1.7` (sheet *Tổng quan* → "Định dạng response", sheet *DTO* → `ApiResponse<T>`). The fields described for each endpoint in the API Design are the content of `Data`.
+All HTTP responses — success and error — must use `ApiResponse<T>`. This is the format defined in `ANGI_API_Design_Ver1.8` (sheet *Tổng quan* → "Định dạng response", sheet *DTO* → `ApiResponse<T>`). The fields described for each endpoint in the API Design are the content of `Data`.
 
 ```csharp
 public class ApiResponse<T>
@@ -264,7 +264,7 @@ Controllers must not catch exceptions only to convert them into HTTP responses.
 
 All expected and unexpected errors must be thrown as exceptions.
 
-Every custom exception inherits `AppException` and carries an `ErrorCode`. Error codes and their HTTP status come from sheet **Mã lỗi** of `ANGI_API_Design_Ver1.7`; the errors specific to an endpoint are in column *Mã lỗi riêng* of sheet *Backend API*. Do not invent a code that is not in the API Design; add it there first.
+Every custom exception inherits `AppException` and carries an `ErrorCode`. Error codes and their HTTP status come from sheet **Mã lỗi** of `ANGI_API_Design_Ver1.8`; the errors specific to an endpoint are in column *Mã lỗi riêng* of sheet *Backend API*. Do not invent a code that is not in the API Design; add it there first.
 
 ```csharp
 public abstract class AppException : Exception

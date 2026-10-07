@@ -6,10 +6,10 @@ Source documents win over this file; when they disagree, fix this file.
 
 | Document | Covers |
 |---|---|
-| `.docs/ANGI_Data_Dictionary_Ver1.1.xlsx` | Every table and column of schemas `core` and `recommendation` |
-| `.docs/ANGI_API_Design_Ver1.7.xlsx` | Backend endpoints, internal Reco API, error codes, enums, sample JSON |
-| `.docs/ANGI_Jira_Plan_Ver1.1.xlsx` | Tasks, owners, dates |
-| `Recommendation_System_Design_Ver1.0.docx` (team drive) | Recommendation algorithm, backend ↔ reco split |
+| `.docs/ANGI_Data_Dictionary_Ver1.2.xlsx` | Every table and column of schemas `core` and `recommendation` |
+| `.docs/ANGI_API_Design_Ver1.8.xlsx` | Backend endpoints, internal Reco API, error codes, enums, sample JSON |
+| `.docs/ANGI_Jira_Plan_Ver1.2.xlsx` | Tasks, owners, dates |
+| `angi-reco` repo: `.docs/Recommendation_System_Design_Ver1.1.docx` | Recommendation algorithm, backend ↔ reco split |
 | `ANGI_Use_Case_Basic_Descriptions_Ver1.0.docx` (team drive) | The 66 use cases |
 
 ---
@@ -62,7 +62,8 @@ Each service = an interface in `Application/Common/Interfaces/Services/` + an im
 ### Recommendation service
 
 - Typed `HttpClient`, header `X-Api-Key`, snake_case JSON. Endpoints: sheet "Reco API (nội bộ)".
-- The backend filters candidates (meal, form, price, tags, distance); reco only scores them and returns ranked ids + scores + `request_id`; the backend loads entities and builds the response.
+- Responses are not wrapped in `ApiResponse`: a 2xx body is the DTO itself, an error body is `{ "error_code": "...", "message": "...", "errors": { field: [messages] } }` (`errors` only for 422 `VALIDATION_FAILED`). Branch on `error_code`, never on `message`.
+- The backend filters candidates (meal, form, price, tags, distance) and sends them sorted by restaurant rating, then dish `like_count` (at most 2000); reco only scores them (stable sort, so ties keep that order) and returns ranked ids + scores + `request_id`; the backend loads entities and builds the response.
 - `/recommendations` timeout 800 ms. On 5xx or timeout: order by restaurant rating, `requestId = null`.
 - Survey, `/recommendations`, `/impressions`, survey status: direct call from the use case. Dish changes and like/dislike: outbox only (§7).
 
