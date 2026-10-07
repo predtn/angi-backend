@@ -93,7 +93,7 @@ namespace ANGI.Infrastructure.Persistences
             return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         }
 
-        // Timestamps are set here so use cases never set them (project_architecture.md §6).
+        // Timestamps are set here so use cases never set them (coding_rule.md §15).
         // Soft delete is explicit: the use case sets DeletedAt instead of calling Remove().
         private void ApplyAuditRules()
         {
