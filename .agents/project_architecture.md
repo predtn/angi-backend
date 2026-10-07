@@ -255,4 +255,4 @@ Rows with the same `aggregate_key` (`dish:<id>`, `user:<id>`) are sent in order;
 | Application | Exceptions, `IUnitOfWork`, validator registration | `IJwtService`, `IPasswordService`, `ICurrentUserService`, use cases, controllers (Sprint 1) |
 | External services | Cloudinary | Brevo, Google, Recommendation, Mapbox, AI provider |
 | Background | — | Outbox worker (T145) |
-| Delivery | — | CI (T136), Render + Vercel staging (T193) |
+| Delivery | CI on GitHub Actions: build, test, missing-migration check on every PR to `dev` / `main` (`README.md` → CI) | Render + Vercel staging (T193) |
