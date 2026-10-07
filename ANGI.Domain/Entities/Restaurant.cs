@@ -16,8 +16,8 @@ namespace ANGI.Domain.Entities
         public string? Ward { get; set; }
         public string? District { get; set; }
         public string? ProvinceName { get; set; }
-        public decimal? Latitude { get; set; }
-        public decimal? Longitude { get; set; }
+        public decimal Latitude { get; set; }
+        public decimal Longitude { get; set; }
         public short? PriceLevel { get; set; }
         public long? CoverMediaId { get; set; }
         public RestaurantVerificationStatus VerificationStatus { get; set; } = RestaurantVerificationStatus.Unverified;

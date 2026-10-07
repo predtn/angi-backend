@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using ANGI.WebApi.Common.Models;
 using ANGI.WebApi.Middlewares;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ANGI.WebApi.Configs
 {
@@ -11,7 +12,6 @@ namespace ANGI.WebApi.Configs
     {
         private const string TooManyRequestsCode = "TOO_MANY_REQUESTS";
         private const string TooManyRequestsMessage = "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.";
-        private const string LoginPath = "/api/v1/auth/login";
         private const string ResendVerificationPath = "/api/v1/auth/verify-email/resend";
         private const string ForgotPasswordPath = "/api/v1/auth/forgot-password";
 
@@ -27,6 +27,11 @@ namespace ANGI.WebApi.Configs
                 .Validate(AreValid, "All rate-limit values must be greater than zero.")
                 .ValidateOnStart();
 
+            // Login counts failed attempts only, which the rate limiter cannot see before the request runs
+            services.AddMemoryCache();
+            services.TryAddSingleton(TimeProvider.System);
+            services.AddScoped<LoginFailureLimitMiddleware>();
+
             services.AddRateLimiter(options =>
             {
                 options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -38,19 +43,24 @@ namespace ANGI.WebApi.Configs
                         ? Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds))
                         : settings.GeneralWindowSeconds;
 
-                    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                    context.HttpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
-                    await context.HttpContext.Response.WriteAsJsonAsync(new ApiResponse<object>
-                    {
-                        Success = false,
-                        Message = TooManyRequestsMessage,
-                        ErrorCode = TooManyRequestsCode,
-                        Data = null
-                    }, cancellationToken);
+                    await WriteTooManyRequestsAsync(context.HttpContext, retryAfter, cancellationToken);
                 };
             });
 
             return services;
+        }
+
+        public static async Task WriteTooManyRequestsAsync(HttpContext context, int retryAfterSeconds, CancellationToken cancellationToken)
+        {
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            await context.Response.WriteAsJsonAsync(new ApiResponse<object>
+            {
+                Success = false,
+                Message = TooManyRequestsMessage,
+                ErrorCode = TooManyRequestsCode,
+                Data = null
+            }, cancellationToken);
         }
 
         private static RateLimitPartition<string> CreatePartition(
@@ -63,14 +73,6 @@ namespace ANGI.WebApi.Configs
             }
 
             var path = context.Request.Path;
-            if (path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return CreateFixedWindowPartition(
-                    $"login:{GetEmailAndIpKey(context)}",
-                    settings.LoginPermitLimit,
-                    TimeSpan.FromMinutes(settings.LoginWindowMinutes));
-            }
-
             if (path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
                 path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase))
             {

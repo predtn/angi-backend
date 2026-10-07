@@ -4,7 +4,7 @@ using ANGI.Infrastructure.Services;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Configuration;
 
-namespace ANGI.Test.Services;
+namespace ANGI.Test.Infrastructure.Services;
 
 public class CloudinaryServiceTests
 {

@@ -51,7 +51,7 @@ Scope là phần bị ảnh hưởng, **tùy chọn**. Dùng tên layer hoặc f
 | `infra` | ANGI.Infrastructure |
 | `webapi` | ANGI.WebApi |
 | `test` | ANGI.Test |
-| `auth`, `restaurant`, ... | Theo module, khi thay đổi đi qua nhiều layer |
+| `auth`, `account`, `restaurant`, `discovery`, `roadmap`, `social`, `notification`, `moderation`, `administration`, `audit` | Theo module (tên module ở `project_architecture.md` §1, viết thường), khi thay đổi đi qua nhiều layer |
 
 Thay đổi thuộc một chức năng, dù đi qua nhiều layer → dùng scope theo module (`feat(auth): ...`).
 
@@ -151,8 +151,8 @@ feat/ANGI-12-login-usecase ──PR──▶ dev ──(khi quyết định phá
 |---|---|
 | EF Core migration (`Migrations/`, `*ModelSnapshot.cs`) | Pull `dev` mới nhất **ngay trước** khi `dotnet ef migrations add`. Mỗi PR tối đa 1 migration. Nếu PR bị conflict migration: xóa migration của mình, pull `dev`, tạo lại migration. **Không sửa tay** file snapshot. Schema `core` chỉ đổi qua EF migration, không chạy SQL tay lên DB chung. |
 | Alembic migration (reco, `alembic/versions/`) | Schema `recommendation` chỉ đổi qua Alembic. Pull `dev` trước khi `alembic revision`; nếu hai revision cùng trỏ một `down_revision` thì tạo lại revision của mình trên head mới. |
-| `Program.cs`, đăng ký DI | Mỗi module có extension method riêng (`AddAuthModule()`, `AddRestaurantModule()`...) trong thư mục của module; `Program.cs` mỗi module chỉ thêm 1 dòng. |
-| `AppDbContext` | Cấu hình entity đặt trong `IEntityTypeConfiguration<T>` riêng từng file, `DbContext` dùng `ApplyConfigurationsFromAssembly`. |
+| `Program.cs`, đăng ký DI | `Program.cs` không đổi khi thêm module. Mỗi module có một extension method trong layer của nó (ví dụ `services.AddAuthUseCases()`), `DependencyInjection.cs` của layer chỉ thêm 1 dòng gọi method đó (`coding_rule.md` §12). |
+| `ANGIContext` | Cấu hình entity đặt trong `IEntityTypeConfiguration<T>` riêng từng file, `DbContext` dùng `ApplyConfigurationsFromAssembly`. |
 | `appsettings.json`, `.csproj`, `package.json` | Chỉ thêm, không sắp xếp lại hay format lại cả file. Thêm package → commit riêng `chore(deps): ...`. |
 | Format code | Không format cả file khi chỉ sửa vài dòng; dùng chung `.editorconfig`. |
 
