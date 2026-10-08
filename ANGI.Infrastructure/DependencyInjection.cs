@@ -4,6 +4,7 @@ using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services;
 using ANGI.Infrastructure.Services.Auth;
+using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Recommendation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -27,6 +28,7 @@ namespace ANGI.Infrastructure
             services.AddScoped<ICloudinaryService, CloudinaryService>();
             services.AddAuthInfrastructure(configuration);
             services.AddRecommendationInfrastructure(configuration);
+            services.AddEmailInfrastructure(configuration);
 
             return services;
         }
