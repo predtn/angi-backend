@@ -28,8 +28,5 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
 
         /// <summary>Adds a new session to the change tracker; the Unit of Work persists it.</summary>
         void AddSession(UserSession session);
-
-        /// <summary>Adds a new audit log to the change tracker; the Unit of Work persists it.</summary>
-        void AddAuditLog(AuditLog auditLog);
     }
 }

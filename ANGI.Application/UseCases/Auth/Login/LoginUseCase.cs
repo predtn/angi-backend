@@ -1,9 +1,11 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Application.Common.Interfaces.Repositories.Auth;
+using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
+using ANGI.Application.Common.Models.Audit;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Domain.Entities;
 using FluentValidation;
@@ -21,6 +23,7 @@ namespace ANGI.Application.UseCases.Auth.Login
         private readonly IAuthenticationTokenService _tokenService;
         private readonly IRecommendationService _recommendationService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IAuditLogService _auditLogService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly TimeProvider _timeProvider;
 
@@ -32,6 +35,7 @@ namespace ANGI.Application.UseCases.Auth.Login
             IAuthenticationTokenService tokenService,
             IRecommendationService recommendationService,
             ICurrentUserService currentUserService,
+            IAuditLogService auditLogService,
             IUnitOfWork unitOfWork,
             TimeProvider timeProvider)
         {
@@ -41,6 +45,7 @@ namespace ANGI.Application.UseCases.Auth.Login
             _tokenService = tokenService;
             _recommendationService = recommendationService;
             _currentUserService = currentUserService;
+            _auditLogService = auditLogService;
             _unitOfWork = unitOfWork;
             _timeProvider = timeProvider;
         }
@@ -74,16 +79,15 @@ namespace ANGI.Application.UseCases.Auth.Login
                 IpAddress = _currentUserService.IpAddress,
                 ExpiresAt = tokens.RefreshTokenExpiresAt
             });
-            _authenticationRepository.AddAuditLog(new AuditLog
+            // AUTH-04 has no token yet, so the actor is the user who just logged in.
+            _auditLogService.Add(new AuditLogEntry
             {
-                ActorId = user.Id,
-                ActorRole = user.Role.Code,
-                Action = "USER_LOGIN",
-                EntityType = "USER",
+                Action = AuditActions.UserLogin,
+                EntityType = AuditEntityTypes.User,
                 EntityId = user.Id,
                 SubjectUserId = user.Id,
-                IpAddress = _currentUserService.IpAddress,
-                UserAgent = _currentUserService.UserAgent
+                ActorId = user.Id,
+                ActorRole = user.Role.Code
             });
 
             await _unitOfWork.SaveChangesAsync(ct);
