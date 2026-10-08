@@ -11,16 +11,19 @@ public sealed class CloudinaryService : ICloudinaryService
 {
     private readonly ICloudinaryClient _client;
 
+    /// <summary>Initializes Cloudinary storage from application configuration.</summary>
     public CloudinaryService(IConfiguration configuration)
         : this(CreateClient(configuration))
     {
     }
 
+    /// <summary>Initializes Cloudinary storage with an injectable client for deterministic tests.</summary>
     internal CloudinaryService(ICloudinaryClient client)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
     }
 
+    /// <summary>Creates and validates the Cloudinary SDK adapter from configuration values.</summary>
     private static ICloudinaryClient CreateClient(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -39,6 +42,7 @@ public sealed class CloudinaryService : ICloudinaryService
         return new CloudinaryClient(new Account(cloudName, apiKey, apiSecret));
     }
 
+    /// <summary>Uploads an image or PDF and returns its stable storage key and delivery URL.</summary>
     public async Task<MediaUploadResult> UploadAsync(
         Stream file,
         string fileName,
@@ -59,7 +63,7 @@ public sealed class CloudinaryService : ICloudinaryService
             throw new ArgumentException("Folder must contain at least one character.", nameof(folder));
         }
 
-        var isPdf = string.Equals(mimeType, "application/pdf", StringComparison.Ordinal);
+        var isPdf = string.Equals(mimeType, "application/pdf", StringComparison.OrdinalIgnoreCase);
         var publicId = $"{normalizedFolder}/{Guid.NewGuid():N}";
         var deliveryType = isPrivate ? "authenticated" : "upload";
         var fileDescription = new FileDescription(fileName, file);
@@ -89,7 +93,7 @@ public sealed class CloudinaryService : ICloudinaryService
         {
             throw new ServiceUnavailableException(
                 "SERVICE_UNAVAILABLE",
-                "The storage service is temporarily unavailable.");
+                "Dịch vụ lưu trữ tạm thời không khả dụng.");
         }
 
         if (result.Error is not null ||
@@ -98,7 +102,7 @@ public sealed class CloudinaryService : ICloudinaryService
         {
             throw new ServiceUnavailableException(
                 "SERVICE_UNAVAILABLE",
-                "The storage service returned an invalid response.");
+                "Dịch vụ lưu trữ trả về phản hồi không hợp lệ.");
         }
 
         var resourceType = isPdf ? "raw" : "image";
@@ -110,12 +114,13 @@ public sealed class CloudinaryService : ICloudinaryService
         {
             throw new ServiceUnavailableException(
                 "SERVICE_UNAVAILABLE",
-                "The storage service returned an invalid URL.");
+                "Dịch vụ lưu trữ trả về URL không hợp lệ.");
         }
 
         return new MediaUploadResult(storageKey, url);
     }
 
+    /// <summary>Builds a public URL or a five-minute signed URL from a stable storage key.</summary>
     public string GetUrl(string storageKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageKey);
@@ -158,14 +163,17 @@ public sealed class CloudinaryService : ICloudinaryService
 
 internal interface ICloudinaryClient
 {
+    /// <summary>Uploads an image resource to Cloudinary.</summary>
     Task<UploadResult> UploadImageAsync(
         ImageUploadParams parameters,
         CancellationToken cancellationToken);
 
+    /// <summary>Uploads a raw resource such as a PDF to Cloudinary.</summary>
     Task<UploadResult> UploadRawAsync(
         RawUploadParams parameters,
         CancellationToken cancellationToken);
 
+    /// <summary>Builds a signed URL for an authenticated Cloudinary resource.</summary>
     string DownloadPrivate(
         string publicId,
         string? format,
@@ -173,6 +181,7 @@ internal interface ICloudinaryClient
         long expiresAt,
         string resourceType);
 
+    /// <summary>Builds a URL for a publicly delivered Cloudinary resource.</summary>
     string BuildPublicUrl(string resourceType, string type, string publicId);
 }
 
@@ -180,6 +189,7 @@ internal sealed class CloudinaryClient : ICloudinaryClient
 {
     private readonly Cloudinary _cloudinary;
 
+    /// <summary>Initializes the SDK adapter with secure URL generation enabled.</summary>
     public CloudinaryClient(Account account)
     {
         _cloudinary = new Cloudinary(account)
@@ -188,16 +198,19 @@ internal sealed class CloudinaryClient : ICloudinaryClient
         };
     }
 
+    /// <summary>Uploads image parameters through the Cloudinary SDK.</summary>
     public async Task<UploadResult> UploadImageAsync(
         ImageUploadParams parameters,
         CancellationToken cancellationToken) =>
         await _cloudinary.UploadAsync(parameters, cancellationToken);
 
+    /// <summary>Uploads raw parameters through the Cloudinary SDK.</summary>
     public async Task<UploadResult> UploadRawAsync(
         RawUploadParams parameters,
         CancellationToken cancellationToken) =>
         await _cloudinary.UploadAsync(parameters, "raw", cancellationToken);
 
+    /// <summary>Delegates authenticated URL generation to the Cloudinary SDK.</summary>
     public string DownloadPrivate(
         string publicId,
         string? format,
@@ -211,6 +224,7 @@ internal sealed class CloudinaryClient : ICloudinaryClient
             expiresAt: expiresAt,
             resourceType: resourceType);
 
+    /// <summary>Delegates secure public URL generation to the Cloudinary SDK.</summary>
     public string BuildPublicUrl(string resourceType, string type, string publicId) =>
         _cloudinary.Api.UrlImgUp
             .ResourceType(resourceType)

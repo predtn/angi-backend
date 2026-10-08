@@ -4,7 +4,7 @@ Rules every change to the backend code must follow. System facts and contracts: 
 
 ## 1. Project structure
 
-`<Module>` is one of `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit` (`project_architecture.md` §1). `<Feature>` is one use case of that module (`Login`, `Refresh`).
+`<Module>` is one of `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media` (`project_architecture.md` §1). `<Feature>` is one use case of that module (`Login`, `Refresh`).
 
 ```
 ANGI.Domain/

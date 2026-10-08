@@ -61,7 +61,7 @@ Optional. A change that belongs to one feature uses the module, even across laye
 
 | Repo | Module scopes | Layer / area scopes |
 |---|---|---|
-| angi-backend | `auth`, `account`, `restaurant`, `discovery`, `roadmap`, `social`, `notification`, `moderation`, `administration`, `audit` | `domain`, `application`, `infra`, `webapi`, `test`, `deps`, `.agents`, `.docs` |
+| angi-backend | `auth`, `account`, `restaurant`, `discovery`, `roadmap`, `social`, `notification`, `moderation`, `administration`, `audit`, `media` | `domain`, `application`, `infra`, `webapi`, `test`, `deps`, `.agents`, `.docs` |
 | angi-reco | — | `api`, `db`, `deps`, `.docs` |
 
 ### Subject

@@ -25,7 +25,7 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 - Out of scope, never build: payment, ordering or delivery, table booking, third-party data import, native mobile app.
 - Recommendation and roadmap requests answer within 3 s.
 
-**Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`.
+**Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`. `Media` is MEDIA-01 (module "Media" in the API Design): one upload used by every other module, which then refers to the file by `mediaId`.
 
 ## 2. Tech stack
 
