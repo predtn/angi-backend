@@ -48,6 +48,7 @@ public sealed class RegisterRestaurantUseCaseTests
             {
                 addedRestaurant!.Id = 7;
                 addedRestaurant.CreatedAt = Now;
+                addedRestaurant.UpdatedAt = Now;
             })
             .ReturnsAsync(3);
         var useCase = CreateUseCase(restaurantRepository, mediaRepository, unitOfWork, transaction);
@@ -63,6 +64,8 @@ public sealed class RegisterRestaurantUseCaseTests
         result.Images.Should().ContainSingle().Which.Should().Be("https://cdn.test/gallery.jpg");
         result.BusinessHours.Should().ContainSingle();
         result.IsOpenNow.Should().BeTrue();
+        result.CreatedAt.Should().Be(Now);
+        result.UpdatedAt.Should().Be(Now);
         addedRestaurant!.OwnerId.Should().Be(12);
         addedRestaurant.VerificationStatus.Should().Be(RestaurantVerificationStatus.Unverified);
         addedRestaurant.Images.Should().ContainSingle();
@@ -96,7 +99,7 @@ public sealed class RegisterRestaurantUseCaseTests
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-03: Reject media references that do not belong to the authenticated owner.
+    // TEST-03: Reject media references that do not belong to the authenticated owner, on the field that holds each id.
     /// <summary>Verifies media ownership before creating a restaurant aggregate.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMissingOwnedMedia_ShouldThrowValidationException()
@@ -117,8 +120,33 @@ public sealed class RegisterRestaurantUseCaseTests
 
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<ValidationException>();
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Select(error => error.PropertyName)
+            .Should().BeEquivalentTo("CoverMediaId", "ImageMediaIds");
         restaurantRepository.Verify(repo => repo.Add(It.IsAny<Domain.Entities.Restaurant>()), Times.Never);
+    }
+
+    // TEST-05: Report a missing cover image on coverMediaId only when the gallery images exist.
+    /// <summary>Verifies that the frontend can attach the error to the cover field.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithMissingCoverOnly_ShouldReportCoverMediaId()
+    {
+        var restaurantRepository = new Mock<IRestaurantRepository>();
+        restaurantRepository.Setup(repo => repo.ExistsByOwnerIdAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var mediaRepository = new Mock<IMediaRepository>();
+        mediaRepository.Setup(repo => repo.GetOwnedByIdsAsync(
+                12,
+                It.IsAny<IReadOnlyCollection<long>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MediaFile { Id = 101, UploaderId = 12, Url = "https://cdn.test/gallery.jpg" }]);
+        var useCase = CreateUseCase(restaurantRepository, mediaRepository, new Mock<IUnitOfWork>());
+
+        var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle()
+            .Which.PropertyName.Should().Be("CoverMediaId");
     }
 
     // TEST-04: Validate required coordinates before querying repositories.

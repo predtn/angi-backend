@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
@@ -66,7 +67,7 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
         var mediaFiles = mediaIds.Count == 0
             ? Array.Empty<MediaFile>()
             : await _mediaRepository.GetOwnedByIdsAsync(ownerId, mediaIds, ct);
-        EnsureAllMediaExist(mediaIds, mediaFiles);
+        EnsureAllMediaExist(request, mediaFiles);
 
         var mediaById = mediaFiles.ToDictionary(media => media.Id);
         var restaurant = new Domain.Entities.Restaurant
@@ -113,25 +114,38 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
         return ids;
     }
 
-    /// <summary>Raises a documented validation error when media is absent or belongs to another user.</summary>
+    /// <summary>
+    /// Raises VALIDATION_FAILED on the field that holds the media id (coverMediaId or imageMediaIds)
+    /// when the media is absent or belongs to another user.
+    /// </summary>
     private static void EnsureAllMediaExist(
-        IReadOnlyCollection<long> requestedIds,
+        RegisterRestaurantRequestDto request,
         IReadOnlyCollection<MediaFile> mediaFiles)
     {
         var foundIds = mediaFiles.Select(media => media.Id).ToHashSet();
-        var missingIds = requestedIds.Where(id => !foundIds.Contains(id)).ToArray();
-        if (missingIds.Length == 0)
+        var failures = new List<ValidationFailure>();
+
+        if (request.CoverMediaId is { } coverMediaId && !foundIds.Contains(coverMediaId))
         {
-            return;
+            failures.Add(new ValidationFailure(
+                nameof(request.CoverMediaId),
+                $"Ảnh bìa {coverMediaId} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
         }
 
-        throw new ValidationException(
-            new[]
-            {
-                new ValidationFailure(
-                    "imageMediaIds",
-                    $"Media không tồn tại hoặc không thuộc người dùng: {string.Join(", ", missingIds)}.")
-            });
+        var missingImageIds = (request.ImageMediaIds ?? Array.Empty<long>())
+            .Where(id => !foundIds.Contains(id))
+            .ToArray();
+        if (missingImageIds.Length > 0)
+        {
+            failures.Add(new ValidationFailure(
+                nameof(request.ImageMediaIds),
+                $"Ảnh {string.Join(", ", missingImageIds)} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new ValidationException(failures);
+        }
     }
 
     /// <summary>Creates a URL-safe, unique slug while preserving the readable restaurant name.</summary>
@@ -239,7 +253,7 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
             PriceLevel = restaurant.PriceLevel,
             RatingAvg = restaurant.RatingAvg,
             RatingCount = restaurant.RatingCount,
-            OperatingStatus = "open",
+            OperatingStatus = ToApiValue(restaurant.OperatingStatus),
             IsOpenNow = IsOpenNow(restaurant.BusinessHours),
             DistanceKm = null,
             Description = restaurant.Description,
@@ -253,13 +267,18 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
             BusinessHours = hours,
             Menu = null,
             MyReview = null,
-            VerificationStatus = "unverified",
-            ModerationStatus = "visible",
+            VerificationStatus = ToApiValue(restaurant.VerificationStatus),
+            ModerationStatus = ToApiValue(restaurant.ModerationStatus),
             LatestVerification = null,
             OpenMenuSubmission = null,
-            CreatedAt = restaurant.CreatedAt
+            CreatedAt = restaurant.CreatedAt,
+            UpdatedAt = restaurant.UpdatedAt
         };
     }
+
+    /// <summary>Converts an enum to its sheet "Enum" value (TemporarilyClosed → temporarily_closed).</summary>
+    private static string ToApiValue<TEnum>(TEnum value) where TEnum : struct, Enum =>
+        JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 
     /// <summary>Determines whether any configured interval is open at the current Vietnam time.</summary>
     private bool IsOpenNow(IEnumerable<RestaurantBusinessHour> hours)

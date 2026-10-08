@@ -32,4 +32,5 @@ public sealed class OwnerRestaurantDto
     public object? LatestVerification { get; set; }
     public object? OpenMenuSubmission { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
