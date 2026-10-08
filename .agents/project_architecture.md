@@ -140,7 +140,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 |---|---|---|
 | Cloudinary | `ICloudinaryService` | Image and document upload (`core.media_files`); private files get signed URLs valid 5 min |
 | Recommendation service | `IRecommendationService` | Survey, ranking, impressions, survey status (sheet "Reco API (nội bộ)") |
-| Brevo | — | Email: verification, password reset |
+| Brevo | `IEmailService` | Email: verification, password reset |
 | Google | — | Verify Google ID tokens (`Google.Apis.Auth`) |
 | Mapbox Directions | `IRouteService` | Distance and time of each leg of a roadmap day (RM-14) |
 | AI provider | — | Roadmap generation (`core.roadmap_generation_jobs`) |
@@ -152,6 +152,13 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 - The backend filters candidates (meal, form, price, tags, distance, active dish of a verified, visible, open restaurant) and sends at most 2000, sorted by restaurant rating, then dish `like_count`. Reco only scores them (stable sort, so ties keep that order) and returns ranked ids, scores and `request_id`; the backend loads the entities and builds the response.
 - `/recommendations` timeout 800 ms. On 5xx or timeout, order by restaurant rating and return `requestId = null`.
 - Survey, `/recommendations`, `/impressions` and survey status are called directly from the use case. Dish changes and likes / dislikes go only through the outbox (§7).
+
+### Email (Brevo)
+
+- Typed `HttpClient` to the Brevo transactional API: `POST {BaseUrl}smtp/email`, header `api-key`. No Brevo SDK.
+- One method per email; the use case passes the recipient, display name, raw token and how long the token is valid. The service builds the link and the Vietnamese template (HTML and plain text) in Infrastructure.
+- Links (sheet "Backend API", AUTH-01 / AUTH-03 / AUTH-08): `{Frontend:BaseUrl}/verify-email?token=<token>` (the page calls AUTH-02) and `{Frontend:BaseUrl}/reset-password?token=<token>` (the page calls AUTH-09). The token is URL-encoded; the display name is HTML-encoded.
+- Missing configuration, a non-2xx answer, a network error or a timeout → `ServiceUnavailableException` 503 `SERVICE_UNAVAILABLE`. The API still starts without Brevo keys; only sending fails. Never log the token, the link or the email body.
 
 ### Mapbox Directions (RM-14)
 
@@ -179,7 +186,8 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
 | `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
 | `Google` | `ClientId` |
-| `Brevo` | `ApiKey`, `SenderEmail` |
+| `Brevo` | `BaseUrl` (`https://api.brevo.com/v3/`), `ApiKey`, `SenderEmail`, `SenderName` (`ANGI`), `TimeoutMilliseconds` (10000) |
+| `Frontend` | `BaseUrl` (`http://localhost:3000`): base of the links sent by email |
 | `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10) |
 

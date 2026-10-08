@@ -8,7 +8,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request to `dev` 
 | Step | Fails when |
 |---|---|
 | Build (Release) | The solution does not compile |
-| Test | A unit test fails (Cloudinary live tests are skipped) |
+| Test | A unit test fails (Cloudinary and Brevo live tests are skipped) |
 | Check for missing EF migration | An entity or configuration changed without `dotnet ef migrations add` |
 
 Run the same checks locally before pushing:
@@ -108,7 +108,7 @@ The API reads its keys from `appsettings.json`, user secrets and environment var
 | `Recommendation:ApiKey` | Header `X-Api-Key`; must equal `RECO_API_KEY` in the `.env` of angi-reco | Survey and recommendation features |
 | `Cloudinary:CloudName`, `Cloudinary:ApiKey`, `Cloudinary:ApiSecret` | Image and document upload | Upload features and the Cloudinary live tests |
 | `Google:ClientId` | Verifying Google ID tokens; same client id as the frontend | Google sign-in |
-| `Brevo:ApiKey`, `Brevo:SenderEmail` | Verification and password-reset emails | Sending emails |
+| `Brevo:ApiKey`, `Brevo:SenderEmail` | Verification and password-reset emails; the sender must be a verified sender of the Brevo account | Sending emails: without them the API starts, but every email returns 503 `SERVICE_UNAVAILABLE` |
 | `Mapbox:AccessToken` | Mapbox Directions (RM-14); the secret token, not the frontend's public `pk.*` token | Roadmap routes |
 
 Set each one once:
@@ -127,3 +127,11 @@ dotnet user-secrets list --project ANGI.WebApi    # check what is set
 ```
 
 On Render the same keys are environment variables with `__` instead of `:` (`Jwt__SecretKey`, `Recommendation__ApiKey`).
+
+`appsettings.json` already holds the non-secret defaults: `Brevo:BaseUrl`, `Brevo:SenderName` (`ANGI`), `Brevo:TimeoutMilliseconds`, and `Frontend:BaseUrl` (`http://localhost:3000`), the base of the links in the emails (`/verify-email?token=...`, `/reset-password?token=...`). On Render set `Frontend__BaseUrl` to the Vercel URL.
+
+To check the Brevo keys, send both emails to your own address (the live test is skipped unless both variables are set):
+
+```bash
+RUN_BREVO_LIVE_TESTS=1 BREVO_LIVE_TEST_TO=you@example.com dotnet test ANGI.slnx --filter BrevoLiveTests
+```
