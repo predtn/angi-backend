@@ -4,7 +4,7 @@ namespace ANGI.Application.Common.Interfaces.Services;
 
 public interface ICloudinaryService
 {
-    // Returns the stable storage key and URL that the caller persists in media_files.
+    /// <summary>Uploads content and returns the stable storage key and URL persisted in media_files.</summary>
     Task<MediaUploadResult> UploadAsync(
         Stream file,
         string fileName,
@@ -13,6 +13,6 @@ public interface ICloudinaryService
         bool isPrivate,
         CancellationToken cancellationToken);
 
-    // Generate a fresh URL when returning private media; its signed URL expires after five minutes.
+    /// <summary>Generates a URL for stored media, signing private resources for five minutes.</summary>
     string GetUrl(string storageKey);
 }

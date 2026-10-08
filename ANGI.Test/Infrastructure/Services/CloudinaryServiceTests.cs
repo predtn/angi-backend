@@ -157,7 +157,30 @@ public class CloudinaryServiceTests
         Assert.Equal(0, client.ImageUploadCallCount);
     }
 
-    // TEST-10: Convert an unexpected Cloudinary failure into the application service-unavailable error. Area: Provider error handling.
+    // TEST-10: Treat media types as case-insensitive at the provider boundary.
+    [Fact]
+    public async Task UploadAsync_WithMixedCasePdfMimeType_ShouldUseRawUpload()
+    {
+        var client = new FakeCloudinaryClient
+        {
+            RawResult = new RawUploadResult
+            {
+                PublicId = "angi/verification_doc/generated-id.pdf",
+                SecureUrl = new Uri("https://cdn.example.com/angi/verification_doc/generated-id.pdf")
+            }
+        };
+        var service = new CloudinaryService(client);
+        using var file = new MemoryStream([1, 2, 3]);
+
+        await service.UploadAsync(
+            file, "identity.pdf", "Application/PDF", "angi/verification_doc", true,
+            CancellationToken.None);
+
+        Assert.Equal(1, client.RawUploadCallCount);
+        Assert.Equal(0, client.ImageUploadCallCount);
+    }
+
+    // TEST-11: Convert an unexpected Cloudinary failure into the application service-unavailable error. Area: Provider error handling.
     [Fact]
     public async Task UploadAsync_ConvertsProviderExceptionToServiceUnavailable()
     {
