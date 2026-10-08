@@ -1,6 +1,7 @@
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.Application.UseCases.Validators.Restaurant;
 using FluentAssertions;
+using FluentValidation.TestHelper;
 
 namespace ANGI.Test.Application.UseCases.Validators.Restaurant;
 
@@ -75,6 +76,28 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         var result = await validator.ValidateAsync(request);
 
         result.IsValid.Should().BeFalse();
+    }
+
+    // TEST-05: Return Vietnamese messages, as for every other validator (coding_rule.md §8).
+    [Fact]
+    public async Task ValidateAsync_WithInvalidFields_ShouldReturnVietnameseMessages()
+    {
+        var validator = new RegisterRestaurantRequestDtoValidator();
+        var request = ValidRequest(
+            new BusinessHourDto { DayOfWeek = 1, OpenTime = "8h", CloseTime = "12:00" });
+        request.Name = "";
+        request.Latitude = 95m;
+        request.ImageMediaIds = [1, 1];
+
+        var result = await validator.TestValidateAsync(request);
+
+        result.ShouldHaveValidationErrorFor(x => x.Name).WithErrorMessage("Tên nhà hàng là bắt buộc.");
+        result.ShouldHaveValidationErrorFor(x => x.Latitude)
+            .WithErrorMessage("Vĩ độ phải nằm trong khoảng -90 đến 90.");
+        result.ShouldHaveValidationErrorFor(x => x.ImageMediaIds)
+            .WithErrorMessage("Danh sách ảnh không được trùng nhau.");
+        result.ShouldHaveValidationErrorFor("BusinessHours[0].OpenTime")
+            .WithErrorMessage("Giờ mở cửa phải có dạng HH:mm.");
     }
 
     private static RegisterRestaurantRequestDto ValidRequest(params BusinessHourDto[] businessHours) => new()

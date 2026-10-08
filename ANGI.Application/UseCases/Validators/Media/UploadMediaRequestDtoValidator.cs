@@ -14,13 +14,13 @@ public sealed class UploadMediaRequestDtoValidator : AbstractValidator<UploadMed
     /// <summary>Creates the validation rules for an upload request.</summary>
     public UploadMediaRequestDtoValidator()
     {
-        RuleFor(x => x.Content).NotNull();
-        RuleFor(x => x.FileName).NotEmpty();
-        RuleFor(x => x.MimeType).NotEmpty();
-        RuleFor(x => x.SizeBytes).GreaterThan(0);
+        RuleFor(x => x.Content).NotNull().WithMessage("Tệp là bắt buộc.");
+        RuleFor(x => x.FileName).NotEmpty().WithMessage("Tên tệp là bắt buộc.");
+        RuleFor(x => x.MimeType).NotEmpty().WithMessage("Không xác định được loại tệp.");
+        RuleFor(x => x.SizeBytes).GreaterThan(0).WithMessage("Tệp không được rỗng.");
         RuleFor(x => x.Purpose)
-            .NotEmpty()
+            .NotEmpty().WithMessage("Mục đích tải lên là bắt buộc.")
             .Must(purpose => Purposes.Contains(purpose, StringComparer.Ordinal))
-            .WithMessage("Purpose is not supported.");
+            .WithMessage("Mục đích tải lên không hợp lệ.");
     }
 }
