@@ -105,6 +105,7 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 
 - Each role reads and writes only its own schema. The backend never maps or queries `recommendation.*`; it asks reco over HTTP.
 - No foreign key crosses schemas. `user_id` / `dish_id` in `recommendation` are `core.users.id` / `core.dishes.id`: never reuse or renumber those ids.
+- `core.audit_logs` is append-only: trigger `trg_audit_logs_append_only` rejects UPDATE, DELETE and TRUNCATE for every role, the owner included. How to write it: `coding_rule.md` §17.
 - Local setup (Docker, roles, connection string): `README.md`.
 
 Column, entity and migration rules: `coding_rule.md` §15–16.

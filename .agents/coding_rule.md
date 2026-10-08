@@ -113,6 +113,7 @@ Read the endpoint in the API Design and the tables in the Data Dictionary first.
 8.  Application     use case in UseCases/<Module>/<Feature>/
                       ├─ validate first (§6)
                       ├─ ICurrentUserService for the caller's identity (§13)
+                      ├─ IAuditLogService when the endpoint writes audit_logs (§17)
                       └─ IUnitOfWork for writes (§14)
 9.  Application     register the use case in Add<Module>UseCases() (§12)
 10. Infrastructure  repository implementation
@@ -275,7 +276,7 @@ Name the API Design endpoint id in the comment above each action: `// RM-01`, or
 
 ## 13. Current user
 
-A use case that needs the caller's identity (author, ownership check) uses `ICurrentUserService`. Never inject `IHttpContextAccessor` into Application.
+A use case that needs the caller's identity (author, ownership check) uses `ICurrentUserService` (`UserId`, `Role`, `IpAddress`, `UserAgent`). Never inject `IHttpContextAccessor` into Application.
 
 ## 14. Transactions
 
@@ -326,3 +327,27 @@ dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.We
 - Adding or renaming an enum value changes its CHECK, so it needs a migration.
 - Development applies pending migrations at startup and refuses to start when the model has changes without a migration; other environments migrate as a deploy step.
 - If the migration conflicts with `dev`: delete your migration, pull `dev`, create it again.
+
+## 17. Audit log
+
+Every endpoint whose column "Bảng DB" in sheet "Backend API" lists `audit_logs (<ACTION>)` writes exactly that action.
+
+```csharp
+_auditLogService.Add(new AuditLogEntry
+{
+    Action = AuditActions.UserSuspended,
+    EntityType = AuditEntityTypes.User,
+    EntityId = user.Id,
+    SubjectUserId = user.Id,
+    OldValues = new { Status = UserStatus.Active },
+    NewValues = new { Status = UserStatus.Suspended, user.SuspendedUntil, Reason = request.Note }
+});
+await _unitOfWork.SaveChangesAsync(ct);   // the audit row is saved with the change it describes
+```
+
+- Use the constants of `AuditActions` and `AuditEntityTypes` (`Application/Common/Models/Audit/`), never a string literal. A new action or entity type is added to sheet "Enum" of the API Design first.
+- Call `Add` before the one `SaveChangesAsync` of the use case, so the row is written only if the change is.
+- The actor (`actor_id`, `actor_role`) comes from the token. Pass `ActorId` / `ActorRole` only when the request has no token yet (login, register); a background job leaves both null (system).
+- `OldValues` / `NewValues` hold only the changed columns; the service writes them as JSON with snake_case keys and snake_case enum values. A Mod's reason goes in `NewValues.Reason`.
+- Never put a password, hash, token or secret in `OldValues` / `NewValues`.
+- `audit_logs` is append-only: a trigger rejects UPDATE, DELETE and TRUNCATE. Never update or remove an audit row.

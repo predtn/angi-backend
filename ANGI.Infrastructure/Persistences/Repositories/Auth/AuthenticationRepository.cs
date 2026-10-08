@@ -82,11 +82,5 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
         {
             _context.UserSessions.Add(session);
         }
-
-        /// <summary>Marks a new audit log as Added in the DbContext without writing it until SaveChangesAsync.</summary>
-        public void AddAuditLog(AuditLog auditLog)
-        {
-            _context.AuditLogs.Add(auditLog);
-        }
     }
 }

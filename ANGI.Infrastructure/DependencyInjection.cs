@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
+using ANGI.Infrastructure.Services.Audit;
 using ANGI.Infrastructure.Services.Auth;
 using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Media;
@@ -32,6 +33,7 @@ namespace ANGI.Infrastructure
             services.AddRecommendationInfrastructure(configuration);
             services.AddEmailInfrastructure(configuration);
             services.AddRestaurantInfrastructure();
+            services.AddAuditInfrastructure();
 
             return services;
         }

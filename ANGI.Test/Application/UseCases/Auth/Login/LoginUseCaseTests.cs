@@ -2,8 +2,10 @@ using System.Net;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Application.Common.Interfaces.Repositories.Auth;
+using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
+using ANGI.Application.Common.Models.Audit;
 using ANGI.Application.Common.Models.Auth;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.UseCases.Auth.Login;
@@ -29,11 +31,12 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             repository.Setup(x => x.GetUserByEmailAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
             UserSession? addedSession = null;
-            AuditLog? addedAuditLog = null;
             repository.Setup(x => x.AddSession(It.IsAny<UserSession>()))
                 .Callback<UserSession>(session => addedSession = session);
-            repository.Setup(x => x.AddAuditLog(It.IsAny<AuditLog>()))
-                .Callback<AuditLog>(auditLog => addedAuditLog = auditLog);
+            var auditLogService = new Mock<IAuditLogService>();
+            AuditLogEntry? addedAuditLog = null;
+            auditLogService.Setup(x => x.Add(It.IsAny<AuditLogEntry>()))
+                .Callback<AuditLogEntry>(entry => addedAuditLog = entry);
 
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify("correct-password", "password-hash")).Returns(true);
@@ -47,7 +50,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
                 repository,
                 passwordService,
                 recommendationService,
-                unitOfWork);
+                unitOfWork,
+                auditLogService);
 
             var result = await useCase.ExecuteAsync(new LoginRequestDto
             {
@@ -67,6 +71,11 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             addedSession.IpAddress.Should().Be(IPAddress.Loopback);
             addedAuditLog.Should().NotBeNull();
             addedAuditLog!.Action.Should().Be("USER_LOGIN");
+            addedAuditLog.EntityType.Should().Be("user");
+            addedAuditLog.EntityId.Should().Be(user.Id);
+            addedAuditLog.SubjectUserId.Should().Be(user.Id);
+            addedAuditLog.ActorId.Should().Be(user.Id);
+            addedAuditLog.ActorRole.Should().Be("TRAVELER");
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -268,7 +277,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             Mock<IAuthenticationRepository> repository,
             Mock<IPasswordService> passwordService,
             Mock<IRecommendationService> recommendationService,
-            Mock<IUnitOfWork> unitOfWork)
+            Mock<IUnitOfWork> unitOfWork,
+            Mock<IAuditLogService>? auditLogService = null)
         {
             var tokenService = new Mock<IAuthenticationTokenService>();
             tokenService.Setup(x => x.CreateTokens(It.IsAny<User>())).Returns(new AuthenticationTokens(
@@ -289,6 +299,7 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
                 tokenService.Object,
                 recommendationService.Object,
                 currentUserService.Object,
+                (auditLogService ?? new Mock<IAuditLogService>()).Object,
                 unitOfWork.Object,
                 new FixedTimeProvider(Now));
         }
