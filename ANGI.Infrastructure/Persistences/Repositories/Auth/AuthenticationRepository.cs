@@ -25,6 +25,22 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                 .FirstOrDefaultAsync(user => user.Email == normalizedEmail, ct);
         }
 
+        /// <summary>Checks the partial unique-email domain; the global filter excludes soft-deleted users.</summary>
+        public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken ct)
+        {
+            return _context.Users
+                .AsNoTracking()
+                .AnyAsync(user => user.Email == normalizedEmail, ct);
+        }
+
+        /// <summary>Loads only the role row identified by its stable API code.</summary>
+        public Task<Role?> GetRoleByCodeAsync(string roleCode, CancellationToken ct)
+        {
+            return _context.Roles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(role => role.Code == roleCode, ct);
+        }
+
         /// <summary>Projects the status fields of a user; the soft-delete filter hides deleted users.</summary>
         public Task<AccountStatusSnapshot?> GetAccountStatusAsync(int userId, CancellationToken ct)
         {
@@ -81,6 +97,18 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
         public void AddSession(UserSession session)
         {
             _context.UserSessions.Add(session);
+        }
+
+        /// <summary>Marks a new account as Added without persisting it immediately.</summary>
+        public void AddUser(User user)
+        {
+            _context.Users.Add(user);
+        }
+
+        /// <summary>Marks a one-time account token as Added without persisting it immediately.</summary>
+        public void AddUserToken(UserToken userToken)
+        {
+            _context.UserTokens.Add(userToken);
         }
     }
 }

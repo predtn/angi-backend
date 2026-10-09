@@ -57,6 +57,23 @@ namespace ANGI.Test.Infrastructure.Services.Auth
             second.RefreshToken.Should().NotBe(first.RefreshToken);
         }
 
+        // TEST-03: Generate random URL-safe user tokens and store only their deterministic SHA-256 hashes.
+        /// <summary>Verifies one-time tokens are random, URL-safe, and separately hashable.</summary>
+        [Fact]
+        public void CreateUserToken_ShouldReturnRandomUrlSafeTokenWithHash()
+        {
+            var service = CreateService();
+
+            var first = service.CreateUserToken();
+            var second = service.CreateUserToken();
+
+            first.Should().NotBe(second);
+            first.Should().MatchRegex("^[A-Za-z0-9_-]+$");
+            service.HashUserToken(first).Should().HaveLength(64);
+            service.HashUserToken(first).Should().Be(service.HashUserToken(first));
+            service.HashUserToken(first).Should().NotBe(first);
+        }
+
         private static AuthenticationTokenService CreateService()
         {
             return new AuthenticationTokenService(
