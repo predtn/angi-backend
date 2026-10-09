@@ -16,5 +16,8 @@ namespace ANGI.Domain.Entities
         public IPAddress? IpAddress { get; set; }
         public string? UserAgent { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        public User? Actor { get; set; }
+        public User? SubjectUser { get; set; }
     }
 }

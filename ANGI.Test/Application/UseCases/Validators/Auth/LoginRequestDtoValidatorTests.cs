@@ -2,7 +2,7 @@ using ANGI.Application.DTOs.Auth;
 using ANGI.Application.UseCases.Validators.Auth;
 using FluentValidation.TestHelper;
 
-namespace ANGI.Test.Application.Validators.Auth
+namespace ANGI.Test.Application.UseCases.Validators.Auth
 {
     public sealed class LoginRequestDtoValidatorTests
     {

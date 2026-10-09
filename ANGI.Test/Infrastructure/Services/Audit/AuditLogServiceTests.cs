@@ -163,6 +163,37 @@ namespace ANGI.Test.Infrastructure.Services.Audit
             }
         }
 
+        // TEST-08: Link a registration audit row to a newly added user before the database generates its id.
+        /// <summary>Verifies generated actor and subject ids can flow through EF relationships in one save.</summary>
+        [Fact]
+        public void Add_WithNewUser_ShouldUseTrackedActorAndSubjectNavigations()
+        {
+            using var context = CreateContext();
+            var user = new User
+            {
+                Email = "new@angi.test",
+                RoleId = 1,
+                DisplayName = "New User",
+                Status = UserStatus.PendingVerification
+            };
+            context.Users.Add(user);
+            var service = CreateService(context, userId: null, role: null);
+
+            service.Add(new AuditLogEntry
+            {
+                Action = AuditActions.UserRegistered,
+                EntityType = AuditEntityTypes.User,
+                ActorUser = user,
+                ActorRole = "TRAVELER",
+                SubjectUser = user
+            });
+
+            var auditLog = SingleAdded(context);
+            auditLog.Actor.Should().BeSameAs(user);
+            auditLog.SubjectUser.Should().BeSameAs(user);
+            auditLog.ActorRole.Should().Be("TRAVELER");
+        }
+
         private static AuditLog SingleAdded(ANGIContext context)
         {
             var entry = context.ChangeTracker.Entries<AuditLog>().Should().ContainSingle().Subject;
