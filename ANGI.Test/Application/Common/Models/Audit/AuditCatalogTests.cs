@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 using ANGI.Application.Common.Models.Audit;
 using FluentAssertions;
 
-namespace ANGI.Test.Application.Models.Audit
+namespace ANGI.Test.Application.Common.Models.Audit
 {
     public sealed class AuditCatalogTests
     {
