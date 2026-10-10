@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.Repositories.Restaurant;
+using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ANGI.Infrastructure.Persistences.Repositories.Restaurant;
@@ -48,5 +49,40 @@ public sealed class RestaurantRepository : IRestaurantRepository
     public void Add(Domain.Entities.Restaurant restaurant)
     {
         _context.Restaurants.Add(restaurant);
+    }
+
+    /// <summary>Loads a read-only owner aggregate with media, hours, and active workflow summaries.</summary>
+    public Task<Domain.Entities.Restaurant?> GetOwnerProfileAsync(int ownerId, CancellationToken ct)
+    {
+        return OwnerProfileQuery(_context.Restaurants.AsNoTracking())
+            .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
+    /// <summary>Loads the owner aggregate with tracking for profile and gallery replacement.</summary>
+    public Task<Domain.Entities.Restaurant?> GetTrackedOwnerProfileAsync(int ownerId, CancellationToken ct)
+    {
+        return OwnerProfileQuery(_context.Restaurants)
+            .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
+    /// <summary>Builds the common complete owner-profile query used by reads and updates.</summary>
+    private static IQueryable<Domain.Entities.Restaurant> OwnerProfileQuery(
+        IQueryable<Domain.Entities.Restaurant> query)
+    {
+        return query
+            .Include(restaurant => restaurant.CoverMedia)
+            .Include(restaurant => restaurant.Images)
+                .ThenInclude(image => image.Media)
+            .Include(restaurant => restaurant.BusinessHours)
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).Take(1))
+                .ThenInclude(verification => verification.Documents)
+                    .ThenInclude(document => document.Media)
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).Take(1))
+                .ThenInclude(verification => verification.Reviewer)
+                    .ThenInclude(reviewer => reviewer!.AvatarMedia)
+            .Include(restaurant => restaurant.MenuSubmissions.Where(submission =>
+                submission.Status == MenuSubmissionStatus.Draft ||
+                submission.Status == MenuSubmissionStatus.Pending))
+            .AsSplitQuery();
     }
 }
