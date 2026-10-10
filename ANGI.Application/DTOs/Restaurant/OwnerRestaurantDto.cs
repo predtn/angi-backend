@@ -29,8 +29,8 @@ public sealed class OwnerRestaurantDto
     public object? MyReview { get; set; }
     public string VerificationStatus { get; set; } = string.Empty;
     public string ModerationStatus { get; set; } = string.Empty;
-    public object? LatestVerification { get; set; }
-    public object? OpenMenuSubmission { get; set; }
+    public VerificationDto? LatestVerification { get; set; }
+    public OpenMenuSubmissionDto? OpenMenuSubmission { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

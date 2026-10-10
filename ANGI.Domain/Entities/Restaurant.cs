@@ -35,5 +35,6 @@ namespace ANGI.Domain.Entities
         public ICollection<RestaurantBusinessHour> BusinessHours { get; set; } = new List<RestaurantBusinessHour>();
         public ICollection<Dish> Dishes { get; set; } = new List<Dish>();
         public ICollection<RestaurantVerification> Verifications { get; set; } = new List<RestaurantVerification>();
+        public ICollection<MenuSubmission> MenuSubmissions { get; set; } = new List<MenuSubmission>();
     }
 }

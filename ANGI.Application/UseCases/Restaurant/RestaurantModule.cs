@@ -1,5 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
+using ANGI.Application.UseCases.Restaurant.GetOwnerProfile;
 using ANGI.Application.UseCases.Restaurant.Register;
+using ANGI.Application.UseCases.Restaurant.UpdateOwnerProfile;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Restaurant;
@@ -11,6 +13,8 @@ public static class RestaurantModule
     public static IServiceCollection AddRestaurantUseCases(this IServiceCollection services)
     {
         services.AddScoped<IRegisterRestaurantUseCase, RegisterRestaurantUseCase>();
+        services.AddScoped<IGetOwnerRestaurantUseCase, GetOwnerRestaurantUseCase>();
+        services.AddScoped<IUpdateOwnerRestaurantUseCase, UpdateOwnerRestaurantUseCase>();
         return services;
     }
 }
