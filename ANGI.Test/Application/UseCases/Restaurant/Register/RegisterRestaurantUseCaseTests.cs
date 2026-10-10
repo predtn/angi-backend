@@ -126,7 +126,7 @@ public sealed class RegisterRestaurantUseCaseTests
         restaurantRepository.Verify(repo => repo.Add(It.IsAny<Domain.Entities.Restaurant>()), Times.Never);
     }
 
-    // TEST-05: Report a missing cover image on coverMediaId only when the gallery images exist.
+    // TEST-04: Report a missing cover image on coverMediaId only when the gallery images exist.
     /// <summary>Verifies that the frontend can attach the error to the cover field.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMissingCoverOnly_ShouldReportCoverMediaId()
@@ -149,7 +149,7 @@ public sealed class RegisterRestaurantUseCaseTests
             .Which.PropertyName.Should().Be("CoverMediaId");
     }
 
-    // TEST-04: Validate required coordinates before querying repositories.
+    // TEST-05: Validate required coordinates before querying repositories.
     /// <summary>Verifies first-statement validation for required numeric coordinates.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCoordinates_ShouldThrowValidationExceptionFirst()
