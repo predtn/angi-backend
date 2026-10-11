@@ -4,7 +4,7 @@ using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace ANGI.WebApi.Controllers
+namespace ANGI.WebApi.Controllers.Auth
 {
     [ApiController]
     [Route("api/v1/auth")]

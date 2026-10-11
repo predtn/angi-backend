@@ -1,14 +1,14 @@
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.DTOs.Auth;
 using ANGI.WebApi.Common.Models;
-using ANGI.WebApi.Controllers;
+using ANGI.WebApi.Controllers.Auth;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 
-namespace ANGI.Test.WebApi.Controllers
+namespace ANGI.Test.WebApi.Controllers.Auth
 {
     public sealed class AuthenticationControllerTests
     {
