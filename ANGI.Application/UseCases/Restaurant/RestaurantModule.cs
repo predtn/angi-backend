@@ -1,5 +1,14 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
 using ANGI.Application.UseCases.Restaurant.GetOwnerProfile;
+using ANGI.Application.UseCases.Restaurant.GetOwnerMenu;
+using ANGI.Application.UseCases.Restaurant.UpdateDishAvailability;
+using ANGI.Application.UseCases.Restaurant.CreateMenuSubmission;
+using ANGI.Application.UseCases.Restaurant.ListMenuSubmissions;
+using ANGI.Application.UseCases.Restaurant.GetMenuSubmission;
+using ANGI.Application.UseCases.Restaurant.AddMenuSubmissionItem;
+using ANGI.Application.UseCases.Restaurant.UpdateMenuSubmissionItem;
+using ANGI.Application.UseCases.Restaurant.DeleteMenuSubmissionItem;
+using ANGI.Application.UseCases.Restaurant.CancelMenuSubmission;
 using ANGI.Application.UseCases.Restaurant.Register;
 using ANGI.Application.UseCases.Restaurant.UpdateOwnerProfile;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +24,15 @@ public static class RestaurantModule
         services.AddScoped<IRegisterRestaurantUseCase, RegisterRestaurantUseCase>();
         services.AddScoped<IGetOwnerRestaurantUseCase, GetOwnerRestaurantUseCase>();
         services.AddScoped<IUpdateOwnerRestaurantUseCase, UpdateOwnerRestaurantUseCase>();
+        services.AddScoped<IGetOwnerMenuUseCase, GetOwnerMenuUseCase>();
+        services.AddScoped<IUpdateDishAvailabilityUseCase, UpdateDishAvailabilityUseCase>();
+        services.AddScoped<ICreateMenuSubmissionUseCase, CreateMenuSubmissionUseCase>();
+        services.AddScoped<IListMenuSubmissionsUseCase, ListMenuSubmissionsUseCase>();
+        services.AddScoped<IGetMenuSubmissionUseCase, GetMenuSubmissionUseCase>();
+        services.AddScoped<IAddMenuSubmissionItemUseCase, AddMenuSubmissionItemUseCase>();
+        services.AddScoped<IUpdateMenuSubmissionItemUseCase, UpdateMenuSubmissionItemUseCase>();
+        services.AddScoped<IDeleteMenuSubmissionItemUseCase, DeleteMenuSubmissionItemUseCase>();
+        services.AddScoped<ICancelMenuSubmissionUseCase, CancelMenuSubmissionUseCase>();
         return services;
     }
 }

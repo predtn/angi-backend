@@ -18,7 +18,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
 
             builder.HasOne(x => x.Restaurant).WithMany(x => x.MenuSubmissions).HasForeignKey(x => x.RestaurantId);
             builder.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedBy);
-            builder.HasOne<User>().WithMany().HasForeignKey(x => x.ReviewedBy);
+            builder.HasOne(x => x.Reviewer).WithMany().HasForeignKey(x => x.ReviewedBy);
         }
     }
 }

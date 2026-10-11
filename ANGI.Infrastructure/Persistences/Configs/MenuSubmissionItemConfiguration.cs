@@ -21,9 +21,9 @@ namespace ANGI.Infrastructure.Persistences.Configs
             builder.HasIndex(x => new { x.SubmissionId, x.SourceDishId }).IsUnique();
 
             builder.HasOne(x => x.Submission).WithMany(x => x.Items).HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Cascade);
-            builder.HasOne<Dish>().WithMany().HasForeignKey(x => x.SourceDishId);
+            builder.HasOne(x => x.SourceDish).WithMany().HasForeignKey(x => x.SourceDishId);
             builder.HasOne<Dish>().WithMany().HasForeignKey(x => x.ResultDishId);
-            builder.HasOne<MediaFile>().WithMany().HasForeignKey(x => x.CoverMediaId);
+            builder.HasOne(x => x.CoverMedia).WithMany().HasForeignKey(x => x.CoverMediaId);
         }
     }
 }

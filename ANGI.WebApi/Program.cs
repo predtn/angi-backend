@@ -39,3 +39,6 @@ app.UseMiddleware<AccountStatusMiddleware>();
 app.MapControllers();
 
 app.Run();
+
+/// <summary>Exposes the generated host to the HTTP integration-test project.</summary>
+public partial class Program;

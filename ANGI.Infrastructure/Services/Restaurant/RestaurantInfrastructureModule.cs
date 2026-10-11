@@ -11,6 +11,7 @@ public static class RestaurantInfrastructureModule
     public static IServiceCollection AddRestaurantInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IRestaurantRepository, RestaurantRepository>();
+        services.AddScoped<IRestaurantMenuRepository, RestaurantMenuRepository>();
         return services;
     }
 }

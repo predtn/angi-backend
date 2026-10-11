@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.DTOs.Auth;
+using ANGI.Application.DTOs.Restaurant;
 using ANGI.WebApi.Common.Models;
 using FluentValidation;
 
@@ -68,6 +69,13 @@ namespace ANGI.WebApi.Middlewares
                     {
                         SuspendedUntil = suspendedException.SuspendedUntil
                     }
+                }),
+                SubmissionAlreadyOpenException openException => (StatusCodes.Status409Conflict, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = openException.Message,
+                    ErrorCode = openException.ErrorCode,
+                    Data = new SubmissionAlreadyOpenErrorDto { Id = openException.SubmissionId }
                 }),
                 AppException appException => (GetStatusCode(appException), new ApiResponse<object>
                 {
