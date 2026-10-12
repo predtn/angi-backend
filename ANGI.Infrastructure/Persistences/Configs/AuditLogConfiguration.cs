@@ -17,8 +17,8 @@ namespace ANGI.Infrastructure.Persistences.Configs
             builder.Property(x => x.NewValues).HasColumnType("jsonb");
             builder.Property(x => x.UserAgent).HasMaxLength(500);
 
-            builder.HasOne<User>().WithMany().HasForeignKey(x => x.ActorId);
-            builder.HasOne<User>().WithMany().HasForeignKey(x => x.SubjectUserId);
+            builder.HasOne(x => x.Actor).WithMany().HasForeignKey(x => x.ActorId);
+            builder.HasOne(x => x.SubjectUser).WithMany().HasForeignKey(x => x.SubjectUserId);
         }
     }
 }

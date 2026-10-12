@@ -12,6 +12,12 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
         /// <summary>Finds a user by normalized email and loads the data required for the authentication result.</summary>
         Task<User?> GetUserByEmailAsync(string normalizedEmail, CancellationToken ct);
 
+        /// <summary>Checks whether a non-deleted account already owns the normalized email.</summary>
+        Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken ct);
+
+        /// <summary>Loads a role by its API code for account creation.</summary>
+        Task<Role?> GetRoleByCodeAsync(string roleCode, CancellationToken ct);
+
         /// <summary>Reads only the status fields of a user; null when the user does not exist or is soft-deleted.</summary>
         Task<AccountStatusSnapshot?> GetAccountStatusAsync(int userId, CancellationToken ct);
 
@@ -28,5 +34,11 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
 
         /// <summary>Adds a new session to the change tracker; the Unit of Work persists it.</summary>
         void AddSession(UserSession session);
+
+        /// <summary>Adds a new user to the change tracker; the Unit of Work persists it.</summary>
+        void AddUser(User user);
+
+        /// <summary>Adds a one-time user token to the change tracker; the Unit of Work persists it.</summary>
+        void AddUserToken(UserToken userToken);
     }
 }

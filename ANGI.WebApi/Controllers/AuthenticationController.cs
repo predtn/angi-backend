@@ -10,19 +10,36 @@ namespace ANGI.WebApi.Controllers
     [Route("api/v1/auth")]
     public sealed class AuthenticationController : ControllerBase
     {
+        private readonly IRegisterAccountUseCase _registerAccountUseCase;
         private readonly ILoginUseCase _loginUseCase;
         private readonly IRefreshTokenUseCase _refreshTokenUseCase;
         private readonly ILogoutUseCase _logoutUseCase;
 
-        /// <summary>Initializes the HTTP boundary with the three Auth use-case abstractions.</summary>
+        /// <summary>Initializes the HTTP boundary with the Auth use-case abstractions.</summary>
         public AuthenticationController(
+            IRegisterAccountUseCase registerAccountUseCase,
             ILoginUseCase loginUseCase,
             IRefreshTokenUseCase refreshTokenUseCase,
             ILogoutUseCase logoutUseCase)
         {
+            _registerAccountUseCase = registerAccountUseCase;
             _loginUseCase = loginUseCase;
             _refreshTokenUseCase = refreshTokenUseCase;
             _logoutUseCase = logoutUseCase;
+        }
+
+        /// <summary>Receives an AUTH-01 request, creates a pending account, and returns the documented 201 response.</summary>
+        [AllowAnonymous]
+        [HttpPost("register")]
+        [ProducesResponseType(typeof(ApiResponse<RegisterAccountResponseDto>), StatusCodes.Status201Created)]
+        public async Task<IActionResult> Register(RegisterAccountRequestDto request, CancellationToken ct)
+        {
+            var result = await _registerAccountUseCase.ExecuteAsync(request, ct);
+            return StatusCode(StatusCodes.Status201Created, new ApiResponse<RegisterAccountResponseDto>
+            {
+                Success = true,
+                Data = result
+            });
         }
 
         /// <summary>Receives an AUTH-04 request, invokes LoginUseCase, and wraps the result in ApiResponse.</summary>
