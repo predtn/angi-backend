@@ -24,12 +24,14 @@ namespace ANGI.Infrastructure.Services.Audit
         private readonly ANGIContext _context;
         private readonly ICurrentUserService _currentUserService;
 
+        /// <summary>Initializes audit tracking with the scoped context and current request identity.</summary>
         public AuditLogService(ANGIContext context, ICurrentUserService currentUserService)
         {
             _context = context;
             _currentUserService = currentUserService;
         }
 
+        /// <summary>Adds a validated audit entry to the current Unit of Work without saving it immediately.</summary>
         public void Add(AuditLogEntry entry)
         {
             ArgumentNullException.ThrowIfNull(entry);
@@ -44,17 +46,19 @@ namespace ANGI.Infrastructure.Services.Audit
             }
 
             // An explicit actor (login, register) wins; otherwise the token's user, or null for a background job.
-            var hasExplicitActor = entry.ActorId is not null;
+            var hasExplicitActor = entry.ActorId is not null || entry.ActorUser is not null;
             var userAgent = _currentUserService.UserAgent;
 
             _context.AuditLogs.Add(new AuditLog
             {
                 ActorId = hasExplicitActor ? entry.ActorId : _currentUserService.UserId,
+                Actor = entry.ActorUser,
                 ActorRole = hasExplicitActor ? entry.ActorRole : _currentUserService.Role,
                 Action = entry.Action,
                 EntityType = entry.EntityType,
                 EntityId = entry.EntityId,
                 SubjectUserId = entry.SubjectUserId,
+                SubjectUser = entry.SubjectUser,
                 OldValues = Serialize(entry.OldValues),
                 NewValues = Serialize(entry.NewValues),
                 IpAddress = _currentUserService.IpAddress,
@@ -64,6 +68,7 @@ namespace ANGI.Infrastructure.Services.Audit
             });
         }
 
+        /// <summary>Serializes changed columns with database-compatible snake_case names and enum values.</summary>
         private static string? Serialize(object? values) =>
             values is null ? null : JsonSerializer.Serialize(values, values.GetType(), _jsonOptions);
     }

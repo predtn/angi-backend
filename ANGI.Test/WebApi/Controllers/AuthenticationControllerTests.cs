@@ -12,7 +12,29 @@ namespace ANGI.Test.WebApi.Controllers
 {
     public sealed class AuthenticationControllerTests
     {
-        // TEST-01: Wrap a successful login result in the standard API response.
+        // TEST-01: Return the documented 201 response after registering an account.
+        /// <summary>Verifies AUTH-01 is wrapped in ApiResponse with HTTP 201.</summary>
+        [Fact]
+        public async Task Register_ShouldReturnCreatedApiResponse()
+        {
+            var expected = new RegisterAccountResponseDto { UserId = 12, Status = "pending_verification" };
+            var registerUseCase = new Mock<IRegisterAccountUseCase>();
+            registerUseCase.Setup(x => x.ExecuteAsync(
+                    It.IsAny<RegisterAccountRequestDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(expected);
+            var controller = CreateController(registerAccountUseCase: registerUseCase);
+
+            var action = await controller.Register(new RegisterAccountRequestDto(), CancellationToken.None);
+
+            var result = action.Should().BeOfType<ObjectResult>().Subject;
+            result.StatusCode.Should().Be(StatusCodes.Status201Created);
+            var response = result.Value.Should().BeOfType<ApiResponse<RegisterAccountResponseDto>>().Subject;
+            response.Success.Should().BeTrue();
+            response.Data.Should().BeSameAs(expected);
+        }
+
+        // TEST-02: Wrap a successful login result in the standard API response.
         [Fact]
         public async Task Login_ShouldReturnOkApiResponse()
         {
@@ -30,7 +52,7 @@ namespace ANGI.Test.WebApi.Controllers
             response.Data.Should().BeSameAs(expected);
         }
 
-        // TEST-02: Return a successful API response with null data after logout.
+        // TEST-03: Return a successful API response with null data after logout.
         [Fact]
         public async Task Logout_ShouldReturnOkApiResponseWithNullData()
         {
@@ -51,7 +73,7 @@ namespace ANGI.Test.WebApi.Controllers
                 Times.Once);
         }
 
-        // TEST-03: Wrap a successful token refresh in the documented authentication API response.
+        // TEST-04: Wrap a successful token refresh in the documented authentication API response.
         [Fact]
         public async Task Refresh_ShouldReturnOkApiResponse()
         {
@@ -71,12 +93,15 @@ namespace ANGI.Test.WebApi.Controllers
             response.Data.Should().BeSameAs(expected);
         }
 
-        // TEST-04: Expose login and refresh anonymously while requiring authentication for logout.
+        // TEST-05: Expose register, login, and refresh anonymously while requiring authentication for logout.
         [Fact]
         public void AuthenticationEndpoints_ShouldDeclareDocumentedAuthorizationAttributes()
         {
             var controllerType = typeof(AuthenticationController);
 
+            controllerType.GetMethod(nameof(AuthenticationController.Register))!
+                .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
+                .Should().ContainSingle();
             controllerType.GetMethod(nameof(AuthenticationController.Login))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
@@ -89,11 +114,13 @@ namespace ANGI.Test.WebApi.Controllers
         }
 
         private static AuthenticationController CreateController(
+            Mock<IRegisterAccountUseCase>? registerAccountUseCase = null,
             Mock<ILoginUseCase>? loginUseCase = null,
             Mock<IRefreshTokenUseCase>? refreshTokenUseCase = null,
             Mock<ILogoutUseCase>? logoutUseCase = null)
         {
             return new AuthenticationController(
+                (registerAccountUseCase ?? new Mock<IRegisterAccountUseCase>()).Object,
                 (loginUseCase ?? new Mock<ILoginUseCase>()).Object,
                 (refreshTokenUseCase ?? new Mock<IRefreshTokenUseCase>()).Object,
                 (logoutUseCase ?? new Mock<ILogoutUseCase>()).Object);

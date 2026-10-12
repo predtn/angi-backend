@@ -1,3 +1,5 @@
+using ANGI.Application.Common.Models;
+using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Restaurant;
@@ -22,4 +24,7 @@ public interface IRestaurantRepository
 
     /// <summary>Loads and tracks the complete owner profile so OWN-03 can update it.</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedOwnerProfileAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
+    Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
 }

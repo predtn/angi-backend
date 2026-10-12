@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
+using ANGI.Application.UseCases.Restaurant.Browse;
 using ANGI.Application.UseCases.Restaurant.GetOwnerProfile;
 using ANGI.Application.UseCases.Restaurant.GetOwnerMenu;
 using ANGI.Application.UseCases.Restaurant.UpdateDishAvailability;
@@ -33,6 +34,7 @@ public static class RestaurantModule
         services.AddScoped<IUpdateMenuSubmissionItemUseCase, UpdateMenuSubmissionItemUseCase>();
         services.AddScoped<IDeleteMenuSubmissionItemUseCase, DeleteMenuSubmissionItemUseCase>();
         services.AddScoped<ICancelMenuSubmissionUseCase, CancelMenuSubmissionUseCase>();
+        services.AddScoped<IBrowseRestaurantsUseCase, BrowseRestaurantsUseCase>();
         return services;
     }
 }
