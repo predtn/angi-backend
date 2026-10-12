@@ -158,6 +158,7 @@ JSON: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`
 | Model binding fails (bad JSON, wrong type) | `ApiBehaviorOptions.InvalidModelStateResponseFactory` | 400 `VALIDATION_FAILED` + `Errors` |
 | Rate limit exceeded | `RateLimiterOptions.OnRejected`, with `Retry-After` | 429 `TOO_MANY_REQUESTS` |
 | Unknown path / wrong HTTP method | `UseStatusCodePages` handler (`StatusCodePagesConfig`) | 404 `ROUTE_NOT_FOUND` / 405 `METHOD_NOT_ALLOWED` |
+| Body missing or not `application/json` (MVC returns 415) | `ApiErrorEnvelopeResultFilter` | 400 `VALIDATION_FAILED` + `Errors` (the API has no 415, §8) |
 
 - Never write a raw JSON error, and never set the status code without the body or the body without the status code.
 
@@ -264,7 +265,7 @@ Name the API Design endpoint id in the comment above each action: `// RM-01`, or
 
 ## 12. Dependency injection
 
-- `Program.cs` calls only `AddApplication()`, `AddInfrastructure(configuration)`, `AddWebApi(configuration)`; adding a module never changes it.
+- `Program.cs` calls only `AddApplication()`, `AddInfrastructure(configuration)`, `AddWebApi(configuration)`; adding a module never changes it. Its last line `public partial class Program;` only exposes the host to `WebApplicationFactory` in HTTP tests.
 - Each module registers its types in one extension method in each layer, called by one line from that layer's `DependencyInjection.cs`:
   - Application: `UseCases/<Module>/<Module>Module.cs` → `Add<Module>UseCases()`
   - Infrastructure: `Services/<Area>/<Area>Module.cs` → `Add<Area>Infrastructure(configuration)` (its repositories, services, settings and HTTP clients)
