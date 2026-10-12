@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
+using ANGI.Application.UseCases.Restaurant.Browse;
 using ANGI.Application.UseCases.Restaurant.GetOwnerProfile;
 using ANGI.Application.UseCases.Restaurant.Register;
 using ANGI.Application.UseCases.Restaurant.UpdateOwnerProfile;
@@ -15,6 +16,7 @@ public static class RestaurantModule
         services.AddScoped<IRegisterRestaurantUseCase, RegisterRestaurantUseCase>();
         services.AddScoped<IGetOwnerRestaurantUseCase, GetOwnerRestaurantUseCase>();
         services.AddScoped<IUpdateOwnerRestaurantUseCase, UpdateOwnerRestaurantUseCase>();
+        services.AddScoped<IBrowseRestaurantsUseCase, BrowseRestaurantsUseCase>();
         return services;
     }
 }

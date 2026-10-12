@@ -11,7 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ANGI.Infrastructure.Services.Auth
 {
-    /// <summary>Issues JWTs, random refresh tokens, and SHA-256 hashes used to store refresh tokens.</summary>
+    /// <summary>Issues JWTs and secure opaque tokens, storing opaque tokens only as SHA-256 hashes.</summary>
     public sealed class AuthenticationTokenService : IAuthenticationTokenService
     {
         private readonly JwtTokenSettings _settings;
@@ -63,7 +63,25 @@ namespace ANGI.Infrastructure.Services.Auth
         /// <summary>Converts a refresh token to lowercase SHA-256 hex so the database never stores the plain token.</summary>
         public string HashRefreshToken(string refreshToken)
         {
-            return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
+            return HashOpaqueToken(refreshToken);
+        }
+
+        /// <summary>Creates a random 32-byte token encoded for safe use in a URL.</summary>
+        public string CreateUserToken()
+        {
+            return WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        }
+
+        /// <summary>Converts a one-time user token to lowercase SHA-256 hex for database storage.</summary>
+        public string HashUserToken(string token)
+        {
+            return HashOpaqueToken(token);
+        }
+
+        /// <summary>Produces the deterministic SHA-256 representation shared by opaque token types.</summary>
+        private static string HashOpaqueToken(string token)
+        {
+            return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
         }
     }
 }
