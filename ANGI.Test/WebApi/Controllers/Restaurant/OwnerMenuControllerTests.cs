@@ -49,6 +49,7 @@ public sealed class OwnerMenuControllerTests
     }
 
     // TEST-03: Forward the HTTP request cancellation token to the use case.
+    /// <summary>Verifies cancellation propagation from the controller to Application.</summary>
     [Fact]
     public async Task GetMenu_ShouldForwardRequestCancellationToken()
     {
@@ -63,11 +64,34 @@ public sealed class OwnerMenuControllerTests
         useCase.Verify(item => item.ExecuteAsync(cancellation.Token), Times.Once);
     }
 
+    // TEST-04: Return the submitted OWN-17 menu in an HTTP 200 ApiResponse.
+    /// <summary>Verifies submit-menu delegation, request forwarding, and response wrapping.</summary>
+    [Fact]
+    public async Task SubmitSubmission_WhenSubmitted_ShouldReturnOkApiResponse()
+    {
+        var request = new SubmitMenuSubmissionRequestDto { OwnerNote = "Gửi duyệt" };
+        var expected = new MenuSubmissionDto { Id = 14, Status = "pending" };
+        var useCase = new Mock<ISubmitMenuSubmissionUseCase>();
+        useCase.Setup(value => value.ExecuteAsync(14, request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
+        var controller = CreateController(submitSubmission: useCase.Object);
+
+        var action = await controller.SubmitSubmission(14, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<MenuSubmissionDto>>()
+            .Which.Data.Should().BeSameAs(expected);
+        useCase.Verify(
+            value => value.ExecuteAsync(14, request, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     /// <summary>Creates the controller while allowing the test to replace selected dependencies.</summary>
     private static OwnerMenuController CreateController(
         IGetOwnerMenuUseCase? getMenu = null,
         ICreateMenuSubmissionUseCase? createSubmission = null,
-        IDeleteMenuSubmissionItemUseCase? deleteItem = null)
+        IDeleteMenuSubmissionItemUseCase? deleteItem = null,
+        ISubmitMenuSubmissionUseCase? submitSubmission = null)
     {
         return new OwnerMenuController(
             getMenu ?? Mock.Of<IGetOwnerMenuUseCase>(),
@@ -78,6 +102,7 @@ public sealed class OwnerMenuControllerTests
             Mock.Of<IAddMenuSubmissionItemUseCase>(),
             Mock.Of<IUpdateMenuSubmissionItemUseCase>(),
             deleteItem ?? Mock.Of<IDeleteMenuSubmissionItemUseCase>(),
+            submitSubmission ?? Mock.Of<ISubmitMenuSubmissionUseCase>(),
             Mock.Of<ICancelMenuSubmissionUseCase>());
     }
 }

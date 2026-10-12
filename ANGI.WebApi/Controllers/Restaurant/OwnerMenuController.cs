@@ -21,9 +21,10 @@ public sealed class OwnerMenuController : ControllerBase
     private readonly IAddMenuSubmissionItemUseCase _addItem;
     private readonly IUpdateMenuSubmissionItemUseCase _updateItem;
     private readonly IDeleteMenuSubmissionItemUseCase _deleteItem;
+    private readonly ISubmitMenuSubmissionUseCase _submitSubmission;
     private readonly ICancelMenuSubmissionUseCase _cancelSubmission;
 
-    /// <summary>Initializes the HTTP boundary with every ANGI-53 use case.</summary>
+    /// <summary>Initializes the HTTP boundary with every owner-menu use case.</summary>
     public OwnerMenuController(
         IGetOwnerMenuUseCase getMenu,
         IUpdateDishAvailabilityUseCase updateAvailability,
@@ -33,6 +34,7 @@ public sealed class OwnerMenuController : ControllerBase
         IAddMenuSubmissionItemUseCase addItem,
         IUpdateMenuSubmissionItemUseCase updateItem,
         IDeleteMenuSubmissionItemUseCase deleteItem,
+        ISubmitMenuSubmissionUseCase submitSubmission,
         ICancelMenuSubmissionUseCase cancelSubmission)
     {
         _getMenu = getMenu;
@@ -43,6 +45,7 @@ public sealed class OwnerMenuController : ControllerBase
         _addItem = addItem;
         _updateItem = updateItem;
         _deleteItem = deleteItem;
+        _submitSubmission = submitSubmission;
         _cancelSubmission = cancelSubmission;
     }
 
@@ -130,6 +133,18 @@ public sealed class OwnerMenuController : ControllerBase
     {
         await _deleteItem.ExecuteAsync(submissionId, itemId, ct);
         return Ok(new ApiResponse<object> { Success = true, Data = null });
+    }
+
+    /// <summary>Receives OWN-17 and submits a changed draft for moderator review.</summary>
+    [HttpPost("menu-submissions/{submissionId:long}/submit")]
+    [ProducesResponseType(typeof(ApiResponse<MenuSubmissionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SubmitSubmission(
+        long submissionId,
+        SubmitMenuSubmissionRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _submitSubmission.ExecuteAsync(submissionId, request, ct);
+        return Ok(new ApiResponse<MenuSubmissionDto> { Success = true, Data = result });
     }
 
     /// <summary>Receives OWN-18 and cancels a draft or pending submission.</summary>
