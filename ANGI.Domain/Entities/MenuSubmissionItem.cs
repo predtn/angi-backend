@@ -17,5 +17,7 @@ namespace ANGI.Domain.Entities
         public int? ResultDishId { get; set; }
 
         public MenuSubmission Submission { get; set; } = null!;
+        public Dish? SourceDish { get; set; }
+        public MediaFile? CoverMedia { get; set; }
     }
 }

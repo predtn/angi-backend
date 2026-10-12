@@ -2,6 +2,7 @@ using System.Text.Json;
 using ANGI.WebApi.Common.Models;
 using ANGI.WebApi.Configs;
 using ANGI.WebApi.Middlewares;
+using ANGI.WebApi.Filters;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi
@@ -16,7 +17,7 @@ namespace ANGI.WebApi
             services.AddScoped<RateLimitPartitionMiddleware>();
             services.AddScoped<AccountStatusMiddleware>();
 
-            services.AddControllers()
+            services.AddControllers(options => options.Filters.Add<ApiErrorEnvelopeResultFilter>())
                 .ConfigureApiBehaviorOptions(options =>
                 {
                     options.InvalidModelStateResponseFactory = context =>

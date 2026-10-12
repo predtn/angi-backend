@@ -16,6 +16,7 @@ namespace ANGI.Domain.Entities
         public DateTime CreatedAt { get; set; }
 
         public Restaurant Restaurant { get; set; } = null!;
+        public User? Reviewer { get; set; }
         public ICollection<MenuSubmissionItem> Items { get; set; } = new List<MenuSubmissionItem>();
     }
 }
