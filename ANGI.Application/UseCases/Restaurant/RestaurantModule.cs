@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
+using ANGI.Application.UseCases.Restaurant.Browse;
 using ANGI.Application.UseCases.Restaurant.Register;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,6 +12,7 @@ public static class RestaurantModule
     public static IServiceCollection AddRestaurantUseCases(this IServiceCollection services)
     {
         services.AddScoped<IRegisterRestaurantUseCase, RegisterRestaurantUseCase>();
+        services.AddScoped<IBrowseRestaurantsUseCase, BrowseRestaurantsUseCase>();
         return services;
     }
 }
