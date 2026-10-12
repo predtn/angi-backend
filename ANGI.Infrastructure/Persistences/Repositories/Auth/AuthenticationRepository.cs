@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.Repositories.Auth;
 using ANGI.Application.Common.Models.Auth;
 using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ANGI.Infrastructure.Persistences.Repositories.Auth
@@ -39,6 +40,19 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
             return _context.Roles
                 .AsNoTracking()
                 .FirstOrDefaultAsync(role => role.Code == roleCode, ct);
+        }
+
+        /// <summary>Loads and locks a user so concurrent resend requests replace tokens in sequence.</summary>
+        public Task<User?> GetUserByEmailForUpdateAsync(string normalizedEmail, CancellationToken ct)
+        {
+            return _context.Users
+                .FromSqlInterpolated($$"""
+                    SELECT *
+                    FROM core.users
+                    WHERE email = {{normalizedEmail}}
+                    FOR UPDATE
+                    """)
+                .SingleOrDefaultAsync(ct);
         }
 
         /// <summary>Projects the status fields of a user; the soft-delete filter hides deleted users.</summary>
@@ -105,10 +119,37 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
             _context.Users.Add(user);
         }
 
-        /// <summary>Marks a one-time account token as Added without persisting it immediately.</summary>
-        public void AddUserToken(UserToken userToken)
+        /// <summary>Loads and locks a user token together with its owner to enforce one-time consumption.</summary>
+        public Task<UserToken?> GetUserTokenByHashForUpdateAsync(string tokenHash, CancellationToken ct)
         {
-            _context.UserTokens.Add(userToken);
+            return _context.UserTokens
+                .FromSqlInterpolated($$"""
+                    SELECT *
+                    FROM core.user_tokens
+                    WHERE token_hash = {{tokenHash}}
+                    FOR UPDATE
+                    """)
+                .Include(token => token.User)
+                .SingleOrDefaultAsync(ct);
+        }
+
+        /// <summary>Loads all unconsumed tokens for the selected user and purpose.</summary>
+        public async Task<IReadOnlyList<UserToken>> GetUnusedUserTokensAsync(
+            int userId,
+            UserTokenPurpose purpose,
+            CancellationToken ct)
+        {
+            return await _context.UserTokens
+                .Where(token => token.UserId == userId &&
+                                token.Purpose == purpose &&
+                                token.UsedAt == null)
+                .ToListAsync(ct);
+        }
+
+        /// <summary>Marks a new user token as Added without persisting it immediately.</summary>
+        public void AddUserToken(UserToken token)
+        {
+            _context.UserTokens.Add(token);
         }
     }
 }

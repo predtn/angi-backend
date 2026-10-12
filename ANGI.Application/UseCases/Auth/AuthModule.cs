@@ -4,6 +4,8 @@ using ANGI.Application.UseCases.Auth.Login;
 using ANGI.Application.UseCases.Auth.Logout;
 using ANGI.Application.UseCases.Auth.Refresh;
 using ANGI.Application.UseCases.Auth.Register;
+using ANGI.Application.UseCases.Auth.ResendVerificationEmail;
+using ANGI.Application.UseCases.Auth.VerifyEmail;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Auth
@@ -12,7 +14,7 @@ namespace ANGI.Application.UseCases.Auth
     public static class AuthModule
     {
         /// <summary>
-        /// Registers the Register, Login, Refresh, Logout and account-status use cases per HTTP request.
+        /// Registers authentication and account-status use cases with a scoped lifetime per HTTP request.
         /// </summary>
         public static IServiceCollection AddAuthUseCases(this IServiceCollection services)
         {
@@ -20,6 +22,8 @@ namespace ANGI.Application.UseCases.Auth
             services.AddScoped<ILoginUseCase, LoginUseCase>();
             services.AddScoped<IRefreshTokenUseCase, RefreshTokenUseCase>();
             services.AddScoped<ILogoutUseCase, LogoutUseCase>();
+            services.AddScoped<IVerifyEmailUseCase, VerifyEmailUseCase>();
+            services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, EnsureActiveAccountUseCase>();
             return services;
         }

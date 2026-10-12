@@ -68,7 +68,7 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
 
         var role = await _authenticationRepository.GetRoleByCodeAsync(request.Role, ct)
             ?? throw new InvalidOperationException($"Configured role '{request.Role}' was not found.");
-        var rawVerificationToken = _tokenService.CreateUserToken();
+        var generatedVerificationToken = _tokenService.CreateUserToken();
         var user = new User
         {
             Email = normalizedEmail,
@@ -81,7 +81,7 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
         {
             User = user,
             Purpose = UserTokenPurpose.EmailVerify,
-            TokenHash = _tokenService.HashUserToken(rawVerificationToken),
+            TokenHash = generatedVerificationToken.TokenHash,
             ExpiresAt = _timeProvider.GetUtcNow().UtcDateTime.Add(_emailVerificationLifetime)
         };
 
@@ -114,7 +114,7 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
         await _emailService.SendEmailVerificationAsync(
             user.Email,
             user.DisplayName,
-            rawVerificationToken,
+            generatedVerificationToken.Token,
             _emailVerificationLifetime,
             ct);
 

@@ -15,6 +15,7 @@ namespace ANGI.WebApi.Configs
         private const string ResendVerificationPath = "/api/v1/auth/verify-email/resend";
         private const string ForgotPasswordPath = "/api/v1/auth/forgot-password";
 
+        /// <summary>Registers global API and sensitive-auth fixed-window rate limiters.</summary>
         public static IServiceCollection AddRateLimitConfiguration(
             this IServiceCollection services,
             IConfiguration configuration)
@@ -50,6 +51,7 @@ namespace ANGI.WebApi.Configs
             return services;
         }
 
+        /// <summary>Writes the canonical 429 API response and Retry-After header.</summary>
         public static async Task WriteTooManyRequestsAsync(HttpContext context, int retryAfterSeconds, CancellationToken cancellationToken)
         {
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -63,6 +65,7 @@ namespace ANGI.WebApi.Configs
             }, cancellationToken);
         }
 
+        /// <summary>Selects the applicable limiter and partition key for an incoming request.</summary>
         private static RateLimitPartition<string> CreatePartition(
             HttpContext context,
             RateLimitSettings settings)
@@ -77,7 +80,7 @@ namespace ANGI.WebApi.Configs
                 path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase))
             {
                 return CreateFixedWindowPartition(
-                    $"sensitive-auth:{GetEmailAndIpKey(context)}",
+                    $"sensitive-auth:{GetEmailKey(context)}",
                     settings.SensitiveAuthPermitLimit,
                     TimeSpan.FromSeconds(settings.SensitiveAuthWindowSeconds));
             }
@@ -93,6 +96,7 @@ namespace ANGI.WebApi.Configs
                 TimeSpan.FromSeconds(settings.GeneralWindowSeconds));
         }
 
+        /// <summary>Creates a fixed-window rate-limit partition with no request queue.</summary>
         private static RateLimitPartition<string> CreateFixedWindowPartition(
             string partitionKey,
             int permitLimit,
@@ -107,17 +111,20 @@ namespace ANGI.WebApi.Configs
             });
         }
 
-        private static string GetEmailAndIpKey(HttpContext context)
+        /// <summary>Builds the sensitive-auth partition from normalized email, falling back to IP for unreadable bodies.</summary>
+        private static string GetEmailKey(HttpContext context)
         {
             var email = context.Items[RateLimitPartitionMiddleware.EmailItemKey] as string;
-            return $"{email ?? "unknown-email"}|ip:{GetIpAddress(context)}";
+            return email ?? $"unknown-email|ip:{GetIpAddress(context)}";
         }
 
+        /// <summary>Returns the remote IP address or a stable fallback when it is unavailable.</summary>
         private static string GetIpAddress(HttpContext context)
         {
             return context.Connection.RemoteIpAddress?.ToString() ?? "unknown-ip";
         }
 
+        /// <summary>Checks that every configured rate-limit threshold and window is positive.</summary>
         private static bool AreValid(RateLimitSettings settings)
         {
             return settings.GeneralPermitLimit > 0 &&

@@ -54,7 +54,8 @@ namespace ANGI.WebApi.Middlewares
 
                 using var document = JsonDocument.Parse(buffer.AsMemory(0, bytesRead));
 
-                if (document.RootElement.TryGetProperty("email", out var emailElement) &&
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("email", out var emailElement) &&
                     emailElement.ValueKind == JsonValueKind.String)
                 {
                     var email = emailElement.GetString()?.Trim().ToLowerInvariant();
