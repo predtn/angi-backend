@@ -1,3 +1,5 @@
+using ANGI.Application.Common.Models;
+using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Restaurant;
@@ -16,4 +18,7 @@ public interface IRestaurantRepository
 
     /// <summary>Adds a restaurant aggregate to the current unit of work.</summary>
     void Add(ANGI.Domain.Entities.Restaurant restaurant);
+
+    /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
+    Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
 }

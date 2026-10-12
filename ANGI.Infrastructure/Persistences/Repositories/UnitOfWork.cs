@@ -1,5 +1,8 @@
+using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 namespace ANGI.Infrastructure.Persistences.Repositories
 {
@@ -15,9 +18,20 @@ namespace ANGI.Infrastructure.Persistences.Repositories
         }
 
         /// <summary>Persists all entity changes tracked by the scoped DbContext.</summary>
-        public Task<int> SaveChangesAsync(CancellationToken ct)
+        public async Task<int> SaveChangesAsync(CancellationToken ct)
         {
-            return _context.SaveChangesAsync(ct);
+            try
+            {
+                return await _context.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException exception) when (
+                exception.InnerException is PostgresException
+                {
+                    SqlState: PostgresErrorCodes.UniqueViolation
+                } postgresException)
+            {
+                throw new UniqueConstraintViolationException(postgresException.ConstraintName, exception);
+            }
         }
 
         /// <summary>Starts an EF Core database transaction and wraps it in the Application-layer abstraction.</summary>
