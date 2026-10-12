@@ -30,7 +30,10 @@ public sealed class OwnerRestaurantControllerTests
         var useCase = new Mock<IRegisterRestaurantUseCase>();
         useCase.Setup(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
-        var controller = new OwnerRestaurantController(useCase.Object);
+        var controller = new OwnerRestaurantController(
+            useCase.Object,
+            Mock.Of<IGetOwnerRestaurantUseCase>(),
+            Mock.Of<IUpdateOwnerRestaurantUseCase>());
 
         var action = await controller.Register(request, CancellationToken.None);
 
@@ -40,5 +43,46 @@ public sealed class OwnerRestaurantControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
         useCase.Verify(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-02: Return the OWN-02 payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies GET delegation and response wrapping.</summary>
+    [Fact]
+    public async Task Get_WhenRestaurantExists_ShouldReturnOkApiResponse()
+    {
+        var expected = new OwnerRestaurantDto { Id = 7, Name = "Bún Bò Bà Diệu" };
+        var useCase = new Mock<IGetOwnerRestaurantUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new OwnerRestaurantController(
+            Mock.Of<IRegisterRestaurantUseCase>(),
+            useCase.Object,
+            Mock.Of<IUpdateOwnerRestaurantUseCase>());
+
+        var action = await controller.Get(CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>()
+            .Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-03: Return the OWN-03 payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies PATCH delegation and response wrapping.</summary>
+    [Fact]
+    public async Task Update_WithValidRequest_ShouldReturnOkApiResponse()
+    {
+        var request = new UpdateRestaurantRequestDto { Name = "Tên mới" };
+        var expected = new OwnerRestaurantDto { Id = 7, Name = "Tên mới" };
+        var useCase = new Mock<IUpdateOwnerRestaurantUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new OwnerRestaurantController(
+            Mock.Of<IRegisterRestaurantUseCase>(),
+            Mock.Of<IGetOwnerRestaurantUseCase>(),
+            useCase.Object);
+
+        var action = await controller.Update(request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>()
+            .Which.Data.Should().BeSameAs(expected);
     }
 }

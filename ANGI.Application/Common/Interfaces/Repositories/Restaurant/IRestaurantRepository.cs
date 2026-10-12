@@ -19,6 +19,12 @@ public interface IRestaurantRepository
     /// <summary>Adds a restaurant aggregate to the current unit of work.</summary>
     void Add(ANGI.Domain.Entities.Restaurant restaurant);
 
+    /// <summary>Loads the complete owner profile without tracking for OWN-02 responses.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> GetOwnerProfileAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>Loads and tracks the complete owner profile so OWN-03 can update it.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> GetTrackedOwnerProfileAsync(int ownerId, CancellationToken ct);
+
     /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
     Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
 }

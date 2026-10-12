@@ -20,6 +20,7 @@ namespace ANGI.Domain.Entities
 
         public Restaurant Restaurant { get; set; } = null!;
         public RestaurantVerification? Previous { get; set; }
+        public User? Reviewer { get; set; }
         public ICollection<RestaurantVerificationDocument> Documents { get; set; } = new List<RestaurantVerificationDocument>();
     }
 }
