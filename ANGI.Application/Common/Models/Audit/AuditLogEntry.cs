@@ -1,3 +1,5 @@
+using ANGI.Domain.Entities;
+
 namespace ANGI.Application.Common.Models.Audit
 {
     /// <summary>One row to write to audit_logs (coding_rule.md §17).</summary>
@@ -22,7 +24,17 @@ namespace ANGI.Application.Common.Models.Audit
         /// <summary>Set only when the request has no token yet (login, register); otherwise the token's user.</summary>
         public int? ActorId { get; init; }
 
+        /// <summary>
+        /// Supplies a newly added actor whose generated id is not available until SaveChangesAsync.
+        /// </summary>
+        public User? ActorUser { get; init; }
+
         /// <summary>Set together with <see cref="ActorId"/>.</summary>
         public string? ActorRole { get; init; }
+
+        /// <summary>
+        /// Supplies a newly added subject whose generated id is not available until SaveChangesAsync.
+        /// </summary>
+        public User? SubjectUser { get; init; }
     }
 }
