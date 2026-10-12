@@ -178,6 +178,7 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
             .Which.PropertyName.Should().Be(nameof(UpdateRestaurantRequestDto.CoverMediaId));
     }
 
+    // TEST-06: Reject an owned PDF when it is used in the restaurant gallery.
     /// <summary>Verifies an owned document cannot be inserted into the restaurant gallery.</summary>
     [Fact]
     public async Task ExecuteAsync_WithOwnedPdfInGallery_ShouldThrowValidationException()
@@ -204,7 +205,7 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
             .Which.PropertyName.Should().Be(nameof(UpdateRestaurantRequestDto.ImageMediaIds));
     }
 
-    // TEST-06: Accept supported image MIME values regardless of their casing.
+    // TEST-07: Accept supported image MIME values regardless of their casing.
     /// <summary>Verifies compatibility with legacy media rows whose MIME casing was not normalized.</summary>
     [Theory]
     [InlineData("image/jpeg")]
@@ -242,7 +243,7 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-07: Normalize surrounding whitespace before persisting scalar values.
+    // TEST-08: Normalize surrounding whitespace before persisting scalar values.
     /// <summary>Verifies required and optional text normalization in OWN-03.</summary>
     [Fact]
     public async Task ExecuteAsync_WithSurroundingWhitespace_ShouldPersistNormalizedValues()

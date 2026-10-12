@@ -197,7 +197,7 @@ public class CloudinaryServiceTests
         Assert.Equal("SERVICE_UNAVAILABLE", exception.ErrorCode);
     }
 
-    // TEST-11: Preserve cancellation raised while the provider call is running. Area: Upload cancellation handling.
+    // TEST-12: Preserve cancellation raised while the provider call is running. Area: Upload cancellation handling.
     [Fact]
     public async Task UploadAsync_PropagatesCancellationRaisedByProvider()
     {
@@ -214,7 +214,7 @@ public class CloudinaryServiceTests
             file, "photo.png", "image/png", "angi/avatar", false, source.Token));
     }
 
-    // TEST-12: Reject provider responses that contain errors or omit required asset metadata. Area: Provider response validation.
+    // TEST-13: Reject provider responses that contain errors or omit required asset metadata. Area: Provider response validation.
     [Theory]
     [MemberData(nameof(InvalidImageResults))]
     public async Task UploadAsync_RejectsInvalidProviderResult(UploadResult providerResult)
@@ -229,7 +229,7 @@ public class CloudinaryServiceTests
         Assert.Equal("SERVICE_UNAVAILABLE", exception.ErrorCode);
     }
 
-    // TEST-13: Reject a provider response whose asset URL is not absolute HTTPS. Area: Provider response validation.
+    // TEST-14: Reject a provider response whose asset URL is not absolute HTTPS. Area: Provider response validation.
     [Theory]
     [InlineData("http://cdn.example.com/photo.png")]
     [InlineData("relative/photo.png")]
@@ -251,7 +251,7 @@ public class CloudinaryServiceTests
             file, "photo.png", "image/png", "angi/avatar", false, CancellationToken.None));
     }
 
-    // TEST-14: Build a stable HTTPS delivery URL for a public image key. Area: Public media URL generation.
+    // TEST-15: Build a stable HTTPS delivery URL for a public image key. Area: Public media URL generation.
     [Fact]
     public void GetUrl_BuildsStablePublicImageUrl()
     {
@@ -262,7 +262,7 @@ public class CloudinaryServiceTests
         Assert.EndsWith("/angi/avatar/example.png", url);
     }
 
-    // TEST-15: Build a stable HTTPS delivery URL for a public raw document key. Area: Public media URL generation.
+    // TEST-16: Build a stable HTTPS delivery URL for a public raw document key. Area: Public media URL generation.
     [Fact]
     public void GetUrl_BuildsStablePublicRawUrl()
     {
@@ -273,7 +273,7 @@ public class CloudinaryServiceTests
         Assert.EndsWith("/angi/document/example.pdf", url);
     }
 
-    // TEST-16: Create a signed URL that expires in about five minutes for private media. Area: Private media URL generation.
+    // TEST-17: Create a signed URL that expires in about five minutes for private media. Area: Private media URL generation.
     [Theory]
     [InlineData("raw/authenticated/angi/verification_doc/example.pdf")]
     [InlineData("image/authenticated/angi/avatar/example.png")]
@@ -292,7 +292,7 @@ public class CloudinaryServiceTests
         Assert.DoesNotContain("unit-test-placeholder", url);
     }
 
-    // TEST-17: Reject malformed or unsupported storage keys. Area: Media storage-key validation.
+    // TEST-18: Reject malformed or unsupported storage keys. Area: Media storage-key validation.
     [Theory]
     [InlineData("")]
     [InlineData("invalid")]

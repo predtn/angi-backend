@@ -8,7 +8,7 @@ namespace ANGI.Test.Infrastructure.Services;
 
 public class CloudinaryLiveTests
 {
-    // TEST-18: Upload a public image and private PDF to a real account, then delete both assets. Area: Cloudinary live integration.
+    // TEST-19: Upload a public image and private PDF to a real account, then delete both assets. Area: Cloudinary live integration.
     [CloudinaryLiveFact]
     public async Task UploadsImageAndPrivatePdfToRealCloudinary()
     {

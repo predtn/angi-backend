@@ -74,6 +74,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
+    // TEST-05: Accept the documented maximum restaurant name length.
     /// <summary>Verifies the documented maximum name length.</summary>
     [Fact]
     public async Task ValidateAsync_WithTwoHundredCharacterName_ShouldBeValid()
@@ -84,7 +85,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
-    // TEST-05: Enforce the description length boundary.
+    // TEST-06: Enforce the description length boundary.
     /// <summary>Verifies 2000 characters are accepted and 2001 are rejected.</summary>
     [Theory]
     [InlineData(2000, true)]
@@ -97,7 +98,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-06: Enforce required phone nullability and length boundaries.
+    // TEST-07: Enforce required phone nullability and length boundaries.
     /// <summary>Verifies null, blank, maximum, and over-maximum phone values.</summary>
     [Theory]
     [InlineData(null, false)]
@@ -112,7 +113,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-07: Validate email syntax, including normalization-safe surrounding whitespace.
+    // TEST-08: Validate email syntax, including normalization-safe surrounding whitespace.
     /// <summary>Verifies representative valid and invalid email values.</summary>
     [Theory]
     [InlineData("owner@example.com", true)]
@@ -127,7 +128,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-08: Allow only absolute HTTP and HTTPS website URLs.
+    // TEST-09: Allow only absolute HTTP and HTTPS website URLs.
     /// <summary>Verifies supported schemes and rejects other or relative URLs.</summary>
     [Theory]
     [InlineData("http://example.com", true)]
@@ -142,7 +143,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-09: Enforce address component length boundaries.
+    // TEST-10: Enforce address component length boundaries.
     /// <summary>Verifies address line, district, and province maximum lengths.</summary>
     [Theory]
     [InlineData(255, 100, 100, true)]
@@ -167,7 +168,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-10: Enforce latitude boundaries.
+    // TEST-11: Enforce latitude boundaries.
     /// <summary>Verifies inclusive latitude bounds and values immediately outside them.</summary>
     [Theory]
     [InlineData(-90, true)]
@@ -182,7 +183,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-11: Enforce longitude boundaries.
+    // TEST-12: Enforce longitude boundaries.
     /// <summary>Verifies inclusive longitude bounds and values immediately outside them.</summary>
     [Theory]
     [InlineData(-180, true)]
@@ -197,7 +198,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-12: Enforce nullable price-level boundaries.
+    // TEST-13: Enforce nullable price-level boundaries.
     /// <summary>Verifies null, inclusive bounds, and invalid adjacent values.</summary>
     [Theory]
     [InlineData(null, true)]
@@ -213,7 +214,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-13: Reject duplicate, null, zero, and negative gallery identifiers.
+    // TEST-14: Reject duplicate gallery identifiers.
     /// <summary>Verifies gallery collection and identity constraints.</summary>
     [Fact]
     public async Task ValidateAsync_WithDuplicateGalleryIds_ShouldBeInvalid()
@@ -225,6 +226,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateRestaurantRequestDto.ImageMediaIds));
     }
 
+    // TEST-15: Reject an explicitly null gallery while allowing an omitted gallery.
     /// <summary>Verifies an explicit null gallery differs from an omitted gallery.</summary>
     [Fact]
     public async Task ValidateAsync_WithExplicitNullGallery_ShouldBeInvalid()
@@ -236,6 +238,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateRestaurantRequestDto.ImageMediaIds));
     }
 
+    // TEST-16: Reject non-positive media identifiers in the cover and gallery fields.
     /// <summary>Verifies database identity values must be positive for both image fields.</summary>
     [Theory]
     [InlineData(0)]
