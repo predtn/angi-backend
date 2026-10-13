@@ -4,6 +4,7 @@ using ANGI.Application.Common.Interfaces.Repositories.Auth;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Models.Auth;
+using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.UseCases.Auth.Refresh;
 using ANGI.Application.UseCases.Validators.Auth;
@@ -33,8 +34,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Refresh
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(2);
             var recommendationService = new Mock<IRecommendationService>();
-            recommendationService.Setup(x => x.GetSurveyCompletionAsync(12, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+            recommendationService.Setup(x => x.GetSurveyStatusAsync(12, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SurveyStatus(true, new DateTime(2026, 10, 2, 2, 30, 1, DateTimeKind.Utc), 6));
             var useCase = CreateUseCase(repository, recommendationService, unitOfWork);
 
             var result = await useCase.ExecuteAsync(

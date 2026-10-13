@@ -7,6 +7,7 @@ using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Models.Audit;
 using ANGI.Application.Common.Models.Auth;
+using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.UseCases.Auth.Login;
 using ANGI.Application.UseCases.Validators.Auth;
@@ -41,8 +42,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify("correct-password", "password-hash")).Returns(true);
             var recommendationService = new Mock<IRecommendationService>();
-            recommendationService.Setup(x => x.GetSurveyCompletionAsync(user.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
+            recommendationService.Setup(x => x.GetSurveyStatusAsync(user.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SurveyStatus(false, null, 0));
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
 
@@ -238,8 +239,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
             var recommendationService = new Mock<IRecommendationService>();
-            recommendationService.Setup(x => x.GetSurveyCompletionAsync(user.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((bool?)null);
+            recommendationService.Setup(x => x.GetSurveyStatusAsync(user.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SurveyStatus?)null);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
             var useCase = CreateUseCase(repository, passwordService, recommendationService, unitOfWork);
@@ -269,7 +270,7 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
 
             result.User.NeedsPreferenceSurvey.Should().BeNull();
             recommendationService.Verify(
-                x => x.GetSurveyCompletionAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+                x => x.GetSurveyStatusAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
