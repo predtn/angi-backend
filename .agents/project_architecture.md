@@ -151,8 +151,20 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 - Typed `HttpClient`, header `X-Api-Key`, snake_case JSON. Endpoints: sheet "Reco API (nội bộ)".
 - Responses are not wrapped in `ApiResponse`: a 2xx body is the DTO itself; an error body is `{ "error_code": "...", "message": "...", "errors": { field: [messages] } }` (`errors` only for 422 `VALIDATION_FAILED`). Branch on `error_code`, never on `message`.
 - The backend filters candidates (meal, form, price, tags, distance, active dish of a verified, visible, open restaurant) and sends at most 2000, sorted by restaurant rating, then dish `like_count`. Reco only scores them (stable sort, so ties keep that order) and returns ranked ids, scores and `request_id`; the backend loads the entities and builds the response.
-- `/recommendations` timeout 800 ms. On 5xx or timeout, order by restaurant rating and return `requestId = null`.
+- Every direct call (RECO-03, 05, 06, 09) times out after `TimeoutMilliseconds` (800 ms).
 - Survey, `/recommendations`, `/impressions` and survey status are called directly from the use case. Dish changes and likes / dislikes go only through the outbox (§7).
+
+`IRecommendationService` has one method per endpoint and turns every reco failure into the outcome the API Design gives:
+
+| Method | Endpoint | Success | 5xx, timeout, network error, unreadable body, `BaseUrl` not set | Listed 4xx | Other 4xx |
+|---|---|---|---|---|---|
+| `SubmitSurveyAsync` | RECO-03 | `SurveySubmissionResult` | 503 `SERVICE_UNAVAILABLE` | 409 `SURVEY_ALREADY_SUBMITTED`; 422 `UNKNOWN_OPTION_CODE` → 400 | 500 |
+| `RecommendAsync` | RECO-05 | ranked dish ids, `requestId`, ignored ids | fallback: the candidates in the order sent, cut to `topK` (50 by default), `requestId = null`, no ignored ids | — | 500 (422 included) |
+| `RecordImpressionsAsync` | RECO-06 | — | logged only, never thrown | logged only | logged only |
+| `GetSurveyStatusAsync` | RECO-09 | `SurveyStatus` (`Completed`, `SurveyAt`, `AnswerCount`; skipped = completed with 0 answers) | `null` | `null` | `null` |
+
+- The client sends at most the first 2000 candidates and does not call reco for an empty candidate list or an empty impression list.
+- The caller's cancellation is never turned into a fallback: it is rethrown.
 
 ### Email (Brevo)
 

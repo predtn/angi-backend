@@ -115,8 +115,8 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 return null;
             }
 
-            var completed = await _recommendationService.GetSurveyCompletionAsync(user.Id, ct);
-            return completed.HasValue ? !completed.Value : null;
+            var status = await _recommendationService.GetSurveyStatusAsync(user.Id, ct);
+            return status is null ? null : !status.Completed;
         }
 
         /// <summary>Creates the standard AUTH-06 exception without duplicating its error code and message.</summary>

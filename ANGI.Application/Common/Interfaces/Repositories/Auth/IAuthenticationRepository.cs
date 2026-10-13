@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Models.Auth;
 using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Auth
 {
@@ -17,6 +18,9 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
 
         /// <summary>Loads a role by its API code for account creation.</summary>
         Task<Role?> GetRoleByCodeAsync(string roleCode, CancellationToken ct);
+
+        /// <summary>Finds and locks a user by email so verification-token replacement is serialized.</summary>
+        Task<User?> GetUserByEmailForUpdateAsync(string normalizedEmail, CancellationToken ct);
 
         /// <summary>Reads only the status fields of a user; null when the user does not exist or is soft-deleted.</summary>
         Task<AccountStatusSnapshot?> GetAccountStatusAsync(int userId, CancellationToken ct);
@@ -38,7 +42,16 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
         /// <summary>Adds a new user to the change tracker; the Unit of Work persists it.</summary>
         void AddUser(User user);
 
-        /// <summary>Adds a one-time user token to the change tracker; the Unit of Work persists it.</summary>
-        void AddUserToken(UserToken userToken);
+        /// <summary>Finds and locks a user token by hash so it can be consumed only once.</summary>
+        Task<UserToken?> GetUserTokenByHashForUpdateAsync(string tokenHash, CancellationToken ct);
+
+        /// <summary>Gets outstanding tokens for a user and purpose so they can be invalidated.</summary>
+        Task<IReadOnlyList<UserToken>> GetUnusedUserTokensAsync(
+            int userId,
+            UserTokenPurpose purpose,
+            CancellationToken ct);
+
+        /// <summary>Adds a user token to the change tracker; the Unit of Work persists it.</summary>
+        void AddUserToken(UserToken token);
     }
 }

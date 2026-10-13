@@ -106,8 +106,8 @@ namespace ANGI.Application.UseCases.Auth.Login
                 return null;
             }
 
-            var completed = await _recommendationService.GetSurveyCompletionAsync(user.Id, ct);
-            return completed.HasValue ? !completed.Value : null;
+            var status = await _recommendationService.GetSurveyStatusAsync(user.Id, ct);
+            return status is null ? null : !status.Completed;
         }
     }
 }

@@ -2,6 +2,7 @@ using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Restaurant;
 using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Restaurant;
+using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -281,5 +282,173 @@ public sealed class RestaurantRepository : IRestaurantRepository
                 Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
         var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
         return Math.Round((decimal)(EarthRadiusKm * c), 1);
+    }
+
+    /// <summary>Checks whether a restaurant exists, is verified, and is visible.</summary>
+    public Task<bool> ExistsAndActiveAsync(long restaurantId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .AnyAsync(r => r.Id == restaurantId
+                        && r.VerificationStatus == RestaurantVerificationStatus.Verified
+                        && r.ModerationStatus == RestaurantModerationStatus.Visible, ct);
+    }
+
+    /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
+    public Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId
+                     && r.VerificationStatus == RestaurantVerificationStatus.Verified
+                     && r.ModerationStatus == RestaurantModerationStatus.Visible)
+            .Include(r => r.CoverMedia)
+            .Include(r => r.Images)
+                .ThenInclude(i => i.Media)
+            .Include(r => r.BusinessHours)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Loads the caller's review for a restaurant if one exists.</summary>
+    public Task<RestaurantReview?> GetTravelerReviewForRestaurantAsync(long restaurantId, int userId, CancellationToken ct)
+    {
+        return _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId
+                     && r.UserId == userId
+                     && r.Status == ContentStatus.Visible)
+            .Include(r => r.User)
+                .ThenInclude(u => u.AvatarMedia)
+            .Include(r => r.Images)
+                .ThenInclude(i => i.Media)
+            .Include(r => r.Reply)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Loads active menu dishes for a restaurant, optionally filtered by tags and availability (REST-03).</summary>
+    public async Task<IReadOnlyList<Dish>> GetActiveMenuDishesAsync(
+        long restaurantId,
+        IReadOnlyList<short>? tagIds,
+        bool includeUnavailable,
+        CancellationToken ct)
+    {
+        var query = _context.Dishes
+            .AsNoTracking()
+            .Where(d => d.RestaurantId == restaurantId && d.Status == DishStatus.Active);
+
+        if (!includeUnavailable)
+        {
+            query = query.Where(d => d.IsAvailable);
+        }
+
+        if (tagIds != null && tagIds.Count > 0)
+        {
+            query = query.Where(d => d.DishTags.Any(dt => tagIds.Contains(dt.TagId)));
+        }
+
+        return await query
+            .OrderBy(d => d.SortOrder)
+            .Include(d => d.CoverMedia)
+            .Include(d => d.Restaurant)
+            .Include(d => d.DishTags)
+                .ThenInclude(dt => dt.Tag)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Loads paginated visible reviews and rating statistics for a restaurant (REST-04).</summary>
+    public async Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems, IReadOnlyDictionary<string, int> RatingBreakdown, decimal RatingAvg, int RatingCount)> GetReviewsAsync(
+        long restaurantId,
+        short? rating,
+        bool? hasImage,
+        string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var restaurantSummary = await _context.Restaurants
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId)
+            .Select(r => new { r.RatingAvg, r.RatingCount })
+            .FirstOrDefaultAsync(ct);
+
+        var ratingAvg = restaurantSummary?.RatingAvg ?? 0m;
+        var ratingCount = restaurantSummary?.RatingCount ?? 0;
+
+        // Breakdown query: counts across all visible reviews for this restaurant
+        var breakdownGroups = await _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status == ContentStatus.Visible)
+            .GroupBy(r => r.Rating)
+            .Select(g => new { Rating = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var ratingBreakdown = new Dictionary<string, int>
+        {
+            ["1"] = 0,
+            ["2"] = 0,
+            ["3"] = 0,
+            ["4"] = 0,
+            ["5"] = 0
+        };
+
+        foreach (var group in breakdownGroups)
+        {
+            var key = group.Rating.ToString();
+            if (ratingBreakdown.ContainsKey(key))
+            {
+                ratingBreakdown[key] = group.Count;
+            }
+        }
+
+        // Paged items query
+        var query = _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status == ContentStatus.Visible);
+
+        if (rating.HasValue)
+        {
+            query = query.Where(r => r.Rating == rating.Value);
+        }
+
+        if (hasImage == true)
+        {
+            query = query.Where(r => r.Images.Any());
+        }
+        else if (hasImage == false)
+        {
+            query = query.Where(r => !r.Images.Any());
+        }
+
+        var totalItems = await query.LongCountAsync(ct);
+
+        if (string.Equals(sort, "rating_desc", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.OrderByDescending(r => r.Rating).ThenByDescending(r => r.CreatedAt);
+        }
+        else if (string.Equals(sort, "rating_asc", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.OrderBy(r => r.Rating).ThenByDescending(r => r.CreatedAt);
+        }
+        else
+        {
+            query = query.OrderByDescending(r => r.CreatedAt);
+        }
+
+        var skip = (page - 1) * pageSize;
+        var items = await query
+            .Skip(skip)
+            .Take(pageSize)
+            .Include(r => r.User)
+                .ThenInclude(u => u.AvatarMedia)
+            .Include(r => r.Images)
+                .ThenInclude(i => i.Media)
+            .Include(r => r.Reply)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        return (items, totalItems, ratingBreakdown, ratingAvg, ratingCount);
     }
 }
