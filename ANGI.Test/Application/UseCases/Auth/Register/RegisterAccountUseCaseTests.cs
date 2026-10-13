@@ -3,6 +3,7 @@ using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Application.Common.Interfaces.Repositories.Auth;
 using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.Common.Models.Auth;
 using ANGI.Application.Common.Models.Audit;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.UseCases.Auth.Register;
@@ -38,8 +39,8 @@ public sealed class RegisterAccountUseCaseTests
         var passwordService = new Mock<IPasswordService>();
         passwordService.Setup(x => x.Hash("MatKhau123")).Returns("password-hash");
         var tokenService = new Mock<IAuthenticationTokenService>();
-        tokenService.Setup(x => x.CreateUserToken()).Returns("raw-verification-token");
-        tokenService.Setup(x => x.HashUserToken("raw-verification-token")).Returns("verification-hash");
+        tokenService.Setup(x => x.CreateUserToken())
+            .Returns(new GeneratedUserToken("raw-verification-token", "verification-hash"));
         var emailService = new Mock<IEmailService>();
         emailService.Setup(x => x.SendEmailVerificationAsync(
                 It.IsAny<string>(),
@@ -130,8 +131,8 @@ public sealed class RegisterAccountUseCaseTests
         var passwordService = new Mock<IPasswordService>();
         passwordService.Setup(x => x.Hash(It.IsAny<string>())).Returns("password-hash");
         var tokenService = new Mock<IAuthenticationTokenService>();
-        tokenService.Setup(x => x.CreateUserToken()).Returns("raw-token");
-        tokenService.Setup(x => x.HashUserToken("raw-token")).Returns("token-hash");
+        tokenService.Setup(x => x.CreateUserToken())
+            .Returns(new GeneratedUserToken("raw-token", "token-hash"));
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -196,8 +197,8 @@ public sealed class RegisterAccountUseCaseTests
         var passwordService = new Mock<IPasswordService>();
         passwordService.Setup(x => x.Hash(It.IsAny<string>())).Returns("password-hash");
         var tokenService = new Mock<IAuthenticationTokenService>();
-        tokenService.Setup(x => x.CreateUserToken()).Returns("raw-token");
-        tokenService.Setup(x => x.HashUserToken("raw-token")).Returns("token-hash");
+        tokenService.Setup(x => x.CreateUserToken())
+            .Returns(new GeneratedUserToken("raw-token", "token-hash"));
         var emailService = new Mock<IEmailService>();
         var transaction = CreateTransaction();
         var unitOfWork = new Mock<IUnitOfWork>();
@@ -354,8 +355,8 @@ public sealed class RegisterAccountUseCaseTests
     private static Mock<IAuthenticationTokenService> SuccessfulTokenService()
     {
         var service = new Mock<IAuthenticationTokenService>();
-        service.Setup(x => x.CreateUserToken()).Returns("raw-token");
-        service.Setup(x => x.HashUserToken("raw-token")).Returns("token-hash");
+        service.Setup(x => x.CreateUserToken())
+            .Returns(new GeneratedUserToken("raw-token", "token-hash"));
         return service;
     }
 

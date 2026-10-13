@@ -27,4 +27,26 @@ public interface IRestaurantRepository
 
     /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
     Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
+
+    /// <summary>Checks whether a restaurant exists and is publicly visible.</summary>
+    Task<bool> ExistsAndActiveAsync(long restaurantId, CancellationToken ct);
+
+    /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
+    Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct);
+
+    /// <summary>Loads the caller's review for a restaurant if one exists.</summary>
+    Task<RestaurantReview?> GetTravelerReviewForRestaurantAsync(long restaurantId, int userId, CancellationToken ct);
+
+    /// <summary>Loads active menu dishes for a restaurant, optionally filtered by tags and availability (REST-03).</summary>
+    Task<IReadOnlyList<Dish>> GetActiveMenuDishesAsync(long restaurantId, IReadOnlyList<short>? tagIds, bool includeUnavailable, CancellationToken ct);
+
+    /// <summary>Loads paginated visible reviews and rating statistics for a restaurant (REST-04).</summary>
+    Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems, IReadOnlyDictionary<string, int> RatingBreakdown, decimal RatingAvg, int RatingCount)> GetReviewsAsync(
+        long restaurantId,
+        short? rating,
+        bool? hasImage,
+        string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct);
 }
