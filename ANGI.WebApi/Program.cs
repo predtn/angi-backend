@@ -21,7 +21,10 @@ if (app.Environment.IsDevelopment())
 {
     // Keep the local database in sync on every run; never in other environments
     await app.Services.MigrateDatabaseAsync();
+}
 
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+{
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
