@@ -16,8 +16,13 @@ namespace ANGI.WebApi
             services.AddScoped<ExceptionHandlingMiddleware>();
             services.AddScoped<RateLimitPartitionMiddleware>();
             services.AddScoped<AccountStatusMiddleware>();
+            services.AddScoped<NullBodyValidationFilter>();
 
-            services.AddControllers(options => options.Filters.Add<ApiErrorEnvelopeResultFilter>())
+            services.AddControllers(options =>
+                {
+                    options.Filters.Add<ApiErrorEnvelopeResultFilter>();
+                    options.Filters.Add<NullBodyValidationFilter>();
+                })
                 .ConfigureApiBehaviorOptions(options =>
                 {
                     options.InvalidModelStateResponseFactory = context =>
@@ -44,7 +49,7 @@ namespace ANGI.WebApi
                     };
                 });
 
-            services.AddOpenApi();
+            services.AddOpenApiDocumentation();
             services.AddJwtConfiguration(configuration);
             services.AddCorsConfiguration(configuration);
             services.AddRateLimitConfiguration(configuration);

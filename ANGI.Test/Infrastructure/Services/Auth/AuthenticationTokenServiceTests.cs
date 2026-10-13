@@ -11,6 +11,7 @@ namespace ANGI.Test.Infrastructure.Services.Auth
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
         // TEST-01: Issue a signed access token with the required identity claims and configured lifetime.
+        /// <summary>Verifies access tokens contain the documented identity claims and expiry.</summary>
         [Fact]
         public void CreateTokens_ShouldIssueRequiredJwtClaimsAndExpiry()
         {
@@ -37,6 +38,7 @@ namespace ANGI.Test.Infrastructure.Services.Auth
         }
 
         // TEST-02: Store only a deterministic SHA-256 hash while issuing a random refresh token.
+        /// <summary>Verifies refresh tokens are random and represented by a deterministic persisted hash.</summary>
         [Fact]
         public void CreateTokens_ShouldReturnHashedRefreshToken()
         {
@@ -57,23 +59,24 @@ namespace ANGI.Test.Infrastructure.Services.Auth
             second.RefreshToken.Should().NotBe(first.RefreshToken);
         }
 
-        // TEST-03: Generate random URL-safe user tokens and store only their deterministic SHA-256 hashes.
-        /// <summary>Verifies one-time tokens are random, URL-safe, and separately hashable.</summary>
+        // TEST-03: Generate random user tokens while exposing only their deterministic hashes for storage.
+        /// <summary>Verifies email verification tokens are opaque, unique, and represented by SHA-256 hashes.</summary>
         [Fact]
-        public void CreateUserToken_ShouldReturnRandomUrlSafeTokenWithHash()
+        public void CreateUserToken_ShouldReturnRandomTokenAndHash()
         {
             var service = CreateService();
 
             var first = service.CreateUserToken();
             var second = service.CreateUserToken();
 
-            first.Should().NotBe(second);
-            first.Should().MatchRegex("^[A-Za-z0-9_-]+$");
-            service.HashUserToken(first).Should().HaveLength(64);
-            service.HashUserToken(first).Should().Be(service.HashUserToken(first));
-            service.HashUserToken(first).Should().NotBe(first);
+            first.Token.Should().NotBe(first.TokenHash);
+            first.Token.Should().MatchRegex("^[A-Za-z0-9_-]+$");
+            first.TokenHash.Should().Be(service.HashUserToken(first.Token));
+            first.TokenHash.Should().HaveLength(64);
+            second.Token.Should().NotBe(first.Token);
         }
 
+        /// <summary>Creates the token service with deterministic settings and time.</summary>
         private static AuthenticationTokenService CreateService()
         {
             return new AuthenticationTokenService(
@@ -92,11 +95,13 @@ namespace ANGI.Test.Infrastructure.Services.Auth
         {
             private readonly DateTimeOffset _now;
 
+            /// <summary>Creates a clock fixed at the supplied UTC instant.</summary>
             public FixedTimeProvider(DateTime now)
             {
                 _now = new DateTimeOffset(now);
             }
 
+            /// <summary>Returns the deterministic UTC instant used by the test.</summary>
             public override DateTimeOffset GetUtcNow() => _now;
         }
     }

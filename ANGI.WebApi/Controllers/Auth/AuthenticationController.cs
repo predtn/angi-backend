@@ -3,6 +3,7 @@ using ANGI.Application.DTOs.Auth;
 using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.WebApi.Controllers.Auth
 {
@@ -14,18 +15,56 @@ namespace ANGI.WebApi.Controllers.Auth
         private readonly ILoginUseCase _loginUseCase;
         private readonly IRefreshTokenUseCase _refreshTokenUseCase;
         private readonly ILogoutUseCase _logoutUseCase;
+        private readonly IVerifyEmailUseCase _verifyEmailUseCase;
+        private readonly IResendVerificationEmailUseCase _resendVerificationEmailUseCase;
 
         /// <summary>Initializes the HTTP boundary with the Auth use-case abstractions.</summary>
         public AuthenticationController(
             IRegisterAccountUseCase registerAccountUseCase,
             ILoginUseCase loginUseCase,
             IRefreshTokenUseCase refreshTokenUseCase,
-            ILogoutUseCase logoutUseCase)
+            ILogoutUseCase logoutUseCase,
+            IVerifyEmailUseCase verifyEmailUseCase,
+            IResendVerificationEmailUseCase resendVerificationEmailUseCase)
         {
             _registerAccountUseCase = registerAccountUseCase;
             _loginUseCase = loginUseCase;
             _refreshTokenUseCase = refreshTokenUseCase;
             _logoutUseCase = logoutUseCase;
+            _verifyEmailUseCase = verifyEmailUseCase;
+            _resendVerificationEmailUseCase = resendVerificationEmailUseCase;
+        }
+
+        /// <summary>Receives an AUTH-02 request, consumes its token, and returns the verified account state.</summary>
+        [AllowAnonymous]
+        [HttpPost("verify-email")]
+        [ProducesResponseType(typeof(ApiResponse<VerifyEmailResponseDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> VerifyEmail(
+            [FromBody, BindRequired] VerifyEmailRequestDto request,
+            CancellationToken ct)
+        {
+            var result = await _verifyEmailUseCase.ExecuteAsync(request, ct);
+            return Ok(new ApiResponse<VerifyEmailResponseDto>
+            {
+                Success = true,
+                Data = result
+            });
+        }
+
+        /// <summary>Receives an AUTH-03 request, conditionally sends a fresh link, and always returns null data.</summary>
+        [AllowAnonymous]
+        [HttpPost("verify-email/resend")]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ResendVerificationEmail(
+            [FromBody, BindRequired] ResendVerificationEmailRequestDto request,
+            CancellationToken ct)
+        {
+            await _resendVerificationEmailUseCase.ExecuteAsync(request, ct);
+            return Ok(new ApiResponse<object>
+            {
+                Success = true,
+                Data = null
+            });
         }
 
         /// <summary>Receives an AUTH-01 request, creates a pending account, and returns the documented 201 response.</summary>
