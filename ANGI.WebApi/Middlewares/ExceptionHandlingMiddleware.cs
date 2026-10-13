@@ -7,6 +7,7 @@ using FluentValidation;
 
 namespace ANGI.WebApi.Middlewares
 {
+    /// <summary>Converts application and unexpected exceptions into the canonical API envelope.</summary>
     public class ExceptionHandlingMiddleware : IMiddleware
     {
         private const string ValidationFailedCode = "VALIDATION_FAILED";
@@ -16,11 +17,13 @@ namespace ANGI.WebApi.Middlewares
 
         private readonly ILogger<ExceptionHandlingMiddleware> _logger;
 
+        /// <summary>Initializes exception handling with structured logging.</summary>
         public ExceptionHandlingMiddleware(ILogger<ExceptionHandlingMiddleware> logger)
         {
             _logger = logger;
         }
 
+        /// <summary>Executes the next pipeline component and serializes any thrown error consistently.</summary>
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
             try
@@ -48,6 +51,7 @@ namespace ANGI.WebApi.Middlewares
             }
         }
 
+        /// <summary>Maps a known exception to its documented status, error code, data, and validation errors.</summary>
         private static (int StatusCode, ApiResponse<object> Response) BuildResponse(Exception exception)
         {
             return exception switch
@@ -94,6 +98,7 @@ namespace ANGI.WebApi.Middlewares
             };
         }
 
+        /// <summary>Maps an application exception category to its allowed HTTP status.</summary>
         private static int GetStatusCode(AppException exception)
         {
             return exception switch
@@ -108,6 +113,7 @@ namespace ANGI.WebApi.Middlewares
             };
         }
 
+        /// <summary>Groups FluentValidation failures by camel-case JSON property name.</summary>
         private static Dictionary<string, string[]> GroupValidationErrors(ValidationException exception)
         {
             return exception.Errors

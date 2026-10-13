@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures approved dishes displayed in the active restaurant menu.</summary>
     public class DishConfiguration : IEntityTypeConfiguration<Dish>
     {
+        /// <summary>Maps dish fields, defaults, constraints, and restaurant/media relationships.</summary>
         public void Configure(EntityTypeBuilder<Dish> builder)
         {
             builder.ToTable("dishes", table =>

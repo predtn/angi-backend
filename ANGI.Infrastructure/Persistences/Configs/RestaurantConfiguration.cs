@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures the restaurant aggregate root and its database constraints.</summary>
     public class RestaurantConfiguration : IEntityTypeConfiguration<Restaurant>
     {
+        /// <summary>Maps restaurant columns, defaults, indexes, and relationships.</summary>
         public void Configure(EntityTypeBuilder<Restaurant> builder)
         {
             builder.ToTable("restaurants", table =>

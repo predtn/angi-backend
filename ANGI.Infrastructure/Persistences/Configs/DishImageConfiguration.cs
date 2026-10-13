@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures ordered supplemental images for approved dishes.</summary>
     public class DishImageConfiguration : IEntityTypeConfiguration<DishImage>
     {
+        /// <summary>Maps the composite key and dish/media relationships.</summary>
         public void Configure(EntityTypeBuilder<DishImage> builder)
         {
             builder.ToTable("dish_images");

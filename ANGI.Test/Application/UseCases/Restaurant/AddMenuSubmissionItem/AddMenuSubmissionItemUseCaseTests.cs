@@ -178,6 +178,22 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         result.SortOrder.Should().Be(0);
     }
 
+    // TEST-08: Avoid smallint overflow when the current menu already uses the maximum sort order.
+    [Fact]
+    public async Task ExecuteAsync_WithMaximumExistingSortOrder_ShouldKeepMaximumSortOrder()
+    {
+        var submission = new MenuSubmission { Id = 14 };
+        submission.Items.Add(new MenuSubmissionItem { Id = 1, SortOrder = short.MaxValue });
+        var repository = new Mock<IRestaurantMenuRepository>();
+        repository.Setup(item => item.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(submission);
+
+        var result = await CreateUseCase(repository, new Mock<IMediaRepository>())
+            .ExecuteAsync(14, ValidRequest(), CancellationToken.None);
+
+        result.SortOrder.Should().Be(short.MaxValue);
+    }
+
     private static Mock<IRestaurantMenuRepository> DraftRepository()
     {
         var repository = new Mock<IRestaurantMenuRepository>();

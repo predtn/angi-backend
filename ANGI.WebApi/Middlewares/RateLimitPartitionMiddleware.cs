@@ -2,6 +2,7 @@ using System.Text.Json;
 
 namespace ANGI.WebApi.Middlewares
 {
+    /// <summary>Extracts normalized auth emails used to partition sensitive endpoint rate limits.</summary>
     public sealed class RateLimitPartitionMiddleware : IMiddleware
     {
         public const string EmailItemKey = "RateLimitEmail";
@@ -14,6 +15,7 @@ namespace ANGI.WebApi.Middlewares
             "/api/v1/auth/forgot-password"
         ];
 
+        /// <summary>Reads eligible request bodies before continuing through the HTTP pipeline.</summary>
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
             if (HttpMethods.IsPost(context.Request.Method) &&
@@ -25,6 +27,7 @@ namespace ANGI.WebApi.Middlewares
             await next(context);
         }
 
+        /// <summary>Buffers a bounded JSON body and stores its normalized email for the rate limiter.</summary>
         private static async Task SetNormalizedEmailAsync(HttpContext context)
         {
             context.Request.EnableBuffering();

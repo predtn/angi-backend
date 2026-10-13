@@ -85,5 +85,6 @@ public sealed class RegisterAccountRequestDtoValidator : AbstractValidator<Regis
         return true;
     }
 
+    /// <summary>Counts Unicode scalar values so supplementary characters count as one display character.</summary>
     private static int GetUnicodeLength(string value) => value.EnumerateRunes().Count();
 }

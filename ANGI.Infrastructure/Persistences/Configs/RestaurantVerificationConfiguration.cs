@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures restaurant verification workflow records shown in owner profiles.</summary>
     public class RestaurantVerificationConfiguration : IEntityTypeConfiguration<RestaurantVerification>
     {
+        /// <summary>Maps verification status, ownership, reviewer, and timestamps.</summary>
         public void Configure(EntityTypeBuilder<RestaurantVerification> builder)
         {
             builder.ToTable("restaurant_verifications");

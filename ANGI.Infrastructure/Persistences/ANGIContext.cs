@@ -7,12 +7,14 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 namespace ANGI.Infrastructure.Persistences
 {
+    /// <summary>Represents the EF Core unit of persistence for the core schema.</summary>
     public class ANGIContext : DbContext
     {
         public const string Schema = "core";
 
         private readonly TimeProvider _timeProvider;
 
+        /// <summary>Initializes the context with database options and a testable UTC clock.</summary>
         public ANGIContext(DbContextOptions<ANGIContext> options, TimeProvider timeProvider) : base(options)
         {
             _timeProvider = timeProvider;
@@ -57,6 +59,7 @@ namespace ANGI.Infrastructure.Persistences
         public DbSet<AuditLog> AuditLogs { get; set; } = null!;
         public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
 
+        /// <summary>Configures warnings for required navigations whose principals may be soft deleted.</summary>
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             // Soft-deleted rows stay in the table, so a required navigation to a soft-deleted
@@ -65,12 +68,14 @@ namespace ANGI.Infrastructure.Persistences
                 warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
         }
 
+        /// <summary>Disables implicit cascade deletes so each relationship declares its intended behavior.</summary>
         protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
         {
             // Cascade delete only where a configuration asks for it (owned child rows).
             configurationBuilder.Conventions.Remove(typeof(CascadeDeleteConvention));
         }
 
+        /// <summary>Applies the core schema, entity configurations, and project-wide model conventions.</summary>
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.HasDefaultSchema(Schema);
@@ -84,20 +89,23 @@ namespace ANGI.Infrastructure.Persistences
             modelBuilder.ApplyDefaultValueAndDeleteConventions();
         }
 
+        /// <summary>Applies automatic timestamps before synchronously persisting tracked changes.</summary>
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
             ApplyAuditRules();
             return base.SaveChanges(acceptAllChangesOnSuccess);
         }
 
+        /// <summary>Applies automatic timestamps before asynchronously persisting tracked changes.</summary>
         public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
         {
             ApplyAuditRules();
             return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         }
 
-        // Timestamps are set here so use cases never set them (coding_rule.md §15).
-        // Soft delete is explicit: the use case sets DeletedAt instead of calling Remove().
+        /// <summary>
+        /// Sets creation and update timestamps from the injected clock; soft deletion remains explicit in use cases.
+        /// </summary>
         private void ApplyAuditRules()
         {
             var now = _timeProvider.GetUtcNow().UtcDateTime;

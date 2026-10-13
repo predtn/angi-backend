@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures owner menu-submission workflow records.</summary>
     public class MenuSubmissionConfiguration : IEntityTypeConfiguration<MenuSubmission>
     {
+        /// <summary>Maps workflow defaults, open-submission uniqueness, and user relationships.</summary>
         public void Configure(EntityTypeBuilder<MenuSubmission> builder)
         {
             builder.ToTable("menu_submissions");

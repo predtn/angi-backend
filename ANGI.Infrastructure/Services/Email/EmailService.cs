@@ -18,6 +18,7 @@ namespace ANGI.Infrastructure.Services.Email
         private readonly FrontendSettings _frontendSettings;
         private readonly ILogger<EmailService> _logger;
 
+        /// <summary>Initializes the Brevo client with email, frontend, and logging settings.</summary>
         public EmailService(
             HttpClient httpClient,
             IOptions<BrevoSettings> brevoSettings,
@@ -30,6 +31,7 @@ namespace ANGI.Infrastructure.Services.Email
             _logger = logger;
         }
 
+        /// <summary>Sends an email-verification link containing the supplied raw one-time token.</summary>
         public Task SendEmailVerificationAsync(
             string toEmail,
             string displayName,
@@ -38,6 +40,7 @@ namespace ANGI.Infrastructure.Services.Email
             CancellationToken ct) =>
             SendAsync(toEmail, displayName, token, validFor, "verify-email", EmailTemplates.EmailVerification, ct);
 
+        /// <summary>Sends a password-reset link containing the supplied raw one-time token.</summary>
         public Task SendPasswordResetAsync(
             string toEmail,
             string displayName,
@@ -46,6 +49,7 @@ namespace ANGI.Infrastructure.Services.Email
             CancellationToken ct) =>
             SendAsync(toEmail, displayName, token, validFor, "reset-password", EmailTemplates.PasswordReset, ct);
 
+        /// <summary>Builds and submits one transactional email while translating provider failures.</summary>
         private async Task SendAsync(
             string toEmail,
             string displayName,
@@ -112,6 +116,7 @@ namespace ANGI.Infrastructure.Services.Email
             throw new ServiceUnavailableException("SERVICE_UNAVAILABLE", UnavailableMessage);
         }
 
+        /// <summary>Returns a normalized absolute HTTP or HTTPS frontend base URL when configured.</summary>
         private bool TryGetFrontendBaseUrl(out string baseUrl)
         {
             baseUrl = _frontendSettings.BaseUrl.TrimEnd('/');
@@ -119,6 +124,7 @@ namespace ANGI.Infrastructure.Services.Email
                 (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
         }
 
+        /// <summary>Reads only the provider error code so logs never expose email contents or recipients.</summary>
         private static async Task<string?> ReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
         {
             try

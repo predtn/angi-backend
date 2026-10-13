@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures append-only audit records written by restaurant profile updates.</summary>
     public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
     {
+        /// <summary>Maps audit payloads, actor metadata, and searchable indexes.</summary>
         public void Configure(EntityTypeBuilder<AuditLog> builder)
         {
             builder.ToTable("audit_logs");

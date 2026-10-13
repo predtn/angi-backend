@@ -9,6 +9,7 @@ namespace ANGI.Test.Infrastructure.Persistences.Repositories;
 
 public sealed class UnitOfWorkTests
 {
+    // TEST-01: Translate a PostgreSQL unique constraint violation into the application exception.
     [Fact]
     public async Task SaveChangesAsync_WithPostgresUniqueViolation_ShouldHideProviderBehindApplicationException()
     {
@@ -29,6 +30,7 @@ public sealed class UnitOfWorkTests
         exception.Which.InnerException.Should().BeSameAs(dbException);
     }
 
+    // TEST-02: Preserve database failures that are not PostgreSQL unique constraint violations.
     [Fact]
     public async Task SaveChangesAsync_WithNonUniqueDatabaseError_ShouldPreserveOriginalException()
     {
