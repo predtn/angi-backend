@@ -1,4 +1,5 @@
 using FluentValidation;
+using ANGI.Application.UseCases.Account;
 using ANGI.Application.UseCases.Auth;
 using ANGI.Application.UseCases.Media;
 using ANGI.Application.UseCases.Restaurant;
@@ -15,6 +16,7 @@ namespace ANGI.Application
             services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
             services.AddSingleton(TimeProvider.System);
             services.AddAuthUseCases();
+            services.AddAccountUseCases();
             services.AddMediaUseCases();
             services.AddRestaurantUseCases();
 

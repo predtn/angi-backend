@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
+using ANGI.Infrastructure.Services.Account;
 using ANGI.Infrastructure.Services.Audit;
 using ANGI.Infrastructure.Services.Auth;
 using ANGI.Infrastructure.Services.Email;
@@ -29,6 +30,7 @@ namespace ANGI.Infrastructure
                        .UseSnakeCaseNamingConvention());
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddAuthInfrastructure(configuration);
+            services.AddAccountInfrastructure();
             services.AddMediaInfrastructure();
             services.AddRecommendationInfrastructure(configuration);
             services.AddEmailInfrastructure(configuration);
