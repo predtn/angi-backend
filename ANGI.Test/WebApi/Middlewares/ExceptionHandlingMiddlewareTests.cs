@@ -76,5 +76,30 @@ namespace ANGI.Test.WebApi.Middlewares
             root.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
             root.ToString().Should().NotContain("database password");
         }
+
+        // TEST-04: Key nested validation errors by the camelCase path of the JSON body.
+        /// <summary>Verifies every segment of a nested FluentValidation property path is camel-cased.</summary>
+        [Fact]
+        public async Task InvokeAsync_WithNestedValidationFailure_ShouldUseCamelCasePath()
+        {
+            var middleware = new ExceptionHandlingMiddleware(new Mock<ILogger<ExceptionHandlingMiddleware>>().Object);
+            var context = new DefaultHttpContext();
+            context.Response.Body = new MemoryStream();
+
+            await middleware.InvokeAsync(
+                context,
+                _ => throw new FluentValidation.ValidationException(
+                [
+                    new FluentValidation.Results.ValidationFailure("Answers[0].ScaleValue", "Mức độ phải nằm trong khoảng từ 0 đến 1."),
+                    new FluentValidation.Results.ValidationFailure("Answers", "Khảo sát phải có từ 1 đến 50 câu trả lời.")
+                ]));
+
+            context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+            context.Response.Body.Position = 0;
+            using var document = await JsonDocument.ParseAsync(context.Response.Body);
+            var errors = document.RootElement.GetProperty("errors");
+            errors.EnumerateObject().Select(property => property.Name)
+                .Should().BeEquivalentTo("answers[0].scaleValue", "answers");
+        }
     }
 }

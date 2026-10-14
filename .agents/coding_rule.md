@@ -196,7 +196,8 @@ throw new ConflictException("REVIEW_ALREADY_EXISTS", "Bạn đã đánh giá nh�
 `ExceptionHandlingMiddleware` maps:
 
 ```
-ValidationException          → 400  VALIDATION_FAILED, Errors grouped by property (camelCase)
+ValidationException          → 400  VALIDATION_FAILED, Errors grouped by property path, every segment camelCase
+                                     (Answers[0].ScaleValue → answers[0].scaleValue, ValidationErrorKeys)
 BadRequestException          → 400  ErrorCode from the exception
 UnauthorizedException        → 401  ErrorCode from the exception
 ForbiddenException           → 403  ErrorCode from the exception
