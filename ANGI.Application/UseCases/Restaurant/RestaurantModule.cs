@@ -12,6 +12,7 @@ using ANGI.Application.UseCases.Restaurant.DeleteMenuSubmissionItem;
 using ANGI.Application.UseCases.Restaurant.CancelMenuSubmission;
 using ANGI.Application.UseCases.Restaurant.SubmitMenuSubmission;
 using ANGI.Application.UseCases.Restaurant.SubmitVerification;
+using ANGI.Application.UseCases.Restaurant.ResubmitVerification;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantDetail;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantMenu;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantReviews;
@@ -47,6 +48,7 @@ public static class RestaurantModule
         services.AddScoped<ISubmitMenuSubmissionUseCase, SubmitMenuSubmissionUseCase>();
         services.AddScoped<ISubmitVerificationUseCase, SubmitVerificationUseCase>();
         services.AddScoped<IGetVerificationStatusUseCase, GetVerificationStatusUseCase>();
+        services.AddScoped<IResubmitVerificationUseCase, ResubmitVerificationUseCase>();
         services.AddScoped<IBrowseRestaurantsUseCase, BrowseRestaurantsUseCase>();
         services.AddScoped<IGetRestaurantDetailUseCase, GetRestaurantDetailUseCase>();
         services.AddScoped<IGetRestaurantMenuUseCase, GetRestaurantMenuUseCase>();

@@ -17,6 +17,7 @@ public sealed class OwnerRestaurantController : ControllerBase
     private readonly IUpdateOwnerRestaurantUseCase _updateOwnerRestaurantUseCase;
     private readonly ISubmitVerificationUseCase _submitVerificationUseCase;
     private readonly IGetVerificationStatusUseCase _getVerificationStatusUseCase;
+    private readonly IResubmitVerificationUseCase _resubmitVerificationUseCase;
 
     /// <summary>Initializes the HTTP boundary with owner restaurant profile use cases.</summary>
     public OwnerRestaurantController(
@@ -24,13 +25,15 @@ public sealed class OwnerRestaurantController : ControllerBase
         IGetOwnerRestaurantUseCase getOwnerRestaurantUseCase,
         IUpdateOwnerRestaurantUseCase updateOwnerRestaurantUseCase,
         ISubmitVerificationUseCase submitVerificationUseCase,
-        IGetVerificationStatusUseCase getVerificationStatusUseCase)
+        IGetVerificationStatusUseCase getVerificationStatusUseCase,
+        IResubmitVerificationUseCase resubmitVerificationUseCase)
     {
         _registerRestaurantUseCase = registerRestaurantUseCase;
         _getOwnerRestaurantUseCase = getOwnerRestaurantUseCase;
         _updateOwnerRestaurantUseCase = updateOwnerRestaurantUseCase;
         _submitVerificationUseCase = submitVerificationUseCase;
         _getVerificationStatusUseCase = getVerificationStatusUseCase;
+        _resubmitVerificationUseCase = resubmitVerificationUseCase;
     }
 
     /// <summary>Receives OWN-01 and creates the authenticated owner's restaurant.</summary>
@@ -99,6 +102,29 @@ public sealed class OwnerRestaurantController : ControllerBase
     {
         var result = await _getVerificationStatusUseCase.ExecuteAsync(ct);
         return Ok(new ApiResponse<GetVerificationStatusResponseDto>
+        {
+            Success = true,
+            Data = result
+        });
+    }
+
+    /// <summary>
+    /// Receives OWN-08 and creates a new pending verification that points back at a rejected or needs_more_info one.
+    /// </summary>
+    [HttpPost("verifications/{verificationId:long}/resubmit")]
+    [ProducesResponseType(typeof(ApiResponse<VerificationDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ResubmitVerification(
+        long verificationId,
+        ResubmitVerificationRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _resubmitVerificationUseCase.ExecuteAsync(verificationId, request, ct);
+        return StatusCode(StatusCodes.Status201Created, new ApiResponse<VerificationDto>
         {
             Success = true,
             Data = result

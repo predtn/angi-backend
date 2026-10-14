@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Restaurant;
 
@@ -33,6 +34,15 @@ public interface IRestaurantRepository
 
     /// <summary>Loads the owner's restaurant and its full verification history without tracking for OWN-07.</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetOwnerRestaurantWithVerificationsAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>
+    /// Reads the status of a verification only when it belongs to the restaurant; null when the id does not exist or
+    /// belongs to another restaurant (OWN-08).
+    /// </summary>
+    Task<VerificationStatus?> GetVerificationStatusAsync(long restaurantId, long verificationId, CancellationToken ct);
+
+    /// <summary>Reads the id of the restaurant's most recent verification, or null when it has none (OWN-08).</summary>
+    Task<long?> GetLatestVerificationIdAsync(long restaurantId, CancellationToken ct);
 
     /// <summary>Loads and tracks only the owner's restaurant row, for changes to its own columns (OWN-05).</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedByOwnerIdAsync(int ownerId, CancellationToken ct);

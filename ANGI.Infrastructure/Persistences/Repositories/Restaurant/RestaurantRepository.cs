@@ -107,6 +107,31 @@ public sealed class RestaurantRepository : IRestaurantRepository
             .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
     }
 
+    /// <summary>Reads only the status of a verification that belongs to the given restaurant.</summary>
+    public async Task<VerificationStatus?> GetVerificationStatusAsync(
+        long restaurantId,
+        long verificationId,
+        CancellationToken ct)
+    {
+        return await _context.RestaurantVerifications
+            .AsNoTracking()
+            .Where(verification => verification.Id == verificationId && verification.RestaurantId == restaurantId)
+            .Select(verification => (VerificationStatus?)verification.Status)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Reads only the id of the restaurant's newest verification (latest submission, then highest id).</summary>
+    public async Task<long?> GetLatestVerificationIdAsync(long restaurantId, CancellationToken ct)
+    {
+        return await _context.RestaurantVerifications
+            .AsNoTracking()
+            .Where(verification => verification.RestaurantId == restaurantId)
+            .OrderByDescending(verification => verification.SubmittedAt)
+            .ThenByDescending(verification => verification.Id)
+            .Select(verification => (long?)verification.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
     /// <summary>Loads and tracks only the owner's restaurant row, for changes to its own columns (OWN-05).</summary>
     public Task<Domain.Entities.Restaurant?> GetTrackedByOwnerIdAsync(int ownerId, CancellationToken ct)
     {
