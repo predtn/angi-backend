@@ -11,6 +11,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidator : AbstractValidato
     public SubmitPreferenceSurveyRequestDtoValidator()
     {
         RuleFor(x => x.Answers)
+            .Cascade(CascadeMode.Stop)
             .NotNull().WithMessage("Câu trả lời khảo sát là bắt buộc.")
             .Must(answers => answers is { Count: >= 1 and <= MaxAnswers })
                 .WithMessage($"Khảo sát phải có từ 1 đến {MaxAnswers} câu trả lời.");

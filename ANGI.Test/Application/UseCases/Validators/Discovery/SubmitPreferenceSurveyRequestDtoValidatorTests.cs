@@ -1,3 +1,4 @@
+using System.Reflection;
 using ANGI.Application.DTOs.Discovery;
 using ANGI.Application.UseCases.Validators.Discovery;
 using FluentAssertions;
@@ -77,5 +78,36 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
         var request = new SubmitPreferenceSurveyRequestDto { Answers = [null!] };
 
         _validator.Validate(request).IsValid.Should().BeFalse();
+    }
+
+    // TEST-07: Report a null answers array once, with the validator's Vietnamese message.
+    [Fact]
+    public void Validate_WithNullAnswers_ShouldFailOnceOnAnswers()
+    {
+        var result = _validator.Validate(new SubmitPreferenceSurveyRequestDto { Answers = null });
+
+        result.Errors.Should().ContainSingle(e => e.PropertyName == "Answers")
+            .Which.ErrorMessage.Should().Be("Câu trả lời khảo sát là bắt buộc.");
+    }
+
+    // TEST-08: Report a null option code with the validator's message.
+    [Fact]
+    public void Validate_WithNullOptionCode_ShouldFailOnOptionCode()
+    {
+        var result = _validator.Validate(WithAnswers(new SurveyAnswerDto { OptionCode = null }));
+
+        result.Errors.Should().ContainSingle(e => e.PropertyName == "Answers[0].OptionCode");
+    }
+
+    // TEST-09: Keep both fields nullable. MVC adds an implicit [Required] with an English message to non-nullable
+    // reference properties and rejects an explicit null before the validator runs.
+    [Theory]
+    [InlineData(typeof(SubmitPreferenceSurveyRequestDto), nameof(SubmitPreferenceSurveyRequestDto.Answers))]
+    [InlineData(typeof(SurveyAnswerDto), nameof(SurveyAnswerDto.OptionCode))]
+    public void RequestFields_ShouldBeNullableSoTheValidatorReportsNull(Type dtoType, string propertyName)
+    {
+        var property = dtoType.GetProperty(propertyName)!;
+
+        new NullabilityInfoContext().Create(property).WriteState.Should().Be(NullabilityState.Nullable);
     }
 }
