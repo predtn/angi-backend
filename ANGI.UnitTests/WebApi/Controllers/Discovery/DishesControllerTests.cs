@@ -30,11 +30,30 @@ public sealed class DishesControllerTests
         var useCase = new Mock<IGetDishDetailUseCase>();
         useCase.Setup(x => x.ExecuteAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-        var action = await new DishesController(useCase.Object).GetDetail(105, CancellationToken.None);
+        var action = await new DishesController(Mock.Of<IBrowseDishesUseCase>(), useCase.Object).GetDetail(105, CancellationToken.None);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status200OK);
         var response = result.Value.Should().BeOfType<ApiResponse<DishDetailDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-03: DISH-01 is public too and wraps its page in a 200 ApiResponse.
+    [Fact]
+    public async Task Browse_ShouldAllowAnonymousAndReturnOk()
+    {
+        typeof(DishesController).GetMethod(nameof(DishesController.Browse))!
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true).Should().ContainSingle();
+        var request = new BrowseDishesRequestDto { Q = "bún" };
+        var expected = new BrowseDishesResponseDto { RequestId = Guid.NewGuid(), NextCursor = "next" };
+        var useCase = new Mock<IBrowseDishesUseCase>();
+        useCase.Setup(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+
+        var action = await new DishesController(useCase.Object, Mock.Of<IGetDishDetailUseCase>()).Browse(request, CancellationToken.None);
+
+        var response = action.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<ApiResponse<BrowseDishesResponseDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
     }

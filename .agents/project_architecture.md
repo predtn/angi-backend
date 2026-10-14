@@ -25,7 +25,7 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 - Out of scope, never build: payment, ordering or delivery, table booking, third-party data import, native mobile app.
 - Recommendation and roadmap requests answer within 3 s.
 
-**Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`. `Media` is MEDIA-01 (module "Media" in the API Design): one upload used by every other module, which then refers to the file by `mediaId`. `Discovery` also holds PREF-02 / PREF-03 (module "Sở thích" in the API Design, F-17 in epic EP-DISC), in their own `PreferenceSurveyController` under `/api/v1/me/preference-survey`.
+**Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`. `Media` is MEDIA-01 (module "Media" in the API Design): one upload used by every other module, which then refers to the file by `mediaId`. `Discovery` also holds PREF-02 / PREF-03 (module "Sở thích" in the API Design, F-17 in epic EP-DISC), in their own `PreferenceSurveyController` under `/api/v1/me/preference-survey`, and the dish, impression and tag endpoints DISH-01..03, IMP-01 and CAT-02 (`DishesController`, `ImpressionsController`, `TagsController`).
 
 ## 2. Tech stack
 
@@ -88,7 +88,7 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 | Tokens | Access token 15 min; refresh token 30 days, rotated on every use (`core.user_sessions`). Claims: `sub`, `email`, `role`, `email_verified`, `sid` (= `user_sessions.id` of the session that issued the token; a refresh issues a new session, so a new `sid`), `jti` |
 | Access | Column "Auth / Role" of the API Design: `Public` needs no token; `Public (token tùy chọn)` personalizes when a token is sent; a named role allows only that role (403 otherwise). An account that is not `active` is rejected on every endpoint that needs a token, even with a valid access token, with the same codes as AUTH-04 (`ACCOUNT_SUSPENDED` + `suspendedUntil`, `ACCOUNT_BANNED`, `ACCOUNT_DEACTIVATED`, `EMAIL_NOT_VERIFIED`). The status is read from the database with a 30 s cache (`IAccountStatusCache`); every use case that changes `users.status` calls `Invalidate(userId)` |
 | Mod / Admin permissions | Effective permissions = role default + allow − deny (`core.user_permissions`), read from the database with a short cache, never from the JWT. Admin has every permission |
-| Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId` |
+| Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId`: reco ranks once, the ranked ids stay 30 min in `IRankedDishListCache` (process memory, one instance) under reco's `request_id`, or a backend key when it is null, with the caller's user id; the cursor is base64url `{k, o}` (key, offset). Malformed, expired or another user's cursor → 400 `INVALID_CURSOR` |
 | Time, money, ids | ISO 8601 UTC; dates `yyyy-MM-dd`; business hours `HH:mm` Vietnam time; integer VND; `int` / `long` ids, `uuid` only for `requestId` and `eventUuid` |
 | Delete | Soft delete for users, restaurants, roadmaps, blogs, comments; 200 with `data: null` |
 | Rate limit | Login 5 failures / 15 min per email + IP; resend and forgot-password 1 / 60 s; everything else 100 / min per user (per IP when anonymous) |
@@ -150,7 +150,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 
 - Typed `HttpClient`, header `X-Api-Key`, snake_case JSON. Endpoints: sheet "Reco API (nội bộ)".
 - Responses are not wrapped in `ApiResponse`: a 2xx body is the DTO itself; an error body is `{ "error_code": "...", "message": "...", "errors": { field: [messages] } }` (`errors` only for 422 `VALIDATION_FAILED`). Branch on `error_code`, never on `message`.
-- The backend filters candidates (meal, form, price, tags, distance, active dish of a verified, visible, open restaurant) and sends at most 2000, sorted by restaurant rating, then dish `like_count`. Reco only scores them (stable sort, so ties keep that order) and returns ranked ids, scores and `request_id`; the backend loads the entities and builds the response.
+- The backend filters candidates (meal, form, price, tags, distance, active dish of a verified, visible, open restaurant) and sends at most 2000; "near me" filters use `NearbyArea` (bounding box in SQL, then Haversine), shared by DISH-01, DISH-03, RM-06 and RM-10. It sends them sorted by restaurant rating, then dish `like_count`. Reco only scores them (stable sort, so ties keep that order) and returns ranked ids, scores and `request_id`; the backend loads the entities and builds the response.
 - Every direct call (RECO-03, 05, 06, 09) times out after `TimeoutMilliseconds` (800 ms).
 - Survey, `/recommendations`, `/impressions` and survey status are called directly from the use case. Dish changes and likes / dislikes go only through the outbox (§7).
 
