@@ -1,6 +1,6 @@
 namespace ANGI.Application.DTOs.Auth
 {
-    public sealed class AuthResultDto
+    public class AuthResultDto
     {
         public string AccessToken { get; set; } = string.Empty;
         public DateTime AccessTokenExpiresAt { get; set; }

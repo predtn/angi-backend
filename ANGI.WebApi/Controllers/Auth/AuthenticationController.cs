@@ -13,6 +13,7 @@ namespace ANGI.WebApi.Controllers.Auth
     {
         private readonly IRegisterAccountUseCase _registerAccountUseCase;
         private readonly ILoginUseCase _loginUseCase;
+        private readonly IGoogleLoginUseCase _googleLoginUseCase;
         private readonly IRefreshTokenUseCase _refreshTokenUseCase;
         private readonly ILogoutUseCase _logoutUseCase;
         private readonly IVerifyEmailUseCase _verifyEmailUseCase;
@@ -24,6 +25,7 @@ namespace ANGI.WebApi.Controllers.Auth
         public AuthenticationController(
             IRegisterAccountUseCase registerAccountUseCase,
             ILoginUseCase loginUseCase,
+            IGoogleLoginUseCase googleLoginUseCase,
             IRefreshTokenUseCase refreshTokenUseCase,
             ILogoutUseCase logoutUseCase,
             IVerifyEmailUseCase verifyEmailUseCase,
@@ -33,6 +35,7 @@ namespace ANGI.WebApi.Controllers.Auth
         {
             _registerAccountUseCase = registerAccountUseCase;
             _loginUseCase = loginUseCase;
+            _googleLoginUseCase = googleLoginUseCase;
             _refreshTokenUseCase = refreshTokenUseCase;
             _logoutUseCase = logoutUseCase;
             _verifyEmailUseCase = verifyEmailUseCase;
@@ -127,6 +130,20 @@ namespace ANGI.WebApi.Controllers.Auth
         {
             var result = await _loginUseCase.ExecuteAsync(request, ct);
             return Ok(new ApiResponse<AuthResultDto>
+            {
+                Success = true,
+                Data = result
+            });
+        }
+
+        /// <summary>Receives an AUTH-05 request and returns the linked or newly created Google account session.</summary>
+        [AllowAnonymous]
+        [HttpPost("google")]
+        [ProducesResponseType(typeof(ApiResponse<GoogleLoginResponseDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GoogleLogin(GoogleLoginRequestDto request, CancellationToken ct)
+        {
+            var result = await _googleLoginUseCase.ExecuteAsync(request, ct);
+            return Ok(new ApiResponse<GoogleLoginResponseDto>
             {
                 Success = true,
                 Data = result

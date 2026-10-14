@@ -26,6 +26,34 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                 .FirstOrDefaultAsync(user => user.Email == normalizedEmail, ct);
         }
 
+        /// <summary>Loads the user associated with the provider subject and the data needed by AuthResultDto.</summary>
+        public Task<User?> GetUserByExternalLoginAsync(
+            ExternalLoginProvider provider,
+            string providerUserId,
+            CancellationToken ct)
+        {
+            return _context.Users
+                .Include(user => user.Role)
+                .Include(user => user.AvatarMedia)
+                .Where(user => _context.UserExternalLogins.Any(login =>
+                    login.UserId == user.Id &&
+                    login.Provider == provider &&
+                    login.ProviderUserId == providerUserId))
+                .FirstOrDefaultAsync(ct);
+        }
+
+        /// <summary>Acquires a transaction-scoped PostgreSQL advisory lock for one provider subject.</summary>
+        public async Task LockExternalLoginAsync(
+            ExternalLoginProvider provider,
+            string providerUserId,
+            CancellationToken ct)
+        {
+            var lockKey = $"{provider}:{providerUserId}";
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))",
+                ct);
+        }
+
         /// <summary>Checks the partial unique-email domain; the global filter excludes soft-deleted users.</summary>
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken ct)
         {
@@ -40,6 +68,14 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
             return _context.Roles
                 .AsNoTracking()
                 .FirstOrDefaultAsync(role => role.Code == roleCode, ct);
+        }
+
+        /// <summary>Gets the next users sequence value for single-save account and session creation.</summary>
+        public Task<int> ReserveUserIdAsync(CancellationToken ct)
+        {
+            return _context.Database
+                .SqlQueryRaw<int>("SELECT nextval('core.users_id_seq')::integer AS \"Value\"")
+                .SingleAsync(ct);
         }
 
         /// <summary>Loads and locks a user so concurrent verification or reset requests replace tokens in sequence.</summary>
@@ -116,7 +152,20 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
         /// <summary>Marks a new account as Added without persisting it immediately.</summary>
         public void AddUser(User user)
         {
+            if (user.Role is not null && _context.Entry(user.Role).State == EntityState.Detached)
+            {
+                // Google registration needs the role navigation immediately for JWT/response mapping.
+                // The role came from an AsNoTracking lookup and must never be inserted as a new role.
+                _context.Roles.Attach(user.Role);
+            }
+
             _context.Users.Add(user);
+        }
+
+        /// <summary>Marks an external identity link as Added without persisting it immediately.</summary>
+        public void AddExternalLogin(UserExternalLogin externalLogin)
+        {
+            _context.UserExternalLogins.Add(externalLogin);
         }
 
         /// <summary>Loads and locks a user token together with its owner and role to enforce one-time consumption.</summary>
