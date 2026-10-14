@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures weekly restaurant opening intervals.</summary>
     public class RestaurantBusinessHourConfiguration : IEntityTypeConfiguration<RestaurantBusinessHour>
     {
+        /// <summary>Maps day constraints, interval uniqueness, and restaurant ownership.</summary>
         public void Configure(EntityTypeBuilder<RestaurantBusinessHour> builder)
         {
             builder.ToTable("restaurant_business_hours", table =>

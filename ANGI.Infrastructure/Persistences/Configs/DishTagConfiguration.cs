@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures the many-to-many association between dishes and tags.</summary>
     public class DishTagConfiguration : IEntityTypeConfiguration<DishTag>
     {
+        /// <summary>Maps the composite key and cascading dish relationship.</summary>
         public void Configure(EntityTypeBuilder<DishTag> builder)
         {
             builder.ToTable("dish_tags");

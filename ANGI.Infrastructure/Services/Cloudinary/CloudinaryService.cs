@@ -5,22 +5,25 @@ using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Configuration;
 
-namespace ANGI.Infrastructure.Services;
+namespace ANGI.Infrastructure.Services.Cloudinary;
 
+/// <summary>Stores media in Cloudinary and resolves stable storage keys to delivery URLs.</summary>
 public sealed class CloudinaryService : ICloudinaryService
 {
     private readonly ICloudinaryClient _client;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes Cloudinary storage from application configuration.</summary>
-    public CloudinaryService(IConfiguration configuration)
-        : this(CreateClient(configuration))
+    public CloudinaryService(IConfiguration configuration, TimeProvider? timeProvider = null)
+        : this(CreateClient(configuration), timeProvider)
     {
     }
 
     /// <summary>Initializes Cloudinary storage with an injectable client for deterministic tests.</summary>
-    internal CloudinaryService(ICloudinaryClient client)
+    internal CloudinaryService(ICloudinaryClient client, TimeProvider? timeProvider = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>Creates and validates the Cloudinary SDK adapter from configuration values.</summary>
@@ -150,7 +153,7 @@ public sealed class CloudinaryService : ICloudinaryService
                 publicId,
                 format: format,
                 type: parts[1],
-                expiresAt: DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds(),
+                expiresAt: _timeProvider.GetUtcNow().AddMinutes(5).ToUnixTimeSeconds(),
                 resourceType: parts[0]);
         }
 
@@ -161,6 +164,7 @@ public sealed class CloudinaryService : ICloudinaryService
     }
 }
 
+/// <summary>Abstracts the Cloudinary SDK operations used by the storage service.</summary>
 internal interface ICloudinaryClient
 {
     /// <summary>Uploads an image resource to Cloudinary.</summary>
@@ -185,14 +189,15 @@ internal interface ICloudinaryClient
     string BuildPublicUrl(string resourceType, string type, string publicId);
 }
 
+/// <summary>Adapts the Cloudinary SDK to the testable storage client abstraction.</summary>
 internal sealed class CloudinaryClient : ICloudinaryClient
 {
-    private readonly Cloudinary _cloudinary;
+    private readonly CloudinaryDotNet.Cloudinary _cloudinary;
 
     /// <summary>Initializes the SDK adapter with secure URL generation enabled.</summary>
     public CloudinaryClient(CloudinaryDotNet.Account account)
     {
-        _cloudinary = new Cloudinary(account)
+        _cloudinary = new CloudinaryDotNet.Cloudinary(account)
         {
             Api = { Secure = true }
         };

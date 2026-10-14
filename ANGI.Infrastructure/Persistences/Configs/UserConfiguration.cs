@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures user accounts referenced by authentication and restaurant ownership.</summary>
     public class UserConfiguration : IEntityTypeConfiguration<User>
     {
+        /// <summary>Maps account fields, status defaults, indexes, and role/media relationships.</summary>
         public void Configure(EntityTypeBuilder<User> builder)
         {
             builder.ToTable("users");

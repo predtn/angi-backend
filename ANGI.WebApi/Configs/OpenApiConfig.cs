@@ -1,3 +1,5 @@
+using System.Reflection;
+using ANGI.Application.DTOs.Restaurant;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -16,9 +18,30 @@ public static class OpenApiConfig
         {
             options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
             options.AddOperationTransformer<BearerSecurityRequirementTransformer>();
+            options.AddSchemaTransformer<RestaurantContractSchemaTransformer>();
         });
 
         return services;
+    }
+}
+
+/// <summary>Adds documented Restaurant request constraints that are enforced through FluentValidation.</summary>
+internal sealed class RestaurantContractSchemaTransformer : IOpenApiSchemaTransformer
+{
+    /// <summary>Publishes the OWN-17 owner-note maximum without adding DataAnnotations to Application DTOs.</summary>
+    public Task TransformAsync(
+        OpenApiSchema schema,
+        OpenApiSchemaTransformerContext context,
+        CancellationToken cancellationToken)
+    {
+        if (context.JsonPropertyInfo?.AttributeProvider is PropertyInfo propertyInfo &&
+            propertyInfo.DeclaringType == typeof(SubmitMenuSubmissionRequestDto) &&
+            propertyInfo.Name == nameof(SubmitMenuSubmissionRequestDto.OwnerNote))
+        {
+            schema.MaxLength = 1000;
+        }
+
+        return Task.CompletedTask;
     }
 }
 
@@ -26,6 +49,7 @@ public static class OpenApiConfig
 internal sealed class BearerSecuritySchemeTransformer(
     IAuthenticationSchemeProvider authenticationSchemeProvider) : IOpenApiDocumentTransformer
 {
+    /// <summary>Adds the configured JWT Bearer scheme when authentication is available.</summary>
     public async Task TransformAsync(
         OpenApiDocument document,
         OpenApiDocumentTransformerContext context,
@@ -55,6 +79,7 @@ internal sealed class BearerSecuritySchemeTransformer(
 /// <summary>Marks only endpoints that require authorization as Bearer-protected in OpenAPI.</summary>
 internal sealed class BearerSecurityRequirementTransformer : IOpenApiOperationTransformer
 {
+    /// <summary>Adds a Bearer requirement to protected operations that are not anonymous.</summary>
     public Task TransformAsync(
         OpenApiOperation operation,
         OpenApiOperationTransformerContext context,

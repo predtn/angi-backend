@@ -1,10 +1,10 @@
 using System.Text;
-using ANGI.Infrastructure.Services;
+using ANGI.Infrastructure.Services.Cloudinary;
 using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Configuration;
 
-namespace ANGI.Test.Infrastructure.Services;
+namespace ANGI.Test.Infrastructure.Services.Cloudinary;
 
 public class CloudinaryLiveTests
 {
@@ -21,7 +21,7 @@ public class CloudinaryLiveTests
             .Build();
 
         var service = new CloudinaryService(configuration);
-        var cleanup = new Cloudinary(new Account(
+        var cleanup = new CloudinaryDotNet.Cloudinary(new Account(
             configuration["Cloudinary:CloudName"],
             configuration["Cloudinary:ApiKey"],
             configuration["Cloudinary:ApiSecret"]));

@@ -45,6 +45,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidator : AbstractValida
             .When(request => request.SortOrderSpecified);
     }
 
+    /// <summary>Accepts whole-number VND amounts that fit the numeric(12,0) database column.</summary>
     private static bool BeValidVndAmount(decimal? price) =>
         !price.HasValue ||
         price.Value == decimal.Truncate(price.Value) && price.Value <= 999_999_999_999m;

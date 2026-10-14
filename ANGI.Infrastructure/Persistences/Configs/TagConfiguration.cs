@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures the dish tag catalog used by menu submissions.</summary>
     public class TagConfiguration : IEntityTypeConfiguration<Tag>
     {
+        /// <summary>Maps tag fields, uniqueness, and defaults.</summary>
         public void Configure(EntityTypeBuilder<Tag> builder)
         {
             builder.ToTable("tags");

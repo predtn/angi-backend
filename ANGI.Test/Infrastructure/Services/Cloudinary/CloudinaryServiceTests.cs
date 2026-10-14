@@ -1,10 +1,10 @@
 using System.Text.RegularExpressions;
 using ANGI.Application.Common.Exceptions;
-using ANGI.Infrastructure.Services;
+using ANGI.Infrastructure.Services.Cloudinary;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Configuration;
 
-namespace ANGI.Test.Infrastructure.Services;
+namespace ANGI.Test.Infrastructure.Services.Cloudinary;
 
 public class CloudinaryServiceTests
 {
@@ -279,16 +279,13 @@ public class CloudinaryServiceTests
     [InlineData("image/authenticated/angi/avatar/example.png")]
     public void GetUrl_CreatesPrivateUrlThatExpiresInAboutFiveMinutes(string storageKey)
     {
-        var service = CreateService();
-        var earliest = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds();
+        var now = new DateTimeOffset(2026, 10, 14, 1, 2, 3, TimeSpan.Zero);
+        var service = CreateService(new FixedTimeProvider(now));
         var url = service.GetUrl(storageKey);
 
         var match = Regex.Match(url, @"(?:\?|&)expires_at=(\d+)");
         Assert.True(match.Success);
-        Assert.InRange(
-            long.Parse(match.Groups[1].Value),
-            earliest,
-            DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds());
+        Assert.Equal(now.AddMinutes(5).ToUnixTimeSeconds(), long.Parse(match.Groups[1].Value));
         Assert.DoesNotContain("unit-test-placeholder", url);
     }
 
@@ -330,12 +327,12 @@ public class CloudinaryServiceTests
         }
     };
 
-    private static CloudinaryService CreateService()
+    private static CloudinaryService CreateService(TimeProvider? timeProvider = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(ValidConfigurationValues())
             .Build();
-        return new CloudinaryService(configuration);
+        return new CloudinaryService(configuration, timeProvider);
     }
 
     private static Dictionary<string, string?> ValidConfigurationValues() => new()
@@ -344,6 +341,11 @@ public class CloudinaryServiceTests
         ["Cloudinary:ApiKey"] = "test-key",
         ["Cloudinary:ApiSecret"] = "unit-test-placeholder"
     };
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
 
     private sealed class FakeCloudinaryClient : ICloudinaryClient
     {
