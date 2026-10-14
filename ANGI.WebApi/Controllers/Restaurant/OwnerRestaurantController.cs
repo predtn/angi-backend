@@ -15,16 +15,19 @@ public sealed class OwnerRestaurantController : ControllerBase
     private readonly IRegisterRestaurantUseCase _registerRestaurantUseCase;
     private readonly IGetOwnerRestaurantUseCase _getOwnerRestaurantUseCase;
     private readonly IUpdateOwnerRestaurantUseCase _updateOwnerRestaurantUseCase;
+    private readonly ISubmitVerificationUseCase _submitVerificationUseCase;
 
     /// <summary>Initializes the HTTP boundary with owner restaurant profile use cases.</summary>
     public OwnerRestaurantController(
         IRegisterRestaurantUseCase registerRestaurantUseCase,
         IGetOwnerRestaurantUseCase getOwnerRestaurantUseCase,
-        IUpdateOwnerRestaurantUseCase updateOwnerRestaurantUseCase)
+        IUpdateOwnerRestaurantUseCase updateOwnerRestaurantUseCase,
+        ISubmitVerificationUseCase submitVerificationUseCase)
     {
         _registerRestaurantUseCase = registerRestaurantUseCase;
         _getOwnerRestaurantUseCase = getOwnerRestaurantUseCase;
         _updateOwnerRestaurantUseCase = updateOwnerRestaurantUseCase;
+        _submitVerificationUseCase = submitVerificationUseCase;
     }
 
     /// <summary>Receives OWN-01 and creates the authenticated owner's restaurant.</summary>
@@ -60,5 +63,20 @@ public sealed class OwnerRestaurantController : ControllerBase
     {
         var result = await _updateOwnerRestaurantUseCase.ExecuteAsync(request, ct);
         return Ok(new ApiResponse<OwnerRestaurantDto> { Success = true, Data = result });
+    }
+
+    /// <summary>Receives OWN-06 and creates the authenticated owner's first verification submission.</summary>
+    [HttpPost("verifications")]
+    [ProducesResponseType(typeof(ApiResponse<VerificationDto>), StatusCodes.Status201Created)]
+    public async Task<IActionResult> SubmitVerification(
+        SubmitVerificationRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _submitVerificationUseCase.ExecuteAsync(request, ct);
+        return StatusCode(StatusCodes.Status201Created, new ApiResponse<VerificationDto>
+        {
+            Success = true,
+            Data = result
+        });
     }
 }

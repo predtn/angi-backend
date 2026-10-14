@@ -33,7 +33,8 @@ public sealed class OwnerRestaurantControllerTests
         var controller = new OwnerRestaurantController(
             useCase.Object,
             Mock.Of<IGetOwnerRestaurantUseCase>(),
-            Mock.Of<IUpdateOwnerRestaurantUseCase>());
+            Mock.Of<IUpdateOwnerRestaurantUseCase>(),
+            Mock.Of<ISubmitVerificationUseCase>());
 
         var action = await controller.Register(request, CancellationToken.None);
 
@@ -56,7 +57,8 @@ public sealed class OwnerRestaurantControllerTests
         var controller = new OwnerRestaurantController(
             Mock.Of<IRegisterRestaurantUseCase>(),
             useCase.Object,
-            Mock.Of<IUpdateOwnerRestaurantUseCase>());
+            Mock.Of<IUpdateOwnerRestaurantUseCase>(),
+            Mock.Of<ISubmitVerificationUseCase>());
 
         var action = await controller.Get(CancellationToken.None);
 
@@ -77,12 +79,51 @@ public sealed class OwnerRestaurantControllerTests
         var controller = new OwnerRestaurantController(
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<ISubmitVerificationUseCase>());
 
         var action = await controller.Update(request, CancellationToken.None);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>()
             .Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-04: Return the OWN-06 verification payload in ApiResponse with HTTP 201.
+    /// <summary>Verifies verification submission delegation and response wrapping.</summary>
+    [Fact]
+    public async Task SubmitVerification_WithValidRequest_ShouldReturnCreatedApiResponse()
+    {
+        var request = new SubmitVerificationRequestDto
+        {
+            LegalName = "Hộ kinh doanh Bún Bò Bà Diệu",
+            BusinessLicenseNo = "32A8012345",
+            Documents =
+            [
+                new VerificationDocumentRequestDto
+                {
+                    DocType = "business_license",
+                    MediaId = 9001
+                }
+            ]
+        };
+        var expected = new VerificationDto { Id = 21, RestaurantId = 7, Status = "pending" };
+        var useCase = new Mock<ISubmitVerificationUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
+        var controller = new OwnerRestaurantController(
+            Mock.Of<IRegisterRestaurantUseCase>(),
+            Mock.Of<IGetOwnerRestaurantUseCase>(),
+            Mock.Of<IUpdateOwnerRestaurantUseCase>(),
+            useCase.Object);
+
+        var action = await controller.SubmitVerification(request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        var response = result.Value.Should().BeOfType<ApiResponse<VerificationDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+        useCase.Verify(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 }
