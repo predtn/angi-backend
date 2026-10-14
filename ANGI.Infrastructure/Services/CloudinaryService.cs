@@ -39,7 +39,7 @@ public sealed class CloudinaryService : ICloudinaryService
             throw new InvalidOperationException("Cloudinary configuration is incomplete.");
         }
 
-        return new CloudinaryClient(new Account(cloudName, apiKey, apiSecret));
+        return new CloudinaryClient(new CloudinaryDotNet.Account(cloudName, apiKey, apiSecret));
     }
 
     /// <summary>Uploads an image or PDF and returns its stable storage key and delivery URL.</summary>
@@ -190,7 +190,7 @@ internal sealed class CloudinaryClient : ICloudinaryClient
     private readonly Cloudinary _cloudinary;
 
     /// <summary>Initializes the SDK adapter with secure URL generation enabled.</summary>
-    public CloudinaryClient(Account account)
+    public CloudinaryClient(CloudinaryDotNet.Account account)
     {
         _cloudinary = new Cloudinary(account)
         {
