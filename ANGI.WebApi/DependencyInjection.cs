@@ -4,6 +4,7 @@ using ANGI.WebApi.Configs;
 using ANGI.WebApi.Middlewares;
 using ANGI.WebApi.Filters;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.WebApi
 {
@@ -20,6 +21,9 @@ namespace ANGI.WebApi
 
             services.AddControllers(options =>
                 {
+                    // Required fields are checked only by FluentValidation (coding_rule.md, Validation): without this,
+                    // MVC rejects a null non-nullable reference first, with an English message.
+                    options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
                     options.Filters.Add<ApiErrorEnvelopeResultFilter>();
                     options.Filters.Add<NullBodyValidationFilter>();
                 })
@@ -27,16 +31,11 @@ namespace ANGI.WebApi
                 {
                     options.InvalidModelStateResponseFactory = context =>
                     {
-                        var errors = context.ModelState
-                            .Where(entry => entry.Value?.Errors.Count > 0)
-                            .ToDictionary(
-                                entry => ValidationErrorKeys.ToCamelCase(entry.Key),
-                                entry => entry.Value!.Errors
-                                    .Select(error => string.IsNullOrWhiteSpace(error.ErrorMessage)
-                                        ? "Giá trị không hợp lệ."
-                                        : error.ErrorMessage)
-                                    .Distinct()
-                                    .ToArray());
+                        var bodyParameterNames = context.ActionDescriptor.Parameters
+                            .Where(parameter => parameter.BindingInfo?.BindingSource == BindingSource.Body)
+                            .Select(parameter => parameter.Name)
+                            .ToArray();
+                        var errors = ModelBindingErrors.From(context.ModelState, bodyParameterNames);
 
                         return new BadRequestObjectResult(new ApiResponse<object>
                         {

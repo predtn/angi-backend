@@ -65,7 +65,7 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
 
         var isPrivate = request.Purpose is "verification_doc" or "report_evidence";
         var upload = await _cloudinaryService.UploadAsync(
-            request.Content,
+            request.Content!,
             request.FileName,
             normalizedMimeType,
             request.Purpose,

@@ -34,13 +34,13 @@ public sealed class MediaController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Upload([FromForm] UploadMediaForm form, CancellationToken ct)
     {
-        await using var content = form.File.OpenReadStream();
+        await using var content = form.File?.OpenReadStream();
         var result = await _uploadMediaUseCase.ExecuteAsync(new UploadMediaRequestDto
         {
             Content = content,
-            FileName = form.File.FileName,
-            MimeType = form.File.ContentType,
-            SizeBytes = form.File.Length,
+            FileName = form.File?.FileName ?? string.Empty,
+            MimeType = form.File?.ContentType ?? string.Empty,
+            SizeBytes = form.File?.Length ?? 0,
             Purpose = form.Purpose
         }, ct);
 

@@ -16,7 +16,8 @@ public sealed class BusinessHourDtoValidator : AbstractValidator<BusinessHourDto
         RuleFor(x => x.CloseTime).Must(BeValidTime).WithMessage("Giờ đóng cửa phải có dạng HH:mm.");
         RuleFor(x => x)
             .Must(hour => !string.Equals(hour.OpenTime, hour.CloseTime, StringComparison.Ordinal))
-            .WithMessage("Giờ mở cửa và giờ đóng cửa phải khác nhau.");
+            .WithMessage("Giờ mở cửa và giờ đóng cửa phải khác nhau.")
+            .When(hour => hour.OpenTime is not null && hour.CloseTime is not null);
     }
 
     /// <summary>Checks whether a value is an exact 24-hour HH:mm time.</summary>

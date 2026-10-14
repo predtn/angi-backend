@@ -12,13 +12,19 @@ public sealed class AddMenuSubmissionItemRequestDtoValidator : AbstractValidator
     public AddMenuSubmissionItemRequestDtoValidator()
     {
         RuleFor(request => request.Name)
-            .NotEmpty().WithMessage("Tên món không được để trống.")
+            .NotEmpty().WithMessage("Tên món không được để trống.");
+        // Format rules only for a value that was sent, so a missing one gets the single message above.
+        RuleFor(request => request.Name)
             .Must(value => value is not null && value.Trim().Length <= 200)
-            .WithMessage("Tên món không được vượt quá 200 ký tự.");
+            .WithMessage("Tên món không được vượt quá 200 ký tự.")
+            .When(request => !string.IsNullOrWhiteSpace(request.Name));
         RuleFor(request => request.Description)
-            .NotEmpty().WithMessage("Mô tả món không được để trống.")
+            .NotEmpty().WithMessage("Mô tả món không được để trống.");
+        // Format rules only for a value that was sent, so a missing one gets the single message above.
+        RuleFor(request => request.Description)
             .Must(value => value is not null && value.Trim().Length is >= 30 and <= 2000)
-            .WithMessage("Mô tả món phải từ 30 đến 2000 ký tự.");
+            .WithMessage("Mô tả món phải từ 30 đến 2000 ký tự.")
+            .When(request => !string.IsNullOrWhiteSpace(request.Description));
         RuleFor(request => request.DishForm)
             .Must(value => DishForms.Contains(value, StringComparer.OrdinalIgnoreCase))
             .WithMessage("Loại món phải là soup, dry hoặc other.");

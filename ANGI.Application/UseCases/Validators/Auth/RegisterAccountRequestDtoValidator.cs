@@ -25,27 +25,36 @@ public sealed class RegisterAccountRequestDtoValidator : AbstractValidator<Regis
             .MaximumLength(255).WithMessage("Email không được vượt quá 255 ký tự.");
 
         RuleFor(x => x.Password)
-            .NotEmpty().WithMessage("Mật khẩu là bắt buộc.")
+            .NotEmpty().WithMessage("Mật khẩu là bắt buộc.");
+        // Format rules only for a value that was sent, so a missing one gets the single message above.
+        RuleFor(x => x.Password)
             .MinimumLength(8).WithMessage("Mật khẩu phải có ít nhất 8 ký tự.")
             .MaximumLength(64).WithMessage("Mật khẩu không được vượt quá 64 ký tự.")
             .Must(password => password is not null && password.Any(char.IsLetter))
                 .WithMessage("Mật khẩu phải có ít nhất một chữ cái.")
             .Must(password => password is not null && password.Any(char.IsDigit))
-                .WithMessage("Mật khẩu phải có ít nhất một chữ số.");
+                .WithMessage("Mật khẩu phải có ít nhất một chữ số.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Password));
 
         RuleFor(x => x.DisplayName)
-            .NotEmpty().WithMessage("Tên hiển thị là bắt buộc.")
+            .NotEmpty().WithMessage("Tên hiển thị là bắt buộc.");
+        // Format rules only for a value that was sent, so a missing one gets the single message above.
+        RuleFor(x => x.DisplayName)
             .Must(name => name is not null && GetUnicodeLength(name.Trim()) >= 2)
                 .WithMessage("Tên hiển thị phải có ít nhất 2 ký tự.")
             .Must(name => name is not null && GetUnicodeLength(name.Trim()) <= 100)
                 .WithMessage("Tên hiển thị không được vượt quá 100 ký tự.")
             .Must(ContainsOnlySafeUnicode)
-                .WithMessage("Tên hiển thị chứa ký tự Unicode không được hỗ trợ.");
+                .WithMessage("Tên hiển thị chứa ký tự Unicode không được hỗ trợ.")
+            .When(x => !string.IsNullOrWhiteSpace(x.DisplayName));
 
         RuleFor(x => x.Role)
-            .NotEmpty().WithMessage("Vai trò là bắt buộc.")
+            .NotEmpty().WithMessage("Vai trò là bắt buộc.");
+        // Format rules only for a value that was sent, so a missing one gets the single message above.
+        RuleFor(x => x.Role)
             .Must(role => _selfRegistrationRoles.Contains(role))
-                .WithMessage("Vai trò chỉ có thể là TRAVELER hoặc RESTAURANT_OWNER.");
+                .WithMessage("Vai trò chỉ có thể là TRAVELER hoặc RESTAURANT_OWNER.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Role));
     }
 
     /// <summary>

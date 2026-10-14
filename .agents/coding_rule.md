@@ -155,7 +155,7 @@ JSON: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`
 |---|---|---|
 | Missing or invalid token | `JwtBearerEvents.OnChallenge` | 401 `UNAUTHORIZED` |
 | Wrong role or missing permission | `JwtBearerEvents.OnForbidden` or an `IAuthorizationMiddlewareResultHandler` | 403 `FORBIDDEN` |
-| Model binding fails (bad JSON, wrong type) | `ApiBehaviorOptions.InvalidModelStateResponseFactory` | 400 `VALIDATION_FAILED` + `Errors` |
+| Model binding fails (bad JSON, wrong type, null or empty body) | `ApiBehaviorOptions.InvalidModelStateResponseFactory` (`ModelBindingErrors`) | 400 `VALIDATION_FAILED` + `Errors`: body errors under `body`, field errors under the API field name, Vietnamese messages instead of MVC's English ones |
 | Rate limit exceeded | `RateLimiterOptions.OnRejected`, with `Retry-After` | 429 `TOO_MANY_REQUESTS` |
 | Unknown path / wrong HTTP method | `UseStatusCodePages` handler (`StatusCodePagesConfig`) | 404 `ROUTE_NOT_FOUND` / 405 `METHOD_NOT_ALLOWED` |
 | Body missing or not `application/json` (MVC returns 415) | `ApiErrorEnvelopeResultFilter` | 400 `VALIDATION_FAILED` + `Errors` (the API has no 415, §8) |
@@ -168,6 +168,7 @@ JSON: `{ "success": true, "message": null, "errorCode": null, "data": { ... } }`
 - One validator per request DTO in `Application/UseCases/Validators/<Module>/`; `AddValidatorsFromAssembly()` registers them.
 - The first statement of `ExecuteAsync` is `await _validator.ValidateAndThrowAsync(request, ct);`.
 - Validate every value the database cannot catch. A non-nullable `int` / `decimal` defaults to 0, so a required number (restaurant `Latitude` / `Longitude`) needs an explicit rule; NOT NULL does not stop 0.
+- MVC's implicit `[Required]` for non-nullable references is off (`SuppressImplicitRequiredAttributeForNonNullableReferenceTypes` in `AddWebApi`), so an explicit JSON `null` reaches the validator. Every non-nullable reference property of a request DTO needs a rule that rejects `null` (`NotEmpty`, `NotNull`) and reports it once; `RequestNullContractTests` fails otherwise. Put `NotEmpty` in its own `RuleFor` and guard the format rules with `.When(x => !string.IsNullOrWhiteSpace(x.Field))`, so a missing value gets one message while a wrong one still gets every message that applies (`.Cascade(CascadeMode.Stop)` when only the first message matters).
 
 ## 7. Mapping
 

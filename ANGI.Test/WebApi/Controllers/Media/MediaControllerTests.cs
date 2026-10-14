@@ -55,4 +55,25 @@ public sealed class MediaControllerTests
                 request.Purpose == "restaurant"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    // TEST-02: A missing "file" field reaches the use case as null content instead of throwing in the controller.
+    /// <summary>Verifies the validator, not a NullReferenceException, reports a missing file.</summary>
+    [Fact]
+    public async Task Upload_WithoutFile_ShouldPassNullContentToUseCase()
+    {
+        var useCase = new Mock<IUploadMediaUseCase>();
+        useCase.Setup(x => x.ExecuteAsync(It.IsAny<UploadMediaRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaFileDto());
+        var controller = new MediaController(useCase.Object);
+
+        await controller.Upload(new UploadMediaForm { File = null, Purpose = "restaurant" }, CancellationToken.None);
+
+        useCase.Verify(x => x.ExecuteAsync(
+            It.Is<UploadMediaRequestDto>(request =>
+                request.Content == null &&
+                request.FileName == string.Empty &&
+                request.SizeBytes == 0 &&
+                request.Purpose == "restaurant"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 }
