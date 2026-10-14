@@ -20,7 +20,7 @@ namespace ANGI.Test.Application.UseCases.Auth.Refresh
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
-        // TEST-01: Revoke the current session and persist a new session during token rotation.
+        // TEST-01: Revoke the current session, persist a new session, and issue the access token with the new session id.
         [Fact]
         public async Task ExecuteAsync_WithActiveSession_ShouldRotateRefreshToken()
         {
@@ -32,7 +32,10 @@ namespace ANGI.Test.Application.UseCases.Auth.Refresh
             repository.Setup(x => x.AddSession(It.IsAny<UserSession>()))
                 .Callback<UserSession>(value => addedSession = value);
             var unitOfWork = new Mock<IUnitOfWork>();
-            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(2);
+            // The database assigns the new session id on save.
+            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                .Callback(() => addedSession!.Id = 78)
+                .ReturnsAsync(2);
             var recommendationService = new Mock<IRecommendationService>();
             recommendationService.Setup(x => x.GetSurveyStatusAsync(12, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SurveyStatus(true, new DateTime(2026, 10, 2, 2, 30, 1, DateTimeKind.Utc), 6));
@@ -46,6 +49,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Refresh
             addedSession.Should().NotBeNull();
             addedSession!.RefreshTokenHash.Should().Be("new-hash");
             result.RefreshToken.Should().Be("new-token");
+            // sid names the new session, not the revoked one.
+            result.AccessToken.Should().Be("new-access-token-sid-78");
             result.User.NeedsPreferenceSurvey.Should().BeFalse();
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -270,12 +275,10 @@ namespace ANGI.Test.Application.UseCases.Auth.Refresh
                 .ReturnsAsync(transaction.Object);
             var tokenService = new Mock<IAuthenticationTokenService>();
             tokenService.Setup(x => x.HashRefreshToken("old-token")).Returns("old-hash");
-            tokenService.Setup(x => x.CreateTokens(It.IsAny<User>())).Returns(new AuthenticationTokens(
-                "new-access-token",
-                Now.AddMinutes(15),
-                "new-token",
-                "new-hash",
-                Now.AddDays(30)));
+            tokenService.Setup(x => x.CreateRefreshToken())
+                .Returns(new GeneratedRefreshToken("new-token", "new-hash", Now.AddDays(30)));
+            tokenService.Setup(x => x.CreateAccessToken(It.IsAny<User>(), It.IsAny<long>()))
+                .Returns<User, long>((_, sessionId) => new IssuedAccessToken($"new-access-token-sid-{sessionId}", Now.AddMinutes(15)));
 
             return new RefreshTokenUseCase(
                 new RefreshTokenRequestDtoValidator(),

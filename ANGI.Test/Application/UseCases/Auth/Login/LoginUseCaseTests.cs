@@ -45,7 +45,10 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             recommendationService.Setup(x => x.GetSurveyStatusAsync(user.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SurveyStatus(false, null, 0));
             var unitOfWork = new Mock<IUnitOfWork>();
-            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
+            // The database assigns the session id on save.
+            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                .Callback(() => addedSession!.Id = 77)
+                .ReturnsAsync(3);
 
             var useCase = CreateUseCase(
                 repository,
@@ -60,7 +63,8 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
                 Password = "correct-password"
             }, CancellationToken.None);
 
-            result.AccessToken.Should().Be("access-token");
+            // Issued after the save, carrying the new session's id as claim sid.
+            result.AccessToken.Should().Be("access-token-sid-77");
             result.RefreshToken.Should().Be("refresh-token");
             result.User.Id.Should().Be(user.Id);
             result.User.Role.Should().Be("TRAVELER");
@@ -282,12 +286,10 @@ namespace ANGI.Test.Application.UseCases.Auth.Login
             Mock<IAuditLogService>? auditLogService = null)
         {
             var tokenService = new Mock<IAuthenticationTokenService>();
-            tokenService.Setup(x => x.CreateTokens(It.IsAny<User>())).Returns(new AuthenticationTokens(
-                "access-token",
-                Now.AddMinutes(15),
-                "refresh-token",
-                "refresh-hash",
-                Now.AddDays(30)));
+            tokenService.Setup(x => x.CreateRefreshToken())
+                .Returns(new GeneratedRefreshToken("refresh-token", "refresh-hash", Now.AddDays(30)));
+            tokenService.Setup(x => x.CreateAccessToken(It.IsAny<User>(), It.IsAny<long>()))
+                .Returns<User, long>((_, sessionId) => new IssuedAccessToken($"access-token-sid-{sessionId}", Now.AddMinutes(15)));
 
             var currentUserService = new Mock<ICurrentUserService>();
             currentUserService.SetupGet(x => x.UserAgent).Returns("test-agent");

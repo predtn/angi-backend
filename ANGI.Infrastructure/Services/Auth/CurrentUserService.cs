@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using ANGI.Application.Common.Interfaces.Services.Auth;
@@ -5,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace ANGI.Infrastructure.Services.Auth
 {
-    /// <summary>Reads the user id, role, User-Agent, and IP address from the current HttpContext.</summary>
+    /// <summary>Reads the user id, role, session id, User-Agent, and IP address from the current HttpContext.</summary>
     public sealed class CurrentUserService : ICurrentUserService
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
@@ -29,6 +30,19 @@ namespace ANGI.Infrastructure.Services.Auth
 
         /// <summary>Gets the role code from the role claim (JwtConfig sets RoleClaimType = "role").</summary>
         public string? Role => _httpContextAccessor.HttpContext?.User.FindFirst("role")?.Value;
+
+        /// <summary>Gets the session id from the sid claim, returning null when it is missing or not numeric.</summary>
+        public long? SessionId
+        {
+            get
+            {
+                var value = _httpContextAccessor.HttpContext?.User
+                    .FindFirst(JwtRegisteredClaimNames.Sid)?.Value;
+                return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var sessionId)
+                    ? sessionId
+                    : null;
+            }
+        }
 
         /// <summary>Gets the User-Agent of the current request.</summary>
         public string? UserAgent => _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString();

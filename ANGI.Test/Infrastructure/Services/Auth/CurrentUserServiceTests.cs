@@ -7,6 +7,26 @@ namespace ANGI.Test.Infrastructure.Services.Auth
 {
     public sealed class CurrentUserServiceTests
     {
+        // TEST-03: Read the session id from the sid claim; a missing or non-numeric sid gives null.
+        [Theory]
+        [InlineData("77", 77L)]
+        [InlineData("not-a-number", null)]
+        [InlineData("-5", null)]
+        [InlineData(null, null)]
+        public void SessionId_ShouldComeFromTheSidClaim(string? sid, long? expected)
+        {
+            var claims = new List<Claim> { new("sub", "3") };
+            if (sid is not null)
+            {
+                claims.Add(new Claim("sid", sid));
+            }
+
+            var httpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+            var service = new CurrentUserService(new HttpContextAccessor { HttpContext = httpContext });
+
+            service.SessionId.Should().Be(expected);
+        }
+
         // TEST-01: Read the user id and role from the sub and role claims of the access token.
         [Fact]
         public void UserIdAndRole_WithAuthenticatedRequest_ShouldComeFromClaims()

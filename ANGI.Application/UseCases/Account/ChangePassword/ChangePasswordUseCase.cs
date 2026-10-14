@@ -102,37 +102,15 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
             return;
         }
 
-        UserSession? currentSession = null;
-
-        if (!string.IsNullOrEmpty(_currentUserService.UserAgent))
-        {
-            currentSession = activeSessions
-                .Where(s => string.Equals(s.UserAgent, _currentUserService.UserAgent, StringComparison.Ordinal))
-                .OrderByDescending(s => s.CreatedAt)
-                .FirstOrDefault();
-        }
-
-        if (currentSession is null && _currentUserService.IpAddress is not null)
-        {
-            currentSession = activeSessions
-                .Where(s => s.IpAddress is not null && s.IpAddress.Equals(_currentUserService.IpAddress))
-                .OrderByDescending(s => s.CreatedAt)
-                .FirstOrDefault();
-        }
-
-        if (currentSession is null)
-        {
-            currentSession = activeSessions.OrderByDescending(s => s.CreatedAt).FirstOrDefault();
-        }
-
+        // The current session is the one named by the access token's sid claim (API Design, ME-03). A token
+        // without sid cannot prove which session it belongs to, so every session is revoked.
+        var currentSessionId = _currentUserService.SessionId;
         foreach (var session in activeSessions)
         {
-            if (currentSession is not null && session.Id == currentSession.Id)
+            if (session.Id != currentSessionId)
             {
-                continue;
+                session.RevokedAt = now;
             }
-
-            session.RevokedAt = now;
         }
     }
 }

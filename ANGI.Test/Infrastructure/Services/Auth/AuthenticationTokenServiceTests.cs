@@ -10,10 +10,10 @@ namespace ANGI.Test.Infrastructure.Services.Auth
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
-        // TEST-01: Issue a signed access token with the required identity claims and configured lifetime.
+        // TEST-01: Issue a signed access token with the documented claims, the session id as sid, and its lifetime.
         /// <summary>Verifies access tokens contain the documented identity claims and expiry.</summary>
         [Fact]
-        public void CreateTokens_ShouldIssueRequiredJwtClaimsAndExpiry()
+        public void CreateAccessToken_ShouldIssueRequiredJwtClaimsSessionIdAndExpiry()
         {
             var service = CreateService();
             var user = new User
@@ -24,8 +24,8 @@ namespace ANGI.Test.Infrastructure.Services.Auth
                 Role = new Role { Code = "TRAVELER", Name = "Traveler" }
             };
 
-            var tokens = service.CreateTokens(user);
-            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(tokens.AccessToken);
+            var accessToken = service.CreateAccessToken(user, 77);
+            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(accessToken.Token);
 
             jwt.Issuer.Should().Be("ANGI.Tests");
             jwt.Audiences.Should().ContainSingle("ANGI.Client.Tests");
@@ -33,30 +33,26 @@ namespace ANGI.Test.Infrastructure.Services.Auth
             jwt.Claims.Should().Contain(claim => claim.Type == JwtRegisteredClaimNames.Email && claim.Value == "user@angi.test");
             jwt.Claims.Should().Contain(claim => claim.Type == "role" && claim.Value == "TRAVELER");
             jwt.Claims.Should().Contain(claim => claim.Type == "email_verified" && claim.Value == "true");
-            tokens.AccessTokenExpiresAt.Should().Be(Now.AddMinutes(15));
-            tokens.RefreshTokenExpiresAt.Should().Be(Now.AddDays(30));
+            jwt.Claims.Should().ContainSingle(claim => claim.Type == JwtRegisteredClaimNames.Sid)
+                .Which.Value.Should().Be("77");
+            accessToken.ExpiresAt.Should().Be(Now.AddMinutes(15));
         }
 
-        // TEST-02: Store only a deterministic SHA-256 hash while issuing a random refresh token.
+        // TEST-02: Store only a deterministic SHA-256 hash while issuing a random refresh token with its lifetime.
         /// <summary>Verifies refresh tokens are random and represented by a deterministic persisted hash.</summary>
         [Fact]
-        public void CreateTokens_ShouldReturnHashedRefreshToken()
+        public void CreateRefreshToken_ShouldReturnHashedRefreshTokenAndExpiry()
         {
             var service = CreateService();
-            var user = new User
-            {
-                Id = 12,
-                Email = "user@angi.test",
-                Role = new Role { Code = "TRAVELER", Name = "Traveler" }
-            };
 
-            var first = service.CreateTokens(user);
-            var second = service.CreateTokens(user);
+            var first = service.CreateRefreshToken();
+            var second = service.CreateRefreshToken();
 
-            first.RefreshToken.Should().NotBe(first.RefreshTokenHash);
-            first.RefreshTokenHash.Should().Be(service.HashRefreshToken(first.RefreshToken));
-            first.RefreshTokenHash.Should().HaveLength(64);
-            second.RefreshToken.Should().NotBe(first.RefreshToken);
+            first.Token.Should().NotBe(first.TokenHash);
+            first.TokenHash.Should().Be(service.HashRefreshToken(first.Token));
+            first.TokenHash.Should().HaveLength(64);
+            first.ExpiresAt.Should().Be(Now.AddDays(30));
+            second.Token.Should().NotBe(first.Token);
         }
 
         // TEST-03: Generate random user tokens while exposing only their deterministic hashes for storage.

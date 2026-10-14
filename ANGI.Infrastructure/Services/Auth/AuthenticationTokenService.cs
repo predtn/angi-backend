@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -26,12 +27,21 @@ namespace ANGI.Infrastructure.Services.Auth
             _timeProvider = timeProvider;
         }
 
-        /// <summary>Creates an access token with user claims and a random 64-byte refresh token.</summary>
-        public AuthenticationTokens CreateTokens(User user)
+        /// <summary>Creates a random 64-byte refresh token, its hash and its expiry.</summary>
+        public GeneratedRefreshToken CreateRefreshToken()
+        {
+            var refreshToken = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(64));
+            return new GeneratedRefreshToken(
+                refreshToken,
+                HashRefreshToken(refreshToken),
+                _timeProvider.GetUtcNow().UtcDateTime.AddDays(_settings.RefreshTokenDays));
+        }
+
+        /// <summary>Creates an access token with the user claims and the session id (claim sid).</summary>
+        public IssuedAccessToken CreateAccessToken(User user, long sessionId)
         {
             var now = _timeProvider.GetUtcNow().UtcDateTime;
             var accessTokenExpiresAt = now.AddMinutes(_settings.AccessTokenMinutes);
-            var refreshTokenExpiresAt = now.AddDays(_settings.RefreshTokenDays);
             var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.SecretKey));
 
             var claims = new[]
@@ -40,6 +50,7 @@ namespace ANGI.Infrastructure.Services.Auth
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
                 new Claim("role", user.Role.Code),
                 new Claim("email_verified", (user.EmailVerifiedAt.HasValue).ToString().ToLowerInvariant()),
+                new Claim(JwtRegisteredClaimNames.Sid, sessionId.ToString(CultureInfo.InvariantCulture)),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
@@ -51,13 +62,7 @@ namespace ANGI.Infrastructure.Services.Auth
                 expires: accessTokenExpiresAt,
                 signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256));
 
-            var refreshToken = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(64));
-            return new AuthenticationTokens(
-                new JwtSecurityTokenHandler().WriteToken(jwt),
-                accessTokenExpiresAt,
-                refreshToken,
-                HashRefreshToken(refreshToken),
-                refreshTokenExpiresAt);
+            return new IssuedAccessToken(new JwtSecurityTokenHandler().WriteToken(jwt), accessTokenExpiresAt);
         }
 
         /// <summary>Converts a refresh token to lowercase SHA-256 hex so the database never stores the plain token.</summary>

@@ -22,7 +22,8 @@ public sealed class ChangePasswordUseCaseTests
     private const string CurrentUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
     private static readonly IPAddress CurrentIp = IPAddress.Parse("127.0.0.1");
 
-    // TEST-01: Happy Path - Successfully change password and revoke other sessions while preserving current session.
+    // TEST-01: Happy Path - Change password and revoke other sessions, keeping the session named by the sid claim even
+    // when another session has the same User-Agent and is newer.
     [Fact]
     public async Task ExecuteAsync_WithValidCurrentAndNewPassword_ShouldUpdatePasswordHashAndRevokeOtherSessions()
     {
@@ -48,9 +49,9 @@ public sealed class ChangePasswordUseCaseTests
         {
             Id = 2,
             UserId = TestUserId,
-            UserAgent = "Other-Browser/1.0",
+            UserAgent = CurrentUserAgent,
             IpAddress = IPAddress.Parse("192.168.1.100"),
-            CreatedAt = Now.AddDays(-1),
+            CreatedAt = Now.AddMinutes(-5),
             RevokedAt = null
         };
 
@@ -67,6 +68,7 @@ public sealed class ChangePasswordUseCaseTests
 
         var currentUserService = new Mock<ICurrentUserService>();
         currentUserService.SetupGet(u => u.UserId).Returns(TestUserId);
+        currentUserService.SetupGet(u => u.SessionId).Returns(currentSession.Id);
         currentUserService.SetupGet(u => u.UserAgent).Returns(CurrentUserAgent);
         currentUserService.SetupGet(u => u.IpAddress).Returns(CurrentIp);
 
@@ -227,6 +229,7 @@ public sealed class ChangePasswordUseCaseTests
 
         var currentUserService = new Mock<ICurrentUserService>();
         currentUserService.SetupGet(u => u.UserId).Returns(TestUserId);
+        currentUserService.SetupGet(u => u.SessionId).Returns(session.Id);
 
         var auditLogService = new Mock<IAuditLogService>();
         var unitOfWork = new Mock<IUnitOfWork>();
@@ -310,6 +313,40 @@ public sealed class ChangePasswordUseCaseTests
         // Assert
         var ex = await act.Should().ThrowAsync<UnauthorizedException>();
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+    }
+
+    // TEST-07: Revoke every session when the access token has no sid claim, since the current session is unknown.
+    [Fact]
+    public async Task ExecuteAsync_WhenTokenHasNoSessionId_ShouldRevokeAllSessions()
+    {
+        var user = new User { Id = TestUserId, PasswordHash = null };
+        var sessions = new List<UserSession>
+        {
+            new() { Id = 1, UserId = TestUserId, UserAgent = CurrentUserAgent, CreatedAt = Now },
+            new() { Id = 2, UserId = TestUserId, UserAgent = CurrentUserAgent, CreatedAt = Now.AddHours(-1) }
+        };
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(r => r.GetUserByIdAsync(TestUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        accountRepository.Setup(r => r.GetActiveSessionsAsync(TestUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sessions);
+        var passwordService = new Mock<IPasswordService>();
+        passwordService.Setup(p => p.Hash("NewPassword456")).Returns("new_hash");
+        var currentUserService = new Mock<ICurrentUserService>();
+        currentUserService.SetupGet(u => u.UserId).Returns(TestUserId);
+        currentUserService.SetupGet(u => u.UserAgent).Returns(CurrentUserAgent);
+        var useCase = new ChangePasswordUseCase(
+            new ChangePasswordRequestDtoValidator(),
+            accountRepository.Object,
+            passwordService.Object,
+            currentUserService.Object,
+            Mock.Of<IAuditLogService>(),
+            Mock.Of<IUnitOfWork>(),
+            new FixedTimeProvider(Now));
+
+        await useCase.ExecuteAsync(new ChangePasswordRequestDto { NewPassword = "NewPassword456" }, CancellationToken.None);
+
+        sessions.Should().OnlyContain(session => session.RevokedAt == Now);
     }
 
     private sealed class FixedTimeProvider : TimeProvider
