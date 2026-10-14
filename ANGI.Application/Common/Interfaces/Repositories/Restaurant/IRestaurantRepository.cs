@@ -25,6 +25,12 @@ public interface IRestaurantRepository
     /// <summary>Loads and tracks the complete owner profile so OWN-03 can update it.</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedOwnerProfileAsync(int ownerId, CancellationToken ct);
 
+    /// <summary>Locks and tracks the owner's restaurant while an OWN-06 submission is created.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> LockOwnerRestaurantForVerificationAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>Adds a restaurant verification aggregate to the current unit of work.</summary>
+    void AddVerification(RestaurantVerification verification);
+
     /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct);
 

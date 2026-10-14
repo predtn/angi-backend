@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Services;
-using ANGI.Application.DTOs.Account;
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
@@ -70,7 +69,7 @@ internal static class OwnerRestaurantMapper
             ModerationStatus = ToApiValue(restaurant.ModerationStatus),
             LatestVerification = latestVerification is null
                 ? null
-                : MapVerification(latestVerification, cloudinaryService),
+                : RestaurantVerificationMapper.Map(latestVerification, cloudinaryService),
             OpenMenuSubmission = openMenuSubmission is null
                 ? null
                 : new OpenMenuSubmissionDto
@@ -80,41 +79,6 @@ internal static class OwnerRestaurantMapper
                 },
             CreatedAt = restaurant.CreatedAt,
             UpdatedAt = restaurant.UpdatedAt
-        };
-    }
-
-    /// <summary>Maps the latest verification and signs every private document URL.</summary>
-    private static VerificationDto MapVerification(
-        RestaurantVerification verification,
-        ICloudinaryService cloudinaryService)
-    {
-        return new VerificationDto
-        {
-            Id = verification.Id,
-            RestaurantId = verification.RestaurantId,
-            Status = ToApiValue(verification.Status),
-            LegalName = verification.LegalName ?? string.Empty,
-            BusinessLicenseNo = verification.BusinessLicenseNo ?? string.Empty,
-            TaxCode = verification.TaxCode,
-            OwnerNote = verification.OwnerNote,
-            Documents = verification.Documents.Select(document => new VerificationDocumentDto
-            {
-                DocType = ToApiValue(document.DocType),
-                MediaId = document.MediaId,
-                Url = cloudinaryService.GetUrl(document.Media.StorageKey)
-            }).ToArray(),
-            PreviousId = verification.PreviousId,
-            SubmittedAt = verification.SubmittedAt,
-            ReviewedBy = verification.Reviewer is null
-                ? null
-                : new UserSummaryDto
-                {
-                    Id = verification.Reviewer.Id,
-                    DisplayName = verification.Reviewer.DisplayName,
-                    AvatarUrl = verification.Reviewer.AvatarMedia?.Url
-                },
-            ReviewedAt = verification.ReviewedAt,
-            ReviewNote = verification.ReviewNote
         };
     }
 

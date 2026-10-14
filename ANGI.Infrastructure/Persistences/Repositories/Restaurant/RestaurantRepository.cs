@@ -69,6 +69,27 @@ public sealed class RestaurantRepository : IRestaurantRepository
             .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
     }
 
+    /// <summary>Locks the owner's restaurant row to serialize verification state transitions.</summary>
+    public Task<Domain.Entities.Restaurant?> LockOwnerRestaurantForVerificationAsync(
+        int ownerId,
+        CancellationToken ct)
+    {
+        return _context.Restaurants
+            .FromSqlInterpolated($$"""
+                SELECT *
+                FROM core.restaurants
+                WHERE owner_id = {{ownerId}}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+    }
+
+    /// <summary>Adds a verification and its document children without saving immediately.</summary>
+    public void AddVerification(RestaurantVerification verification)
+    {
+        _context.RestaurantVerifications.Add(verification);
+    }
+
     /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
     public Task<Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct)
     {
