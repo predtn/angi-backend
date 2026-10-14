@@ -277,7 +277,7 @@ Name the API Design endpoint id in the comment above each action: `// RM-01`, or
 
 ## 13. Current user
 
-A use case that needs the caller's identity (author, ownership check) uses `ICurrentUserService` (`UserId`, `Role`, `IpAddress`, `UserAgent`). Never inject `IHttpContextAccessor` into Application.
+A use case that needs the caller's identity (author, ownership check) uses `ICurrentUserService` (`UserId`, `Role`, `SessionId`, `IpAddress`, `UserAgent`). `SessionId` is the `sid` claim: the caller's own `user_sessions` row (e.g. the session ME-03 keeps); never guess it from IP or User-Agent. Never inject `IHttpContextAccessor` into Application.
 
 ## 14. Transactions
 

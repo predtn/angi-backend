@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.WebApi.Controllers.Account;
 
-/// <summary>Exposes authenticated personal profile management endpoints (ME-01, ME-02).</summary>
+/// <summary>Exposes authenticated personal profile and password endpoints (ME-01, ME-02, ME-03).</summary>
 [ApiController]
 [Route("api/v1/me")]
 [Authorize]
@@ -15,13 +15,16 @@ public sealed class MeController : ControllerBase
 {
     private readonly IGetMyProfileUseCase _getMyProfileUseCase;
     private readonly IUpdateMyProfileUseCase _updateMyProfileUseCase;
+    private readonly IChangePasswordUseCase _changePasswordUseCase;
 
     public MeController(
         IGetMyProfileUseCase getMyProfileUseCase,
-        IUpdateMyProfileUseCase updateMyProfileUseCase)
+        IUpdateMyProfileUseCase updateMyProfileUseCase,
+        IChangePasswordUseCase changePasswordUseCase)
     {
         _getMyProfileUseCase = getMyProfileUseCase;
         _updateMyProfileUseCase = updateMyProfileUseCase;
+        _changePasswordUseCase = changePasswordUseCase;
     }
 
     /// <summary>Lấy thông tin profile của người dùng đang đăng nhập (ME-01).</summary>
@@ -64,6 +67,24 @@ public sealed class MeController : ControllerBase
         {
             Success = true,
             Data = result
+        });
+    }
+
+    // ME-03
+    /// <summary>Receives an ME-03 request and changes the authenticated user's password while revoking other sessions.</summary>
+    [HttpPut("password")]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody, BindRequired] ChangePasswordRequestDto request,
+        CancellationToken ct)
+    {
+        await _changePasswordUseCase.ExecuteAsync(request, ct);
+        return StatusCode(StatusCodes.Status200OK, new ApiResponse<object>
+        {
+            Success = true,
+            Data = null
         });
     }
 }

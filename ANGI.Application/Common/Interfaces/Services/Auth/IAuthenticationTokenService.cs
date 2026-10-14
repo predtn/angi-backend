@@ -6,8 +6,17 @@ namespace ANGI.Application.Common.Interfaces.Services.Auth
     /// <summary>Provides JWT issuance and secure opaque-token generation and hashing.</summary>
     public interface IAuthenticationTokenService
     {
-        /// <summary>Creates an access-token and refresh-token pair for a user.</summary>
-        AuthenticationTokens CreateTokens(User user);
+        /// <summary>
+        /// Creates the refresh token of a new session; its hash is stored in user_sessions before the
+        /// access token is issued.
+        /// </summary>
+        GeneratedRefreshToken CreateRefreshToken();
+
+        /// <summary>
+        /// Creates the access token of a saved session. The token carries the session id as claim sid,
+        /// so the API knows which session a request comes from (ME-03 keeps it).
+        /// </summary>
+        IssuedAccessToken CreateAccessToken(User user, long sessionId);
 
         /// <summary>Hashes a refresh token before it is queried or stored in the database.</summary>
         string HashRefreshToken(string refreshToken);

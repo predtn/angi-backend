@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Account;
+using ANGI.Application.UseCases.Account.ChangePassword;
 using ANGI.Application.UseCases.Account.GetMyProfile;
 using ANGI.Application.UseCases.Account.UpdateMyProfile;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,7 @@ public static class AccountModule
     {
         services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
         services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
+        services.AddScoped<IChangePasswordUseCase, ChangePasswordUseCase>();
         return services;
     }
 }

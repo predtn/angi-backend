@@ -85,7 +85,7 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 | Topic | Rule |
 |---|---|
 | Base URL, JSON | `/api/v1`, camelCase, every response wrapped in `ApiResponse<T>` (`coding_rule.md` §5) |
-| Tokens | Access token 15 min; refresh token 30 days, rotated on every use (`core.user_sessions`). Claims: `sub`, `role`, `email_verified` |
+| Tokens | Access token 15 min; refresh token 30 days, rotated on every use (`core.user_sessions`). Claims: `sub`, `email`, `role`, `email_verified`, `sid` (= `user_sessions.id` of the session that issued the token; a refresh issues a new session, so a new `sid`), `jti` |
 | Access | Column "Auth / Role" of the API Design: `Public` needs no token; `Public (token tùy chọn)` personalizes when a token is sent; a named role allows only that role (403 otherwise). An account that is not `active` is rejected on every endpoint that needs a token, even with a valid access token, with the same codes as AUTH-04 (`ACCOUNT_SUSPENDED` + `suspendedUntil`, `ACCOUNT_BANNED`, `ACCOUNT_DEACTIVATED`, `EMAIL_NOT_VERIFIED`). The status is read from the database with a 30 s cache (`IAccountStatusCache`); every use case that changes `users.status` calls `Invalidate(userId)` |
 | Mod / Admin permissions | Effective permissions = role default + allow − deny (`core.user_permissions`), read from the database with a short cache, never from the JWT. Admin has every permission |
 | Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId` |

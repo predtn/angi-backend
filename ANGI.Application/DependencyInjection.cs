@@ -15,8 +15,8 @@ namespace ANGI.Application
         {
             services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
             services.AddSingleton(TimeProvider.System);
-            services.AddAuthUseCases();
             services.AddAccountUseCases();
+            services.AddAuthUseCases();
             services.AddMediaUseCases();
             services.AddRestaurantUseCases();
 

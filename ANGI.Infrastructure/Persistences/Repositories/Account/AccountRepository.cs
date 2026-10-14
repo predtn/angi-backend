@@ -103,4 +103,16 @@ public sealed class AccountRepository : IAccountRepository
 
         return [];
     }
+
+    public Task<User?> GetUserByIdAsync(int userId, CancellationToken ct)
+    {
+        return _context.Users.FirstOrDefaultAsync(user => user.Id == userId, ct);
+    }
+
+    public async Task<IReadOnlyList<UserSession>> GetActiveSessionsAsync(int userId, CancellationToken ct)
+    {
+        return await _context.UserSessions
+            .Where(session => session.UserId == userId && session.RevokedAt == null)
+            .ToListAsync(ct);
+    }
 }

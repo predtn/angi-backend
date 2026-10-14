@@ -14,9 +14,10 @@ public sealed class MeControllerTests
 {
     private readonly Mock<IGetMyProfileUseCase> _getMyProfileUseCase = new();
     private readonly Mock<IUpdateMyProfileUseCase> _updateMyProfileUseCase = new();
+    private readonly Mock<IChangePasswordUseCase> _changePasswordUseCase = new();
 
     private MeController CreateController() =>
-        new(_getMyProfileUseCase.Object, _updateMyProfileUseCase.Object);
+        new(_getMyProfileUseCase.Object, _updateMyProfileUseCase.Object, _changePasswordUseCase.Object);
 
     [Fact]
     public void Controller_ShouldRequireAuthorization()
@@ -81,5 +82,44 @@ public sealed class MeControllerTests
         var response = okResult.Value.Should().BeOfType<ApiResponse<UserProfileDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeEquivalentTo(updatedProfile);
+    }
+
+    [Fact]
+    public void ChangePassword_ShouldHaveDocumentedOpenApiProducesResponseTypes()
+    {
+        var method = typeof(MeController).GetMethod(nameof(MeController.ChangePassword));
+        method.Should().NotBeNull();
+
+        var producesResponseTypes = method!
+            .GetCustomAttributes(typeof(ProducesResponseTypeAttribute), inherit: true)
+            .Cast<ProducesResponseTypeAttribute>()
+            .Select(attr => attr.StatusCode)
+            .ToList();
+
+        producesResponseTypes.Should().Contain(StatusCodes.Status200OK);
+        producesResponseTypes.Should().Contain(StatusCodes.Status400BadRequest);
+        producesResponseTypes.Should().Contain(StatusCodes.Status401Unauthorized);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WhenSuccessful_ShouldReturnOkWithNullData()
+    {
+        var controller = CreateController();
+        var request = new ChangePasswordRequestDto
+        {
+            CurrentPassword = "OldPassword123",
+            NewPassword = "NewPassword456"
+        };
+
+        var actionResult = await controller.ChangePassword(request, CancellationToken.None);
+
+        var objectResult = actionResult.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        var response = objectResult.Value.Should().BeOfType<ApiResponse<object>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeNull();
+
+        _changePasswordUseCase.Verify(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

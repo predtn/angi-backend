@@ -6,6 +6,7 @@ using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.Common.Models.Audit;
+using ANGI.Application.Common.Models.Auth;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Domain.Entities;
 using FluentValidation;
@@ -68,17 +69,18 @@ namespace ANGI.Application.UseCases.Auth.Login
             AccountStatusRules.EnsureActive(user.Status, user.SuspendedUntil);
 
             var now = _timeProvider.GetUtcNow().UtcDateTime;
-            var tokens = _tokenService.CreateTokens(user);
+            var refreshToken = _tokenService.CreateRefreshToken();
 
             user.LastLoginAt = now;
-            _authenticationRepository.AddSession(new UserSession
+            var session = new UserSession
             {
                 UserId = user.Id,
-                RefreshTokenHash = tokens.RefreshTokenHash,
+                RefreshTokenHash = refreshToken.TokenHash,
                 UserAgent = _currentUserService.UserAgent,
                 IpAddress = _currentUserService.IpAddress,
-                ExpiresAt = tokens.RefreshTokenExpiresAt
-            });
+                ExpiresAt = refreshToken.ExpiresAt
+            };
+            _authenticationRepository.AddSession(session);
             // AUTH-04 has no token yet, so the actor is the user who just logged in.
             _auditLogService.Add(new AuditLogEntry
             {
@@ -91,6 +93,15 @@ namespace ANGI.Application.UseCases.Auth.Login
             });
 
             await _unitOfWork.SaveChangesAsync(ct);
+
+            // The session id exists only once saved; the access token carries it as claim sid.
+            var accessToken = _tokenService.CreateAccessToken(user, session.Id);
+            var tokens = new AuthenticationTokens(
+                accessToken.Token,
+                accessToken.ExpiresAt,
+                refreshToken.Token,
+                refreshToken.TokenHash,
+                refreshToken.ExpiresAt);
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(user, ct);
             return AuthenticationResponseMapper.Map(user, tokens, needsPreferenceSurvey);

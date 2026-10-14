@@ -4,6 +4,7 @@ using ANGI.Application.Common.Interfaces.Repositories.Auth;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
+using ANGI.Application.Common.Models.Auth;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
@@ -75,18 +76,28 @@ namespace ANGI.Application.UseCases.Auth.Refresh
             }
 
             session.RevokedAt = now;
-            var tokens = _tokenService.CreateTokens(session.User);
-            _authenticationRepository.AddSession(new UserSession
+            var refreshToken = _tokenService.CreateRefreshToken();
+            var newSession = new UserSession
             {
                 UserId = session.UserId,
-                RefreshTokenHash = tokens.RefreshTokenHash,
+                RefreshTokenHash = refreshToken.TokenHash,
                 UserAgent = session.UserAgent,
                 IpAddress = session.IpAddress,
-                ExpiresAt = tokens.RefreshTokenExpiresAt
-            });
+                ExpiresAt = refreshToken.ExpiresAt
+            };
+            _authenticationRepository.AddSession(newSession);
 
             await _unitOfWork.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+
+            // Rotation creates a new session row, so the new access token carries its id as claim sid.
+            var accessToken = _tokenService.CreateAccessToken(session.User, newSession.Id);
+            var tokens = new AuthenticationTokens(
+                accessToken.Token,
+                accessToken.ExpiresAt,
+                refreshToken.Token,
+                refreshToken.TokenHash,
+                refreshToken.ExpiresAt);
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(session.User, ct);
             return AuthenticationResponseMapper.Map(session.User, tokens, needsPreferenceSurvey);

@@ -30,8 +30,8 @@ namespace ANGI.Infrastructure
                                   npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", ANGIContext.Schema))
                        .UseSnakeCaseNamingConvention());
             services.AddScoped<IUnitOfWork, UnitOfWork>();
-            services.AddAuthInfrastructure(configuration);
             services.AddAccountInfrastructure();
+            services.AddAuthInfrastructure(configuration);
             services.AddMediaInfrastructure();
             services.AddMapboxInfrastructure(configuration);
             services.AddRecommendationInfrastructure(configuration);

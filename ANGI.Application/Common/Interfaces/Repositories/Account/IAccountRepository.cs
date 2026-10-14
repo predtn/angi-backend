@@ -2,7 +2,7 @@ using ANGI.Domain.Entities;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Account;
 
-/// <summary>Provides persistence operations required by Account / Personal Profile use cases.</summary>
+/// <summary>Provides persistence operations required by the Account use cases.</summary>
 public interface IAccountRepository
 {
     /// <summary>Loads user and avatar media as read-only (no tracking) for ME-01.</summary>
@@ -19,4 +19,10 @@ public interface IAccountRepository
 
     /// <summary>Gets effective permissions for the user (Mod/Admin permissions, empty for other roles).</summary>
     Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(int userId, string roleCode, CancellationToken ct);
+
+    /// <summary>Finds a user by ID for reading and updating password/profile.</summary>
+    Task<User?> GetUserByIdAsync(int userId, CancellationToken ct);
+
+    /// <summary>Gets active sessions of a user that have not been revoked.</summary>
+    Task<IReadOnlyList<UserSession>> GetActiveSessionsAsync(int userId, CancellationToken ct);
 }

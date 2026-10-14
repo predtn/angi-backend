@@ -11,6 +11,12 @@ namespace ANGI.Application.Common.Interfaces.Services.Auth
         /// <summary>Gets the role code from the role claim, or null when the request is unauthenticated.</summary>
         string? Role { get; }
 
+        /// <summary>
+        /// Gets the user_sessions id from the sid claim: the session the request comes from, or null for an
+        /// unauthenticated request or a token issued without sid.
+        /// </summary>
+        long? SessionId { get; }
+
         /// <summary>Gets the User-Agent value of the current request.</summary>
         string? UserAgent { get; }
 
