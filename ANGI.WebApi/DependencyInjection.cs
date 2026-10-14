@@ -1,4 +1,4 @@
-using System.Text.Json;
+using ANGI.WebApi.Common;
 using ANGI.WebApi.Common.Models;
 using ANGI.WebApi.Configs;
 using ANGI.WebApi.Middlewares;
@@ -30,7 +30,7 @@ namespace ANGI.WebApi
                         var errors = context.ModelState
                             .Where(entry => entry.Value?.Errors.Count > 0)
                             .ToDictionary(
-                                entry => JsonNamingPolicy.CamelCase.ConvertName(entry.Key),
+                                entry => ValidationErrorKeys.ToCamelCase(entry.Key),
                                 entry => entry.Value!.Errors
                                     .Select(error => string.IsNullOrWhiteSpace(error.ErrorMessage)
                                         ? "Giá trị không hợp lệ."

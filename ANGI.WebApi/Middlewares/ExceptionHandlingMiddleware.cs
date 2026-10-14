@@ -1,7 +1,7 @@
-using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.DTOs.Restaurant;
+using ANGI.WebApi.Common;
 using ANGI.WebApi.Common.Models;
 using FluentValidation;
 
@@ -117,7 +117,7 @@ namespace ANGI.WebApi.Middlewares
         private static Dictionary<string, string[]> GroupValidationErrors(ValidationException exception)
         {
             return exception.Errors
-                .GroupBy(failure => JsonNamingPolicy.CamelCase.ConvertName(failure.PropertyName))
+                .GroupBy(failure => ValidationErrorKeys.ToCamelCase(failure.PropertyName))
                 .ToDictionary(
                     group => group.Key,
                     group => group.Select(failure => failure.ErrorMessage).Distinct().ToArray());
