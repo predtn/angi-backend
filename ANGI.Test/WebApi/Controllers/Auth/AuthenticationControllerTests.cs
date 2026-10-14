@@ -153,7 +153,30 @@ namespace ANGI.Test.WebApi.Controllers.Auth
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
-        // TEST-07: Return a successful null-data response after requesting a password reset.
+        // TEST-07: Wrap a successful Google login result in the documented AUTH-05 response.
+        /// <summary>Verifies AUTH-05 exposes AuthResult fields and isNewUser through ApiResponse.</summary>
+        [Fact]
+        public async Task GoogleLogin_ShouldReturnOkApiResponse()
+        {
+            var expected = new GoogleLoginResponseDto { AccessToken = "access-token", IsNewUser = true };
+            var googleLoginUseCase = new Mock<IGoogleLoginUseCase>();
+            googleLoginUseCase.Setup(x => x.ExecuteAsync(
+                    It.IsAny<GoogleLoginRequestDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(expected);
+            var controller = CreateController(googleLoginUseCase: googleLoginUseCase);
+
+            var action = await controller.GoogleLogin(
+                new GoogleLoginRequestDto { IdToken = "google-token", Role = "TRAVELER" },
+                CancellationToken.None);
+
+            var result = action.Should().BeOfType<OkObjectResult>().Subject;
+            var response = result.Value.Should().BeOfType<ApiResponse<GoogleLoginResponseDto>>().Subject;
+            response.Success.Should().BeTrue();
+            response.Data.Should().BeSameAs(expected);
+        }
+
+        // TEST-18: Return a successful null-data response after requesting a password reset.
         /// <summary>Verifies AUTH-08 delegates to its use case and preserves the non-enumerating response shape.</summary>
         [Fact]
         public async Task ForgotPassword_ShouldReturnOkApiResponseWithNullData()
@@ -187,6 +210,9 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             controllerType.GetMethod(nameof(AuthenticationController.Login))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
+            controllerType.GetMethod(nameof(AuthenticationController.GoogleLogin))!
+                .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
+                .Should().ContainSingle();
             controllerType.GetMethod(nameof(AuthenticationController.Refresh))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
@@ -208,6 +234,7 @@ namespace ANGI.Test.WebApi.Controllers.Auth
         private static AuthenticationController CreateController(
             Mock<IRegisterAccountUseCase>? registerAccountUseCase = null,
             Mock<ILoginUseCase>? loginUseCase = null,
+            Mock<IGoogleLoginUseCase>? googleLoginUseCase = null,
             Mock<IRefreshTokenUseCase>? refreshTokenUseCase = null,
             Mock<ILogoutUseCase>? logoutUseCase = null,
             Mock<IVerifyEmailUseCase>? verifyEmailUseCase = null,
@@ -217,6 +244,7 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             return new AuthenticationController(
                 (registerAccountUseCase ?? new Mock<IRegisterAccountUseCase>()).Object,
                 (loginUseCase ?? new Mock<ILoginUseCase>()).Object,
+                (googleLoginUseCase ?? new Mock<IGoogleLoginUseCase>()).Object,
                 (refreshTokenUseCase ?? new Mock<IRefreshTokenUseCase>()).Object,
                 (logoutUseCase ?? new Mock<ILogoutUseCase>()).Object,
                 (verifyEmailUseCase ?? new Mock<IVerifyEmailUseCase>()).Object,
@@ -242,6 +270,7 @@ namespace ANGI.Test.WebApi.Controllers
         /// <summary>Lists public Auth endpoints whose contracts require a JSON request body.</summary>
         public static TheoryData<string> BodyEndpoints => new()
         {
+            "/api/v1/auth/google",
             "/api/v1/auth/verify-email",
             "/api/v1/auth/verify-email/resend",
             "/api/v1/auth/forgot-password"
@@ -365,7 +394,7 @@ namespace ANGI.Test.WebApi.Controllers
             replenished.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // TEST-16: Expose AUTH-02, AUTH-03, and AUTH-08 schemas to API Explorer/OpenAPI.
+        // TEST-16: Expose AUTH-02, AUTH-03, AUTH-05, and AUTH-08 schemas to API Explorer/OpenAPI.
         /// <summary>Verifies Scalar can discover each implemented Auth request and success schema.</summary>
         [Fact]
         public void ApiExplorer_ShouldExposeAuthenticationVerificationSchemas()
@@ -385,6 +414,28 @@ namespace ANGI.Test.WebApi.Controllers
             AssertOpenApiContract<ForgotPasswordRequestDto, object>(
                 descriptions,
                 "api/v1/auth/forgot-password");
+            AssertOpenApiContract<GoogleLoginRequestDto, GoogleLoginResponseDto>(
+                descriptions,
+                "api/v1/auth/google");
+        }
+
+        // TEST-17: Map both AUTH-05 application errors to their documented HTTP envelopes.
+        /// <summary>Verifies Google token and first-login role failures preserve their status and error code.</summary>
+        [Theory]
+        [InlineData("invalid-token", "TRAVELER", HttpStatusCode.Unauthorized, "GOOGLE_TOKEN_INVALID")]
+        [InlineData("role-required", null, HttpStatusCode.BadRequest, "ROLE_REQUIRED")]
+        public async Task GoogleLogin_WithApplicationFailure_ShouldReturnDocumentedEnvelope(
+            string idToken,
+            string? role,
+            HttpStatusCode expectedStatus,
+            string expectedCode)
+        {
+            using var response = await _factory.CreateClient().PostAsJsonAsync(
+                "/api/v1/auth/google",
+                new GoogleLoginRequestDto { IdToken = idToken, Role = role });
+
+            response.StatusCode.Should().Be(expectedStatus);
+            await AssertErrorEnvelope(response, expectedCode);
         }
 
         /// <summary>Asserts one POST endpoint publishes its body and successful response model.</summary>
@@ -494,9 +545,11 @@ namespace ANGI.Test.WebApi.Controllers
                 services.RemoveAll<IVerifyEmailUseCase>();
                 services.RemoveAll<IResendVerificationEmailUseCase>();
                 services.RemoveAll<IForgotPasswordUseCase>();
+                services.RemoveAll<IGoogleLoginUseCase>();
                 services.AddScoped<IVerifyEmailUseCase, StubVerifyEmailUseCase>();
                 services.AddScoped<IResendVerificationEmailUseCase, StubResendVerificationEmailUseCase>();
                 services.AddScoped<IForgotPasswordUseCase, StubForgotPasswordUseCase>();
+                services.AddScoped<IGoogleLoginUseCase, StubGoogleLoginUseCase>();
             });
         }
 
@@ -540,5 +593,28 @@ namespace ANGI.Test.WebApi.Controllers
             public Task ExecuteAsync(ForgotPasswordRequestDto request, CancellationToken ct) => Task.CompletedTask;
         }
 
+        private sealed class StubGoogleLoginUseCase : IGoogleLoginUseCase
+        {
+            /// <summary>Returns deterministic AUTH-05 outcomes without contacting Google or PostgreSQL.</summary>
+            public Task<GoogleLoginResponseDto> ExecuteAsync(
+                GoogleLoginRequestDto request,
+                CancellationToken ct)
+            {
+                return request.IdToken switch
+                {
+                    "invalid-token" => throw new UnauthorizedException(
+                        "GOOGLE_TOKEN_INVALID",
+                        "Google ID token không hợp lệ."),
+                    "role-required" => throw new BadRequestException(
+                        "ROLE_REQUIRED",
+                        "Vai trò là bắt buộc."),
+                    _ => Task.FromResult(new GoogleLoginResponseDto
+                    {
+                        AccessToken = "access-token",
+                        IsNewUser = false
+                    })
+                };
+            }
+        }
     }
 }

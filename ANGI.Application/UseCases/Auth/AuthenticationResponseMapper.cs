@@ -32,6 +32,25 @@ namespace ANGI.Application.UseCases.Auth
             };
         }
 
+        /// <summary>Creates the AUTH-05 response by adding new-account state to the shared authentication result.</summary>
+        public static GoogleLoginResponseDto MapGoogle(
+            User user,
+            AuthenticationTokens tokens,
+            bool? needsPreferenceSurvey,
+            bool isNewUser)
+        {
+            var result = Map(user, tokens, needsPreferenceSurvey);
+            return new GoogleLoginResponseDto
+            {
+                AccessToken = result.AccessToken,
+                AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                RefreshToken = result.RefreshToken,
+                RefreshTokenExpiresAt = result.RefreshTokenExpiresAt,
+                User = result.User,
+                IsNewUser = isNewUser
+            };
+        }
+
         /// <summary>Converts a PascalCase enum name to snake_case for the API JSON contract.</summary>
         private static string ToSnakeCase(string value)
         {
