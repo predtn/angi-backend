@@ -34,7 +34,8 @@ public sealed class OwnerRestaurantControllerTests
             useCase.Object,
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IResubmitVerificationUseCase>());
 
         var action = await controller.Register(request, CancellationToken.None);
 
@@ -58,7 +59,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             useCase.Object,
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IResubmitVerificationUseCase>());
 
         var action = await controller.Get(CancellationToken.None);
 
@@ -80,7 +82,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             useCase.Object,
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IResubmitVerificationUseCase>());
 
         var action = await controller.Update(request, CancellationToken.None);
 
@@ -115,7 +118,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IResubmitVerificationUseCase>());
 
         var action = await controller.SubmitVerification(request, CancellationToken.None);
 
@@ -125,5 +129,44 @@ public sealed class OwnerRestaurantControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-05: Return the OWN-08 verification payload in ApiResponse with HTTP 201 and forward the route id.
+    /// <summary>Verifies resubmission delegation, route id forwarding and response wrapping.</summary>
+    [Fact]
+    public async Task ResubmitVerification_WithValidRequest_ShouldReturnCreatedApiResponse()
+    {
+        var request = new ResubmitVerificationRequestDto
+        {
+            LegalName = "Hộ kinh doanh Bún Bò Bà Diệu",
+            BusinessLicenseNo = "32A8012345",
+            Documents =
+            [
+                new VerificationDocumentRequestDto
+                {
+                    DocType = "food_safety_cert",
+                    MediaId = 9002
+                }
+            ]
+        };
+        var expected = new VerificationDto { Id = 22, RestaurantId = 7, Status = "pending", PreviousId = 21 };
+        var useCase = new Mock<IResubmitVerificationUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(21, request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
+        var controller = new OwnerRestaurantController(
+            Mock.Of<IRegisterRestaurantUseCase>(),
+            Mock.Of<IGetOwnerRestaurantUseCase>(),
+            Mock.Of<IUpdateOwnerRestaurantUseCase>(),
+            Mock.Of<ISubmitVerificationUseCase>(),
+            useCase.Object);
+
+        var action = await controller.ResubmitVerification(21, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        var response = result.Value.Should().BeOfType<ApiResponse<VerificationDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+        useCase.Verify(item => item.ExecuteAsync(21, request, It.IsAny<CancellationToken>()), Times.Once);
     }
 }
