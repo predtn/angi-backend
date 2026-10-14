@@ -17,6 +17,7 @@ namespace ANGI.WebApi.Controllers.Auth
         private readonly ILogoutUseCase _logoutUseCase;
         private readonly IVerifyEmailUseCase _verifyEmailUseCase;
         private readonly IResendVerificationEmailUseCase _resendVerificationEmailUseCase;
+        private readonly IForgotPasswordUseCase _forgotPasswordUseCase;
 
         /// <summary>Initializes the HTTP boundary with the Auth use-case abstractions.</summary>
         public AuthenticationController(
@@ -25,7 +26,8 @@ namespace ANGI.WebApi.Controllers.Auth
             IRefreshTokenUseCase refreshTokenUseCase,
             ILogoutUseCase logoutUseCase,
             IVerifyEmailUseCase verifyEmailUseCase,
-            IResendVerificationEmailUseCase resendVerificationEmailUseCase)
+            IResendVerificationEmailUseCase resendVerificationEmailUseCase,
+            IForgotPasswordUseCase forgotPasswordUseCase)
         {
             _registerAccountUseCase = registerAccountUseCase;
             _loginUseCase = loginUseCase;
@@ -33,6 +35,7 @@ namespace ANGI.WebApi.Controllers.Auth
             _logoutUseCase = logoutUseCase;
             _verifyEmailUseCase = verifyEmailUseCase;
             _resendVerificationEmailUseCase = resendVerificationEmailUseCase;
+            _forgotPasswordUseCase = forgotPasswordUseCase;
         }
 
         /// <summary>Receives an AUTH-02 request, consumes its token, and returns the verified account state.</summary>
@@ -60,6 +63,22 @@ namespace ANGI.WebApi.Controllers.Auth
             CancellationToken ct)
         {
             await _resendVerificationEmailUseCase.ExecuteAsync(request, ct);
+            return Ok(new ApiResponse<object>
+            {
+                Success = true,
+                Data = null
+            });
+        }
+
+        /// <summary>Receives an AUTH-08 request, conditionally sends a reset link, and always returns null data.</summary>
+        [AllowAnonymous]
+        [HttpPost("forgot-password")]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ForgotPassword(
+            [FromBody, BindRequired] ForgotPasswordRequestDto request,
+            CancellationToken ct)
+        {
+            await _forgotPasswordUseCase.ExecuteAsync(request, ct);
             return Ok(new ApiResponse<object>
             {
                 Success = true,

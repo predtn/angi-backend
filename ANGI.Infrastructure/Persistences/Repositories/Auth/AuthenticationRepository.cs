@@ -42,7 +42,7 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                 .FirstOrDefaultAsync(role => role.Code == roleCode, ct);
         }
 
-        /// <summary>Loads and locks a user so concurrent resend requests replace tokens in sequence.</summary>
+        /// <summary>Loads and locks a user so concurrent verification or reset requests replace tokens in sequence.</summary>
         public Task<User?> GetUserByEmailForUpdateAsync(string normalizedEmail, CancellationToken ct)
         {
             return _context.Users
