@@ -8,6 +8,7 @@ using ANGI.Application.UseCases.Auth.VerifyEmail;
 using ANGI.Application.UseCases.Validators.Auth;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
+using ANGI.IntegrationTests.Fixtures;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Persistences.Repositories.Auth;
@@ -199,11 +200,7 @@ public sealed class EmailVerificationPostgresConcurrencyTests
     /// <summary>Creates an ANGI database context configured for the dedicated PostgreSQL test database.</summary>
     private static ANGIContext CreateContext(string connectionString)
     {
-        var options = new DbContextOptionsBuilder<ANGIContext>()
-            .UseNpgsql(connectionString)
-            .UseSnakeCaseNamingConvention()
-            .Options;
-        return new ANGIContext(options, new FixedTimeProvider(Now));
+        return PostgresTestDatabase.CreateContext(connectionString, new FixedTimeProvider(Now));
     }
 
     /// <summary>Returns the PostgreSQL integration-test connection string validated by the test attribute.</summary>
@@ -224,30 +221,5 @@ public sealed class EmailVerificationPostgresConcurrencyTests
 
         /// <summary>Returns the fixed UTC instant used by the integration scenario.</summary>
         public override DateTimeOffset GetUtcNow() => _now;
-    }
-}
-
-/// <summary>Guards PostgreSQL tests from running against an unapproved database.</summary>
-public sealed class PostgresIntegrationFactAttribute : FactAttribute
-{
-    public const string ConnectionStringVariable = "ANGI_TEST_POSTGRES_CONNECTION_STRING";
-
-    /// <summary>Enables the test only when a dedicated PostgreSQL test database is explicitly configured.</summary>
-    public PostgresIntegrationFactAttribute()
-    {
-        var connectionString = Environment.GetEnvironmentVariable(ConnectionStringVariable);
-        if (Environment.GetEnvironmentVariable("RUN_POSTGRES_INTEGRATION_TESTS") != "1" ||
-            string.IsNullOrWhiteSpace(connectionString))
-        {
-            Skip = $"Set RUN_POSTGRES_INTEGRATION_TESTS=1 and {ConnectionStringVariable} to a dedicated test database.";
-            return;
-        }
-
-        var database = new NpgsqlConnectionStringBuilder(connectionString).Database;
-        if (string.IsNullOrWhiteSpace(database) ||
-            !database.Contains("test", StringComparison.OrdinalIgnoreCase))
-        {
-            Skip = "The PostgreSQL integration database name must contain 'test' to protect development data.";
-        }
     }
 }

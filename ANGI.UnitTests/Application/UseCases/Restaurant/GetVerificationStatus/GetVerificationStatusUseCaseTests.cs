@@ -8,7 +8,7 @@ using ANGI.Domain.Enums;
 using FluentAssertions;
 using Moq;
 
-namespace ANGI.Test.Application.UseCases.Restaurant.GetVerificationStatus;
+namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetVerificationStatus;
 
 public sealed class GetVerificationStatusUseCaseTests
 {
