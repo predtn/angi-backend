@@ -6,6 +6,7 @@ using ANGI.Application.UseCases.Auth.GoogleLogin;
 using ANGI.Application.UseCases.Auth.Logout;
 using ANGI.Application.UseCases.Auth.Refresh;
 using ANGI.Application.UseCases.Auth.Register;
+using ANGI.Application.UseCases.Auth.ResetPassword;
 using ANGI.Application.UseCases.Auth.ResendVerificationEmail;
 using ANGI.Application.UseCases.Auth.VerifyEmail;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,7 @@ namespace ANGI.Application.UseCases.Auth
             services.AddScoped<IVerifyEmailUseCase, VerifyEmailUseCase>();
             services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
             services.AddScoped<IForgotPasswordUseCase, ForgotPasswordUseCase>();
+            services.AddScoped<IResetPasswordUseCase, ResetPasswordUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, EnsureActiveAccountUseCase>();
             return services;
         }

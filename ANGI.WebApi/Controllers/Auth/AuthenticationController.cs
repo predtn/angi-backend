@@ -19,6 +19,7 @@ namespace ANGI.WebApi.Controllers.Auth
         private readonly IVerifyEmailUseCase _verifyEmailUseCase;
         private readonly IResendVerificationEmailUseCase _resendVerificationEmailUseCase;
         private readonly IForgotPasswordUseCase _forgotPasswordUseCase;
+        private readonly IResetPasswordUseCase _resetPasswordUseCase;
 
         /// <summary>Initializes the HTTP boundary with the Auth use-case abstractions.</summary>
         public AuthenticationController(
@@ -29,7 +30,8 @@ namespace ANGI.WebApi.Controllers.Auth
             ILogoutUseCase logoutUseCase,
             IVerifyEmailUseCase verifyEmailUseCase,
             IResendVerificationEmailUseCase resendVerificationEmailUseCase,
-            IForgotPasswordUseCase forgotPasswordUseCase)
+            IForgotPasswordUseCase forgotPasswordUseCase,
+            IResetPasswordUseCase resetPasswordUseCase)
         {
             _registerAccountUseCase = registerAccountUseCase;
             _loginUseCase = loginUseCase;
@@ -39,6 +41,7 @@ namespace ANGI.WebApi.Controllers.Auth
             _verifyEmailUseCase = verifyEmailUseCase;
             _resendVerificationEmailUseCase = resendVerificationEmailUseCase;
             _forgotPasswordUseCase = forgotPasswordUseCase;
+            _resetPasswordUseCase = resetPasswordUseCase;
         }
 
         /// <summary>Receives an AUTH-02 request, consumes its token, and returns the verified account state.</summary>
@@ -82,6 +85,22 @@ namespace ANGI.WebApi.Controllers.Auth
             CancellationToken ct)
         {
             await _forgotPasswordUseCase.ExecuteAsync(request, ct);
+            return Ok(new ApiResponse<object>
+            {
+                Success = true,
+                Data = null
+            });
+        }
+
+        /// <summary>Receives an AUTH-09 request, resets the password, revokes all sessions, and returns null data.</summary>
+        [AllowAnonymous]
+        [HttpPost("reset-password")]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ResetPassword(
+            [FromBody, BindRequired] ResetPasswordRequestDto request,
+            CancellationToken ct)
+        {
+            await _resetPasswordUseCase.ExecuteAsync(request, ct);
             return Ok(new ApiResponse<object>
             {
                 Success = true,

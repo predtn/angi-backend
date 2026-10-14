@@ -168,7 +168,7 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
             _context.UserExternalLogins.Add(externalLogin);
         }
 
-        /// <summary>Loads and locks a user token together with its owner to enforce one-time consumption.</summary>
+        /// <summary>Loads and locks a user token together with its owner and role to enforce one-time consumption.</summary>
         public Task<UserToken?> GetUserTokenByHashForUpdateAsync(string tokenHash, CancellationToken ct)
         {
             return _context.UserTokens
@@ -179,6 +179,7 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                     FOR UPDATE
                     """)
                 .Include(token => token.User)
+                    .ThenInclude(user => user.Role)
                 .SingleOrDefaultAsync(ct);
         }
 
