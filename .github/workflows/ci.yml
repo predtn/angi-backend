@@ -25,6 +25,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: angi_test
+          POSTGRES_USER: angi_backend
+          POSTGRES_PASSWORD: integration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U angi_backend -d angi_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v7
 
@@ -45,8 +60,11 @@ jobs:
       - name: Build
         run: dotnet build ANGI.slnx --configuration Release --no-restore
 
-      # Cloudinary live tests skip themselves because RUN_CLOUDINARY_LIVE_TESTS is not set.
+      # PostgreSQL integration tests run in CI; only opt-in live external-service tests skip.
       - name: Test
+        env:
+          RUN_POSTGRES_INTEGRATION_TESTS: 1
+          ANGI_TEST_POSTGRES_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=angi_test;Username=angi_backend;Password=integration_test
         run: >
           dotnet test ANGI.slnx --configuration Release --no-build
           --logger trx --results-directory TestResults
