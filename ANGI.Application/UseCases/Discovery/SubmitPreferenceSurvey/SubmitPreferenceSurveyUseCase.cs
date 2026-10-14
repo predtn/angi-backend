@@ -43,8 +43,8 @@ public sealed class SubmitPreferenceSurveyUseCase : ISubmitPreferenceSurveyUseCa
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException(UnauthorizedCode, UnauthorizedMessage);
 
-        var answers = request.Answers
-            .Select(answer => new SurveyAnswer(answer.OptionCode, answer.ScaleValue))
+        var answers = request.Answers!
+            .Select(answer => new SurveyAnswer(answer.OptionCode!, answer.ScaleValue))
             .ToArray();
 
         var result = await _recommendationService.SubmitSurveyAsync(
