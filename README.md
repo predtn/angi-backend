@@ -104,7 +104,7 @@ The API reads its keys from `appsettings.json`, user secrets and environment var
 |---|---|---|
 | `ConnectionStrings:Default` | PostgreSQL (role `angi_backend`) | Always ([Start](#start)) |
 | `Jwt:SecretKey` | Signing access tokens, at least 32 bytes; a local random value is fine | Always: the API refuses to start without it |
-| `Recommendation:BaseUrl` | Recommendation service; locally `http://localhost:8000` | Survey and recommendation features |
+| `Recommendation:BaseUrl` | Recommendation service; locally `http://127.0.0.1:8000`, not `localhost`: uvicorn listens on IPv4 only and Windows first tries `localhost` over IPv6, which takes about 2 s to fail, past the 800 ms timeout | Survey and recommendation features |
 | `Recommendation:ApiKey` | Header `X-Api-Key`; must equal `RECO_API_KEY` in the `.env` of angi-reco | Survey and recommendation features |
 | `Cloudinary:CloudName`, `Cloudinary:ApiKey`, `Cloudinary:ApiSecret` | Image and document upload | Upload features and the Cloudinary live tests |
 | `Google:ClientId` | Verifying Google ID tokens; same client id as the frontend | Google sign-in |
@@ -114,7 +114,7 @@ The API reads its keys from `appsettings.json`, user secrets and environment var
 Set each one once:
 
 ```bash
-dotnet user-secrets set "Recommendation:BaseUrl" "http://localhost:8000" --project ANGI.WebApi
+dotnet user-secrets set "Recommendation:BaseUrl" "http://127.0.0.1:8000" --project ANGI.WebApi
 dotnet user-secrets set "Recommendation:ApiKey" "<RECO_API_KEY of angi-reco>" --project ANGI.WebApi
 dotnet user-secrets set "Cloudinary:CloudName" "<value>" --project ANGI.WebApi
 dotnet user-secrets set "Cloudinary:ApiKey" "<value>" --project ANGI.WebApi
