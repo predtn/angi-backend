@@ -31,6 +31,9 @@ public interface IRestaurantRepository
     /// <summary>Adds a restaurant verification aggregate to the current unit of work.</summary>
     void AddVerification(RestaurantVerification verification);
 
+    /// <summary>Loads the owner's restaurant and its full verification history without tracking for OWN-07.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> GetOwnerRestaurantWithVerificationsAsync(int ownerId, CancellationToken ct);
+
     /// <summary>Loads and tracks only the owner's restaurant row, for changes to its own columns (OWN-05).</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedByOwnerIdAsync(int ownerId, CancellationToken ct);
 

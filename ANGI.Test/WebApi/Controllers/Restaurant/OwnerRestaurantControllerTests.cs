@@ -34,7 +34,8 @@ public sealed class OwnerRestaurantControllerTests
             useCase.Object,
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IGetVerificationStatusUseCase>());
 
         var action = await controller.Register(request, CancellationToken.None);
 
@@ -58,7 +59,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             useCase.Object,
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IGetVerificationStatusUseCase>());
 
         var action = await controller.Get(CancellationToken.None);
 
@@ -80,7 +82,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             useCase.Object,
-            Mock.Of<ISubmitVerificationUseCase>());
+            Mock.Of<ISubmitVerificationUseCase>(),
+            Mock.Of<IGetVerificationStatusUseCase>());
 
         var action = await controller.Update(request, CancellationToken.None);
 
@@ -115,7 +118,8 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
             Mock.Of<IUpdateOwnerRestaurantUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IGetVerificationStatusUseCase>());
 
         var action = await controller.SubmitVerification(request, CancellationToken.None);
 
@@ -125,5 +129,36 @@ public sealed class OwnerRestaurantControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-05: Return the OWN-07 verification status payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies OWN-07 verification status delegation and response wrapping.</summary>
+    [Fact]
+    public async Task GetVerifications_WhenRestaurantExists_ShouldReturnOkApiResponse()
+    {
+        var expected = new GetVerificationStatusResponseDto
+        {
+            VerificationStatus = "pending",
+            Items =
+            [
+                new VerificationDto { Id = 21, RestaurantId = 7, Status = "pending" }
+            ]
+        };
+        var useCase = new Mock<IGetVerificationStatusUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new OwnerRestaurantController(
+            Mock.Of<IRegisterRestaurantUseCase>(),
+            Mock.Of<IGetOwnerRestaurantUseCase>(),
+            Mock.Of<IUpdateOwnerRestaurantUseCase>(),
+            Mock.Of<ISubmitVerificationUseCase>(),
+            useCase.Object);
+
+        var action = await controller.GetVerifications(CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        var response = result.Value.Should().BeOfType<ApiResponse<GetVerificationStatusResponseDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+        useCase.Verify(item => item.ExecuteAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

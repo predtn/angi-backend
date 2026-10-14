@@ -16,18 +16,21 @@ public sealed class OwnerRestaurantController : ControllerBase
     private readonly IGetOwnerRestaurantUseCase _getOwnerRestaurantUseCase;
     private readonly IUpdateOwnerRestaurantUseCase _updateOwnerRestaurantUseCase;
     private readonly ISubmitVerificationUseCase _submitVerificationUseCase;
+    private readonly IGetVerificationStatusUseCase _getVerificationStatusUseCase;
 
     /// <summary>Initializes the HTTP boundary with owner restaurant profile use cases.</summary>
     public OwnerRestaurantController(
         IRegisterRestaurantUseCase registerRestaurantUseCase,
         IGetOwnerRestaurantUseCase getOwnerRestaurantUseCase,
         IUpdateOwnerRestaurantUseCase updateOwnerRestaurantUseCase,
-        ISubmitVerificationUseCase submitVerificationUseCase)
+        ISubmitVerificationUseCase submitVerificationUseCase,
+        IGetVerificationStatusUseCase getVerificationStatusUseCase)
     {
         _registerRestaurantUseCase = registerRestaurantUseCase;
         _getOwnerRestaurantUseCase = getOwnerRestaurantUseCase;
         _updateOwnerRestaurantUseCase = updateOwnerRestaurantUseCase;
         _submitVerificationUseCase = submitVerificationUseCase;
+        _getVerificationStatusUseCase = getVerificationStatusUseCase;
     }
 
     /// <summary>Receives OWN-01 and creates the authenticated owner's restaurant.</summary>
@@ -79,6 +82,23 @@ public sealed class OwnerRestaurantController : ControllerBase
     {
         var result = await _submitVerificationUseCase.ExecuteAsync(request, ct);
         return StatusCode(StatusCodes.Status201Created, new ApiResponse<VerificationDto>
+        {
+            Success = true,
+            Data = result
+        });
+    }
+
+    /// <summary>Receives OWN-07 and returns the authenticated owner's verification status and history.</summary>
+    [HttpGet("verifications")]
+    [Authorize(Roles = "RESTAURANT_OWNER")]
+    [ProducesResponseType(typeof(ApiResponse<GetVerificationStatusResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetVerifications(CancellationToken ct)
+    {
+        var result = await _getVerificationStatusUseCase.ExecuteAsync(ct);
+        return Ok(new ApiResponse<GetVerificationStatusResponseDto>
         {
             Success = true,
             Data = result
