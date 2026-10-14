@@ -19,6 +19,7 @@ namespace ANGI.Infrastructure.Services.Auth
             services.AddScoped<IAuthenticationRepository, AuthenticationRepository>();
             services.AddScoped<IPasswordService, PasswordService>();
             services.AddScoped<IAuthenticationTokenService, AuthenticationTokenService>();
+            services.AddScoped<IGoogleIdentityService, GoogleIdentityService>();
             services.AddScoped<ICurrentUserService, CurrentUserService>();
             services.AddMemoryCache();
             services.AddScoped<IAccountStatusCache, AccountStatusCache>();
@@ -26,6 +27,8 @@ namespace ANGI.Infrastructure.Services.Auth
 
             services.AddOptions<JwtTokenSettings>()
                 .Bind(configuration.GetSection(JwtTokenSettings.SectionName));
+            services.AddOptions<GoogleSettings>()
+                .Bind(configuration.GetSection(GoogleSettings.SectionName));
 
             return services;
         }

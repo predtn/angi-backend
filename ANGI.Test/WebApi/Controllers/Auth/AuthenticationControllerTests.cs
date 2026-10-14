@@ -153,7 +153,30 @@ namespace ANGI.Test.WebApi.Controllers.Auth
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
-        // TEST-07: Expose public authentication endpoints anonymously while requiring authentication for logout.
+        // TEST-07: Wrap a successful Google login result in the documented AUTH-05 response.
+        /// <summary>Verifies AUTH-05 exposes AuthResult fields and isNewUser through ApiResponse.</summary>
+        [Fact]
+        public async Task GoogleLogin_ShouldReturnOkApiResponse()
+        {
+            var expected = new GoogleLoginResponseDto { AccessToken = "access-token", IsNewUser = true };
+            var googleLoginUseCase = new Mock<IGoogleLoginUseCase>();
+            googleLoginUseCase.Setup(x => x.ExecuteAsync(
+                    It.IsAny<GoogleLoginRequestDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(expected);
+            var controller = CreateController(googleLoginUseCase: googleLoginUseCase);
+
+            var action = await controller.GoogleLogin(
+                new GoogleLoginRequestDto { IdToken = "google-token", Role = "TRAVELER" },
+                CancellationToken.None);
+
+            var result = action.Should().BeOfType<OkObjectResult>().Subject;
+            var response = result.Value.Should().BeOfType<ApiResponse<GoogleLoginResponseDto>>().Subject;
+            response.Success.Should().BeTrue();
+            response.Data.Should().BeSameAs(expected);
+        }
+
+        // TEST-08: Expose public authentication endpoints anonymously while requiring authentication for logout.
         /// <summary>Verifies the controller authorization attributes match the Auth API contract.</summary>
         [Fact]
         public void AuthenticationEndpoints_ShouldDeclareDocumentedAuthorizationAttributes()
@@ -164,6 +187,9 @@ namespace ANGI.Test.WebApi.Controllers.Auth
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
             controllerType.GetMethod(nameof(AuthenticationController.Login))!
+                .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
+                .Should().ContainSingle();
+            controllerType.GetMethod(nameof(AuthenticationController.GoogleLogin))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
             controllerType.GetMethod(nameof(AuthenticationController.Refresh))!
@@ -184,6 +210,7 @@ namespace ANGI.Test.WebApi.Controllers.Auth
         private static AuthenticationController CreateController(
             Mock<IRegisterAccountUseCase>? registerAccountUseCase = null,
             Mock<ILoginUseCase>? loginUseCase = null,
+            Mock<IGoogleLoginUseCase>? googleLoginUseCase = null,
             Mock<IRefreshTokenUseCase>? refreshTokenUseCase = null,
             Mock<ILogoutUseCase>? logoutUseCase = null,
             Mock<IVerifyEmailUseCase>? verifyEmailUseCase = null,
@@ -192,6 +219,7 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             return new AuthenticationController(
                 (registerAccountUseCase ?? new Mock<IRegisterAccountUseCase>()).Object,
                 (loginUseCase ?? new Mock<ILoginUseCase>()).Object,
+                (googleLoginUseCase ?? new Mock<IGoogleLoginUseCase>()).Object,
                 (refreshTokenUseCase ?? new Mock<IRefreshTokenUseCase>()).Object,
                 (logoutUseCase ?? new Mock<ILogoutUseCase>()).Object,
                 (verifyEmailUseCase ?? new Mock<IVerifyEmailUseCase>()).Object,
@@ -214,11 +242,12 @@ namespace ANGI.Test.WebApi.Controllers
 
         public static TheoryData<string> BodyEndpoints => new()
         {
+            "/api/v1/auth/google",
             "/api/v1/auth/verify-email",
             "/api/v1/auth/verify-email/resend"
         };
 
-        // TEST-08: Reject a missing JSON body with the canonical validation envelope.
+        // TEST-09: Reject a missing JSON body with the canonical validation envelope.
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string path)
@@ -229,7 +258,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-09: Reject malformed JSON with the canonical validation envelope.
+        // TEST-10: Reject malformed JSON with the canonical validation envelope.
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMalformedJson_ShouldReturnValidationEnvelope(string path)
@@ -242,7 +271,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-10: Reject a literal null JSON body with the canonical validation envelope.
+        // TEST-11: Reject a literal null JSON body with the canonical validation envelope.
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithNullJsonBody_ShouldReturnValidationEnvelope(string path)
@@ -254,7 +283,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-11: Map documented AUTH-02 application failures to their HTTP envelopes.
+        // TEST-12: Map documented AUTH-02 application failures to their HTTP envelopes.
         [Theory]
         [InlineData("invalid-token", HttpStatusCode.BadRequest, "TOKEN_INVALID")]
         [InlineData("expired-token", HttpStatusCode.BadRequest, "TOKEN_EXPIRED")]
@@ -272,7 +301,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, expectedCode);
         }
 
-        // TEST-12: Map email-provider failure to the documented 503 envelope.
+        // TEST-13: Map email-provider failure to the documented 503 envelope.
         [Fact]
         public async Task ResendVerificationEmail_WhenEmailProviderFails_ShouldReturnServiceUnavailableEnvelope()
         {
@@ -284,7 +313,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, "SERVICE_UNAVAILABLE");
         }
 
-        // TEST-13: Return 429, Retry-After, and the canonical envelope on the second resend per email.
+        // TEST-14: Return 429, Retry-After, and the canonical envelope on the second resend per email.
         [Fact]
         public async Task ResendVerificationEmail_TwiceWithinWindow_ShouldReturnRateLimitEnvelope()
         {
@@ -309,7 +338,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(second, "TOO_MANY_REQUESTS");
         }
 
-        // TEST-14: Admit a resend again after the configured fixed window replenishes.
+        // TEST-15: Admit a resend again after the configured fixed window replenishes.
         [Fact]
         public async Task ResendVerificationEmail_AfterWindow_ShouldBeAllowedAgain()
         {
@@ -335,7 +364,7 @@ namespace ANGI.Test.WebApi.Controllers
             replenished.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // TEST-15: Expose AUTH-02 and AUTH-03 request and success schemas to API Explorer/OpenAPI.
+        // TEST-16: Expose AUTH-02, AUTH-03, and AUTH-05 request and success schemas to API Explorer/OpenAPI.
         [Fact]
         public void ApiExplorer_ShouldExposeAuthenticationVerificationSchemas()
         {
@@ -351,6 +380,28 @@ namespace ANGI.Test.WebApi.Controllers
             AssertOpenApiContract<ResendVerificationEmailRequestDto, object>(
                 descriptions,
                 "api/v1/auth/verify-email/resend");
+            AssertOpenApiContract<GoogleLoginRequestDto, GoogleLoginResponseDto>(
+                descriptions,
+                "api/v1/auth/google");
+        }
+
+        // TEST-17: Map both AUTH-05 application errors to their documented HTTP envelopes.
+        /// <summary>Verifies Google token and first-login role failures preserve their status and error code.</summary>
+        [Theory]
+        [InlineData("invalid-token", "TRAVELER", HttpStatusCode.Unauthorized, "GOOGLE_TOKEN_INVALID")]
+        [InlineData("role-required", null, HttpStatusCode.BadRequest, "ROLE_REQUIRED")]
+        public async Task GoogleLogin_WithApplicationFailure_ShouldReturnDocumentedEnvelope(
+            string idToken,
+            string? role,
+            HttpStatusCode expectedStatus,
+            string expectedCode)
+        {
+            using var response = await _factory.CreateClient().PostAsJsonAsync(
+                "/api/v1/auth/google",
+                new GoogleLoginRequestDto { IdToken = idToken, Role = role });
+
+            response.StatusCode.Should().Be(expectedStatus);
+            await AssertErrorEnvelope(response, expectedCode);
         }
 
         private static void AssertOpenApiContract<TRequest, TResponse>(
@@ -453,8 +504,10 @@ namespace ANGI.Test.WebApi.Controllers
             {
                 services.RemoveAll<IVerifyEmailUseCase>();
                 services.RemoveAll<IResendVerificationEmailUseCase>();
+                services.RemoveAll<IGoogleLoginUseCase>();
                 services.AddScoped<IVerifyEmailUseCase, StubVerifyEmailUseCase>();
                 services.AddScoped<IResendVerificationEmailUseCase, StubResendVerificationEmailUseCase>();
+                services.AddScoped<IGoogleLoginUseCase, StubGoogleLoginUseCase>();
             });
         }
 
@@ -487,6 +540,30 @@ namespace ANGI.Test.WebApi.Controllers
                 }
 
                 return Task.CompletedTask;
+            }
+        }
+
+        private sealed class StubGoogleLoginUseCase : IGoogleLoginUseCase
+        {
+            /// <summary>Returns deterministic AUTH-05 outcomes without contacting Google or PostgreSQL.</summary>
+            public Task<GoogleLoginResponseDto> ExecuteAsync(
+                GoogleLoginRequestDto request,
+                CancellationToken ct)
+            {
+                return request.IdToken switch
+                {
+                    "invalid-token" => throw new UnauthorizedException(
+                        "GOOGLE_TOKEN_INVALID",
+                        "Google ID token không hợp lệ."),
+                    "role-required" => throw new BadRequestException(
+                        "ROLE_REQUIRED",
+                        "Vai trò là bắt buộc."),
+                    _ => Task.FromResult(new GoogleLoginResponseDto
+                    {
+                        AccessToken = "access-token",
+                        IsNewUser = false
+                    })
+                };
             }
         }
     }
