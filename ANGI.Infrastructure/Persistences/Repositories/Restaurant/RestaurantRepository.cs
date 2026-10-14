@@ -90,6 +90,12 @@ public sealed class RestaurantRepository : IRestaurantRepository
         _context.RestaurantVerifications.Add(verification);
     }
 
+    /// <summary>Loads and tracks only the owner's restaurant row, for changes to its own columns (OWN-05).</summary>
+    public Task<Domain.Entities.Restaurant?> GetTrackedByOwnerIdAsync(int ownerId, CancellationToken ct)
+    {
+        return _context.Restaurants.FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
     /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
     public Task<Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct)
     {

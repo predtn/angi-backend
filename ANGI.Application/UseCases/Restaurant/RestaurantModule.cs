@@ -17,6 +17,7 @@ using ANGI.Application.UseCases.Restaurant.GetRestaurantMenu;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantReviews;
 using ANGI.Application.UseCases.Restaurant.Register;
 using ANGI.Application.UseCases.Restaurant.UpdateBusinessHours;
+using ANGI.Application.UseCases.Restaurant.UpdateOperatingStatus;
 using ANGI.Application.UseCases.Restaurant.UpdateOwnerProfile;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -32,6 +33,7 @@ public static class RestaurantModule
         services.AddScoped<IGetOwnerRestaurantUseCase, GetOwnerRestaurantUseCase>();
         services.AddScoped<IUpdateOwnerRestaurantUseCase, UpdateOwnerRestaurantUseCase>();
         services.AddScoped<IUpdateBusinessHoursUseCase, UpdateBusinessHoursUseCase>();
+        services.AddScoped<IUpdateOperatingStatusUseCase, UpdateOperatingStatusUseCase>();
         services.AddScoped<IGetOwnerMenuUseCase, GetOwnerMenuUseCase>();
         services.AddScoped<IUpdateDishAvailabilityUseCase, UpdateDishAvailabilityUseCase>();
         services.AddScoped<ICreateMenuSubmissionUseCase, CreateMenuSubmissionUseCase>();
