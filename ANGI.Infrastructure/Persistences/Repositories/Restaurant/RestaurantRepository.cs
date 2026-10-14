@@ -90,6 +90,23 @@ public sealed class RestaurantRepository : IRestaurantRepository
         _context.RestaurantVerifications.Add(verification);
     }
 
+    /// <summary>Loads the owner's restaurant and its full verification history without tracking for OWN-07.</summary>
+    public Task<Domain.Entities.Restaurant?> GetOwnerRestaurantWithVerificationsAsync(
+        int ownerId,
+        CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).ThenByDescending(item => item.Id))
+                .ThenInclude(verification => verification.Documents)
+                    .ThenInclude(document => document.Media)
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).ThenByDescending(item => item.Id))
+                .ThenInclude(verification => verification.Reviewer)
+                    .ThenInclude(reviewer => reviewer!.AvatarMedia)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
     /// <summary>Loads and tracks only the owner's restaurant row, for changes to its own columns (OWN-05).</summary>
     public Task<Domain.Entities.Restaurant?> GetTrackedByOwnerIdAsync(int ownerId, CancellationToken ct)
     {
