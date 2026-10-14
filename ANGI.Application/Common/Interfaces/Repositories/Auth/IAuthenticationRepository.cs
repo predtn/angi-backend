@@ -13,11 +13,26 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
         /// <summary>Finds a user by normalized email and loads the data required for the authentication result.</summary>
         Task<User?> GetUserByEmailAsync(string normalizedEmail, CancellationToken ct);
 
+        /// <summary>Finds the account linked to an external provider identity and loads authentication data.</summary>
+        Task<User?> GetUserByExternalLoginAsync(
+            ExternalLoginProvider provider,
+            string providerUserId,
+            CancellationToken ct);
+
+        /// <summary>Serializes concurrent attempts for the same external identity inside the active transaction.</summary>
+        Task LockExternalLoginAsync(
+            ExternalLoginProvider provider,
+            string providerUserId,
+            CancellationToken ct);
+
         /// <summary>Checks whether a non-deleted account already owns the normalized email.</summary>
         Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken ct);
 
         /// <summary>Loads a role by its API code for account creation.</summary>
         Task<Role?> GetRoleByCodeAsync(string roleCode, CancellationToken ct);
+
+        /// <summary>Reserves the next database user id so a new account can receive a JWT before the atomic save.</summary>
+        Task<int> ReserveUserIdAsync(CancellationToken ct);
 
         /// <summary>Finds and locks a user by email so verification-token replacement is serialized.</summary>
         Task<User?> GetUserByEmailForUpdateAsync(string normalizedEmail, CancellationToken ct);
@@ -41,6 +56,9 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
 
         /// <summary>Adds a new user to the change tracker; the Unit of Work persists it.</summary>
         void AddUser(User user);
+
+        /// <summary>Adds an external login link to the change tracker; the Unit of Work persists it.</summary>
+        void AddExternalLogin(UserExternalLogin externalLogin);
 
         /// <summary>Finds and locks a user token by hash so it can be consumed only once.</summary>
         Task<UserToken?> GetUserTokenByHashForUpdateAsync(string tokenHash, CancellationToken ct);

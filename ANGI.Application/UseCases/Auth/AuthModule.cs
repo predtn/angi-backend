@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.UseCases.Auth.EnsureActiveAccount;
 using ANGI.Application.UseCases.Auth.Login;
+using ANGI.Application.UseCases.Auth.GoogleLogin;
 using ANGI.Application.UseCases.Auth.Logout;
 using ANGI.Application.UseCases.Auth.Refresh;
 using ANGI.Application.UseCases.Auth.Register;
@@ -20,6 +21,7 @@ namespace ANGI.Application.UseCases.Auth
         {
             services.AddScoped<IRegisterAccountUseCase, RegisterAccountUseCase>();
             services.AddScoped<ILoginUseCase, LoginUseCase>();
+            services.AddScoped<IGoogleLoginUseCase, GoogleLoginUseCase>();
             services.AddScoped<IRefreshTokenUseCase, RefreshTokenUseCase>();
             services.AddScoped<ILogoutUseCase, LogoutUseCase>();
             services.AddScoped<IVerifyEmailUseCase, VerifyEmailUseCase>();
