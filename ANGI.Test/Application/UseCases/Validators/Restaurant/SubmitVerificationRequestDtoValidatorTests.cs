@@ -120,6 +120,57 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
         result.Errors.Should().Contain(error => error.PropertyName == "Documents[0]");
     }
 
+    // TEST-08: Report explicit nulls once each, with the validator's Vietnamese messages.
+    /// <summary>Verifies null required fields reach the validator instead of failing elsewhere.</summary>
+    [Fact]
+    public async Task Validate_WithNullRequiredFields_ShouldReportEachOnce()
+    {
+        var request = new SubmitVerificationRequestDto { LegalName = null, BusinessLicenseNo = null, Documents = null };
+
+        var result = await _validator.TestValidateAsync(request);
+
+        result.Errors.Select(error => (error.PropertyName, error.ErrorMessage)).Should().BeEquivalentTo(
+        [
+            ("LegalName", "Tên pháp lý là bắt buộc."),
+            ("BusinessLicenseNo", "Số giấy phép kinh doanh là bắt buộc."),
+            ("Documents", "Danh sách giấy tờ là bắt buộc.")
+        ]);
+    }
+
+    // TEST-09: Report a null document type once, as required rather than invalid.
+    /// <summary>Verifies the document-type rule stops after its first failure.</summary>
+    [Fact]
+    public async Task Validate_WithNullDocType_ShouldReportRequiredOnce()
+    {
+        var request = ValidRequest();
+        request.Documents =
+        [
+            new VerificationDocumentRequestDto { DocType = "business_license", MediaId = 9001 },
+            new VerificationDocumentRequestDto { DocType = null, MediaId = 9002 }
+        ];
+
+        var result = await _validator.TestValidateAsync(request);
+
+        result.Errors.Should().ContainSingle(error => error.PropertyName == "Documents[1].DocType")
+            .Which.ErrorMessage.Should().Be("Loại giấy tờ là bắt buộc.");
+    }
+
+    // TEST-10: Keep the required fields nullable. MVC adds an implicit [Required] with an English message to
+    // non-nullable reference properties and rejects an explicit null before the validator runs.
+    /// <summary>Guards the nullability that lets the validator own every required-field message.</summary>
+    [Theory]
+    [InlineData(typeof(SubmitVerificationRequestDto), nameof(SubmitVerificationRequestDto.LegalName))]
+    [InlineData(typeof(SubmitVerificationRequestDto), nameof(SubmitVerificationRequestDto.BusinessLicenseNo))]
+    [InlineData(typeof(SubmitVerificationRequestDto), nameof(SubmitVerificationRequestDto.Documents))]
+    [InlineData(typeof(VerificationDocumentRequestDto), nameof(VerificationDocumentRequestDto.DocType))]
+    public void RequiredFields_ShouldBeNullableSoTheValidatorReportsNull(Type dtoType, string propertyName)
+    {
+        var property = dtoType.GetProperty(propertyName)!;
+
+        new System.Reflection.NullabilityInfoContext().Create(property).WriteState
+            .Should().Be(System.Reflection.NullabilityState.Nullable);
+    }
+
     /// <summary>Creates the smallest valid OWN-06 request.</summary>
     private static SubmitVerificationRequestDto ValidRequest() => new()
     {

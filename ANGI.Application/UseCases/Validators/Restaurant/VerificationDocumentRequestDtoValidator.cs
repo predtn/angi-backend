@@ -19,8 +19,9 @@ public sealed class VerificationDocumentRequestDtoValidator : AbstractValidator<
     public VerificationDocumentRequestDtoValidator()
     {
         RuleFor(document => document.DocType)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty().WithMessage("Loại giấy tờ là bắt buộc.")
-            .Must(documentType => AllowedDocumentTypes.Contains(documentType))
+            .Must(documentType => documentType is not null && AllowedDocumentTypes.Contains(documentType))
             .WithMessage("Loại giấy tờ không hợp lệ.");
 
         RuleFor(document => document.MediaId)

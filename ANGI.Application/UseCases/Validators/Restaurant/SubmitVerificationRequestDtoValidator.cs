@@ -26,6 +26,7 @@ public sealed class SubmitVerificationRequestDtoValidator : AbstractValidator<Su
             .When(request => request.OwnerNote is not null);
 
         RuleFor(request => request.Documents)
+            .Cascade(CascadeMode.Stop)
             .NotNull().WithMessage("Danh sách giấy tờ là bắt buộc.")
             .NotEmpty().WithMessage("Phải cung cấp ít nhất một giấy tờ.")
             .Must(documents => documents is not null &&

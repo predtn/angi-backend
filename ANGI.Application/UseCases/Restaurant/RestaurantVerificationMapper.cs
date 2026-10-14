@@ -9,10 +9,14 @@ namespace ANGI.Application.UseCases.Restaurant;
 /// <summary>Maps restaurant verification aggregates to their shared API representation.</summary>
 internal static class RestaurantVerificationMapper
 {
-    /// <summary>Maps a verification and signs each private document URL for the response.</summary>
+    /// <summary>
+    /// Maps a verification and signs each private document URL for the response. A document whose Media navigation is
+    /// not loaded (a submission created in this request) takes its storage key from <paramref name="storageKeys"/>.
+    /// </summary>
     public static VerificationDto Map(
         RestaurantVerification verification,
-        ICloudinaryService cloudinaryService)
+        ICloudinaryService cloudinaryService,
+        IReadOnlyDictionary<long, string>? storageKeys = null)
     {
         return new VerificationDto
         {
@@ -27,7 +31,7 @@ internal static class RestaurantVerificationMapper
             {
                 DocType = ToApiValue(document.DocType),
                 MediaId = document.MediaId,
-                Url = cloudinaryService.GetUrl(document.Media.StorageKey)
+                Url = cloudinaryService.GetUrl(document.Media?.StorageKey ?? storageKeys![document.MediaId])
             }).ToArray(),
             PreviousId = verification.PreviousId,
             SubmittedAt = verification.SubmittedAt,

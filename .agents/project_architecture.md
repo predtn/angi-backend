@@ -199,7 +199,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
 | `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
 | `Google` | `ClientId` |
-| `Brevo` | `BaseUrl` (`https://api.brevo.com/v3/`), `ApiKey`, `SenderEmail`, `SenderName` (`ANGI`), `TimeoutMilliseconds` (10000) |
+| `Brevo` | `BaseUrl` (`https://api.brevo.com/v3/`), `ApiKey`, `SenderEmail` (`angi.sep490.g71@gmail.com`, the team's verified Brevo sender), `SenderName` (`ANGI`), `TimeoutMilliseconds` (10000) |
 | `Frontend` | `BaseUrl` (`http://localhost:3000`): base of the links sent by email |
 | `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10) |

@@ -88,6 +88,9 @@ public sealed class SubmitVerificationUseCaseTests
         addedVerification.Status.Should().Be(VerificationStatus.Pending);
         addedVerification.Documents.Select(item => item.DocType)
             .Should().Equal(VerificationDocumentType.BusinessLicense, VerificationDocumentType.StorefrontPhoto);
+        addedVerification.Documents.Select(item => item.MediaId).Should().Equal(9001, 9002);
+        // The media rows come from an untracked query: a set navigation would make EF insert them again.
+        addedVerification.Documents.Should().OnlyContain(item => item.Media == null);
         result.Id.Should().Be(21);
         result.RestaurantId.Should().Be(7);
         result.Status.Should().Be("pending");
@@ -177,11 +180,11 @@ public sealed class SubmitVerificationUseCaseTests
     }
 
     // TEST-05: Reject restaurant states with the exact OWN-06 conflict codes.
-    /// <summary>Verifies both documented conflict branches before media lookup.</summary>
+    /// <summary>Verifies the three documented conflict branches before media lookup.</summary>
     [Theory]
     [InlineData(RestaurantVerificationStatus.Pending, "VERIFICATION_ALREADY_PENDING")]
     [InlineData(RestaurantVerificationStatus.Verified, "RESTAURANT_ALREADY_VERIFIED")]
-    [InlineData(RestaurantVerificationStatus.Rejected, "VERIFICATION_ALREADY_PENDING")]
+    [InlineData(RestaurantVerificationStatus.Rejected, "VERIFICATION_RESUBMIT_REQUIRED")]
     public async Task ExecuteAsync_WithConflictingRestaurantState_ShouldThrowConflict(
         RestaurantVerificationStatus status,
         string errorCode)

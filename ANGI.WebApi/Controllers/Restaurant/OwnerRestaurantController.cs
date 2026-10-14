@@ -68,6 +68,11 @@ public sealed class OwnerRestaurantController : ControllerBase
     /// <summary>Receives OWN-06 and creates the authenticated owner's first verification submission.</summary>
     [HttpPost("verifications")]
     [ProducesResponseType(typeof(ApiResponse<VerificationDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> SubmitVerification(
         SubmitVerificationRequestDto request,
         CancellationToken ct)

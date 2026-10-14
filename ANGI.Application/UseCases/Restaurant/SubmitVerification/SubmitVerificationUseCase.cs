@@ -66,7 +66,7 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
 
         EnsureSubmissionState(restaurant.VerificationStatus);
 
-        var mediaIds = request.Documents.Select(document => document.MediaId).Distinct().ToArray();
+        var mediaIds = request.Documents!.Select(document => document.MediaId).Distinct().ToArray();
         var ownedMedia = await _mediaRepository.GetOwnedByIdsAsync(ownerId, mediaIds, ct);
         var mediaById = EnsureVerificationMedia(request, ownedMedia);
 
@@ -74,20 +74,21 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
         {
             RestaurantId = restaurant.Id,
             SubmittedBy = ownerId,
-            LegalName = request.LegalName.Trim(),
-            BusinessLicenseNo = request.BusinessLicenseNo.Trim(),
+            LegalName = request.LegalName!.Trim(),
+            BusinessLicenseNo = request.BusinessLicenseNo!.Trim(),
             TaxCode = NormalizeOptional(request.TaxCode),
             OwnerNote = NormalizeOptional(request.OwnerNote),
             Status = VerificationStatus.Pending
         };
 
-        foreach (var document in request.Documents)
+        foreach (var document in request.Documents!)
         {
             verification.Documents.Add(new RestaurantVerificationDocument
             {
-                DocType = DocumentTypes[document.DocType],
-                MediaId = document.MediaId,
-                Media = mediaById[document.MediaId]
+                DocType = DocumentTypes[document.DocType!],
+                // Only the id: the media rows were read untracked, so setting the navigation would make EF insert
+                // them again (duplicate pk_media_files).
+                MediaId = document.MediaId
             });
         }
 
@@ -95,28 +96,34 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
         _restaurantRepository.AddVerification(verification);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        var result = RestaurantVerificationMapper.Map(verification, _cloudinaryService);
+        var storageKeys = mediaById.ToDictionary(item => item.Key, item => item.Value.StorageKey);
+        var result = RestaurantVerificationMapper.Map(verification, _cloudinaryService, storageKeys);
         await transaction.CommitAsync(ct);
         return result;
     }
 
-    /// <summary>Raises the two OWN-06 conflicts for restaurants already in a terminal or active workflow state.</summary>
+    /// <summary>
+    /// Allows only a restaurant that was never submitted. A rejected restaurant (its last submission was rejected or
+    /// needs more information) resubmits through OWN-08 instead.
+    /// </summary>
     private static void EnsureSubmissionState(RestaurantVerificationStatus status)
     {
-        if (status == RestaurantVerificationStatus.Verified)
+        switch (status)
         {
-            throw new ConflictException(
-                "RESTAURANT_ALREADY_VERIFIED",
-                "Nhà hàng đã được xác minh.");
-        }
-
-        if (status != RestaurantVerificationStatus.Unverified)
-        {
-            throw new ConflictException(
-                "VERIFICATION_ALREADY_PENDING",
-                status == RestaurantVerificationStatus.Rejected
-                    ? "Nhà hàng đã có hồ sơ xác minh. Vui lòng dùng chức năng nộp lại."
-                    : "Nhà hàng đã có hồ sơ xác minh đang chờ duyệt.");
+            case RestaurantVerificationStatus.Unverified:
+                return;
+            case RestaurantVerificationStatus.Verified:
+                throw new ConflictException(
+                    "RESTAURANT_ALREADY_VERIFIED",
+                    "Nhà hàng đã được xác minh.");
+            case RestaurantVerificationStatus.Rejected:
+                throw new ConflictException(
+                    "VERIFICATION_RESUBMIT_REQUIRED",
+                    "Hồ sơ trước đã bị từ chối hoặc cần bổ sung. Vui lòng nộp lại hồ sơ.");
+            default:
+                throw new ConflictException(
+                    "VERIFICATION_ALREADY_PENDING",
+                    "Nhà hàng đã có hồ sơ xác minh đang chờ duyệt.");
         }
     }
 
@@ -127,9 +134,10 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
     {
         var mediaById = ownedMedia.ToDictionary(media => media.Id);
         var failures = new List<ValidationFailure>();
-        for (var index = 0; index < request.Documents.Count; index++)
+        var documents = request.Documents!;
+        for (var index = 0; index < documents.Count; index++)
         {
-            var document = request.Documents[index];
+            var document = documents[index];
             if (!mediaById.TryGetValue(document.MediaId, out var media) || !IsVerificationUpload(media.StorageKey))
             {
                 failures.Add(new ValidationFailure(
