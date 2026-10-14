@@ -1,0 +1,225 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Services;
+using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.Common.Models.Auth;
+using ANGI.Application.DTOs.Auth;
+using ANGI.Application.UseCases.Auth.ResendVerificationEmail;
+using ANGI.Application.UseCases.Auth.VerifyEmail;
+using ANGI.Application.UseCases.Validators.Auth;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
+using ANGI.IntegrationTests.Fixtures;
+using ANGI.Infrastructure.Persistences;
+using ANGI.Infrastructure.Persistences.Repositories;
+using ANGI.Infrastructure.Persistences.Repositories.Auth;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Moq;
+using Npgsql;
+
+namespace ANGI.IntegrationTests.Infrastructure.Persistences.Repositories.Auth;
+
+/// <summary>Exercises email-verification concurrency against a real PostgreSQL database.</summary>
+public sealed class EmailVerificationPostgresConcurrencyTests
+{
+    private static readonly DateTime Now = new(2026, 10, 12, 3, 0, 0, DateTimeKind.Utc);
+
+    // TEST-01: Serialize two real PostgreSQL consumers of the same verification token.
+    /// <summary>Verifies that concurrent verification requests consume a token exactly once in PostgreSQL.</summary>
+    [PostgresIntegrationFact]
+    public async Task VerifyEmail_WithTwoDatabaseScopes_ShouldAllowExactlyOneConsumer()
+    {
+        var connectionString = RequiredConnectionString();
+        var seed = await SeedPendingUserAsync(connectionString, "verify", "shared-token-hash");
+
+        try
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var first = RunVerifyAsync(connectionString, seed.TokenHash, gate.Task);
+            var second = RunVerifyAsync(connectionString, seed.TokenHash, gate.Task);
+            gate.SetResult();
+
+            var outcomes = await Task.WhenAll(first, second);
+
+            outcomes.Should().ContainSingle(outcome => outcome == "success");
+            outcomes.Should().ContainSingle(outcome => outcome == "TOKEN_ALREADY_USED");
+
+            await using var assertionContext = CreateContext(connectionString);
+            var token = await assertionContext.UserTokens.SingleAsync(item => item.Id == seed.TokenId);
+            var user = await assertionContext.Users.SingleAsync(item => item.Id == seed.UserId);
+            token.UsedAt.Should().Be(Now);
+            user.Status.Should().Be(UserStatus.Active);
+            user.EmailVerifiedAt.Should().Be(Now);
+        }
+        finally
+        {
+            await DeleteUserAsync(connectionString, seed.UserId);
+        }
+    }
+
+    // TEST-02: Serialize resend token replacement across two independent application scopes.
+    /// <summary>Verifies that concurrent resend requests leave exactly one active verification token.</summary>
+    [PostgresIntegrationFact]
+    public async Task ResendVerificationEmail_WithTwoDatabaseScopes_ShouldLeaveOneUnusedToken()
+    {
+        var connectionString = RequiredConnectionString();
+        var seed = await SeedPendingUserAsync(connectionString, "resend", "old-token-hash");
+
+        try
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var first = RunResendAsync(
+                connectionString,
+                seed.Email,
+                new GeneratedUserToken("first-raw-token", $"first-{Guid.NewGuid():N}"),
+                gate.Task);
+            var second = RunResendAsync(
+                connectionString,
+                seed.Email,
+                new GeneratedUserToken("second-raw-token", $"second-{Guid.NewGuid():N}"),
+                gate.Task);
+            gate.SetResult();
+
+            await Task.WhenAll(first, second);
+
+            await using var assertionContext = CreateContext(connectionString);
+            var tokens = await assertionContext.UserTokens
+                .Where(item => item.UserId == seed.UserId && item.Purpose == UserTokenPurpose.EmailVerify)
+                .OrderBy(item => item.Id)
+                .ToListAsync();
+
+            tokens.Should().HaveCount(3);
+            tokens.Should().ContainSingle(item => item.UsedAt == null);
+            tokens.Single(item => item.Id == seed.TokenId).UsedAt.Should().NotBeNull();
+        }
+        finally
+        {
+            await DeleteUserAsync(connectionString, seed.UserId);
+        }
+    }
+
+    /// <summary>Executes email verification in an independent database context after the shared gate opens.</summary>
+    private static async Task<string> RunVerifyAsync(
+        string connectionString,
+        string tokenHash,
+        Task gate)
+    {
+        await using var context = CreateContext(connectionString);
+        var repository = new AuthenticationRepository(context);
+        var tokenService = new Mock<IAuthenticationTokenService>();
+        tokenService.Setup(service => service.HashUserToken("shared-raw-token")).Returns(tokenHash);
+        var useCase = new VerifyEmailUseCase(
+            new VerifyEmailRequestDtoValidator(),
+            repository,
+            tokenService.Object,
+            new Mock<IAccountStatusCache>().Object,
+            new UnitOfWork(context),
+            new FixedTimeProvider(Now));
+
+        await gate;
+        try
+        {
+            await useCase.ExecuteAsync(
+                new VerifyEmailRequestDto { Token = "shared-raw-token" },
+                CancellationToken.None);
+            return "success";
+        }
+        catch (AppException exception)
+        {
+            return exception.ErrorCode;
+        }
+    }
+
+    /// <summary>Executes a verification-email resend in an independent database context.</summary>
+    private static async Task RunResendAsync(
+        string connectionString,
+        string email,
+        GeneratedUserToken generatedToken,
+        Task gate)
+    {
+        await using var context = CreateContext(connectionString);
+        var repository = new AuthenticationRepository(context);
+        var tokenService = new Mock<IAuthenticationTokenService>();
+        tokenService.Setup(service => service.CreateUserToken()).Returns(generatedToken);
+        var emailService = new Mock<IEmailService>();
+        var useCase = new ResendVerificationEmailUseCase(
+            new ResendVerificationEmailRequestDtoValidator(),
+            repository,
+            tokenService.Object,
+            emailService.Object,
+            new UnitOfWork(context),
+            new FixedTimeProvider(Now));
+
+        await gate;
+        await useCase.ExecuteAsync(
+            new ResendVerificationEmailRequestDto { Email = email },
+            CancellationToken.None);
+        emailService.Verify(service => service.SendEmailVerificationAsync(
+            email,
+            It.IsAny<string>(),
+            generatedToken.Token,
+            TimeSpan.FromHours(24),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>Applies migrations and inserts a pending user with an email-verification token.</summary>
+    private static async Task<SeedResult> SeedPendingUserAsync(
+        string connectionString,
+        string prefix,
+        string tokenHashPrefix)
+    {
+        await using var context = CreateContext(connectionString);
+        await context.Database.MigrateAsync();
+        var suffix = Guid.NewGuid().ToString("N");
+        var user = new User
+        {
+            Email = $"angi-58-{prefix}-{suffix}@integration.test",
+            RoleId = 1,
+            DisplayName = "ANGI 58 Integration",
+            Status = UserStatus.PendingVerification
+        };
+        var token = new UserToken
+        {
+            User = user,
+            Purpose = UserTokenPurpose.EmailVerify,
+            TokenHash = $"{tokenHashPrefix}-{suffix}",
+            ExpiresAt = Now.AddHours(1)
+        };
+        context.UserTokens.Add(token);
+        await context.SaveChangesAsync();
+        return new SeedResult(user.Id, user.Email, token.Id, token.TokenHash);
+    }
+
+    /// <summary>Deletes the seeded user and its cascading integration-test data.</summary>
+    private static async Task DeleteUserAsync(string connectionString, int userId)
+    {
+        await using var context = CreateContext(connectionString);
+        await context.Users.Where(user => user.Id == userId).ExecuteDeleteAsync();
+    }
+
+    /// <summary>Creates an ANGI database context configured for the dedicated PostgreSQL test database.</summary>
+    private static ANGIContext CreateContext(string connectionString)
+    {
+        return PostgresTestDatabase.CreateContext(connectionString, new FixedTimeProvider(Now));
+    }
+
+    /// <summary>Returns the PostgreSQL integration-test connection string validated by the test attribute.</summary>
+    private static string RequiredConnectionString() =>
+        Environment.GetEnvironmentVariable(PostgresIntegrationFactAttribute.ConnectionStringVariable)!;
+
+    private sealed record SeedResult(int UserId, string Email, long TokenId, string TokenHash);
+
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        private readonly DateTimeOffset _now;
+
+        /// <summary>Initializes a deterministic UTC clock for database assertions.</summary>
+        public FixedTimeProvider(DateTime now)
+        {
+            _now = new DateTimeOffset(now);
+        }
+
+        /// <summary>Returns the fixed UTC instant used by the integration scenario.</summary>
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
+}

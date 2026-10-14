@@ -90,6 +90,23 @@ public sealed class RestaurantRepository : IRestaurantRepository
         _context.RestaurantVerifications.Add(verification);
     }
 
+    /// <summary>Loads the owner's restaurant and its full verification history without tracking for OWN-07.</summary>
+    public Task<Domain.Entities.Restaurant?> GetOwnerRestaurantWithVerificationsAsync(
+        int ownerId,
+        CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).ThenByDescending(item => item.Id))
+                .ThenInclude(verification => verification.Documents)
+                    .ThenInclude(document => document.Media)
+            .Include(restaurant => restaurant.Verifications.OrderByDescending(item => item.SubmittedAt).ThenByDescending(item => item.Id))
+                .ThenInclude(verification => verification.Reviewer)
+                    .ThenInclude(reviewer => reviewer!.AvatarMedia)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
     /// <summary>Reads only the status of a verification that belongs to the given restaurant.</summary>
     public async Task<VerificationStatus?> GetVerificationStatusAsync(
         long restaurantId,
