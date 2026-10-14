@@ -47,7 +47,8 @@ ANGI.WebApi/
   DependencyInjection.cs          AddWebApi(configuration)
   Program.cs
 
-ANGI.Test/                        mirrors the project folders: Application/, Infrastructure/, WebApi/, Domain/
+ANGI.UnitTests/                   isolated tests; mirrors Application/, Infrastructure/, WebApi/, Domain/
+ANGI.IntegrationTests/            HTTP host, PostgreSQL and live external-service integration tests
 ```
 
 ## 2. Layers and dependencies
@@ -119,7 +120,7 @@ Read the endpoint in the API Design and the tables in the Data Dictionary first.
 10. Infrastructure  repository implementation
 11. Infrastructure  register the repository in the module's Add…Infrastructure() (§12)
 12. WebApi          controller action (§11) with [Authorize] / [Authorize(Roles = "...")] as the API Design says
-13. Test            unit tests for the use case and validator in ANGI.Test
+13. Test            unit tests in ANGI.UnitTests; integration tests in ANGI.IntegrationTests when needed
 ```
 
 ## 5. Responses

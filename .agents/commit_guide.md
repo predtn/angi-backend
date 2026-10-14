@@ -86,7 +86,7 @@ Never use `Closes #12`: the team does not use GitHub Issues.
 
 - One commit = one logical change. If the subject needs "and", split it.
 - The commit builds and its tests pass. Run what CI runs:
-  - angi-backend: `dotnet build ANGI.slnx`, `dotnet test ANGI.slnx`, and after any entity or configuration change `dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi`
+  - angi-backend: `dotnet build ANGI.slnx`, `dotnet test ANGI.slnx` with `RUN_POSTGRES_INTEGRATION_TESTS=1` and `ANGI_TEST_POSTGRES_CONNECTION_STRING` set to the local `angi_test` database (README, CI), since CI runs the PostgreSQL tests that are skipped without them, and after any entity or configuration change `dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi`
   - angi-reco: `ruff check .`, `ruff format --check .`, `pytest`, and after any model change `alembic check`
 - Nothing generated or secret is staged: `bin/`, `obj/`, `.env`, user secrets, `appsettings.*.local.json`, caches.
 - Do not reformat or reorder whole files. In `appsettings.json`, `.csproj`, `pyproject.toml` only add lines.

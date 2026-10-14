@@ -36,7 +36,7 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 | Validation | FluentValidation |
 | Auth | JWT Bearer, rotating refresh token, BCrypt, Google sign-in |
 | API docs | OpenAPI + Scalar at `/scalar`, Development only |
-| Tests | xUnit, Moq, FluentAssertions 7.x (never 8.x: paid for commercial use); `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) for HTTP contract tests |
+| Tests | xUnit, Moq, FluentAssertions 7.x (never 8.x: paid for commercial use); `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) for HTTP contract tests. `ANGI.UnitTests` is isolated; `ANGI.IntegrationTests` also runs against PostgreSQL, only on a dedicated database whose name contains `test` (a service container in CI) |
 | Hosting | Render (backend, reco, PostgreSQL), Vercel (frontend) |
 
 Do not add another framework or library for a concern this table already covers.
@@ -47,7 +47,7 @@ Do not add another framework or library for a concern this table already covers.
 Domain  ◀──  Application  ◀──  Infrastructure
                   ▲                  ▲
                   └──── WebApi ──────┘   (Infrastructure: DI registration only)
-Test ──▶ all projects
+UnitTests, IntegrationTests ──▶ all projects
 ```
 
 | Project | Contains |
