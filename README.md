@@ -8,7 +8,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request to `dev` 
 | Step | Fails when |
 |---|---|
 | Build (Release) | The solution does not compile |
-| Test | A unit or HTTP contract test fails (PostgreSQL and live external-service tests are skipped unless enabled) |
+| Test | A unit, HTTP contract or PostgreSQL integration test fails (CI provides its own PostgreSQL; only the live Cloudinary and Brevo tests are skipped) |
 | Check for missing EF migration | An entity or configuration changed without `dotnet ef migrations add` |
 
 Run the same checks locally before pushing:
@@ -28,9 +28,11 @@ dotnet test ANGI.UnitTests/ANGI.UnitTests.csproj
 dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj
 ```
 
-HTTP contract tests run by default. PostgreSQL tests require an explicitly selected database whose name contains `test`:
+HTTP contract tests run by default. PostgreSQL tests require an explicitly selected database whose name contains `test`. Create it once in the local container (owned by `angi_backend`, which can then create the `citext` and `vector` extensions itself):
 
 ```bash
+docker exec angi-postgres psql -U postgres -c "create database angi_test owner angi_backend"
+
 RUN_POSTGRES_INTEGRATION_TESTS=1 \
 ANGI_TEST_POSTGRES_CONNECTION_STRING="Host=localhost;Port=5432;Database=angi_test;Username=angi_backend;Password=<password>" \
 dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj
