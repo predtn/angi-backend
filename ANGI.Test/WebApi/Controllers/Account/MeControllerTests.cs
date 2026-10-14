@@ -12,17 +12,78 @@ namespace ANGI.Test.WebApi.Controllers.Account;
 
 public sealed class MeControllerTests
 {
-    // TEST-01: Verify MeController requires [Authorize] attribute.
+    private readonly Mock<IGetMyProfileUseCase> _getMyProfileUseCase = new();
+    private readonly Mock<IUpdateMyProfileUseCase> _updateMyProfileUseCase = new();
+    private readonly Mock<IChangePasswordUseCase> _changePasswordUseCase = new();
+
+    private MeController CreateController() =>
+        new(_getMyProfileUseCase.Object, _updateMyProfileUseCase.Object, _changePasswordUseCase.Object);
+
     [Fact]
     public void Controller_ShouldRequireAuthorization()
     {
-        var authorizeAttribute = typeof(MeController)
-            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true);
-
-        authorizeAttribute.Should().NotBeEmpty("MeController must be protected with [Authorize]");
+        var attributes = typeof(MeController).GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true);
+        attributes.Should().NotBeEmpty();
     }
 
-    // TEST-02: Verify endpoint has ProducesResponseType annotations for 200, 400, 401.
+    [Fact]
+    public async Task GetProfile_ShouldCallUseCaseAndReturnOk()
+    {
+        // Arrange
+        var profile = new UserProfileDto
+        {
+            Id = 12,
+            Email = "an.nguyen@gmail.com",
+            DisplayName = "Nguyễn An",
+            Role = "TRAVELER"
+        };
+
+        _getMyProfileUseCase.Setup(u => u.ExecuteAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(profile);
+
+        var controller = CreateController();
+
+        // Act
+        var actionResult = await controller.GetProfile(CancellationToken.None);
+
+        // Assert
+        var okResult = actionResult.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        var response = okResult.Value.Should().BeOfType<ApiResponse<UserProfileDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeEquivalentTo(profile);
+    }
+
+    [Fact]
+    public async Task UpdateProfile_ShouldCallUseCaseAndReturnOk()
+    {
+        // Arrange
+        var request = new UpdateProfileRequestDto { DisplayName = "An Nguyễn Mới" };
+        var updatedProfile = new UserProfileDto
+        {
+            Id = 12,
+            DisplayName = "An Nguyễn Mới",
+            Role = "TRAVELER"
+        };
+
+        _updateMyProfileUseCase.Setup(u => u.ExecuteAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(updatedProfile);
+
+        var controller = CreateController();
+
+        // Act
+        var actionResult = await controller.UpdateProfile(request, CancellationToken.None);
+
+        // Assert
+        var okResult = actionResult.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        var response = okResult.Value.Should().BeOfType<ApiResponse<UserProfileDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeEquivalentTo(updatedProfile);
+    }
+
     [Fact]
     public void ChangePassword_ShouldHaveDocumentedOpenApiProducesResponseTypes()
     {
@@ -40,13 +101,10 @@ public sealed class MeControllerTests
         producesResponseTypes.Should().Contain(StatusCodes.Status401Unauthorized);
     }
 
-    // TEST-03: Verify successful execution invokes use case and returns 200 OK with null Data.
     [Fact]
     public async Task ChangePassword_WhenSuccessful_ShouldReturnOkWithNullData()
     {
-        var useCase = new Mock<IChangePasswordUseCase>();
-        var controller = new MeController(useCase.Object);
-
+        var controller = CreateController();
         var request = new ChangePasswordRequestDto
         {
             CurrentPassword = "OldPassword123",
@@ -62,6 +120,6 @@ public sealed class MeControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeNull();
 
-        useCase.Verify(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+        _changePasswordUseCase.Verify(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

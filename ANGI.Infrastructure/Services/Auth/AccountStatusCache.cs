@@ -44,6 +44,7 @@ namespace ANGI.Infrastructure.Services.Auth
             _cache.Remove(Key(userId));
         }
 
+        /// <summary>Builds the per-user memory-cache key.</summary>
         private static string Key(int userId) => $"account-status:{userId}";
     }
 }

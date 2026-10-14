@@ -129,6 +129,7 @@ internal static class RestaurantDetailMapper
         };
     }
 
+    /// <summary>Calculates the straight-line distance in kilometres between two geographic coordinates.</summary>
     public static decimal CalculateHaversineDistance(decimal lat1, decimal lng1, decimal lat2, decimal lng2)
     {
         const double EarthRadiusKm = 6371.0;
@@ -144,6 +145,7 @@ internal static class RestaurantDetailMapper
         return Math.Round((decimal)(EarthRadiusKm * c), 1);
     }
 
+    /// <summary>Determines whether any restaurant interval is open at the current Vietnam local time.</summary>
     private static bool IsOpenNow(IEnumerable<RestaurantBusinessHour> hours, TimeProvider timeProvider)
     {
         var vietnamNow = timeProvider.GetUtcNow().ToOffset(TimeSpan.FromHours(7));

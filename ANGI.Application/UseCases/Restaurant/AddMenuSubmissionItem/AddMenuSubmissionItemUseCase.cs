@@ -56,9 +56,12 @@ public sealed class AddMenuSubmissionItemUseCase : IAddMenuSubmissionItemUseCase
             ownerId,
             request.CoverMediaId,
             ct);
-        var nextSortOrder = request.SortOrder ?? (submission.Items.Count == 0
-            ? (short)0
-            : (short)(submission.Items.Max(item => item.SortOrder) + 1));
+        var highestSortOrder = submission.Items.Count == 0
+            ? (short)-1
+            : submission.Items.Max(item => item.SortOrder);
+        var nextSortOrder = request.SortOrder ?? (highestSortOrder == short.MaxValue
+            ? short.MaxValue
+            : (short)(highestSortOrder + 1));
         var item = new MenuSubmissionItem
         {
             SubmissionId = submission.Id,

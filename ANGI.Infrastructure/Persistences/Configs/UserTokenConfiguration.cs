@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures persistence for one-time account verification and password-reset tokens.</summary>
     public class UserTokenConfiguration : IEntityTypeConfiguration<UserToken>
     {
+        /// <summary>Maps user token constraints, enum storage, uniqueness, and ownership.</summary>
         public void Configure(EntityTypeBuilder<UserToken> builder)
         {
             builder.ToTable("user_tokens");

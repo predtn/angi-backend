@@ -19,7 +19,7 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
             .NotEmpty().WithMessage("Số điện thoại là bắt buộc.")
             .MaximumLength(20).WithMessage("Số điện thoại không được vượt quá 20 ký tự.");
         RuleFor(x => x.Email)
-            .EmailAddress().WithMessage("Email không đúng định dạng.")
+            .Must(BeValidEmail).WithMessage("Email không đúng định dạng.")
             .When(x => !string.IsNullOrWhiteSpace(x.Email));
         RuleFor(x => x.Website)
             .Must(BeHttpUrl).WithMessage("Website phải là URL http hoặc https.")
@@ -44,9 +44,14 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
         RuleFor(x => x.PriceLevel)
             .InclusiveBetween((short)1, (short)4).WithMessage("Mức giá phải từ 1 đến 4.")
             .When(x => x.PriceLevel.HasValue);
+        RuleFor(x => x.CoverMediaId)
+            .GreaterThan(0).WithMessage("Mã ảnh bìa phải lớn hơn 0.")
+            .When(x => x.CoverMediaId.HasValue);
         RuleFor(x => x.ImageMediaIds)
             .Must(ids => ids is null || ids.Count <= 10)
             .WithMessage("Chỉ được chọn tối đa 10 ảnh.")
+            .Must(ids => ids is null || ids.All(id => id > 0))
+            .WithMessage("Mã ảnh phải lớn hơn 0.")
             .Must(ids => ids is null || ids.Distinct().Count() == ids.Count)
             .WithMessage("Danh sách ảnh không được trùng nhau.");
         RuleForEach(x => x.BusinessHours).SetValidator(new BusinessHourDtoValidator());
@@ -57,8 +62,24 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
 
     /// <summary>Checks whether the website is an absolute HTTP or HTTPS URL.</summary>
     private static bool BeHttpUrl(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>Checks a normalized contact email without accepting whitespace inside the address.</summary>
+    private static bool BeValidEmail(string? value)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return false;
+        }
+
+        var separatorIndex = trimmed.IndexOf('@');
+        return !trimmed.Any(char.IsWhiteSpace) &&
+               separatorIndex > 0 &&
+               separatorIndex == trimmed.LastIndexOf('@') &&
+               separatorIndex < trimmed.Length - 1;
+    }
 
     /// <summary>Prevents overlaps across the circular seven-day schedule, including overnight intervals.</summary>
     private static bool HaveNonOverlappingIntervals(IReadOnlyList<BusinessHourDto>? hours)

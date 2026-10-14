@@ -18,7 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Moq;
 using Npgsql;
 
-namespace ANGI.Test.Infrastructure.Persistences.Restaurant;
+namespace ANGI.Test.Infrastructure.Persistences.Repositories.Restaurant;
 
 public sealed class MenuSubmissionPostgresConcurrencyTests
 {

@@ -250,6 +250,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
     private static string ToApiValue<TEnum>(TEnum value) where TEnum : struct, Enum =>
         JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 
+    /// <summary>Determines whether the supplied weekly intervals contain the current Vietnam local time.</summary>
     private static bool CalculateIsOpenNow(
         Domain.Entities.Restaurant restaurant,
         short currentDay,
@@ -269,6 +270,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             (h.DayOfWeek == previousDay && h.CloseTime < h.OpenTime && currentTime < h.CloseTime));
     }
 
+    /// <summary>Calculates the straight-line distance in kilometres between two geographic coordinates.</summary>
     private static decimal CalculateHaversineDistance(decimal lat1, decimal lng1, decimal lat2, decimal lng2)
     {
         const double EarthRadiusKm = 6371.0;

@@ -16,7 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Moq;
 using Npgsql;
 
-namespace ANGI.Test.Infrastructure.Persistences.Auth;
+namespace ANGI.Test.Infrastructure.Persistences.Repositories.Auth;
 
 public sealed class EmailVerificationPostgresConcurrencyTests
 {

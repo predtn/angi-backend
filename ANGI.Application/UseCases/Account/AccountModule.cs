@@ -1,15 +1,18 @@
 using ANGI.Application.Common.Interfaces.UseCases.Account;
 using ANGI.Application.UseCases.Account.ChangePassword;
+using ANGI.Application.UseCases.Account.GetMyProfile;
+using ANGI.Application.UseCases.Account.UpdateMyProfile;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Account;
 
-/// <summary>Centralizes Application-layer use-case registration for the Account module.</summary>
+/// <summary>Registers Account use cases for the lifetime of an HTTP request.</summary>
 public static class AccountModule
 {
-    /// <summary>Registers account management use cases with a scoped lifetime.</summary>
     public static IServiceCollection AddAccountUseCases(this IServiceCollection services)
     {
+        services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
+        services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
         services.AddScoped<IChangePasswordUseCase, ChangePasswordUseCase>();
         return services;
     }

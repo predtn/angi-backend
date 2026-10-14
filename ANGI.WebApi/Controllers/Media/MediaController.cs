@@ -21,10 +21,17 @@ public sealed class MediaController : ControllerBase
         _uploadMediaUseCase = uploadMediaUseCase;
     }
 
-    /// <summary>Receives MEDIA-01 multipart content and returns persisted media metadata.</summary>
+    /// <summary>Upload ảnh hoặc tài liệu và trả về thông tin metadata (MEDIA-01).</summary>
+    /// <param name="form">Biểu mẫu multipart/form-data chứa file và purpose.</param>
+    /// <param name="ct">Mã hủy yêu cầu thao tác bất đồng bộ.</param>
+    /// <response code="201">Tải lên tệp thành công.</response>
+    /// <response code="400">Tệp vượt quá dung lượng cho phép hoặc định dạng không hỗ trợ.</response>
+    /// <response code="401">Chưa đăng nhập hoặc token không hợp lệ.</response>
     [HttpPost]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApiResponse<MediaFileDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Upload([FromForm] UploadMediaForm form, CancellationToken ct)
     {
         await using var content = form.File.OpenReadStream();

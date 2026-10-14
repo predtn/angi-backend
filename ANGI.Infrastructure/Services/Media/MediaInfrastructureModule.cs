@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Infrastructure.Persistences.Repositories.Media;
+using ANGI.Infrastructure.Services.Cloudinary;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Infrastructure.Services.Media;

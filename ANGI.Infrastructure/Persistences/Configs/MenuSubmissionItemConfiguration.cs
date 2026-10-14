@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures proposed dishes contained in a menu submission.</summary>
     public class MenuSubmissionItemConfiguration : IEntityTypeConfiguration<MenuSubmissionItem>
     {
+        /// <summary>Maps proposal fields, constraints, defaults, and dish/media relationships.</summary>
         public void Configure(EntityTypeBuilder<MenuSubmissionItem> builder)
         {
             builder.ToTable("menu_submission_items", table =>

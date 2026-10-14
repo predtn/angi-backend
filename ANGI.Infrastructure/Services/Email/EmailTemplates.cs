@@ -3,6 +3,7 @@ using System.Text.Unicode;
 
 namespace ANGI.Infrastructure.Services.Email
 {
+    /// <summary>Contains the subject and alternative bodies of one transactional email.</summary>
     internal sealed record EmailContent(string Subject, string HtmlContent, string TextContent);
 
     /// <summary>The Vietnamese account emails. The display name is HTML-encoded in the HTML part.</summary>
@@ -11,6 +12,7 @@ namespace ANGI.Infrastructure.Services.Email
         // Encodes only HTML-special characters, so Vietnamese letters stay readable.
         private static readonly HtmlEncoder _htmlEncoder = HtmlEncoder.Create(UnicodeRanges.All);
 
+        /// <summary>Builds the Vietnamese one-time email-verification message.</summary>
         public static EmailContent EmailVerification(string displayName, string link, TimeSpan validFor)
         {
             var validity = FormatValidity(validFor);
@@ -25,6 +27,7 @@ namespace ANGI.Infrastructure.Services.Email
                 ignore: "Nếu bạn không đăng ký ANGI, hãy bỏ qua email này.");
         }
 
+        /// <summary>Builds the Vietnamese one-time password-reset message.</summary>
         public static EmailContent PasswordReset(string displayName, string link, TimeSpan validFor)
         {
             var validity = FormatValidity(validFor);
@@ -45,6 +48,7 @@ namespace ANGI.Infrastructure.Services.Email
                 ? $"{(long)validFor.TotalHours} giờ"
                 : $"{(long)Math.Ceiling(validFor.TotalMinutes)} phút";
 
+        /// <summary>Builds safe HTML and plain-text alternatives for an account email.</summary>
         private static EmailContent Build(
             string subject,
             string displayName,

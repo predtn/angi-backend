@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
+    /// <summary>Configures uploaded media referenced by restaurant profiles and menu items.</summary>
     public class MediaFileConfiguration : IEntityTypeConfiguration<MediaFile>
     {
+        /// <summary>Maps uploaded file metadata and its uploader relationship.</summary>
         public void Configure(EntityTypeBuilder<MediaFile> builder)
         {
             builder.ToTable("media_files");
