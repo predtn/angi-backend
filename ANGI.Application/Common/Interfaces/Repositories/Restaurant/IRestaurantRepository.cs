@@ -25,6 +25,9 @@ public interface IRestaurantRepository
     /// <summary>Loads and tracks the complete owner profile so OWN-03 can update it.</summary>
     Task<ANGI.Domain.Entities.Restaurant?> GetTrackedOwnerProfileAsync(int ownerId, CancellationToken ct);
 
+    /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct);
+
     /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
     Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
 

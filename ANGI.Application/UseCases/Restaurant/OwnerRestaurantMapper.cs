@@ -142,7 +142,7 @@ internal static class OwnerRestaurantMapper
     }
 
     /// <summary>Determines whether any configured interval is open at the current Vietnam time.</summary>
-    private static bool IsOpenNow(IEnumerable<RestaurantBusinessHour> hours, TimeProvider timeProvider)
+    internal static bool IsOpenNow(IEnumerable<RestaurantBusinessHour> hours, TimeProvider timeProvider)
     {
         var vietnamNow = timeProvider.GetUtcNow().ToOffset(TimeSpan.FromHours(7));
         var currentDay = (short)vietnamNow.DayOfWeek;

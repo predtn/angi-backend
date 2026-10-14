@@ -69,6 +69,14 @@ public sealed class RestaurantRepository : IRestaurantRepository
             .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
     }
 
+    /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
+    public Task<Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .Include(restaurant => restaurant.BusinessHours)
+            .FirstOrDefaultAsync(restaurant => restaurant.OwnerId == ownerId, ct);
+    }
+
     /// <summary>Builds the common complete owner-profile query used by reads and updates.</summary>
     private static IQueryable<Domain.Entities.Restaurant> OwnerProfileQuery(
         IQueryable<Domain.Entities.Restaurant> query)
