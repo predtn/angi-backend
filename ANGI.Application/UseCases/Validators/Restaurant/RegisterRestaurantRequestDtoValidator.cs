@@ -1,5 +1,5 @@
-using System.Globalization;
 using ANGI.Application.DTOs.Restaurant;
+using ANGI.Application.UseCases.Restaurant;
 using FluentValidation;
 
 namespace ANGI.Application.UseCases.Validators.Restaurant;
@@ -82,63 +82,6 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
     }
 
     /// <summary>Prevents overlaps across the circular seven-day schedule, including overnight intervals.</summary>
-    private static bool HaveNonOverlappingIntervals(IReadOnlyList<BusinessHourDto>? hours)
-    {
-        if (hours is null)
-        {
-            return true;
-        }
-
-        const int minutesPerDay = 24 * 60;
-        const int minutesPerWeek = 7 * minutesPerDay;
-        var intervals = new List<(int Start, int End)>();
-
-        foreach (var hour in hours)
-        {
-            if (!TimeOnly.TryParseExact(
-                    hour.OpenTime,
-                    "HH:mm",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out var openTime) ||
-                !TimeOnly.TryParseExact(
-                    hour.CloseTime,
-                    "HH:mm",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out var closeTime))
-            {
-                continue;
-            }
-
-            var start = (hour.DayOfWeek * minutesPerDay) + (openTime.Hour * 60) + openTime.Minute;
-            var end = (hour.DayOfWeek * minutesPerDay) + (closeTime.Hour * 60) + closeTime.Minute;
-            if (end <= start)
-            {
-                end += minutesPerDay;
-            }
-
-            intervals.Add((start, end));
-        }
-
-        for (var firstIndex = 0; firstIndex < intervals.Count; firstIndex++)
-        {
-            for (var secondIndex = firstIndex + 1; secondIndex < intervals.Count; secondIndex++)
-            {
-                var first = intervals[firstIndex];
-                var second = intervals[secondIndex];
-                foreach (var weekShift in new[] { -minutesPerWeek, 0, minutesPerWeek })
-                {
-                    var shiftedStart = second.Start + weekShift;
-                    var shiftedEnd = second.End + weekShift;
-                    if (first.Start < shiftedEnd && shiftedStart < first.End)
-                    {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        return true;
-    }
+    private static bool HaveNonOverlappingIntervals(IReadOnlyList<BusinessHourDto>? hours) =>
+        !BusinessHourRules.HasOverlap(hours);
 }

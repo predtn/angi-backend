@@ -31,6 +31,9 @@ public interface IRestaurantRepository
     /// <summary>Adds a restaurant verification aggregate to the current unit of work.</summary>
     void AddVerification(RestaurantVerification verification);
 
+    /// <summary>Loads and tracks only the owner's restaurant and its business hours so OWN-04 can replace them.</summary>
+    Task<ANGI.Domain.Entities.Restaurant?> GetTrackedWithBusinessHoursAsync(int ownerId, CancellationToken ct);
+
     /// <summary>Retrieves a paginated list of restaurants matching search and filter criteria.</summary>
     Task<Paged<RestaurantCardDto>> BrowseAsync(BrowseRestaurantsRequestDto request, DateTimeOffset currentUtcTime, CancellationToken ct);
 
