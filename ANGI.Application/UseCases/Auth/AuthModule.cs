@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.UseCases.Auth.EnsureActiveAccount;
+using ANGI.Application.UseCases.Auth.ForgotPassword;
 using ANGI.Application.UseCases.Auth.Login;
 using ANGI.Application.UseCases.Auth.GoogleLogin;
 using ANGI.Application.UseCases.Auth.Logout;
@@ -26,6 +27,7 @@ namespace ANGI.Application.UseCases.Auth
             services.AddScoped<ILogoutUseCase, LogoutUseCase>();
             services.AddScoped<IVerifyEmailUseCase, VerifyEmailUseCase>();
             services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
+            services.AddScoped<IForgotPasswordUseCase, ForgotPasswordUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, EnsureActiveAccountUseCase>();
             return services;
         }

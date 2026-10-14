@@ -176,6 +176,27 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             response.Data.Should().BeSameAs(expected);
         }
 
+        // TEST-18: Return a successful null-data response after requesting a password reset.
+        /// <summary>Verifies AUTH-08 delegates to its use case and preserves the non-enumerating response shape.</summary>
+        [Fact]
+        public async Task ForgotPassword_ShouldReturnOkApiResponseWithNullData()
+        {
+            var forgotPasswordUseCase = new Mock<IForgotPasswordUseCase>();
+            var controller = CreateController(forgotPasswordUseCase: forgotPasswordUseCase);
+
+            var action = await controller.ForgotPassword(
+                new ForgotPasswordRequestDto { Email = "user@angi.test" },
+                CancellationToken.None);
+
+            var result = action.Should().BeOfType<OkObjectResult>().Subject;
+            var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
+            response.Success.Should().BeTrue();
+            response.Data.Should().BeNull();
+            forgotPasswordUseCase.Verify(x => x.ExecuteAsync(
+                It.IsAny<ForgotPasswordRequestDto>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
         // TEST-08: Expose public authentication endpoints anonymously while requiring authentication for logout.
         /// <summary>Verifies the controller authorization attributes match the Auth API contract.</summary>
         [Fact]
@@ -201,6 +222,9 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             controllerType.GetMethod(nameof(AuthenticationController.ResendVerificationEmail))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();
+            controllerType.GetMethod(nameof(AuthenticationController.ForgotPassword))!
+                .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
+                .Should().ContainSingle();
             controllerType.GetMethod(nameof(AuthenticationController.Logout))!
                 .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
                 .Should().ContainSingle();
@@ -214,7 +238,8 @@ namespace ANGI.Test.WebApi.Controllers.Auth
             Mock<IRefreshTokenUseCase>? refreshTokenUseCase = null,
             Mock<ILogoutUseCase>? logoutUseCase = null,
             Mock<IVerifyEmailUseCase>? verifyEmailUseCase = null,
-            Mock<IResendVerificationEmailUseCase>? resendVerificationEmailUseCase = null)
+            Mock<IResendVerificationEmailUseCase>? resendVerificationEmailUseCase = null,
+            Mock<IForgotPasswordUseCase>? forgotPasswordUseCase = null)
         {
             return new AuthenticationController(
                 (registerAccountUseCase ?? new Mock<IRegisterAccountUseCase>()).Object,
@@ -223,7 +248,8 @@ namespace ANGI.Test.WebApi.Controllers.Auth
                 (refreshTokenUseCase ?? new Mock<IRefreshTokenUseCase>()).Object,
                 (logoutUseCase ?? new Mock<ILogoutUseCase>()).Object,
                 (verifyEmailUseCase ?? new Mock<IVerifyEmailUseCase>()).Object,
-                (resendVerificationEmailUseCase ?? new Mock<IResendVerificationEmailUseCase>()).Object);
+                (resendVerificationEmailUseCase ?? new Mock<IResendVerificationEmailUseCase>()).Object,
+                (forgotPasswordUseCase ?? new Mock<IForgotPasswordUseCase>()).Object);
         }
     }
 }
@@ -235,19 +261,23 @@ namespace ANGI.Test.WebApi.Controllers
     {
         private readonly AuthenticationApiFactory _factory;
 
+        /// <summary>Initializes HTTP contract tests with the shared deterministic host.</summary>
         public AuthenticationHttpContractTests(AuthenticationApiFactory factory)
         {
             _factory = factory;
         }
 
+        /// <summary>Lists public Auth endpoints whose contracts require a JSON request body.</summary>
         public static TheoryData<string> BodyEndpoints => new()
         {
             "/api/v1/auth/google",
             "/api/v1/auth/verify-email",
-            "/api/v1/auth/verify-email/resend"
+            "/api/v1/auth/verify-email/resend",
+            "/api/v1/auth/forgot-password"
         };
 
         // TEST-09: Reject a missing JSON body with the canonical validation envelope.
+        /// <summary>Verifies body-required Auth endpoints reject an absent request payload.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string path)
@@ -259,6 +289,7 @@ namespace ANGI.Test.WebApi.Controllers
         }
 
         // TEST-10: Reject malformed JSON with the canonical validation envelope.
+        /// <summary>Verifies malformed Auth JSON is converted to the standard validation error.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMalformedJson_ShouldReturnValidationEnvelope(string path)
@@ -272,6 +303,7 @@ namespace ANGI.Test.WebApi.Controllers
         }
 
         // TEST-11: Reject a literal null JSON body with the canonical validation envelope.
+        /// <summary>Verifies a JSON null cannot bypass required Auth request models.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithNullJsonBody_ShouldReturnValidationEnvelope(string path)
@@ -284,6 +316,7 @@ namespace ANGI.Test.WebApi.Controllers
         }
 
         // TEST-12: Map documented AUTH-02 application failures to their HTTP envelopes.
+        /// <summary>Verifies every AUTH-02 token failure keeps its documented status and error code.</summary>
         [Theory]
         [InlineData("invalid-token", HttpStatusCode.BadRequest, "TOKEN_INVALID")]
         [InlineData("expired-token", HttpStatusCode.BadRequest, "TOKEN_EXPIRED")]
@@ -302,6 +335,7 @@ namespace ANGI.Test.WebApi.Controllers
         }
 
         // TEST-13: Map email-provider failure to the documented 503 envelope.
+        /// <summary>Verifies an email delivery failure is wrapped as SERVICE_UNAVAILABLE.</summary>
         [Fact]
         public async Task ResendVerificationEmail_WhenEmailProviderFails_ShouldReturnServiceUnavailableEnvelope()
         {
@@ -313,9 +347,12 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, "SERVICE_UNAVAILABLE");
         }
 
-        // TEST-14: Return 429, Retry-After, and the canonical envelope on the second resend per email.
-        [Fact]
-        public async Task ResendVerificationEmail_TwiceWithinWindow_ShouldReturnRateLimitEnvelope()
+        // TEST-14: Return 429, Retry-After, and the canonical envelope on a repeated sensitive request.
+        /// <summary>Verifies AUTH-03 and AUTH-08 share the documented per-email fixed-window limit.</summary>
+        [Theory]
+        [InlineData("/api/v1/auth/verify-email/resend")]
+        [InlineData("/api/v1/auth/forgot-password")]
+        public async Task SensitiveEmailEndpoint_TwiceWithinWindow_ShouldReturnRateLimitEnvelope(string path)
         {
             await using var factory = new AuthenticationApiFactory(
                 sensitiveWindowSeconds: 60,
@@ -323,12 +360,8 @@ namespace ANGI.Test.WebApi.Controllers
             var email = $"rate-{Guid.NewGuid():N}@angi.test";
             var client = factory.CreateClient();
 
-            using var first = await client.PostAsJsonAsync(
-                "/api/v1/auth/verify-email/resend",
-                new ResendVerificationEmailRequestDto { Email = email });
-            using var second = await client.PostAsJsonAsync(
-                "/api/v1/auth/verify-email/resend",
-                new ResendVerificationEmailRequestDto { Email = email });
+            using var first = await client.PostAsJsonAsync(path, new { Email = email });
+            using var second = await client.PostAsJsonAsync(path, new { Email = email });
 
             first.StatusCode.Should().Be(HttpStatusCode.OK);
             second.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
@@ -338,9 +371,12 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(second, "TOO_MANY_REQUESTS");
         }
 
-        // TEST-15: Admit a resend again after the configured fixed window replenishes.
-        [Fact]
-        public async Task ResendVerificationEmail_AfterWindow_ShouldBeAllowedAgain()
+        // TEST-15: Admit a sensitive email request after the configured fixed window replenishes.
+        /// <summary>Verifies AUTH-03 and AUTH-08 replenish their permits after the configured fixed window.</summary>
+        [Theory]
+        [InlineData("/api/v1/auth/verify-email/resend")]
+        [InlineData("/api/v1/auth/forgot-password")]
+        public async Task SensitiveEmailEndpoint_AfterWindow_ShouldBeAllowedAgain(string path)
         {
             await using var factory = new AuthenticationApiFactory(
                 sensitiveWindowSeconds: 1,
@@ -348,23 +384,18 @@ namespace ANGI.Test.WebApi.Controllers
             var client = factory.CreateClient();
             var email = $"reset-{Guid.NewGuid():N}@angi.test";
 
-            using var first = await client.PostAsJsonAsync(
-                "/api/v1/auth/verify-email/resend",
-                new ResendVerificationEmailRequestDto { Email = email });
-            using var limited = await client.PostAsJsonAsync(
-                "/api/v1/auth/verify-email/resend",
-                new ResendVerificationEmailRequestDto { Email = email });
+            using var first = await client.PostAsJsonAsync(path, new { Email = email });
+            using var limited = await client.PostAsJsonAsync(path, new { Email = email });
             await Task.Delay(TimeSpan.FromMilliseconds(2200));
-            using var replenished = await client.PostAsJsonAsync(
-                "/api/v1/auth/verify-email/resend",
-                new ResendVerificationEmailRequestDto { Email = email });
+            using var replenished = await client.PostAsJsonAsync(path, new { Email = email });
 
             first.StatusCode.Should().Be(HttpStatusCode.OK);
             limited.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
             replenished.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // TEST-16: Expose AUTH-02, AUTH-03, and AUTH-05 request and success schemas to API Explorer/OpenAPI.
+        // TEST-16: Expose AUTH-02, AUTH-03, AUTH-05, and AUTH-08 schemas to API Explorer/OpenAPI.
+        /// <summary>Verifies Scalar can discover each implemented Auth request and success schema.</summary>
         [Fact]
         public void ApiExplorer_ShouldExposeAuthenticationVerificationSchemas()
         {
@@ -380,6 +411,9 @@ namespace ANGI.Test.WebApi.Controllers
             AssertOpenApiContract<ResendVerificationEmailRequestDto, object>(
                 descriptions,
                 "api/v1/auth/verify-email/resend");
+            AssertOpenApiContract<ForgotPasswordRequestDto, object>(
+                descriptions,
+                "api/v1/auth/forgot-password");
             AssertOpenApiContract<GoogleLoginRequestDto, GoogleLoginResponseDto>(
                 descriptions,
                 "api/v1/auth/google");
@@ -404,6 +438,7 @@ namespace ANGI.Test.WebApi.Controllers
             await AssertErrorEnvelope(response, expectedCode);
         }
 
+        /// <summary>Asserts one POST endpoint publishes its body and successful response model.</summary>
         private static void AssertOpenApiContract<TRequest, TResponse>(
             IEnumerable<ApiDescription> descriptions,
             string relativePath)
@@ -420,6 +455,7 @@ namespace ANGI.Test.WebApi.Controllers
                 response.Type == typeof(ApiResponse<TResponse>));
         }
 
+        /// <summary>Asserts the canonical API error envelope and its optional field errors.</summary>
         private static async Task AssertErrorEnvelope(
             HttpResponseMessage response,
             string expectedCode,
@@ -444,17 +480,20 @@ namespace ANGI.Test.WebApi.Controllers
         private readonly int _sensitiveWindowSeconds;
         private readonly int _sensitivePermitLimit;
 
+        /// <summary>Creates a host with permissive test rate limits.</summary>
         public AuthenticationApiFactory()
             : this(60, 100)
         {
         }
 
+        /// <summary>Creates a host with deterministic sensitive-auth rate-limit settings.</summary>
         internal AuthenticationApiFactory(int sensitiveWindowSeconds, int sensitivePermitLimit)
         {
             _sensitiveWindowSeconds = sensitiveWindowSeconds;
             _sensitivePermitLimit = sensitivePermitLimit;
         }
 
+        /// <summary>Supplies startup environment variables while the in-memory host is created.</summary>
         protected override IHost CreateHost(IHostBuilder builder)
         {
             const string secret = "ANGI-58-http-contract-test-secret-key-123456789";
@@ -480,6 +519,7 @@ namespace ANGI.Test.WebApi.Controllers
             }
         }
 
+        /// <summary>Replaces external and database Auth dependencies with deterministic stubs.</summary>
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Production");
@@ -504,15 +544,18 @@ namespace ANGI.Test.WebApi.Controllers
             {
                 services.RemoveAll<IVerifyEmailUseCase>();
                 services.RemoveAll<IResendVerificationEmailUseCase>();
+                services.RemoveAll<IForgotPasswordUseCase>();
                 services.RemoveAll<IGoogleLoginUseCase>();
                 services.AddScoped<IVerifyEmailUseCase, StubVerifyEmailUseCase>();
                 services.AddScoped<IResendVerificationEmailUseCase, StubResendVerificationEmailUseCase>();
+                services.AddScoped<IForgotPasswordUseCase, StubForgotPasswordUseCase>();
                 services.AddScoped<IGoogleLoginUseCase, StubGoogleLoginUseCase>();
             });
         }
 
         private sealed class StubVerifyEmailUseCase : IVerifyEmailUseCase
         {
+            /// <summary>Returns deterministic AUTH-02 outcomes for HTTP error mapping tests.</summary>
             public Task<VerifyEmailResponseDto> ExecuteAsync(VerifyEmailRequestDto request, CancellationToken ct)
             {
                 return request.Token switch
@@ -532,6 +575,7 @@ namespace ANGI.Test.WebApi.Controllers
 
         private sealed class StubResendVerificationEmailUseCase : IResendVerificationEmailUseCase
         {
+            /// <summary>Returns deterministic AUTH-03 success and delivery-failure outcomes.</summary>
             public Task ExecuteAsync(ResendVerificationEmailRequestDto request, CancellationToken ct)
             {
                 if (request.Email.Equals("service-unavailable@angi.test", StringComparison.OrdinalIgnoreCase))
@@ -541,6 +585,12 @@ namespace ANGI.Test.WebApi.Controllers
 
                 return Task.CompletedTask;
             }
+        }
+
+        private sealed class StubForgotPasswordUseCase : IForgotPasswordUseCase
+        {
+            /// <summary>Returns a deterministic AUTH-08 success without contacting email or PostgreSQL.</summary>
+            public Task ExecuteAsync(ForgotPasswordRequestDto request, CancellationToken ct) => Task.CompletedTask;
         }
 
         private sealed class StubGoogleLoginUseCase : IGoogleLoginUseCase

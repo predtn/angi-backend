@@ -34,7 +34,7 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Auth
         /// <summary>Reserves the next database user id so a new account can receive a JWT before the atomic save.</summary>
         Task<int> ReserveUserIdAsync(CancellationToken ct);
 
-        /// <summary>Finds and locks a user by email so verification-token replacement is serialized.</summary>
+        /// <summary>Finds and locks a user by email so account-token replacement is serialized.</summary>
         Task<User?> GetUserByEmailForUpdateAsync(string normalizedEmail, CancellationToken ct);
 
         /// <summary>Reads only the status fields of a user; null when the user does not exist or is soft-deleted.</summary>
