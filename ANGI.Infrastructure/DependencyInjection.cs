@@ -6,6 +6,7 @@ using ANGI.Infrastructure.Services.Audit;
 using ANGI.Infrastructure.Services.Auth;
 using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Media;
+using ANGI.Infrastructure.Services.Mapbox;
 using ANGI.Infrastructure.Services.Recommendation;
 using ANGI.Infrastructure.Services.Restaurant;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,7 @@ namespace ANGI.Infrastructure
             services.AddAuthInfrastructure(configuration);
             services.AddAccountInfrastructure();
             services.AddMediaInfrastructure();
+            services.AddMapboxInfrastructure(configuration);
             services.AddRecommendationInfrastructure(configuration);
             services.AddEmailInfrastructure(configuration);
             services.AddRestaurantInfrastructure();
