@@ -133,6 +133,14 @@ poll pending rows → lock a batch (locked_until) → call reco with Idempotency
 
 Rows with the same `aggregate_key` (`dish:<id>`, `user:<id>`) are sent in order; different keys may run in parallel.
 
+How `OutboxWorker` (`Infrastructure/Services/Outbox`) does it:
+
+- One `UPDATE … RETURNING` with `FOR UPDATE SKIP LOCKED` claims at most `BatchSize` due rows (pending past `next_attempt_at`, or processing with an expired `locked_until`) and sets them processing. It claims only the oldest unfinished row of each `aggregate_key`, so a row waiting for a retry holds back its key's later rows; a dead row does not.
+- The lock lasts `BatchSize × TimeoutSeconds + 30 s`, since the batch is sent one message after another. Each call to reco times out after `TimeoutSeconds` (not the 800 ms of direct calls) and carries `X-Api-Key` and `Idempotency-Key = event_uuid`.
+- Retry delay: reco's `Retry-After` when sent (e.g. 503 `DISH_VECTOR_NOT_READY`), otherwise 5 s doubling per attempt; both at most 15 min. The attempt that reaches `MaxAttempts` makes the row dead. An unreadable payload is dead at once.
+- `locked_until`, `next_attempt_at` and `processed_at` come from the database clock (`now()`), the one the claim compares with.
+- Without `Recommendation:BaseUrl` and `ApiKey` the worker does not start and rows stay pending (tests, machines without reco).
+
 ## 8. Integrations
 
 Every external service is an interface in `Application/Common/Interfaces/Services/` and an implementation in `Infrastructure/Services/`. Where the table has no interface name yet, choose `I<Purpose>Service` and add it here in the same pull request.
@@ -202,7 +210,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Brevo` | `BaseUrl` (`https://api.brevo.com/v3/`), `ApiKey`, `SenderEmail` (`angi.sep490.g71@gmail.com`, the team's verified Brevo sender), `SenderName` (`ANGI`), `TimeoutMilliseconds` (10000) |
 | `Frontend` | `BaseUrl` (`http://localhost:3000`): base of the links sent by email |
 | `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
-| `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10) |
+| `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
