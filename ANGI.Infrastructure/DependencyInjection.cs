@@ -11,6 +11,7 @@ using ANGI.Infrastructure.Services.Mapbox;
 using ANGI.Infrastructure.Services.Outbox;
 using ANGI.Infrastructure.Services.Recommendation;
 using ANGI.Infrastructure.Services.Restaurant;
+using ANGI.Infrastructure.Services.Social;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,7 @@ namespace ANGI.Infrastructure
             services.AddEmailInfrastructure(configuration);
             services.AddRestaurantInfrastructure();
             services.AddDiscoveryInfrastructure();
+            services.AddSocialInfrastructure();
             services.AddAuditInfrastructure();
 
             return services;

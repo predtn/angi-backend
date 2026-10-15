@@ -19,6 +19,13 @@ public interface IDishRepository
     Task<IReadOnlyList<int>> GetCandidateIdsAsync(DishCandidateFilter filter, int maxCount, CancellationToken ct);
 
     /// <summary>
+    /// Returns at most <paramref name="limit"/> candidate dishes for the home trending block (HOME-01): most likes since
+    /// <paramref name="since"/>, then like_count, then restaurant rating, so dishes without recent likes complete the list.
+    /// </summary>
+    /// <param name="province">Case-insensitive substring of the restaurant province, or null.</param>
+    Task<IReadOnlyList<int>> GetTrendingIdsAsync(string? province, DateTime since, int limit, CancellationToken ct);
+
+    /// <summary>
     /// Loads the dishes of a page with what a DishCard shows, keeping only those still candidates (a dish hidden or sold
     /// out since the list was ranked is left out). Order is not guaranteed.
     /// </summary>

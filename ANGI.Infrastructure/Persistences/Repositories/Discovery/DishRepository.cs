@@ -144,6 +144,34 @@ public sealed class DishRepository : IDishRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetTrendingIdsAsync(string? province, DateTime since, int limit, CancellationToken ct)
+    {
+        var query = Candidates();
+        if (!string.IsNullOrWhiteSpace(province))
+        {
+            var term = $"%{province.Trim()}%";
+            query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
+        }
+
+        return await query
+            .Select(dish => new
+            {
+                dish.Id,
+                RecentLikes = _context.DishFeedbacks.Count(feedback =>
+                    feedback.DishId == dish.Id && feedback.Value == FeedbackValue.Like && feedback.CreatedAt >= since),
+                dish.LikeCount,
+                dish.Restaurant.RatingAvg
+            })
+            .OrderByDescending(row => row.RecentLikes)
+            .ThenByDescending(row => row.LikeCount)
+            .ThenByDescending(row => row.RatingAvg)
+            .ThenBy(row => row.Id)
+            .Select(row => row.Id)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<Dish>> GetCardDishesAsync(IReadOnlyCollection<int> dishIds, CancellationToken ct)
     {
         var ids = dishIds.ToArray();
