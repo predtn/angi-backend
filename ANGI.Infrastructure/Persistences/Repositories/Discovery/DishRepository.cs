@@ -91,6 +91,25 @@ public sealed class DishRepository : IDishRepository
             query = query.Where(dish => !dish.DishTags.Any(dishTag => excluded.Contains(dishTag.TagId)));
         }
 
+        if (filter.AnyTagIds.Count > 0)
+        {
+            var any = filter.AnyTagIds.ToArray();
+            query = query.Where(dish => dish.DishTags.Any(dishTag => any.Contains(dishTag.TagId)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.MealTimeCode))
+        {
+            var code = filter.MealTimeCode;
+            query = query.Where(dish => dish.DishTags.Any(dishTag =>
+                dishTag.Tag.TagType == TagType.MealTime && dishTag.Tag.Code == code));
+        }
+
+        if (filter.ExcludeDishIds.Count > 0)
+        {
+            var excludedDishes = filter.ExcludeDishIds.ToArray();
+            query = query.Where(dish => !excludedDishes.Contains(dish.Id));
+        }
+
         if (filter.TagIds.Count > 0)
         {
             var requested = filter.TagIds.Distinct().ToArray();
@@ -142,6 +161,9 @@ public sealed class DishRepository : IDishRepository
             .Take(maxCount)
             .ToArray();
     }
+
+    /// <inheritdoc />
+    public void AddRoll(DishRoll roll) => _context.DishRolls.Add(roll);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetTrendingIdsAsync(string? province, DateTime since, int limit, CancellationToken ct)

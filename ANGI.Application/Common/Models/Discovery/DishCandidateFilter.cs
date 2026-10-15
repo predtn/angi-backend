@@ -20,6 +20,15 @@ public sealed record DishCandidateFilter
     /// <summary>Within one tag type a dish needs one of the tags; across types it needs every type.</summary>
     public IReadOnlyList<short> TagIds { get; init; } = [];
 
+    /// <summary>A dish needs at least one of these tags, whatever their type (DISH-03 tagIds).</summary>
+    public IReadOnlyList<short> AnyTagIds { get; init; } = [];
+
+    /// <summary>A dish needs the meal_time tag with this code (DISH-03 mealTime: breakfast, lunch, dinner, snack).</summary>
+    public string? MealTimeCode { get; init; }
+
+    /// <summary>Dishes left out by id (DISH-03: dishes already rolled in the session).</summary>
+    public IReadOnlyList<int> ExcludeDishIds { get; init; } = [];
+
     /// <summary>A dish with any of these tags is left out (dietary constraints sent by the app).</summary>
     public IReadOnlyList<short> ExcludeTagIds { get; init; } = [];
 

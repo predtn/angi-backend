@@ -30,7 +30,7 @@ public sealed class DishesControllerTests
         var useCase = new Mock<IGetDishDetailUseCase>();
         useCase.Setup(x => x.ExecuteAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-        var action = await new DishesController(Mock.Of<IBrowseDishesUseCase>(), useCase.Object).GetDetail(105, CancellationToken.None);
+        var action = await new DishesController(Mock.Of<IBrowseDishesUseCase>(), useCase.Object, Mock.Of<IRollDishUseCase>()).GetDetail(105, CancellationToken.None);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -50,10 +50,31 @@ public sealed class DishesControllerTests
         var useCase = new Mock<IBrowseDishesUseCase>();
         useCase.Setup(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-        var action = await new DishesController(useCase.Object, Mock.Of<IGetDishDetailUseCase>()).Browse(request, CancellationToken.None);
+        var action = await new DishesController(useCase.Object, Mock.Of<IGetDishDetailUseCase>(), Mock.Of<IRollDishUseCase>()).Browse(request, CancellationToken.None);
 
         var response = action.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeOfType<ApiResponse<BrowseDishesResponseDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-04: DISH-03 is for Travelers only and wraps the roll in a 200 ApiResponse.
+    [Fact]
+    public async Task Roll_ShouldRequireTravelerAndReturnOk()
+    {
+        var action = typeof(DishesController).GetMethod(nameof(DishesController.Roll))!;
+        action.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true).Cast<AuthorizeAttribute>()
+            .Should().ContainSingle().Which.Roles.Should().Be("TRAVELER");
+        var request = new RollDishRequestDto { MealTime = "lunch" };
+        var expected = new RollDishResponseDto { RollId = 4410, Dish = new DishDetailDto { Id = 105 } };
+        var useCase = new Mock<IRollDishUseCase>();
+        useCase.Setup(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+
+        var result = await new DishesController(Mock.Of<IBrowseDishesUseCase>(), Mock.Of<IGetDishDetailUseCase>(), useCase.Object)
+            .Roll(request, CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<ApiResponse<RollDishResponseDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
     }

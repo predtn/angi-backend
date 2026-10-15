@@ -4,6 +4,7 @@ using ANGI.Application.UseCases.Discovery.GetDishDetail;
 using ANGI.Application.UseCases.Discovery.GetHome;
 using ANGI.Application.UseCases.Discovery.GetTags;
 using ANGI.Application.UseCases.Discovery.RecordImpressions;
+using ANGI.Application.UseCases.Discovery.RollDish;
 using ANGI.Application.UseCases.Discovery.SkipPreferenceSurvey;
 using ANGI.Application.UseCases.Discovery.SubmitPreferenceSurvey;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +23,7 @@ public static class DiscoveryModule
         services.AddScoped<IRecordImpressionsUseCase, RecordImpressionsUseCase>();
         services.AddScoped<IGetTagsUseCase, GetTagsUseCase>();
         services.AddScoped<IGetHomeUseCase, GetHomeUseCase>();
+        services.AddScoped<IRollDishUseCase, RollDishUseCase>();
         return services;
     }
 }
