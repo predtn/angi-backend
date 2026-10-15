@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.Common.Interfaces.Services;
@@ -43,25 +42,29 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 CacheHours = 12
             });
 
-            using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var stopwatch = Stopwatch.StartNew();
+            // The guard only stops a hung test; a slow CI runner must not fail it, so it is not a timing assertion.
+            using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var result = await service.CalculateRouteAsync(
                 null,
                 [new RouteCoordinate(0m, 0m), new RouteCoordinate(0m, 0.01m)],
                 RouteProfile.Driving,
                 guard.Token);
 
-            stopwatch.Stop();
             service.Should().BeOfType<MapboxRouteService>();
             result.IsEstimated.Should().BeTrue();
             handler.RequestUri.Should().Be(new Uri(
                 "https://mapbox.example/directions/v5/mapbox/driving/0,0;0.01,0?access_token=secret&overview=false&steps=false"));
-            stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+            // The handler waits forever, so only the 50 ms client timeout can have ended the call (the service rethrows
+            // a cancellation that comes from the caller's token instead of estimating).
+            handler.WasCanceled.Should().BeTrue();
+            guard.IsCancellationRequested.Should().BeFalse();
         }
 
         private sealed class WaitingHttpMessageHandler : HttpMessageHandler
         {
             public Uri? RequestUri { get; private set; }
+
+            public bool WasCanceled { get; private set; }
 
             /// <summary>Waits for the configured HttpClient timeout after capturing the absolute request URI.</summary>
             protected override async Task<HttpResponseMessage> SendAsync(
@@ -69,7 +72,16 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 CancellationToken cancellationToken)
             {
                 RequestUri = request.RequestUri;
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    WasCanceled = true;
+                    throw;
+                }
+
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
         }
