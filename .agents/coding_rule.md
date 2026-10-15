@@ -239,6 +239,7 @@ var restaurant = await _ctx.Restaurants
 - Every async method takes a `CancellationToken` and passes it down from the controller to EF Core and `HttpClient`.
 - Never `.Result`, `.Wait()` or `async void` (event handlers excepted). Never `SaveChanges()`; use `SaveChangesAsync(ct)`.
 - Get the current time from the injected `TimeProvider` (`GetUtcNow()`), so tests can control it. Store and compare UTC only; never `DateTime.Now`.
+- Draw random values from the injected `Random` (registered as `Random.Shared`), never `new Random()` or `Random.Shared` directly, so tests can fix the draw.
 
 ## 11. Controllers
 
@@ -273,7 +274,7 @@ Name the API Design endpoint id in the comment above each action: `// RM-01`, or
   - Application: `UseCases/<Module>/<Module>Module.cs` → `Add<Module>UseCases()`
   - Infrastructure: `Services/<Area>/<Area>Module.cs` → `Add<Area>Infrastructure(configuration)` (its repositories, services, settings and HTTP clients)
 - A service used by several modules (e.g. `IRecommendationService`) gets its own area module, not a slot in another module's registration.
-- Lifetimes: `AddScoped` for use cases, repositories and services; `AddSingleton` only for stateless utilities (`TimeProvider`); typed `AddHttpClient` for HTTP services.
+- Lifetimes: `AddScoped` for use cases, repositories and services; `AddSingleton` only for stateless or thread-safe utilities (`TimeProvider`, `Random.Shared`); typed `AddHttpClient` for HTTP services.
 - Never register Infrastructure types from Application.
 - Settings classes bind a configuration section (`SectionName` constant) with `AddOptions<T>().Bind(...)`.
 - Middlewares implement `IMiddleware` and are registered `AddScoped`. Order: `project_architecture.md` §4; `ExceptionHandlingMiddleware` stays first.

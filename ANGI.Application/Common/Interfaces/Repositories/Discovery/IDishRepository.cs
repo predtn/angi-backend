@@ -18,6 +18,9 @@ public interface IDishRepository
     /// </summary>
     Task<IReadOnlyList<int>> GetCandidateIdsAsync(DishCandidateFilter filter, int maxCount, CancellationToken ct);
 
+    /// <summary>Marks a DISH-03 roll as Added; it is saved with the unit of work.</summary>
+    void AddRoll(DishRoll roll);
+
     /// <summary>
     /// Returns at most <paramref name="limit"/> candidate dishes for the home trending block (HOME-01): most likes since
     /// <paramref name="since"/>, then like_count, then restaurant rating, so dishes without recent likes complete the list.

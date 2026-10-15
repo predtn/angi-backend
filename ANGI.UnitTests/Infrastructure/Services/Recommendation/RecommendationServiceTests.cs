@@ -142,7 +142,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             await act.Should().ThrowExactlyAsync<InvalidOperationException>();
         }
 
-        // TEST-08: Send RECO-05 in snake_case and return dish ids by rank with the request id and ignored ids.
+        // TEST-08: Send RECO-05 in snake_case and return dish ids by rank with their scores, the request id and ignored ids.
         [Fact]
         public async Task RecommendAsync_WithSuccessfulResponse_ShouldReturnDishesByRank()
         {
@@ -158,6 +158,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
 
             result.RequestId.Should().Be(RequestId);
             result.DishIds.Should().Equal(105, 133);
+            result.Scores.Should().Equal(0.8, 0.7);
             result.IgnoredDishIds.Should().Equal(140);
             var request = handler.Requests.Should().ContainSingle().Subject;
             request.Uri.Should().Be(new Uri("https://reco.angi.test/recommendations"));
@@ -188,7 +189,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             body.RootElement.GetProperty("context").GetString().Should().Be("home");
         }
 
-        // TEST-10: Fall back to the candidates in the order sent, cut to top_k, when RECO-05 fails or reco is not configured.
+        // TEST-10: Fall back to the candidates in the order sent, cut to top_k and without scores, when RECO-05 fails or reco is not configured.
         [Theory]
         [InlineData("server-error")]
         [InlineData("timeout")]
@@ -203,6 +204,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
 
             result.RequestId.Should().BeNull();
             result.DishIds.Should().Equal(140, 105, 133);
+            result.Scores.Should().BeNull();
             result.IgnoredDishIds.Should().BeEmpty();
         }
 

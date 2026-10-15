@@ -167,7 +167,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 | Method | Endpoint | Success | 5xx, timeout, network error, unreadable body, `BaseUrl` not set | Listed 4xx | Other 4xx |
 |---|---|---|---|---|---|
 | `SubmitSurveyAsync` | RECO-03 | `SurveySubmissionResult` | 503 `SERVICE_UNAVAILABLE` | 409 `SURVEY_ALREADY_SUBMITTED`; 422 `UNKNOWN_OPTION_CODE` → 400 | 500 |
-| `RecommendAsync` | RECO-05 | ranked dish ids, `requestId`, ignored ids | fallback: the candidates in the order sent, cut to `topK` (50 by default), `requestId = null`, no ignored ids | — | 500 (422 included) |
+| `RecommendAsync` | RECO-05 | ranked dish ids with their `recommend_score` (`Scores`), `requestId`, ignored ids | fallback: the candidates in the order sent, cut to `topK` (50 by default), `requestId = null`, `Scores = null`, no ignored ids | — | 500 (422 included) |
 | `RecordImpressionsAsync` | RECO-06 | — | logged only, never thrown | logged only | logged only |
 | `GetSurveyStatusAsync` | RECO-09 | `SurveyStatus` (`Completed`, `SurveyAt`, `AnswerCount`; skipped = completed with 0 answers) | `null` | `null` | `null` |
 

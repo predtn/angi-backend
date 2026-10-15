@@ -16,6 +16,8 @@ namespace ANGI.Application
         {
             services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
             services.AddSingleton(TimeProvider.System);
+            // Thread-safe shared generator, injected so tests can seed it (DISH-03 weighted roll).
+            services.AddSingleton(Random.Shared);
             services.AddAccountUseCases();
             services.AddAuthUseCases();
             services.AddDiscoveryUseCases();

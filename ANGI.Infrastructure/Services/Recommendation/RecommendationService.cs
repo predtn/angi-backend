@@ -147,10 +147,12 @@ namespace ANGI.Infrastructure.Services.Recommendation
                     return Fallback(candidates, topK);
                 }
 
+                var items = result.Items.OrderBy(item => item.Rank).ToArray();
                 return new RecommendationResult(
                     result.RequestId,
-                    result.Items.OrderBy(item => item.Rank).Select(item => item.DishId).ToArray(),
-                    result.IgnoredDishIds ?? Array.Empty<int>());
+                    items.Select(item => item.DishId).ToArray(),
+                    result.IgnoredDishIds ?? Array.Empty<int>(),
+                    items.Select(item => item.RecommendScore).ToArray());
             }
 
             var errorCode = await ReadErrorCodeAsync(response, ct);
@@ -331,7 +333,7 @@ namespace ANGI.Infrastructure.Services.Recommendation
             int? TopK,
             RecommendationContext Context);
 
-        private sealed record RecommendItem(int DishId, int Rank);
+        private sealed record RecommendItem(int DishId, int Rank, double RecommendScore);
 
         private sealed record RecommendResponse(
             Guid? RequestId,
