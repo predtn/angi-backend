@@ -24,6 +24,8 @@ public sealed class RoadmapsControllerTests
         var controller = new RoadmapsController(
             useCase.Object,
             Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>());
 
         var action = await controller.Create(request, CancellationToken.None);
@@ -45,6 +47,8 @@ public sealed class RoadmapsControllerTests
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
             useCase.Object);
 
         var action = await controller.Update(88, request, CancellationToken.None);
@@ -71,6 +75,8 @@ public sealed class RoadmapsControllerTests
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             useCase.Object,
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>());
 
         var action = await controller.GetMyRoadmaps(request, CancellationToken.None);
@@ -78,5 +84,49 @@ public sealed class RoadmapsControllerTests
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<Paged<RoadmapSummaryDto>>>()
             .Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-04: Return the RM-03 detail payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies detail route-value delegation and the documented success envelope.</summary>
+    [Fact]
+    public async Task GetDetail_WithOwnedRoadmap_ShouldReturnOkApiResponse()
+    {
+        var expected = new RoadmapDetailDto { Overview = new RoadmapSummaryDto { Id = 88 } };
+        var useCase = new Mock<IGetRoadmapDetailUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            useCase.Object,
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IUpdateRoadmapUseCase>());
+
+        var action = await controller.GetDetail(88, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<RoadmapDetailDto>>().Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-05: Return the RM-14 daily route payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies both route values, query delegation, and the documented success envelope.</summary>
+    [Fact]
+    public async Task GetDayRoute_WithValidQuery_ShouldReturnOkApiResponse()
+    {
+        var request = new GetRoadmapDayRouteRequestDto { Profile = "walking" };
+        var expected = new GetRoadmapDayRouteResponseDto { DayId = 301, Profile = "walking" };
+        var useCase = new Mock<IGetRoadmapDayRouteUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, 301, request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            useCase.Object,
+            Mock.Of<IUpdateRoadmapUseCase>());
+
+        var action = await controller.GetDayRoute(88, 301, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<GetRoadmapDayRouteResponseDto>>().Which.Data.Should().BeSameAs(expected);
     }
 }

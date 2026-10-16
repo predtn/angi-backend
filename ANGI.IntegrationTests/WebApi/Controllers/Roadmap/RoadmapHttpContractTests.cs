@@ -36,10 +36,12 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-01: Return the canonical 401 envelope for every implemented roadmap endpoint without a token.
-    /// <summary>Verifies RM-01, RM-02, and RM-04 require authentication.</summary>
+    /// <summary>Verifies RM-01, RM-02, RM-03, RM-04, and RM-14 require authentication.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
+    [InlineData("GET", "/api/v1/roadmaps/88")]
+    [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
@@ -56,6 +58,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
+    [InlineData("GET", "/api/v1/roadmaps/88")]
+    [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
@@ -144,7 +148,86 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         _factory.GetMyRoadmaps.LastRequest.Should().BeEquivalentTo(new { Page = 2, PageSize = 10 });
     }
 
-    // TEST-07: Resolve every implemented roadmap use case, validator, repository, and controller dependency.
+    // TEST-07: Serialize the complete RM-03 success envelope through its route.
+    /// <summary>Verifies RM-03 routing, use-case delegation, and nested detail JSON shape.</summary>
+    [Fact]
+    public async Task GetDetail_WithOwnedRoadmap_ShouldSerializeCompleteDetail()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("overview").GetProperty("id").GetInt64().Should().Be(88);
+        data.GetProperty("itinerary").GetArrayLength().Should().Be(1);
+        data.GetProperty("budget").GetProperty("totalEstimatedCost").GetDecimal().Should().Be(0);
+        _factory.GetDetail.LastRoadmapId.Should().Be(88);
+    }
+
+    // TEST-08: Bind every RM-14 query parameter and serialize route metrics.
+    /// <summary>Verifies route values, query binding, defaults, and the complete RM-14 response JSON shape.</summary>
+    [Fact]
+    public async Task GetDayRoute_WithGpsAndProfile_ShouldSerializeRouteResponse()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            "/api/v1/roadmaps/88/days/301/route?originLat=16.061204&originLng=108.227531&profile=walking");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("dayId").GetInt64().Should().Be(301);
+        data.GetProperty("profile").GetString().Should().Be("walking");
+        data.GetProperty("origin").GetProperty("source").GetString().Should().Be("gps");
+        data.GetProperty("legs")[0].GetProperty("fromItemId").ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("totalDistanceMeters").GetInt32().Should().Be(2350);
+        _factory.GetDayRoute.LastCall.Should().BeEquivalentTo(new
+        {
+            RoadmapId = 88L,
+            DayId = 301L,
+            OriginLat = (decimal?)16.061204m,
+            OriginLng = (decimal?)108.227531m,
+            Profile = "walking"
+        });
+    }
+
+    // TEST-09: Return VALIDATION_FAILED when only one RM-14 GPS coordinate is supplied.
+    /// <summary>Verifies the HTTP error envelope and camel-case validation key for the coordinate-pair rule.</summary>
+    [Fact]
+    public async Task GetDayRoute_WithIncompleteGps_ShouldReturnValidationEnvelope()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            "/api/v1/roadmaps/88/days/301/route?originLat=16.061204");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("errorCode").GetString().Should().Be("VALIDATION_FAILED");
+        document.RootElement.GetProperty("errors").TryGetProperty("originLng", out _).Should().BeTrue();
+    }
+
+    // TEST-10: Preserve ROADMAP_NOT_FOUND through the RM-03 exception middleware boundary.
+    /// <summary>Verifies owned-resource absence uses the documented 404 envelope.</summary>
+    [Fact]
+    public async Task GetDetail_WithMissingRoadmap_ShouldReturnNotFoundEnvelope()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/404");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await AssertErrorCode(response, "ROADMAP_NOT_FOUND");
+    }
+
+    // TEST-11: Resolve every implemented roadmap use case, validator, repository, and controller dependency.
     /// <summary>Verifies all module registrations are connected in the production dependency graph.</summary>
     [Fact]
     public void Services_ShouldResolveRoadmapDependencies()
@@ -153,6 +236,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         var provider = scope.ServiceProvider;
         provider.GetRequiredService<IValidator<CreateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<GetMyRoadmapsRequestDto>>().Should().NotBeNull();
+        provider.GetRequiredService<IValidator<GetRoadmapDayRouteRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
@@ -160,16 +244,16 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Should().NotContainNulls();
     }
 
-    // TEST-08: Publish RM-01, RM-02, and RM-04 through both runtime routing and OpenAPI.
+    // TEST-12: Publish RM-01, RM-02, RM-03, RM-04, and RM-14 through runtime routing and OpenAPI.
     /// <summary>Verifies the endpoints consumed by Scalar are discoverable with their documented verbs.</summary>
     [Fact]
-    public async Task RuntimeAndOpenApi_ShouldPublishBothRoadmapOperations()
+    public async Task RuntimeAndOpenApi_ShouldPublishAllRoadmapOperations()
     {
         var endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(3);
+        endpoints.Should().HaveCount(5);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -178,6 +262,9 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         paths.GetProperty("/api/v1/roadmaps").TryGetProperty("post", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}").TryGetProperty("patch", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}").TryGetProperty("get", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/days/{dayId}/route")
+            .TryGetProperty("get", out _).Should().BeTrue();
     }
 
     /// <summary>Builds an HTTP request with an application/json body.</summary>
@@ -220,6 +307,12 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
 
     /// <summary>Gets the stateful RM-02 stub used to inspect bound query parameters.</summary>
     public StubGetMyRoadmapsUseCase GetMyRoadmaps { get; } = new();
+
+    /// <summary>Gets the stateful RM-03 stub used to inspect route-value binding.</summary>
+    public StubGetRoadmapDetailUseCase GetDetail { get; } = new();
+
+    /// <summary>Gets the stateful RM-14 stub used to inspect route and query binding.</summary>
+    public StubGetRoadmapDayRouteUseCase GetDayRoute { get; } = new();
 
     /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
     protected override IHost CreateHost(IHostBuilder builder)
@@ -265,11 +358,17 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IEnsureActiveAccountUseCase>();
             services.RemoveAll<ICreateRoadmapUseCase>();
             services.RemoveAll<IGetMyRoadmapsUseCase>();
+            services.RemoveAll<IGetRoadmapDetailUseCase>();
+            services.RemoveAll<IGetRoadmapDayRouteUseCase>();
             services.RemoveAll<IUpdateRoadmapUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
             services.AddScoped<ICreateRoadmapUseCase, StubCreateRoadmapUseCase>();
             services.AddSingleton(GetMyRoadmaps);
             services.AddSingleton<IGetMyRoadmapsUseCase>(GetMyRoadmaps);
+            services.AddSingleton(GetDetail);
+            services.AddSingleton<IGetRoadmapDetailUseCase>(GetDetail);
+            services.AddSingleton(GetDayRoute);
+            services.AddSingleton<IGetRoadmapDayRouteUseCase>(GetDayRoute);
             services.AddSingleton(Update);
             services.AddSingleton<IUpdateRoadmapUseCase>(Update);
         });
@@ -331,6 +430,73 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             return Task.FromResult(Detail(1));
         }
     }
+
+    public sealed class StubGetRoadmapDetailUseCase : IGetRoadmapDetailUseCase
+    {
+        public long? LastRoadmapId { get; private set; }
+
+        /// <summary>Captures the route value, returns deterministic detail, or emits the RM-03 missing error.</summary>
+        public Task<RoadmapDetailDto> ExecuteAsync(long roadmapId, CancellationToken ct)
+        {
+            LastRoadmapId = roadmapId;
+            if (roadmapId == 404)
+            {
+                throw new ANGI.Application.Common.Exceptions.NotFoundException(
+                    "ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
+            }
+
+            return Task.FromResult(Detail(1));
+        }
+    }
+
+    public sealed class StubGetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
+    {
+        public RouteCall? LastCall { get; private set; }
+
+        /// <summary>Validates and captures RM-14 input before returning deterministic route metrics.</summary>
+        public async Task<GetRoadmapDayRouteResponseDto> ExecuteAsync(
+            long roadmapId,
+            long dayId,
+            GetRoadmapDayRouteRequestDto request,
+            CancellationToken ct)
+        {
+            await new ANGI.Application.UseCases.Validators.Roadmap.GetRoadmapDayRouteRequestDtoValidator()
+                .ValidateAndThrowAsync(request, ct);
+            LastCall = new RouteCall(roadmapId, dayId, request.OriginLat, request.OriginLng, request.Profile);
+            return new GetRoadmapDayRouteResponseDto
+            {
+                DayId = dayId,
+                Profile = request.Profile!.ToLowerInvariant(),
+                Origin = request.OriginLat.HasValue
+                    ? new RoadmapRouteOriginDto
+                    {
+                        Latitude = request.OriginLat.Value,
+                        Longitude = request.OriginLng!.Value,
+                        Source = "gps"
+                    }
+                    : null,
+                Legs =
+                [
+                    new RoadmapRouteLegDto
+                    {
+                        FromItemId = null,
+                        ToItemId = 1502,
+                        DistanceMeters = 2350,
+                        DurationSeconds = 540
+                    }
+                ],
+                TotalDistanceMeters = 2350,
+                TotalDurationSeconds = 540
+            };
+        }
+    }
+
+    public sealed record RouteCall(
+        long RoadmapId,
+        long DayId,
+        decimal? OriginLat,
+        decimal? OriginLng,
+        string? Profile);
 
     /// <summary>Builds a deterministic empty-roadmap response for HTTP serialization.</summary>
     private static RoadmapDetailDto Detail(short numDays) => new()

@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Models;
+using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Roadmap;
 using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -138,6 +139,67 @@ public sealed class RoadmapRepository : IRoadmapRepository
                         .ThenInclude(dish => dish.DishTags)
                             .ThenInclude(dishTag => dishTag.Tag)
             .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Loads the complete owned roadmap graph without tracking for RM-03 mapping.</summary>
+    public async Task<Domain.Entities.Roadmap?> GetOwnedDetailAsync(
+        long roadmapId,
+        int userId,
+        CancellationToken ct)
+    {
+        return await _context.Roadmaps
+            .AsNoTracking()
+            .Where(roadmap => roadmap.Id == roadmapId && roadmap.UserId == userId)
+            .Include(roadmap => roadmap.Days)
+                .ThenInclude(day => day.Items)
+                    .ThenInclude(item => item.Dish)
+                        .ThenInclude(dish => dish.CoverMedia)
+            .Include(roadmap => roadmap.Days)
+                .ThenInclude(day => day.Items)
+                    .ThenInclude(item => item.Dish)
+                        .ThenInclude(dish => dish.Restaurant)
+            .Include(roadmap => roadmap.Days)
+                .ThenInclude(day => day.Items)
+                    .ThenInclude(item => item.Dish)
+                        .ThenInclude(dish => dish.DishTags)
+                            .ThenInclude(dishTag => dishTag.Tag)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Projects an owned roadmap and only the requested day's route values without tracking.</summary>
+    public async Task<RoadmapRouteData?> GetOwnedRouteDataAsync(
+        long roadmapId,
+        long dayId,
+        int userId,
+        CancellationToken ct)
+    {
+        return await _context.Roadmaps
+            .AsNoTracking()
+            .Where(roadmap => roadmap.Id == roadmapId && roadmap.UserId == userId)
+            .Select(roadmap => new RoadmapRouteData
+            {
+                OriginMode = roadmap.OriginMode,
+                OriginLatitude = roadmap.OriginLatitude,
+                OriginLongitude = roadmap.OriginLongitude,
+                OriginLabel = roadmap.OriginLabel,
+                Day = roadmap.Days
+                    .Where(day => day.Id == dayId)
+                    .Select(day => new RoadmapDayRouteData
+                    {
+                        Id = day.Id,
+                        Items = day.Items.Select(item => new RoadmapRouteItemData
+                        {
+                            Id = item.Id,
+                            MealSlot = item.MealSlot,
+                            SortOrder = item.SortOrder,
+                            Latitude = item.Dish.Restaurant.Latitude,
+                            Longitude = item.Dish.Restaurant.Longitude
+                        }).ToArray()
+                    })
+                    .FirstOrDefault()
+            })
             .FirstOrDefaultAsync(ct);
     }
 

@@ -79,10 +79,10 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
-    // TEST-02: Hide another traveler's roadmap behind ROADMAP_NOT_FOUND.
-    /// <summary>Verifies ownership filtering survives the complete HTTP and database boundary.</summary>
+    // TEST-02: Hide another traveler's roadmap behind ROADMAP_NOT_FOUND for every implemented owned endpoint.
+    /// <summary>Verifies RM-03, RM-04, and RM-14 ownership filtering through HTTP and PostgreSQL.</summary>
     [PostgresEndToEndFact]
-    public async Task UpdateAnotherTravelersRoadmap_ShouldReturnNotFound()
+    public async Task AccessAnotherTravelersRoadmap_ShouldReturnNotFoundAcrossOwnedEndpoints()
     {
         await _factory.ResetDatabaseAsync();
         using var client = _factory.CreateClient();
@@ -97,14 +97,20 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         var second = await RegisterTravelerAndLoginAsync(client, "second-roadmap@integration.test");
         Authorize(client, second.AccessToken);
 
-        using var response = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{created.Overview.Id}", new
+        using var updateResponse = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{created.Overview.Id}", new
         {
             title = "Unauthorized change"
         });
+        using var detailResponse = await client.GetAsync($"/api/v1/roadmaps/{created.Overview.Id}");
+        using var routeResponse = await client.GetAsync(
+            $"/api/v1/roadmaps/{created.Overview.Id}/days/{created.Itinerary.Single().DayId}/route");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
-        error!.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        foreach (var response in new[] { updateResponse, detailResponse, routeResponse })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+            error!.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        }
     }
 
     // TEST-03: Page only the caller's visible roadmaps and compute every RoadmapSummary field from current data.
@@ -170,6 +176,132 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         invalidResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var invalid = await invalidResponse.Content.ReadFromJsonAsync<ApiResponse<object>>();
         invalid!.ErrorCode.Should().Be("VALIDATION_FAILED");
+    }
+
+    // TEST-04: Read current dish data, item feedback, itinerary ordering, and calculated budget through RM-03.
+    /// <summary>Verifies the real RM-03 repository graph and mapper against PostgreSQL through the HTTP pipeline.</summary>
+    [PostgresEndToEndFact]
+    public async Task GetRoadmapDetail_ShouldReturnOwnedCurrentCalculatedAggregate()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-detail@integration.test");
+        Authorize(client, traveler.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Detail trip", new DateOnly(2026, 10, 20), 2);
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var removedDish = await context.Dishes.SingleAsync(dish => dish.Id == publicDish.HiddenDishId);
+            removedDish.Status = DishStatus.Removed;
+            var day = await context.RoadmapDays.SingleAsync(value =>
+                value.RoadmapId == roadmap.Overview.Id && value.DayNumber == 1);
+            var dinner = new RoadmapItem
+            {
+                RoadmapDayId = day.Id,
+                DishId = publicDish.HiddenDishId,
+                MealSlot = MealSlot.Dinner,
+                SortOrder = 0,
+                Source = RoadmapItemSource.Manual
+            };
+            var breakfast = new RoadmapItem
+            {
+                RoadmapDayId = day.Id,
+                DishId = publicDish.DishId,
+                MealSlot = MealSlot.Breakfast,
+                SortOrder = 1,
+                Source = RoadmapItemSource.Manual
+            };
+            context.RoadmapItems.AddRange(dinner, breakfast);
+            await context.SaveChangesAsync();
+            context.DishFeedbacks.Add(new DishFeedback
+            {
+                EventUuid = Guid.NewGuid(),
+                UserId = traveler.User.Id,
+                DishId = publicDish.DishId,
+                Value = FeedbackValue.Like,
+                RoadmapItemId = breakfast.Id
+            });
+            await context.SaveChangesAsync();
+        });
+
+        using var response = await client.GetAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var detail = await SuccessDataAsync<RoadmapDetailDto>(response);
+        detail.Itinerary.Should().HaveCount(2);
+        detail.Itinerary[0].Items.Select(item => item.MealSlot).Should().Equal("breakfast", "dinner");
+        detail.Itinerary[0].Items[0].MyFeedback.Should().Be("like");
+        detail.Itinerary[0].Items[1].Dish.Status.Should().Be("removed");
+        detail.Overview.TotalEstimatedCost.Should().Be(75_000);
+        detail.Overview.CoverUrl.Should().Be("https://cdn.test/dishes/cover.jpg");
+        detail.Budget.ByDay.Select(item => item.Cost).Should().Equal(75_000, 0);
+    }
+
+    // TEST-05: Calculate a daily route through the real repository and Mapbox fallback service.
+    /// <summary>Verifies RM-14 GPS precedence, item identifiers, fallback totals, and missing-day error end to end.</summary>
+    [PostgresEndToEndFact]
+    public async Task GetRoadmapDayRoute_ShouldReturnEstimatedGpsRouteAndDayNotFound()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-route@integration.test");
+        Authorize(client, traveler.AccessToken);
+        using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
+        {
+            Title = "Route trip",
+            NumDays = 1,
+            OriginMode = "pinned",
+            OriginLatitude = 11m,
+            OriginLongitude = 107m,
+            OriginLabel = "Pinned point"
+        });
+        var roadmap = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
+        var itemIds = await _factory.ExecuteDbAsync(async context =>
+        {
+            var day = await context.RoadmapDays.SingleAsync(value => value.RoadmapId == roadmap.Overview.Id);
+            var first = new RoadmapItem
+            {
+                RoadmapDayId = day.Id,
+                DishId = publicDish.DishId,
+                MealSlot = MealSlot.Breakfast,
+                SortOrder = 0,
+                Source = RoadmapItemSource.Manual
+            };
+            var second = new RoadmapItem
+            {
+                RoadmapDayId = day.Id,
+                DishId = publicDish.HiddenDishId,
+                MealSlot = MealSlot.Lunch,
+                SortOrder = 0,
+                Source = RoadmapItemSource.Manual
+            };
+            context.RoadmapItems.AddRange(first, second);
+            await context.SaveChangesAsync();
+            return (DayId: day.Id, FirstItemId: first.Id, SecondItemId: second.Id);
+        });
+
+        using var response = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{itemIds.DayId}/route" +
+            "?originLat=10.775&originLng=106.700&profile=walking");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var route = await SuccessDataAsync<GetRoadmapDayRouteResponseDto>(response);
+        route.Profile.Should().Be("walking");
+        route.Origin.Should().NotBeNull();
+        route.Origin!.Source.Should().Be("gps");
+        route.OriginSkipped.Should().BeFalse();
+        route.Legs.Select(leg => (leg.FromItemId, leg.ToItemId)).Should().Equal(
+            ((long?)null, itemIds.FirstItemId), ((long?)itemIds.FirstItemId, itemIds.SecondItemId));
+        route.IsEstimated.Should().BeTrue();
+        route.TotalDistanceMeters.Should().Be(0);
+        route.TotalDurationSeconds.Should().Be(0);
+
+        using var missingDay = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/route");
+        missingDay.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await missingDay.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        error!.ErrorCode.Should().Be("DAY_NOT_FOUND");
     }
 
     /// <summary>Registers, verifies, and logs in a traveler through public HTTP endpoints.</summary>
