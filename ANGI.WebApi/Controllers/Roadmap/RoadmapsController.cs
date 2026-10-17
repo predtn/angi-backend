@@ -18,6 +18,7 @@ public sealed class RoadmapsController : ControllerBase
     private readonly IGetRoadmapDetailUseCase _getRoadmapDetailUseCase;
     private readonly IGetRoadmapDayRouteUseCase _getRoadmapDayRouteUseCase;
     private readonly IUpdateRoadmapUseCase _updateRoadmapUseCase;
+    private readonly IDeleteRoadmapUseCase _deleteRoadmapUseCase;
 
     /// <summary>Initializes the HTTP boundary with roadmap planning use cases.</summary>
     public RoadmapsController(
@@ -25,13 +26,15 @@ public sealed class RoadmapsController : ControllerBase
         IGetMyRoadmapsUseCase getMyRoadmapsUseCase,
         IGetRoadmapDetailUseCase getRoadmapDetailUseCase,
         IGetRoadmapDayRouteUseCase getRoadmapDayRouteUseCase,
-        IUpdateRoadmapUseCase updateRoadmapUseCase)
+        IUpdateRoadmapUseCase updateRoadmapUseCase,
+        IDeleteRoadmapUseCase deleteRoadmapUseCase)
     {
         _createRoadmapUseCase = createRoadmapUseCase;
         _getMyRoadmapsUseCase = getMyRoadmapsUseCase;
         _getRoadmapDetailUseCase = getRoadmapDetailUseCase;
         _getRoadmapDayRouteUseCase = getRoadmapDayRouteUseCase;
         _updateRoadmapUseCase = updateRoadmapUseCase;
+        _deleteRoadmapUseCase = deleteRoadmapUseCase;
     }
 
     /// <summary>Receives RM-02 and returns one page of the current traveler's roadmap cards.</summary>
@@ -108,5 +111,17 @@ public sealed class RoadmapsController : ControllerBase
     {
         var result = await _updateRoadmapUseCase.ExecuteAsync(roadmapId, request, ct);
         return Ok(new ApiResponse<RoadmapDetailDto> { Success = true, Data = result });
+    }
+
+    /// <summary>Receives RM-05 and soft-deletes a traveler-owned roadmap.</summary>
+    [HttpDelete("{roadmapId:long}")]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(long roadmapId, CancellationToken ct)
+    {
+        await _deleteRoadmapUseCase.ExecuteAsync(roadmapId, ct);
+        return Ok(new ApiResponse<object> { Success = true, Data = null });
     }
 }

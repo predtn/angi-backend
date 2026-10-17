@@ -18,6 +18,12 @@ public interface IRoadmapRepository
     /// <summary>Locks and loads an owned roadmap aggregate for an atomic RM-04 update.</summary>
     Task<Domain.Entities.Roadmap?> LockAndGetTrackedAsync(long roadmapId, int userId, CancellationToken ct);
 
+    /// <summary>Locks and tracks an owned visible roadmap for an atomic RM-05 soft deletion.</summary>
+    Task<Domain.Entities.Roadmap?> LockAndGetTrackedForDeleteAsync(
+        long roadmapId,
+        int userId,
+        CancellationToken ct);
+
     /// <summary>Loads the complete read-only aggregate required by the owned RM-03 detail response.</summary>
     Task<Domain.Entities.Roadmap?> GetOwnedDetailAsync(long roadmapId, int userId, CancellationToken ct);
 
