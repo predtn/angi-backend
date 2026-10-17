@@ -26,6 +26,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetMyRoadmapsUseCase>(),
             Mock.Of<IGetRoadmapDetailUseCase>(),
             Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>());
 
@@ -50,6 +52,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetMyRoadmapsUseCase>(),
             Mock.Of<IGetRoadmapDetailUseCase>(),
             Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             useCase.Object,
             Mock.Of<IDeleteRoadmapUseCase>());
 
@@ -79,6 +83,8 @@ public sealed class RoadmapsControllerTests
             useCase.Object,
             Mock.Of<IGetRoadmapDetailUseCase>(),
             Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>());
 
@@ -102,6 +108,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetMyRoadmapsUseCase>(),
             useCase.Object,
             Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>());
 
@@ -126,6 +134,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetMyRoadmapsUseCase>(),
             Mock.Of<IGetRoadmapDetailUseCase>(),
             useCase.Object,
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>());
 
@@ -146,6 +156,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetMyRoadmapsUseCase>(),
             Mock.Of<IGetRoadmapDetailUseCase>(),
             Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
             useCase.Object);
 
@@ -156,5 +168,57 @@ public sealed class RoadmapsControllerTests
         envelope.Success.Should().BeTrue();
         envelope.Data.Should().BeNull();
         useCase.Verify(item => item.ExecuteAsync(88, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-07: Return the RM-06 suggestion payload in ApiResponse with HTTP 200.
+    /// <summary>Verifies suggestion route/query delegation and its documented success envelope.</summary>
+    [Fact]
+    public async Task GetSuggestions_WithValidQuery_ShouldReturnOkApiResponse()
+    {
+        var request = new GetRoadmapSuggestionsRequestDto { Province = "Đà Nẵng", Limit = 20 };
+        var expected = new GetRoadmapSuggestionsResponseDto { RequestId = Guid.NewGuid() };
+        var useCase = new Mock<IGetRoadmapSuggestionsUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            useCase.Object,
+            Mock.Of<IAddRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapUseCase>());
+
+        var action = await controller.GetSuggestions(88, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<GetRoadmapSuggestionsResponseDto>>()
+            .Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-08: Return the RM-07 RoadmapItem payload in ApiResponse with HTTP 201.
+    /// <summary>Verifies both route values, body delegation, and the documented create envelope.</summary>
+    [Fact]
+    public async Task AddItem_WithValidBody_ShouldReturnCreatedApiResponse()
+    {
+        var request = new AddRoadmapItemRequestDto { DishId = 105, MealSlot = "lunch" };
+        var expected = new RoadmapItemDto { Id = 1502, DayId = 301 };
+        var useCase = new Mock<IAddRoadmapItemUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, 301, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            useCase.Object,
+            Mock.Of<IUpdateRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapUseCase>());
+
+        var action = await controller.AddItem(88, 301, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        result.Value.Should().BeOfType<ApiResponse<RoadmapItemDto>>().Which.Data.Should().BeSameAs(expected);
     }
 }

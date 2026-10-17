@@ -2,6 +2,7 @@ using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Roadmap;
+using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -244,5 +245,59 @@ public sealed class RoadmapRepository : IRoadmapRepository
                                feedback.RoadmapItemId.HasValue &&
                                roadmapItemIds.Contains(feedback.RoadmapItemId.Value))
             .ToDictionaryAsync(feedback => feedback.RoadmapItemId!.Value, feedback => feedback.Value, ct);
+    }
+
+    /// <summary>Projects only the owned roadmap origin and dish exclusions needed by RM-06.</summary>
+    public Task<RoadmapSuggestionContext?> GetSuggestionContextAsync(
+        long roadmapId,
+        int userId,
+        CancellationToken ct)
+    {
+        return _context.Roadmaps
+            .AsNoTracking()
+            .Where(roadmap => roadmap.Id == roadmapId && roadmap.UserId == userId)
+            .Select(roadmap => new RoadmapSuggestionContext(
+                roadmap.OriginMode,
+                roadmap.OriginLatitude,
+                roadmap.OriginLongitude,
+                roadmap.Days.SelectMany(day => day.Items).Select(item => item.DishId).Distinct().ToArray()))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Locks an owned roadmap before loading and tracking the requested day and its item orders.</summary>
+    public async Task<(bool RoadmapExists, RoadmapDay? Day)> LockAndGetOwnedDayAsync(
+        long roadmapId,
+        long dayId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmaps
+            WHERE id = {{roadmapId}}
+              AND user_id = {{userId}}
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """, ct);
+
+        var roadmapExists = await _context.Roadmaps
+            .AsNoTracking()
+            .AnyAsync(roadmap => roadmap.Id == roadmapId && roadmap.UserId == userId, ct);
+        if (!roadmapExists)
+        {
+            return (false, null);
+        }
+
+        var day = await _context.RoadmapDays
+            .Where(value => value.Id == dayId && value.RoadmapId == roadmapId)
+            .Include(value => value.Items)
+            .FirstOrDefaultAsync(ct);
+        return (true, day);
+    }
+
+    /// <summary>Adds one RM-07 item to the current unit of work.</summary>
+    public void AddItem(RoadmapItem item)
+    {
+        _context.RoadmapItems.Add(item);
     }
 }

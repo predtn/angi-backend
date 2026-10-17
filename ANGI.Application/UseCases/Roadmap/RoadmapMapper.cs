@@ -94,10 +94,10 @@ internal static class RoadmapMapper
     }
 
     /// <summary>Maps one scheduled item, its dish card, and the current traveler's feedback.</summary>
-    private static RoadmapItemDto MapItem(
+    internal static RoadmapItemDto MapItem(
         RoadmapDay day,
         RoadmapItem item,
-        IReadOnlyDictionary<long, FeedbackValue> feedbackByItemId)
+        IReadOnlyDictionary<long, FeedbackValue>? feedbackByItemId = null)
     {
         var dish = item.Dish;
         var restaurant = dish.Restaurant;
@@ -140,7 +140,7 @@ internal static class RoadmapMapper
                 Rank = null,
                 Status = ToApiValue(dish.Status)
             },
-            MyFeedback = feedbackByItemId.TryGetValue(item.Id, out var feedback)
+            MyFeedback = feedbackByItemId is not null && feedbackByItemId.TryGetValue(item.Id, out var feedback)
                 ? ToApiValue(feedback)
                 : null,
             CreatedAt = item.CreatedAt
