@@ -116,11 +116,17 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
             MaxRanked,
             RecommendationContext.RoadmapManual,
             ct);
+        var candidateSet = candidates.ToHashSet();
+        var eligibleRankedDishIds = ranked.DishIds
+            .Where(candidateSet.Contains)
+            .Distinct()
+            .Take(MaxRanked)
+            .ToArray();
         var list = new RankedDishList(
             ranked.RequestId ?? Guid.NewGuid(),
             userId,
             ranked.RequestId,
-            ranked.DishIds,
+            eligibleRankedDishIds,
             roadmapId);
         _cache.Store(list);
         return list;

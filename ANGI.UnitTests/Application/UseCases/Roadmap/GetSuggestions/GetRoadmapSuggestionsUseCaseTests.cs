@@ -130,7 +130,24 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
         captured!.Area.Should().BeNull();
     }
 
-    // TEST-04: Reuse the cached ranked list on later pages without filtering or ranking again.
+    // TEST-04: Ignore duplicate or unexpected ids returned by the recommendation boundary.
+    /// <summary>Verifies RM-06 never exposes a dish that did not pass its candidate filters.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenRecoReturnsUnexpectedIds_ShouldKeepDistinctCandidatesOnly()
+    {
+        SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.None, null, null, []));
+        Candidates(1, 2);
+        Ranked(Guid.NewGuid(), 2, 999, 2, 1);
+        CardsFor(1, 2, 999);
+
+        var result = await CreateUseCase().ExecuteAsync(RoadmapId,
+            new GetRoadmapSuggestionsRequestDto { Province = "Huế" }, CancellationToken.None);
+
+        result.Items.Select(item => (item.Id, item.Rank)).Should().Equal((2, 1), (1, 2));
+        result.NextCursor.Should().BeNull();
+    }
+
+    // TEST-05: Reuse the cached ranked list on later pages without filtering or ranking again.
     /// <summary>Verifies stable ranks and the single-call cursor contract.</summary>
     [Fact]
     public async Task ExecuteAsync_WithCursor_ShouldReuseScopedCachedList()
@@ -154,7 +171,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
             It.IsAny<RecommendationContext>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-05: Reject malformed, unknown, cross-roadmap, and cross-user cursors.
+    // TEST-06: Reject malformed, unknown, cross-roadmap, and cross-user cursors.
     /// <summary>Verifies cached suggestions cannot escape their authenticated roadmap scope.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidOrForeignCursor_ShouldThrowInvalidCursor()
@@ -183,7 +200,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
         }
     }
 
-    // TEST-06: Return ROADMAP_NOT_FOUND for a missing or foreign roadmap before ranking.
+    // TEST-07: Return ROADMAP_NOT_FOUND for a missing or foreign roadmap before ranking.
     /// <summary>Verifies RM-06 ownership hiding and absence behavior.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRoadmapIsNotOwned_ShouldThrowRoadmapNotFound()
@@ -200,7 +217,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
         _dishRepository.VerifyNoOtherCalls();
     }
 
-    // TEST-07: Reject an unauthenticated caller without reading roadmap data.
+    // TEST-08: Reject an unauthenticated caller without reading roadmap data.
     /// <summary>Verifies Application enforces RM-06 authentication independently of the controller.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
@@ -213,7 +230,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
         _roadmapRepository.VerifyNoOtherCalls();
     }
 
-    // TEST-08: Validate before reading identity, roadmap, dishes, or reco.
+    // TEST-09: Validate before reading identity, roadmap, dishes, or reco.
     /// <summary>Verifies the coding-rule validation-first invariant.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationFirst()
