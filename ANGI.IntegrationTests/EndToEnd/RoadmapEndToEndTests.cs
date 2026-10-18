@@ -496,6 +496,22 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         soldOutDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await soldOutDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
 
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes
+                .Include(item => item.Restaurant)
+                .SingleAsync(item => item.Id == publicDish.DishId);
+            dish.IsAvailable = true;
+            dish.Restaurant.OperatingStatus = RestaurantOperatingStatus.TemporarilyClosed;
+            await context.SaveChangesAsync();
+        });
+        using var closedRestaurant = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        closedRestaurant.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await closedRestaurant.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("DISH_NOT_AVAILABLE");
+
         var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-errors-other@integration.test");
         Authorize(client, other.AccessToken);
         using var foreignRoadmap = await client.PostAsJsonAsync(
