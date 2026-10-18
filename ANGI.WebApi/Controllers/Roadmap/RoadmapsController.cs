@@ -16,6 +16,7 @@ public sealed class RoadmapsController : ControllerBase
     private readonly ICreateRoadmapUseCase _createRoadmapUseCase;
     private readonly IGetMyRoadmapsUseCase _getMyRoadmapsUseCase;
     private readonly IGetRoadmapDetailUseCase _getRoadmapDetailUseCase;
+    private readonly IGetRoadmapItemDetailUseCase _getRoadmapItemDetailUseCase;
     private readonly IGetRoadmapDayRouteUseCase _getRoadmapDayRouteUseCase;
     private readonly IGetRoadmapSuggestionsUseCase _getRoadmapSuggestionsUseCase;
     private readonly IAddRoadmapItemUseCase _addRoadmapItemUseCase;
@@ -27,6 +28,7 @@ public sealed class RoadmapsController : ControllerBase
         ICreateRoadmapUseCase createRoadmapUseCase,
         IGetMyRoadmapsUseCase getMyRoadmapsUseCase,
         IGetRoadmapDetailUseCase getRoadmapDetailUseCase,
+        IGetRoadmapItemDetailUseCase getRoadmapItemDetailUseCase,
         IGetRoadmapDayRouteUseCase getRoadmapDayRouteUseCase,
         IGetRoadmapSuggestionsUseCase getRoadmapSuggestionsUseCase,
         IAddRoadmapItemUseCase addRoadmapItemUseCase,
@@ -36,6 +38,7 @@ public sealed class RoadmapsController : ControllerBase
         _createRoadmapUseCase = createRoadmapUseCase;
         _getMyRoadmapsUseCase = getMyRoadmapsUseCase;
         _getRoadmapDetailUseCase = getRoadmapDetailUseCase;
+        _getRoadmapItemDetailUseCase = getRoadmapItemDetailUseCase;
         _getRoadmapDayRouteUseCase = getRoadmapDayRouteUseCase;
         _getRoadmapSuggestionsUseCase = getRoadmapSuggestionsUseCase;
         _addRoadmapItemUseCase = addRoadmapItemUseCase;
@@ -83,6 +86,18 @@ public sealed class RoadmapsController : ControllerBase
     {
         var result = await _getRoadmapDetailUseCase.ExecuteAsync(roadmapId, ct);
         return Ok(new ApiResponse<RoadmapDetailDto> { Success = true, Data = result });
+    }
+
+    /// <summary>Receives RM-12 and returns one owned item's complete dish, restaurant, feedback, and review detail.</summary>
+    [HttpGet("{roadmapId:long}/items/{itemId:long}")]
+    [ProducesResponseType(typeof(ApiResponse<RoadmapItemDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetItemDetail(long roadmapId, long itemId, CancellationToken ct)
+    {
+        var result = await _getRoadmapItemDetailUseCase.ExecuteAsync(roadmapId, itemId, ct);
+        return Ok(new ApiResponse<RoadmapItemDetailDto> { Success = true, Data = result });
     }
 
     /// <summary>Receives RM-06 and returns one ranked page of dishes available to add to the roadmap.</summary>

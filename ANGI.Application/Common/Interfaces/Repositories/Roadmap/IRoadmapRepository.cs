@@ -27,6 +27,9 @@ public interface IRoadmapRepository
     /// <summary>Loads the complete read-only aggregate required by the owned RM-03 detail response.</summary>
     Task<Domain.Entities.Roadmap?> GetOwnedDetailAsync(long roadmapId, int userId, CancellationToken ct);
 
+    /// <summary>Loads the complete read-only graph for one RM-12 item belonging to an owned roadmap.</summary>
+    Task<RoadmapItem?> GetOwnedItemDetailAsync(long roadmapId, long itemId, int userId, CancellationToken ct);
+
     /// <summary>Projects one owned roadmap with only the requested day and route values required by RM-14.</summary>
     Task<RoadmapRouteData?> GetOwnedRouteDataAsync(
         long roadmapId,

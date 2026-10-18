@@ -41,6 +41,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps/88")]
+    [InlineData("GET", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("GET", "/api/v1/roadmaps/88/suggestions?province=Hue")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
@@ -62,6 +63,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps/88")]
+    [InlineData("GET", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("GET", "/api/v1/roadmaps/88/suggestions?province=Hue")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
@@ -340,6 +342,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         provider.GetRequiredService<IValidator<AddRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IGetRoadmapItemDetailUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
             .Select(parameter => provider.GetService(parameter.ParameterType))
@@ -355,7 +358,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(8);
+        endpoints.Should().HaveCount(9);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -372,6 +375,48 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}/days/{dayId}/items")
             .TryGetProperty("post", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
+            .TryGetProperty("get", out _).Should().BeTrue();
+    }
+
+    // TEST-17: Serialize every RM-12 section and bind both route values.
+    /// <summary>Verifies RM-12 routing, delegation, nullable values, and complete nested response JSON.</summary>
+    [Fact]
+    public async Task GetItemDetail_WithOwnedItem_ShouldSerializeCompleteDetail()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/items/1502");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("id").GetInt64().Should().Be(1502);
+        data.GetProperty("myFeedback").GetString().Should().Be("like");
+        data.GetProperty("dish").GetProperty("status").GetString().Should().Be("hidden");
+        data.GetProperty("dish").GetProperty("rank").ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("dish").GetProperty("restaurant").GetProperty("distanceKm")
+            .ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("restaurant").GetProperty("businessHours")[0]
+            .GetProperty("openTime").GetString().Should().Be("06:00");
+        data.GetProperty("canRate").GetBoolean().Should().BeFalse();
+        data.GetProperty("myReview").GetProperty("status").GetString().Should().Be("visible");
+        _factory.GetItemDetail.LastCall.Should().Be(new RoadmapApiFactory.ItemDetailCall(88, 1502));
+    }
+
+    // TEST-18: Preserve ROADMAP_ITEM_NOT_FOUND through the RM-12 HTTP boundary.
+    /// <summary>Verifies missing, mismatched, and foreign items use the sole documented 404 envelope.</summary>
+    [Fact]
+    public async Task GetItemDetail_WithoutOwnedMatchingItem_ShouldReturnNotFoundEnvelope()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/items/404");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
     }
 
     /// <summary>Builds an HTTP request with an application/json body.</summary>
@@ -418,6 +463,9 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
 
     /// <summary>Gets the stateful RM-03 stub used to inspect route-value binding.</summary>
     public StubGetRoadmapDetailUseCase GetDetail { get; } = new();
+
+    /// <summary>Gets the stateful RM-12 stub used to inspect both item-detail route values.</summary>
+    public StubGetRoadmapItemDetailUseCase GetItemDetail { get; } = new();
 
     /// <summary>Gets the stateful RM-14 stub used to inspect route and query binding.</summary>
     public StubGetRoadmapDayRouteUseCase GetDayRoute { get; } = new();
@@ -476,6 +524,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<ICreateRoadmapUseCase>();
             services.RemoveAll<IGetMyRoadmapsUseCase>();
             services.RemoveAll<IGetRoadmapDetailUseCase>();
+            services.RemoveAll<IGetRoadmapItemDetailUseCase>();
             services.RemoveAll<IGetRoadmapDayRouteUseCase>();
             services.RemoveAll<IGetRoadmapSuggestionsUseCase>();
             services.RemoveAll<IAddRoadmapItemUseCase>();
@@ -487,6 +536,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IGetMyRoadmapsUseCase>(GetMyRoadmaps);
             services.AddSingleton(GetDetail);
             services.AddSingleton<IGetRoadmapDetailUseCase>(GetDetail);
+            services.AddSingleton(GetItemDetail);
+            services.AddSingleton<IGetRoadmapItemDetailUseCase>(GetItemDetail);
             services.AddSingleton(GetDayRoute);
             services.AddSingleton<IGetRoadmapDayRouteUseCase>(GetDayRoute);
             services.AddSingleton(GetSuggestions);
@@ -617,6 +668,78 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    public sealed class StubGetRoadmapItemDetailUseCase : IGetRoadmapItemDetailUseCase
+    {
+        public ItemDetailCall? LastCall { get; private set; }
+
+        /// <summary>Captures both RM-12 route values, returns complete detail, or emits the documented missing error.</summary>
+        public Task<RoadmapItemDetailDto> ExecuteAsync(long roadmapId, long itemId, CancellationToken ct)
+        {
+            LastCall = new ItemDetailCall(roadmapId, itemId);
+            if (itemId == 404)
+            {
+                throw new ANGI.Application.Common.Exceptions.NotFoundException(
+                    "ROADMAP_ITEM_NOT_FOUND", "Không tìm thấy món trong roadmap.");
+            }
+
+            var review = new ANGI.Application.DTOs.Restaurant.ReviewDto
+            {
+                Id = 640,
+                RestaurantId = 7,
+                User = new ANGI.Application.DTOs.Account.UserSummaryDto { Id = 12, DisplayName = "Traveler" },
+                Rating = 5,
+                Status = "visible",
+                CreatedAt = new DateTime(2026, 10, 3, 2, 0, 0, DateTimeKind.Utc)
+            };
+            return Task.FromResult(new RoadmapItemDetailDto
+            {
+                Id = itemId,
+                DayId = 301,
+                DayNumber = 1,
+                MealSlot = "breakfast",
+                Source = "manual",
+                MyFeedback = "like",
+                CreatedAt = new DateTime(2026, 10, 2, 2, 10, 0, DateTimeKind.Utc),
+                Dish = new ANGI.Application.DTOs.Discovery.DishDetailDto
+                {
+                    Id = 105,
+                    Name = "Dish",
+                    DishForm = "soup",
+                    Status = "hidden",
+                    Restaurant = new ANGI.Application.DTOs.Restaurant.RestaurantCardDto
+                    {
+                        Id = 7,
+                        Name = "Restaurant",
+                        Slug = "restaurant",
+                        AddressLine = "12 Street",
+                        OperatingStatus = "open",
+                        DistanceKm = null
+                    }
+                },
+                Restaurant = new ANGI.Application.DTOs.Restaurant.RestaurantDetailDto
+                {
+                    Id = 7,
+                    Name = "Restaurant",
+                    Slug = "restaurant",
+                    AddressLine = "12 Street",
+                    OperatingStatus = "open",
+                    BusinessHours =
+                    [
+                        new ANGI.Application.DTOs.Restaurant.BusinessHourDto
+                        {
+                            DayOfWeek = 1,
+                            OpenTime = "06:00",
+                            CloseTime = "13:30"
+                        }
+                    ],
+                    MyReview = review
+                },
+                CanRate = false,
+                MyReview = review
+            });
+        }
+    }
+
     public sealed class StubDeleteRoadmapUseCase : IDeleteRoadmapUseCase
     {
         public long? LastRoadmapId { get; private set; }
@@ -725,6 +848,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         string MealSlot,
         short? SortOrder,
         Guid? RecoRequestId);
+
+    public sealed record ItemDetailCall(long RoadmapId, long ItemId);
 
     /// <summary>Builds a deterministic empty-roadmap response for HTTP serialization.</summary>
     private static RoadmapDetailDto Detail(short numDays) => new()
