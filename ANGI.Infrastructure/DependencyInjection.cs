@@ -8,6 +8,7 @@ using ANGI.Infrastructure.Services.Auth;
 using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Media;
 using ANGI.Infrastructure.Services.Mapbox;
+using ANGI.Infrastructure.Services.Notification;
 using ANGI.Infrastructure.Services.Outbox;
 using ANGI.Infrastructure.Services.Recommendation;
 using ANGI.Infrastructure.Services.Restaurant;
@@ -37,6 +38,7 @@ namespace ANGI.Infrastructure
             services.AddAuthInfrastructure(configuration);
             services.AddMediaInfrastructure();
             services.AddMapboxInfrastructure(configuration);
+            services.AddNotificationInfrastructure();
             services.AddRecommendationInfrastructure(configuration);
             services.AddOutboxInfrastructure(configuration);
             services.AddEmailInfrastructure(configuration);
