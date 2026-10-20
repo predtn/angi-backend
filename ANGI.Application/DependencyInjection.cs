@@ -4,6 +4,7 @@ using ANGI.Application.UseCases.Auth;
 using ANGI.Application.UseCases.Discovery;
 using ANGI.Application.UseCases.Media;
 using ANGI.Application.UseCases.Restaurant;
+using ANGI.Application.UseCases.Roadmap;
 using ANGI.Application.UseCases.Social;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,6 +25,7 @@ namespace ANGI.Application
             services.AddDiscoveryUseCases();
             services.AddMediaUseCases();
             services.AddRestaurantUseCases();
+            services.AddRoadmapUseCases();
             services.AddSocialUseCases();
 
             return services;

@@ -59,7 +59,7 @@ public interface IRestaurantRepository
     /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
     Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct);
 
-    /// <summary>Loads the caller's review for a restaurant if one exists.</summary>
+    /// <summary>Loads the caller's review for a restaurant, including a moderated review, if one exists.</summary>
     Task<RestaurantReview?> GetTravelerReviewForRestaurantAsync(long restaurantId, int userId, CancellationToken ct);
 
     /// <summary>Loads active menu dishes for a restaurant, optionally filtered by tags and availability (REST-03).</summary>
