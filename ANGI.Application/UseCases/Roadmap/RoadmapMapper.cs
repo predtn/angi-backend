@@ -21,6 +21,7 @@ internal static class RoadmapMapper
             .OrderBy(item => item.RoadmapDay.DayNumber)
             .ThenBy(item => item.MealSlot)
             .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
             .ToArray();
         var total = allItems.Sum(item => item.Dish.Price);
 
@@ -77,6 +78,7 @@ internal static class RoadmapMapper
         var items = day.Items
             .OrderBy(item => item.MealSlot)
             .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
             .Select(item => MapItem(day, item, feedbackByItemId))
             .ToArray();
 

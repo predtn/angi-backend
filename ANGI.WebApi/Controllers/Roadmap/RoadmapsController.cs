@@ -15,16 +15,22 @@ public sealed class RoadmapsController : ControllerBase
 {
     private readonly ICreateRoadmapUseCase _createRoadmapUseCase;
     private readonly IGetMyRoadmapsUseCase _getMyRoadmapsUseCase;
+    private readonly IGetRoadmapDetailUseCase _getRoadmapDetailUseCase;
+    private readonly IGetRoadmapDayRouteUseCase _getRoadmapDayRouteUseCase;
     private readonly IUpdateRoadmapUseCase _updateRoadmapUseCase;
 
     /// <summary>Initializes the HTTP boundary with roadmap planning use cases.</summary>
     public RoadmapsController(
         ICreateRoadmapUseCase createRoadmapUseCase,
         IGetMyRoadmapsUseCase getMyRoadmapsUseCase,
+        IGetRoadmapDetailUseCase getRoadmapDetailUseCase,
+        IGetRoadmapDayRouteUseCase getRoadmapDayRouteUseCase,
         IUpdateRoadmapUseCase updateRoadmapUseCase)
     {
         _createRoadmapUseCase = createRoadmapUseCase;
         _getMyRoadmapsUseCase = getMyRoadmapsUseCase;
+        _getRoadmapDetailUseCase = getRoadmapDetailUseCase;
+        _getRoadmapDayRouteUseCase = getRoadmapDayRouteUseCase;
         _updateRoadmapUseCase = updateRoadmapUseCase;
     }
 
@@ -56,6 +62,35 @@ public sealed class RoadmapsController : ControllerBase
             Success = true,
             Data = result
         });
+    }
+
+    /// <summary>Receives RM-03 and returns Overview, Itinerary, and Budget for an owned roadmap.</summary>
+    [HttpGet("{roadmapId:long}")]
+    [ProducesResponseType(typeof(ApiResponse<RoadmapDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDetail(long roadmapId, CancellationToken ct)
+    {
+        var result = await _getRoadmapDetailUseCase.ExecuteAsync(roadmapId, ct);
+        return Ok(new ApiResponse<RoadmapDetailDto> { Success = true, Data = result });
+    }
+
+    /// <summary>Receives RM-14 and returns travel legs for one day of an owned roadmap.</summary>
+    [HttpGet("{roadmapId:long}/days/{dayId:long}/route")]
+    [ProducesResponseType(typeof(ApiResponse<GetRoadmapDayRouteResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDayRoute(
+        long roadmapId,
+        long dayId,
+        [FromQuery] GetRoadmapDayRouteRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _getRoadmapDayRouteUseCase.ExecuteAsync(roadmapId, dayId, request, ct);
+        return Ok(new ApiResponse<GetRoadmapDayRouteResponseDto> { Success = true, Data = result });
     }
 
     /// <summary>Receives RM-04 and partially updates a traveler-owned roadmap.</summary>
