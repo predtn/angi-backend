@@ -30,7 +30,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.Create(request, CancellationToken.None);
 
@@ -57,7 +58,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             useCase.Object,
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.Update(88, request, CancellationToken.None);
 
@@ -89,7 +91,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.GetMyRoadmaps(request, CancellationToken.None);
 
@@ -115,7 +118,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.GetDetail(88, CancellationToken.None);
 
@@ -142,7 +146,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.GetDayRoute(88, 301, request, CancellationToken.None);
 
@@ -165,7 +170,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.Delete(88, CancellationToken.None);
 
@@ -194,7 +200,8 @@ public sealed class RoadmapsControllerTests
             useCase.Object,
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.GetSuggestions(88, request, CancellationToken.None);
 
@@ -221,7 +228,8 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             useCase.Object,
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.AddItem(88, 301, request, CancellationToken.None);
 
@@ -247,12 +255,40 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGetRoadmapSuggestionsUseCase>(),
             Mock.Of<IAddRoadmapItemUseCase>(),
             Mock.Of<IUpdateRoadmapUseCase>(),
-            Mock.Of<IDeleteRoadmapUseCase>());
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>());
 
         var action = await controller.GetItemDetail(88, 1502, CancellationToken.None);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<RoadmapItemDetailDto>>().Which.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(88, 1502, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-10: Return the RM-09 empty ApiResponse with HTTP 200.
+    /// <summary>Verifies both delete-item route values and the documented null-data success envelope.</summary>
+    [Fact]
+    public async Task DeleteItem_WithOwnedMatchingItem_ShouldReturnOkApiResponseWithNullData()
+    {
+        var useCase = new Mock<IDeleteRoadmapItemUseCase>();
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapItemDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            useCase.Object);
+
+        var action = await controller.DeleteItem(88, 1502, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        var envelope = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
+        envelope.Success.Should().BeTrue();
+        envelope.Data.Should().BeNull();
+        useCase.Verify(value => value.ExecuteAsync(88, 1502, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

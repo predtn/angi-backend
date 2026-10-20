@@ -36,7 +36,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-01: Return the canonical 401 envelope for every implemented roadmap endpoint without a token.
-    /// <summary>Verifies RM-01 through RM-07 and RM-14 require authentication.</summary>
+    /// <summary>Verifies every published roadmap operation, including RM-09, requires authentication.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
@@ -47,6 +47,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
+    [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -69,6 +70,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
+    [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -342,6 +344,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         provider.GetRequiredService<IValidator<AddRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IDeleteRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IGetRoadmapItemDetailUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
@@ -349,7 +352,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Should().NotContainNulls();
     }
 
-    // TEST-16: Publish RM-01 through RM-07 and RM-14 through runtime routing and OpenAPI.
+    // TEST-16: Publish all implemented roadmap operations through runtime routing and OpenAPI.
     /// <summary>Verifies the endpoints consumed by Scalar are discoverable with their documented verbs.</summary>
     [Fact]
     public async Task RuntimeAndOpenApi_ShouldPublishAllRoadmapOperations()
@@ -358,7 +361,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(9);
+        endpoints.Should().HaveCount(10);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -377,6 +380,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .TryGetProperty("post", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
             .TryGetProperty("get", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
+            .TryGetProperty("delete", out _).Should().BeTrue();
     }
 
     // TEST-17: Serialize every RM-12 section and bind both route values.
@@ -411,6 +416,41 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     public async Task GetItemDetail_WithoutOwnedMatchingItem_ShouldReturnNotFoundEnvelope()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/items/404");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
+    }
+
+    // TEST-19: Serialize the RM-09 success envelope with explicit null data.
+    /// <summary>Verifies DELETE routing, both route values, delegation, and the documented response JSON shape.</summary>
+    [Fact]
+    public async Task DeleteItem_WithOwnedMatchingItem_ShouldSerializeNullDataSuccessEnvelope()
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            "/api/v1/roadmaps/88/items/1502");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        document.RootElement.GetProperty("message").ValueKind.Should().Be(JsonValueKind.Null);
+        document.RootElement.GetProperty("errorCode").ValueKind.Should().Be(JsonValueKind.Null);
+        document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+        _factory.DeleteItem.LastCall.Should().Be(new RoadmapApiFactory.ItemDetailCall(88, 1502));
+    }
+
+    // TEST-20: Preserve ROADMAP_ITEM_NOT_FOUND through the RM-09 HTTP boundary.
+    /// <summary>Verifies missing, mismatched, foreign, and deleted-parent items use the sole documented 404 envelope.</summary>
+    [Fact]
+    public async Task DeleteItem_WithoutOwnedMatchingItem_ShouldReturnNotFoundEnvelope()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/roadmaps/88/items/404");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
         using var response = await _factory.CreateClient().SendAsync(request);
@@ -479,6 +519,9 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
     /// <summary>Gets the stateful RM-05 stub used to inspect route-value binding.</summary>
     public StubDeleteRoadmapUseCase Delete { get; } = new();
 
+    /// <summary>Gets the stateful RM-09 stub used to inspect both delete-item route values.</summary>
+    public StubDeleteRoadmapItemUseCase DeleteItem { get; } = new();
+
     /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -530,6 +573,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IAddRoadmapItemUseCase>();
             services.RemoveAll<IUpdateRoadmapUseCase>();
             services.RemoveAll<IDeleteRoadmapUseCase>();
+            services.RemoveAll<IDeleteRoadmapItemUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
             services.AddScoped<ICreateRoadmapUseCase, StubCreateRoadmapUseCase>();
             services.AddSingleton(GetMyRoadmaps);
@@ -548,6 +592,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IUpdateRoadmapUseCase>(Update);
             services.AddSingleton(Delete);
             services.AddSingleton<IDeleteRoadmapUseCase>(Delete);
+            services.AddSingleton(DeleteItem);
+            services.AddSingleton<IDeleteRoadmapItemUseCase>(DeleteItem);
         });
     }
 
@@ -752,6 +798,24 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             {
                 throw new ANGI.Application.Common.Exceptions.NotFoundException(
                     "ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    public sealed class StubDeleteRoadmapItemUseCase : IDeleteRoadmapItemUseCase
+    {
+        public ItemDetailCall? LastCall { get; private set; }
+
+        /// <summary>Captures both route values or emits the RM-09 owned-resource error.</summary>
+        public Task ExecuteAsync(long roadmapId, long itemId, CancellationToken ct)
+        {
+            LastCall = new ItemDetailCall(roadmapId, itemId);
+            if (itemId == 404)
+            {
+                throw new ANGI.Application.Common.Exceptions.NotFoundException(
+                    "ROADMAP_ITEM_NOT_FOUND", "Không tìm thấy món trong roadmap.");
             }
 
             return Task.CompletedTask;

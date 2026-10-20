@@ -335,4 +335,37 @@ public sealed class RoadmapRepository : IRoadmapRepository
     {
         _context.RoadmapItems.Add(item);
     }
+
+    /// <summary>Loads and row-locks an RM-09 item after checking route membership, ownership, and visibility.</summary>
+    public async Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmap_items AS item
+            INNER JOIN core.roadmap_days AS day ON day.id = item.roadmap_day_id
+            INNER JOIN core.roadmaps AS roadmap ON roadmap.id = day.roadmap_id
+            WHERE item.id = {{itemId}}
+              AND roadmap.id = {{roadmapId}}
+              AND roadmap.user_id = {{userId}}
+              AND roadmap.deleted_at IS NULL
+            FOR UPDATE OF item
+            """, ct);
+
+        return await _context.RoadmapItems.FirstOrDefaultAsync(
+            item => item.Id == itemId &&
+                    item.RoadmapDay.RoadmapId == roadmapId &&
+                    item.RoadmapDay.Roadmap.UserId == userId &&
+                    item.RoadmapDay.Roadmap.DeletedAt == null,
+            ct);
+    }
+
+    /// <summary>Marks the tracked RM-09 item for physical deletion on the next unit-of-work save.</summary>
+    public void RemoveItem(RoadmapItem item)
+    {
+        _context.RoadmapItems.Remove(item);
+    }
 }

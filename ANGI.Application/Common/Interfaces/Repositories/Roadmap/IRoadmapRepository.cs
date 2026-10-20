@@ -61,4 +61,14 @@ public interface IRoadmapRepository
 
     /// <summary>Adds one roadmap item to the current unit of work.</summary>
     void AddItem(RoadmapItem item);
+
+    /// <summary>Locks and tracks an item only when it belongs to the requested owned, visible roadmap.</summary>
+    Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>Marks one tracked roadmap item for physical deletion.</summary>
+    void RemoveItem(RoadmapItem item);
 }
