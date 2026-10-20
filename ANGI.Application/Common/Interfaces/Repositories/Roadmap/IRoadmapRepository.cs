@@ -59,6 +59,19 @@ public interface IRoadmapRepository
         int userId,
         CancellationToken ct);
 
+    /// <summary>Locks the owned roadmap and loads one tracked RM-08 item with its response graph.</summary>
+    Task<RoadmapItem?> LockAndGetOwnedItemAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>Loads a tracked destination day only when it belongs to the supplied owned roadmap.</summary>
+    Task<RoadmapDay?> GetOwnedDayAsync(long roadmapId, long dayId, int userId, CancellationToken ct);
+
     /// <summary>Adds one roadmap item to the current unit of work.</summary>
     void AddItem(RoadmapItem item);
+
+    /// <summary>Hard-deletes an item so dependent feedback and review links become null.</summary>
+    void RemoveItem(RoadmapItem item);
 }

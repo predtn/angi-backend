@@ -330,9 +330,57 @@ public sealed class RoadmapRepository : IRoadmapRepository
         return (true, day);
     }
 
+    /// <summary>Locks the owned roadmap row and tracks one RM-08 item with the graph required by RoadmapItem.</summary>
+    public async Task<RoadmapItem?> LockAndGetOwnedItemAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmaps
+            WHERE id = {{roadmapId}}
+              AND user_id = {{userId}}
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """, ct);
+
+        return await _context.RoadmapItems
+            .Where(item => item.Id == itemId &&
+                           item.RoadmapDay.RoadmapId == roadmapId &&
+                           item.RoadmapDay.Roadmap.UserId == userId)
+            .Include(item => item.RoadmapDay)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.CoverMedia)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Restaurant)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.DishTags)
+                    .ThenInclude(dishTag => dishTag.Tag)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Tracks an RM-08 destination day after constraining it to the current user's roadmap.</summary>
+    public Task<RoadmapDay?> GetOwnedDayAsync(long roadmapId, long dayId, int userId, CancellationToken ct)
+    {
+        return _context.RoadmapDays
+            .Where(day => day.Id == dayId &&
+                          day.RoadmapId == roadmapId &&
+                          day.Roadmap.UserId == userId)
+            .FirstOrDefaultAsync(ct);
+    }
+
     /// <summary>Adds one RM-07 item to the current unit of work.</summary>
     public void AddItem(RoadmapItem item)
     {
         _context.RoadmapItems.Add(item);
+    }
+
+    /// <summary>Marks the old RM-08 item for hard deletion in the current unit of work.</summary>
+    public void RemoveItem(RoadmapItem item)
+    {
+        _context.RoadmapItems.Remove(item);
     }
 }

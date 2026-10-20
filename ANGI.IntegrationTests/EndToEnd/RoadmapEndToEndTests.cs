@@ -632,6 +632,170 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
     }
 
+    // TEST-10: Replace an item atomically, detach its interactions, then update the replacement in place.
+    /// <summary>Verifies both RM-08 write paths, new-id semantics, and ON DELETE SET NULL through HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task UpdateRoadmapItem_ShouldReplaceThenRepositionWithoutLeakingOldInteractions()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        var replacementDishId = await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = new Dish
+            {
+                RestaurantId = publicDish.RestaurantId,
+                Name = "Replacement dish",
+                Price = 60_000,
+                DishForm = DishForm.Dry,
+                IsAvailable = true,
+                Status = DishStatus.Active
+            };
+            context.Dishes.Add(dish);
+            await context.SaveChangesAsync();
+            return dish.Id;
+        });
+        using var client = _factory.CreateClient();
+        var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-update-item@integration.test");
+        Authorize(client, traveler.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Editable trip", null, 2);
+        var firstDayId = roadmap.Itinerary.Single(day => day.DayNumber == 1).DayId;
+        var secondDayId = roadmap.Itinerary.Single(day => day.DayNumber == 2).DayId;
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{firstDayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "breakfast", SortOrder = 0 });
+        var original = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        var interactionIds = await _factory.ExecuteDbAsync(async context =>
+        {
+            var feedback = new DishFeedback
+            {
+                EventUuid = Guid.NewGuid(),
+                UserId = traveler.User.Id,
+                DishId = publicDish.DishId,
+                RoadmapItemId = original.Id,
+                Value = FeedbackValue.Like
+            };
+            var review = new RestaurantReview
+            {
+                RestaurantId = publicDish.RestaurantId,
+                UserId = traveler.User.Id,
+                Rating = 5,
+                Content = "Original item review",
+                RoadmapItemId = original.Id
+            };
+            context.DishFeedbacks.Add(feedback);
+            context.RestaurantReviews.Add(review);
+            await context.SaveChangesAsync();
+            return (FeedbackId: feedback.Id, ReviewId: review.Id);
+        });
+        var recoRequestId = Guid.NewGuid();
+
+        using var replaceResponse = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{original.Id}",
+            new UpdateRoadmapItemRequestDto
+            {
+                DishId = replacementDishId,
+                RecoRequestId = recoRequestId,
+                DayId = secondDayId,
+                MealSlot = "late_night",
+                SortOrder = short.MaxValue
+            });
+
+        replaceResponse.StatusCode.Should().Be(HttpStatusCode.OK, await replaceResponse.Content.ReadAsStringAsync());
+        var replacement = await SuccessDataAsync<RoadmapItemDto>(replaceResponse);
+        replacement.Id.Should().NotBe(original.Id);
+        replacement.DayId.Should().Be(secondDayId);
+        replacement.DayNumber.Should().Be(2);
+        replacement.Dish.Id.Should().Be(replacementDishId);
+        replacement.MealSlot.Should().Be("late_night");
+        replacement.SortOrder.Should().Be(short.MaxValue);
+        replacement.Source.Should().Be("manual");
+        replacement.RecoRequestId.Should().Be(recoRequestId);
+        replacement.MyFeedback.Should().BeNull();
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            (await context.RoadmapItems.AnyAsync(item => item.Id == original.Id)).Should().BeFalse();
+            var persisted = await context.RoadmapItems.SingleAsync(item => item.Id == replacement.Id);
+            persisted.RoadmapDayId.Should().Be(secondDayId);
+            persisted.DishId.Should().Be(replacementDishId);
+            (await context.DishFeedbacks.SingleAsync(item => item.Id == interactionIds.FeedbackId))
+                .RoadmapItemId.Should().BeNull();
+            (await context.RestaurantReviews.SingleAsync(item => item.Id == interactionIds.ReviewId))
+                .RoadmapItemId.Should().BeNull();
+        });
+
+        using var moveResponse = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{replacement.Id}",
+            new UpdateRoadmapItemRequestDto
+            {
+                DayId = firstDayId,
+                MealSlot = "lunch",
+                SortOrder = short.MinValue
+            });
+
+        moveResponse.StatusCode.Should().Be(HttpStatusCode.OK, await moveResponse.Content.ReadAsStringAsync());
+        var moved = await SuccessDataAsync<RoadmapItemDto>(moveResponse);
+        moved.Id.Should().Be(replacement.Id);
+        moved.DayId.Should().Be(firstDayId);
+        moved.MealSlot.Should().Be("lunch");
+        moved.SortOrder.Should().Be(short.MinValue);
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var persisted = await context.RoadmapItems.SingleAsync(item => item.Id == replacement.Id);
+            persisted.RoadmapDayId.Should().Be(firstDayId);
+            persisted.MealSlot.Should().Be(MealSlot.Lunch);
+            persisted.SortOrder.Should().Be(short.MinValue);
+        });
+    }
+
+    // TEST-11: Reject every invalid RM-08 resource and availability scope at the real HTTP boundary.
+    /// <summary>Verifies missing, foreign, cross-roadmap-day, and unavailable replacement errors in PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task UpdateRoadmapItem_WithInvalidTargets_ShouldReturnDocumentedErrors()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-update-errors-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Protected editable trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        var item = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        var otherRoadmap = await CreateRoadmapAsync(client, "Other trip", null, 1);
+        var otherDayId = otherRoadmap.Itinerary.Single().DayId;
+
+        using var missingItem = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999",
+            new UpdateRoadmapItemRequestDto { MealSlot = "dinner" });
+        using var crossRoadmapDay = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
+            new UpdateRoadmapItemRequestDto { DayId = otherDayId });
+        using var unavailableDish = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
+            new UpdateRoadmapItemRequestDto { DishId = publicDish.HiddenDishId });
+
+        foreach (var response in new[] { missingItem, crossRoadmapDay })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            (await response.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+                .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+        }
+        unavailableDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await unavailableDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("DISH_NOT_AVAILABLE");
+
+        var other = await RegisterTravelerAndLoginAsync(client, "roadmap-update-errors-other@integration.test");
+        Authorize(client, other.AccessToken);
+        using var foreignItem = await client.PatchAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
+            new UpdateRoadmapItemRequestDto { MealSlot = "dinner" });
+        foreignItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await foreignItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+    }
+
     /// <summary>Creates a valid image media row for PostgreSQL relationship coverage.</summary>
     private static MediaFile TestMedia(int uploaderId, string name) => new()
     {

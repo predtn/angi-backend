@@ -36,7 +36,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-01: Return the canonical 401 envelope for every implemented roadmap endpoint without a token.
-    /// <summary>Verifies RM-01 through RM-07 and RM-14 require authentication.</summary>
+    /// <summary>Verifies RM-01 through RM-08 and RM-14 require authentication.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("GET", "/api/v1/roadmaps")]
@@ -45,6 +45,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("GET", "/api/v1/roadmaps/88/suggestions?province=Hue")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
+    [InlineData("PATCH", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
@@ -67,6 +68,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("GET", "/api/v1/roadmaps/88/days/301/route")]
     [InlineData("GET", "/api/v1/roadmaps/88/suggestions?province=Hue")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
+    [InlineData("PATCH", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
@@ -81,11 +83,12 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-03: Return VALIDATION_FAILED for missing JSON bodies on every roadmap body endpoint.
-    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, and RM-07.</summary>
+    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, RM-07, and RM-08.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
+    [InlineData("PATCH", "/api/v1/roadmaps/88/items/1502")]
     public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path);
@@ -340,16 +343,18 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         provider.GetRequiredService<IValidator<GetRoadmapDayRouteRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<GetRoadmapSuggestionsRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<AddRoadmapItemRequestDto>>().Should().NotBeNull();
+        provider.GetRequiredService<IValidator<UpdateRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IGetRoadmapItemDetailUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IUpdateRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
             .Select(parameter => provider.GetService(parameter.ParameterType))
             .Should().NotContainNulls();
     }
 
-    // TEST-16: Publish RM-01 through RM-07 and RM-14 through runtime routing and OpenAPI.
+    // TEST-16: Publish RM-01 through RM-08 and RM-14 through runtime routing and OpenAPI.
     /// <summary>Verifies the endpoints consumed by Scalar are discoverable with their documented verbs.</summary>
     [Fact]
     public async Task RuntimeAndOpenApi_ShouldPublishAllRoadmapOperations()
@@ -358,7 +363,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(9);
+        endpoints.Should().HaveCount(10);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -377,6 +382,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .TryGetProperty("post", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
             .TryGetProperty("get", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
+            .TryGetProperty("patch", out _).Should().BeTrue();
     }
 
     // TEST-17: Serialize every RM-12 section and bind both route values.
@@ -417,6 +424,37 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
+    }
+
+    // TEST-19: Bind every RM-08 route and body value and serialize the replacement RoadmapItem.
+    /// <summary>Verifies RM-08 request binding, delegation, status, and the new item identity in JSON.</summary>
+    [Fact]
+    public async Task UpdateItem_WithReplacementBody_ShouldSerializeUpdatedRoadmapItem()
+    {
+        using var request = JsonRequest("PATCH", "/api/v1/roadmaps/88/items/1502", $$"""
+            {"dishId":120,"recoRequestId":"{{RoadmapApiFactory.SuggestionRequestId}}","dayId":302,"mealSlot":"lunch","sortOrder":1}
+            """);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("id").GetInt64().Should().Be(1600);
+        data.GetProperty("dayId").GetInt64().Should().Be(302);
+        data.GetProperty("mealSlot").GetString().Should().Be("lunch");
+        data.GetProperty("dish").GetProperty("id").GetInt32().Should().Be(120);
+        _factory.UpdateItem.LastCall.Should().BeEquivalentTo(new
+        {
+            RoadmapId = 88L,
+            ItemId = 1502L,
+            DishId = (int?)120,
+            RecoRequestId = (Guid?)RoadmapApiFactory.SuggestionRequestId,
+            DayId = (long?)302,
+            MealSlot = "lunch",
+            SortOrder = (short?)1
+        });
     }
 
     /// <summary>Builds an HTTP request with an application/json body.</summary>
@@ -476,6 +514,9 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
     /// <summary>Gets the stateful RM-07 stub used to inspect route and body binding.</summary>
     public StubAddRoadmapItemUseCase AddItem { get; } = new();
 
+    /// <summary>Gets the stateful RM-08 stub used to inspect route and body binding.</summary>
+    public StubUpdateRoadmapItemUseCase UpdateItem { get; } = new();
+
     /// <summary>Gets the stateful RM-05 stub used to inspect route-value binding.</summary>
     public StubDeleteRoadmapUseCase Delete { get; } = new();
 
@@ -528,6 +569,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IGetRoadmapDayRouteUseCase>();
             services.RemoveAll<IGetRoadmapSuggestionsUseCase>();
             services.RemoveAll<IAddRoadmapItemUseCase>();
+            services.RemoveAll<IUpdateRoadmapItemUseCase>();
             services.RemoveAll<IUpdateRoadmapUseCase>();
             services.RemoveAll<IDeleteRoadmapUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
@@ -544,6 +586,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IGetRoadmapSuggestionsUseCase>(GetSuggestions);
             services.AddSingleton(AddItem);
             services.AddSingleton<IAddRoadmapItemUseCase>(AddItem);
+            services.AddSingleton(UpdateItem);
+            services.AddSingleton<IUpdateRoadmapItemUseCase>(UpdateItem);
             services.AddSingleton(Update);
             services.AddSingleton<IUpdateRoadmapUseCase>(Update);
             services.AddSingleton(Delete);
@@ -827,6 +871,45 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    public sealed class StubUpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
+    {
+        public UpdateItemCall? LastCall { get; private set; }
+
+        /// <summary>Captures every RM-08 route/body value and returns a representative replacement item.</summary>
+        public Task<RoadmapItemDto> ExecuteAsync(
+            long roadmapId,
+            long itemId,
+            UpdateRoadmapItemRequestDto request,
+            CancellationToken ct)
+        {
+            LastCall = new UpdateItemCall(
+                roadmapId,
+                itemId,
+                request.DishId,
+                request.RecoRequestId,
+                request.DayId,
+                request.MealSlot,
+                request.SortOrder);
+            return Task.FromResult(new RoadmapItemDto
+            {
+                Id = request.DishId.HasValue ? 1600 : itemId,
+                DayId = request.DayId ?? 301,
+                DayNumber = request.DayId == 302 ? (short)2 : (short)1,
+                MealSlot = request.MealSlot ?? "breakfast",
+                SortOrder = request.SortOrder ?? 0,
+                Source = "manual",
+                RecoRequestId = request.RecoRequestId,
+                Dish = new RoadmapDishDto
+                {
+                    Id = request.DishId ?? 105,
+                    Name = "Replacement dish",
+                    DishForm = "soup",
+                    Status = "active"
+                }
+            });
+        }
+    }
+
     public sealed record RouteCall(
         long RoadmapId,
         long DayId,
@@ -848,6 +931,15 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         string MealSlot,
         short? SortOrder,
         Guid? RecoRequestId);
+
+    public sealed record UpdateItemCall(
+        long RoadmapId,
+        long ItemId,
+        int? DishId,
+        Guid? RecoRequestId,
+        long? DayId,
+        string? MealSlot,
+        short? SortOrder);
 
     public sealed record ItemDetailCall(long RoadmapId, long ItemId);
 
