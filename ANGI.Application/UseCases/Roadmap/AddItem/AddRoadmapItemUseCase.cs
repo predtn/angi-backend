@@ -56,7 +56,9 @@ public sealed class AddRoadmapItemUseCase : IAddRoadmapItemUseCase
         var day = target.Day
             ?? throw new NotFoundException("DAY_NOT_FOUND", "Không tìm thấy ngày trong roadmap.");
         var dish = await _dishRepository.GetPublicDetailAsync(request.DishId, ct);
-        if (dish is null || !dish.IsAvailable)
+        if (dish is null ||
+            !dish.IsAvailable ||
+            dish.Restaurant.OperatingStatus != RestaurantOperatingStatus.Open)
         {
             throw new BadRequestException("DISH_NOT_AVAILABLE", "Món không còn khả dụng để thêm vào roadmap.");
         }

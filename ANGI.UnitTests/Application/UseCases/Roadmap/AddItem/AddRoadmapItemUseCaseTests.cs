@@ -143,7 +143,27 @@ public sealed class AddRoadmapItemUseCaseTests
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-06: Reject an unauthenticated caller before starting a transaction.
+    // TEST-06: Reject a dish when its restaurant stopped operating after the suggestion was returned.
+    /// <summary>Verifies RM-07 rechecks restaurant availability and does not persist stale RM-06 choices.</summary>
+    [Theory]
+    [InlineData(RestaurantOperatingStatus.TemporarilyClosed)]
+    [InlineData(RestaurantOperatingStatus.PermanentlyClosed)]
+    public async Task ExecuteAsync_WhenRestaurantIsNotOpen_ShouldThrowDishNotAvailable(
+        RestaurantOperatingStatus operatingStatus)
+    {
+        var dish = PublicDish();
+        dish.Restaurant.OperatingStatus = operatingStatus;
+        var fixture = CreateFixture((true, Day()), dish);
+
+        var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
+        fixture.RoadmapRepository.Verify(item => item.AddItem(It.IsAny<RoadmapItem>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-07: Reject an unauthenticated caller before starting a transaction.
     /// <summary>Verifies Application independently enforces RM-07 authentication.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
@@ -155,7 +175,7 @@ public sealed class AddRoadmapItemUseCaseTests
         fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-07: Validate before identity, transaction, repositories, or persistence.
+    // TEST-08: Validate before identity, transaction, repositories, or persistence.
     /// <summary>Verifies the coding-rule validation-first invariant for RM-07.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationFirst()
