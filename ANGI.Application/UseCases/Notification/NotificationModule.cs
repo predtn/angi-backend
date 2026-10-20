@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Notification;
 using ANGI.Application.UseCases.Notification.GetNotifications;
 using ANGI.Application.UseCases.Notification.GetUnreadNotificationCount;
+using ANGI.Application.UseCases.Notification.MarkNotificationAsRead;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Notification;
@@ -12,6 +13,7 @@ public static class NotificationModule
     {
         services.AddScoped<IGetNotificationsUseCase, GetNotificationsUseCase>();
         services.AddScoped<IGetUnreadNotificationCountUseCase, GetUnreadNotificationCountUseCase>();
+        services.AddScoped<IMarkNotificationAsReadUseCase, MarkNotificationAsReadUseCase>();
         return services;
     }
 }

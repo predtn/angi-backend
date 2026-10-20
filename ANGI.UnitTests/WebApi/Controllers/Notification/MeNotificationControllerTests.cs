@@ -14,9 +14,13 @@ public sealed class MeNotificationControllerTests
 {
     private readonly Mock<IGetNotificationsUseCase> _getNotificationsUseCase = new();
     private readonly Mock<IGetUnreadNotificationCountUseCase> _getUnreadNotificationCountUseCase = new();
+    private readonly Mock<IMarkNotificationAsReadUseCase> _markNotificationAsReadUseCase = new();
 
     private MeNotificationController CreateController() =>
-        new(_getNotificationsUseCase.Object, _getUnreadNotificationCountUseCase.Object);
+        new(
+            _getNotificationsUseCase.Object,
+            _getUnreadNotificationCountUseCase.Object,
+            _markNotificationAsReadUseCase.Object);
 
     [Fact]
     public void Controller_ShouldRequireAuthorization()
@@ -91,5 +95,45 @@ public sealed class MeNotificationControllerTests
         var apiResponse = okResult.Value.Should().BeOfType<ApiResponse<GetUnreadNotificationCountResponseDto>>().Subject;
         apiResponse.Success.Should().BeTrue();
         apiResponse.Data.Should().BeEquivalentTo(responseData);
+    }
+
+    [Fact]
+    public async Task MarkAsRead_WithValidRequest_ReturnsOkWithApiResponse()
+    {
+        // Arrange
+        var request = new MarkNotificationAsReadRequestDto
+        {
+            Ids = new List<long> { 501, 502 },
+            All = false
+        };
+
+        var expectedResponse = new MarkNotificationAsReadResponseDto
+        {
+            Updated = 2
+        };
+
+        _markNotificationAsReadUseCase.Setup(u => u.ExecuteAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedResponse);
+
+        var controller = CreateController();
+
+        // Act
+        var result = await controller.MarkAsRead(request, CancellationToken.None);
+
+        // Assert
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        var okResult = (OkObjectResult)result;
+        okResult.Value.Should().BeOfType<ApiResponse<MarkNotificationAsReadResponseDto>>();
+
+        var apiResponse = (ApiResponse<MarkNotificationAsReadResponseDto>)okResult.Value!;
+        apiResponse.Success.Should().BeTrue();
+        apiResponse.Data.Should().NotBeNull();
+        apiResponse.Data!.Updated.Should().Be(2);
+        apiResponse.ErrorCode.Should().BeNull();
+        apiResponse.Message.Should().BeNull();
+
+        _markNotificationAsReadUseCase.Verify(u => u.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 }
