@@ -7,6 +7,7 @@ using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
+using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Roadmap;
 using ANGI.WebApi.Controllers.Roadmap;
 using FluentAssertions;
@@ -34,10 +35,11 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         _factory = factory;
     }
 
-    // TEST-01: Return the canonical 401 envelope for RM-01 and RM-04 without a token.
-    /// <summary>Verifies both roadmap planning endpoints require authentication.</summary>
+    // TEST-01: Return the canonical 401 envelope for every implemented roadmap endpoint without a token.
+    /// <summary>Verifies RM-01, RM-02, and RM-04 require authentication.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
+    [InlineData("GET", "/api/v1/roadmaps")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
@@ -49,10 +51,11 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         await AssertErrorCode(response, "UNAUTHORIZED");
     }
 
-    // TEST-02: Return the canonical 403 envelope when a non-traveler calls RM-01 or RM-04.
+    // TEST-02: Return the canonical 403 envelope when a non-traveler calls a roadmap endpoint.
     /// <summary>Verifies the controller enforces the documented TRAVELER role.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
+    [InlineData("GET", "/api/v1/roadmaps")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
@@ -120,7 +123,28 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         _factory.Update.LastRequest.OriginLabelSpecified.Should().BeTrue();
     }
 
-    // TEST-06: Resolve every ANGI-104 use case, validator, repository, and controller dependency.
+    // TEST-06: Bind RM-02 query parameters and serialize the complete paged response.
+    /// <summary>Verifies routing, query binding, use-case delegation, and JSON shape for the roadmap list.</summary>
+    [Fact]
+    public async Task GetMyRoadmaps_WithValidQuery_ShouldSerializePagedRoadmapSummaries()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps?page=2&pageSize=10");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("page").GetInt32().Should().Be(2);
+        data.GetProperty("pageSize").GetInt32().Should().Be(10);
+        data.GetProperty("totalItems").GetInt64().Should().Be(11);
+        data.GetProperty("totalPages").GetInt32().Should().Be(2);
+        data.GetProperty("items")[0].GetProperty("originMode").GetString().Should().Be("pinned");
+        _factory.GetMyRoadmaps.LastRequest.Should().BeEquivalentTo(new { Page = 2, PageSize = 10 });
+    }
+
+    // TEST-07: Resolve every implemented roadmap use case, validator, repository, and controller dependency.
     /// <summary>Verifies all module registrations are connected in the production dependency graph.</summary>
     [Fact]
     public void Services_ShouldResolveRoadmapDependencies()
@@ -128,6 +152,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         using var scope = _factory.Services.CreateScope();
         var provider = scope.ServiceProvider;
         provider.GetRequiredService<IValidator<CreateRoadmapRequestDto>>().Should().NotBeNull();
+        provider.GetRequiredService<IValidator<GetMyRoadmapsRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
@@ -135,7 +160,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Should().NotContainNulls();
     }
 
-    // TEST-07: Publish RM-01 and RM-04 through both runtime routing and OpenAPI.
+    // TEST-08: Publish RM-01, RM-02, and RM-04 through both runtime routing and OpenAPI.
     /// <summary>Verifies the endpoints consumed by Scalar are discoverable with their documented verbs.</summary>
     [Fact]
     public async Task RuntimeAndOpenApi_ShouldPublishBothRoadmapOperations()
@@ -144,13 +169,14 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(2);
+        endpoints.Should().HaveCount(3);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var paths = document.RootElement.GetProperty("paths");
         paths.GetProperty("/api/v1/roadmaps").TryGetProperty("post", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}").TryGetProperty("patch", out _).Should().BeTrue();
     }
 
@@ -191,6 +217,9 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
 
     /// <summary>Gets the stateful RM-04 stub used to inspect bound PATCH requests.</summary>
     public StubUpdateRoadmapUseCase Update { get; } = new();
+
+    /// <summary>Gets the stateful RM-02 stub used to inspect bound query parameters.</summary>
+    public StubGetMyRoadmapsUseCase GetMyRoadmaps { get; } = new();
 
     /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
     protected override IHost CreateHost(IHostBuilder builder)
@@ -235,9 +264,12 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<IEnsureActiveAccountUseCase>();
             services.RemoveAll<ICreateRoadmapUseCase>();
+            services.RemoveAll<IGetMyRoadmapsUseCase>();
             services.RemoveAll<IUpdateRoadmapUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
             services.AddScoped<ICreateRoadmapUseCase, StubCreateRoadmapUseCase>();
+            services.AddSingleton(GetMyRoadmaps);
+            services.AddSingleton<IGetMyRoadmapsUseCase>(GetMyRoadmaps);
             services.AddSingleton(Update);
             services.AddSingleton<IUpdateRoadmapUseCase>(Update);
         });
@@ -254,6 +286,38 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         /// <summary>Returns deterministic empty days for RM-01 serialization tests.</summary>
         public Task<RoadmapDetailDto> ExecuteAsync(CreateRoadmapRequestDto request, CancellationToken ct) =>
             Task.FromResult(Detail(request.NumDays));
+    }
+
+    public sealed class StubGetMyRoadmapsUseCase : IGetMyRoadmapsUseCase
+    {
+        public GetMyRoadmapsRequestDto? LastRequest { get; private set; }
+
+        /// <summary>Captures the bound query and returns a deterministic RM-02 page.</summary>
+        public Task<Paged<RoadmapSummaryDto>> ExecuteAsync(
+            GetMyRoadmapsRequestDto request,
+            CancellationToken ct)
+        {
+            LastRequest = request;
+            return Task.FromResult(new Paged<RoadmapSummaryDto>
+            {
+                Items =
+                [
+                    new RoadmapSummaryDto
+                    {
+                        Id = 88,
+                        Title = "Trip",
+                        NumDays = 3,
+                        OriginMode = "pinned",
+                        OriginLatitude = 16.061204m,
+                        OriginLongitude = 108.227531m
+                    }
+                ],
+                Page = request.Page,
+                PageSize = request.PageSize,
+                TotalItems = 11,
+                TotalPages = 2
+            });
+        }
     }
 
     public sealed class StubUpdateRoadmapUseCase : IUpdateRoadmapUseCase

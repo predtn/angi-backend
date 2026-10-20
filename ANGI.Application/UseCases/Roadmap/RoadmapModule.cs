@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
 using ANGI.Application.UseCases.Roadmap.Create;
+using ANGI.Application.UseCases.Roadmap.GetMyRoadmaps;
 using ANGI.Application.UseCases.Roadmap.Update;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +13,7 @@ public static class RoadmapModule
     public static IServiceCollection AddRoadmapUseCases(this IServiceCollection services)
     {
         services.AddScoped<ICreateRoadmapUseCase, CreateRoadmapUseCase>();
+        services.AddScoped<IGetMyRoadmapsUseCase, GetMyRoadmapsUseCase>();
         services.AddScoped<IUpdateRoadmapUseCase, UpdateRoadmapUseCase>();
         return services;
     }

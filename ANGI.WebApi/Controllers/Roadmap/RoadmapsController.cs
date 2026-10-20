@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
+using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Roadmap;
 using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -13,15 +14,32 @@ namespace ANGI.WebApi.Controllers.Roadmap;
 public sealed class RoadmapsController : ControllerBase
 {
     private readonly ICreateRoadmapUseCase _createRoadmapUseCase;
+    private readonly IGetMyRoadmapsUseCase _getMyRoadmapsUseCase;
     private readonly IUpdateRoadmapUseCase _updateRoadmapUseCase;
 
     /// <summary>Initializes the HTTP boundary with roadmap planning use cases.</summary>
     public RoadmapsController(
         ICreateRoadmapUseCase createRoadmapUseCase,
+        IGetMyRoadmapsUseCase getMyRoadmapsUseCase,
         IUpdateRoadmapUseCase updateRoadmapUseCase)
     {
         _createRoadmapUseCase = createRoadmapUseCase;
+        _getMyRoadmapsUseCase = getMyRoadmapsUseCase;
         _updateRoadmapUseCase = updateRoadmapUseCase;
+    }
+
+    /// <summary>Receives RM-02 and returns one page of the current traveler's roadmap cards.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<Paged<RoadmapSummaryDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetMyRoadmaps(
+        [FromQuery] GetMyRoadmapsRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _getMyRoadmapsUseCase.ExecuteAsync(request, ct);
+        return Ok(new ApiResponse<Paged<RoadmapSummaryDto>> { Success = true, Data = result });
     }
 
     /// <summary>Receives RM-01 and creates a roadmap with its initially empty days.</summary>
