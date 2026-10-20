@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
 using ANGI.Application.UseCases.Roadmap.Create;
+using ANGI.Application.UseCases.Roadmap.Delete;
 using ANGI.Application.UseCases.Roadmap.GetMyRoadmaps;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapDayRoute;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapDetail;
@@ -15,6 +16,7 @@ public static class RoadmapModule
     public static IServiceCollection AddRoadmapUseCases(this IServiceCollection services)
     {
         services.AddScoped<ICreateRoadmapUseCase, CreateRoadmapUseCase>();
+        services.AddScoped<IDeleteRoadmapUseCase, DeleteRoadmapUseCase>();
         services.AddScoped<IGetMyRoadmapsUseCase, GetMyRoadmapsUseCase>();
         services.AddScoped<IGetRoadmapDetailUseCase, GetRoadmapDetailUseCase>();
         services.AddScoped<IGetRoadmapDayRouteUseCase, GetRoadmapDayRouteUseCase>();

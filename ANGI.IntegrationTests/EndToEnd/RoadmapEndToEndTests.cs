@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using ANGI.Application.DTOs.Auth;
 using ANGI.Application.DTOs.Roadmap;
 using ANGI.Application.Common.Models;
@@ -80,7 +81,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     }
 
     // TEST-02: Hide another traveler's roadmap behind ROADMAP_NOT_FOUND for every implemented owned endpoint.
-    /// <summary>Verifies RM-03, RM-04, and RM-14 ownership filtering through HTTP and PostgreSQL.</summary>
+    /// <summary>Verifies RM-03, RM-04, RM-05, and RM-14 ownership filtering through HTTP and PostgreSQL.</summary>
     [PostgresEndToEndFact]
     public async Task AccessAnotherTravelersRoadmap_ShouldReturnNotFoundAcrossOwnedEndpoints()
     {
@@ -104,8 +105,9 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         using var detailResponse = await client.GetAsync($"/api/v1/roadmaps/{created.Overview.Id}");
         using var routeResponse = await client.GetAsync(
             $"/api/v1/roadmaps/{created.Overview.Id}/days/{created.Itinerary.Single().DayId}/route");
+        using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{created.Overview.Id}");
 
-        foreach (var response in new[] { updateResponse, detailResponse, routeResponse })
+        foreach (var response in new[] { updateResponse, detailResponse, routeResponse, deleteResponse })
         {
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
             var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
@@ -302,6 +304,84 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         missingDay.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var error = await missingDay.Content.ReadFromJsonAsync<ApiResponse<object>>();
         error!.ErrorCode.Should().Be("DAY_NOT_FOUND");
+    }
+
+    // TEST-06: Soft-delete only the owned roadmap while preserving its child records.
+    /// <summary>Verifies RM-05 persistence, response, visibility, and repeated-delete behavior end to end.</summary>
+    [PostgresEndToEndFact]
+    public async Task DeleteRoadmap_ShouldSoftDeleteAndHideOnlyTheOwnedRoadmap()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-delete@integration.test");
+        Authorize(client, traveler.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Delete trip", null, 1);
+        var relatedIds = await _factory.ExecuteDbAsync(async context =>
+        {
+            var dayId = await context.RoadmapDays
+                .Where(day => day.RoadmapId == roadmap.Overview.Id)
+                .Select(day => day.Id)
+                .SingleAsync();
+            var item = new RoadmapItem
+            {
+                RoadmapDayId = dayId,
+                DishId = publicDish.DishId,
+                MealSlot = MealSlot.Lunch,
+                SortOrder = 0,
+                Source = RoadmapItemSource.Manual
+            };
+            context.RoadmapItems.Add(item);
+            var blog = new Blog
+            {
+                AuthorId = traveler.User.Id,
+                RoadmapId = roadmap.Overview.Id,
+                RoadmapSnapshot = "{\"title\":\"Delete trip\"}",
+                Title = "Shared delete trip",
+                Slug = "shared-delete-trip",
+                Content = "The snapshot must remain available.",
+                PublishedAt = DateTime.UtcNow
+            };
+            context.Blogs.Add(blog);
+            await context.SaveChangesAsync();
+            return (ItemId: item.Id, BlogId: blog.Id);
+        });
+
+        using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteResponse.Content.ReadAsStringAsync());
+        var envelope = await deleteResponse.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        envelope.Should().NotBeNull();
+        envelope!.Success.Should().BeTrue();
+        envelope.Data.Should().BeNull();
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            (await context.Roadmaps.AnyAsync(item => item.Id == roadmap.Overview.Id)).Should().BeFalse();
+            var deleted = await context.Roadmaps
+                .IgnoreQueryFilters()
+                .SingleAsync(item => item.Id == roadmap.Overview.Id);
+            deleted.UserId.Should().Be(traveler.User.Id);
+            deleted.DeletedAt.Should().NotBeNull();
+            (await context.RoadmapDays.CountAsync(day => day.RoadmapId == roadmap.Overview.Id)).Should().Be(1);
+            (await context.RoadmapItems.AnyAsync(item => item.Id == relatedIds.ItemId)).Should().BeTrue();
+            var sharedBlog = await context.Blogs.SingleAsync(blog => blog.Id == relatedIds.BlogId);
+            sharedBlog.RoadmapId.Should().Be(roadmap.Overview.Id);
+            using var snapshot = JsonDocument.Parse(sharedBlog.RoadmapSnapshot!);
+            snapshot.RootElement.GetProperty("title").GetString().Should().Be("Delete trip");
+        });
+
+        using var detailResponse = await client.GetAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        using var repeatedDeleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        foreach (var response in new[] { detailResponse, repeatedDeleteResponse })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+            error!.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        }
+
+        using var listResponse = await client.GetAsync("/api/v1/roadmaps");
+        var list = await SuccessDataAsync<Paged<RoadmapSummaryDto>>(listResponse);
+        list.Items.Should().NotContain(item => item.Id == roadmap.Overview.Id);
     }
 
     /// <summary>Registers, verifies, and logs in a traveler through public HTTP endpoints.</summary>

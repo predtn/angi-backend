@@ -142,6 +142,30 @@ public sealed class RoadmapRepository : IRoadmapRepository
             .FirstOrDefaultAsync(ct);
     }
 
+    /// <summary>Locks and tracks only the owned visible roadmap row needed by RM-05.</summary>
+    public async Task<Domain.Entities.Roadmap?> LockAndGetTrackedForDeleteAsync(
+        long roadmapId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmaps
+            WHERE id = {{roadmapId}}
+              AND user_id = {{userId}}
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """, ct);
+
+        return await _context.Roadmaps
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                roadmap => roadmap.Id == roadmapId &&
+                           roadmap.UserId == userId &&
+                           roadmap.DeletedAt == null,
+                ct);
+    }
+
     /// <summary>Loads the complete owned roadmap graph without tracking for RM-03 mapping.</summary>
     public async Task<Domain.Entities.Roadmap?> GetOwnedDetailAsync(
         long roadmapId,
