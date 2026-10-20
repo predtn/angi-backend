@@ -389,14 +389,13 @@ public sealed class RestaurantRepository : IRestaurantRepository
             .FirstOrDefaultAsync(ct);
     }
 
-    /// <summary>Loads the caller's review for a restaurant if one exists.</summary>
+    /// <summary>Loads the caller's review, including its moderation state, for rating eligibility and own-review display.</summary>
     public Task<RestaurantReview?> GetTravelerReviewForRestaurantAsync(long restaurantId, int userId, CancellationToken ct)
     {
         return _context.RestaurantReviews
             .AsNoTracking()
             .Where(r => r.RestaurantId == restaurantId
-                     && r.UserId == userId
-                     && r.Status == ContentStatus.Visible)
+                     && r.UserId == userId)
             .Include(r => r.User)
                 .ThenInclude(u => u.AvatarMedia)
             .Include(r => r.Images)

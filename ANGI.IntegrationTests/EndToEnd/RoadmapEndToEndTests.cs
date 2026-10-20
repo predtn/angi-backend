@@ -522,6 +522,125 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             .Should().Be("ROADMAP_NOT_FOUND");
     }
 
+    // TEST-09: Read full RM-12 detail and conceal every invalid ownership or membership boundary.
+    /// <summary>Verifies item, inactive dish, restaurant, feedback, moderated own review, and all 404 scopes in PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task GetRoadmapItemDetail_ShouldReturnCompleteOwnedDataAndHideInvalidTargets()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-detail-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Item detail trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes.SingleAsync(value => value.Id == publicDish.DishId);
+            dish.Status = DishStatus.Hidden;
+            dish.IsAvailable = false;
+            var restaurant = await context.Restaurants.SingleAsync(value => value.Id == publicDish.RestaurantId);
+            restaurant.BusinessHours.Add(new RestaurantBusinessHour
+            {
+                DayOfWeek = 1,
+                OpenTime = new TimeOnly(6, 0),
+                CloseTime = new TimeOnly(13, 30)
+            });
+            restaurant.Images.Add(new RestaurantImage
+            {
+                SortOrder = 0,
+                Media = TestMedia(owner.User.Id, "restaurant-detail")
+            });
+            context.DishFeedbacks.Add(new DishFeedback
+            {
+                EventUuid = Guid.NewGuid(),
+                UserId = owner.User.Id,
+                DishId = dish.Id,
+                RoadmapItemId = added.Id,
+                Value = FeedbackValue.Dislike
+            });
+            var review = new RestaurantReview
+            {
+                RestaurantId = restaurant.Id,
+                UserId = owner.User.Id,
+                Rating = 4,
+                Content = "Own moderated review",
+                RoadmapItemId = added.Id,
+                Status = ContentStatus.Hidden
+            };
+            review.Images.Add(new ReviewImage { Media = TestMedia(owner.User.Id, "review-detail") });
+            context.RestaurantReviews.Add(review);
+            await context.SaveChangesAsync();
+        });
+
+        using var detailResponse = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK, await detailResponse.Content.ReadAsStringAsync());
+        var detail = await SuccessDataAsync<RoadmapItemDetailDto>(detailResponse);
+        detail.Id.Should().Be(added.Id);
+        detail.DayId.Should().Be(dayId);
+        detail.MyFeedback.Should().Be("dislike");
+        detail.Dish.Id.Should().Be(publicDish.DishId);
+        detail.Dish.Status.Should().Be("hidden");
+        detail.Dish.IsAvailable.Should().BeFalse();
+        detail.Dish.Images.Should().HaveCount(2);
+        detail.Dish.Rank.Should().BeNull();
+        detail.Dish.Restaurant.DistanceKm.Should().BeNull();
+        detail.Restaurant.Id.Should().Be(publicDish.RestaurantId);
+        detail.Restaurant.Images.Should().ContainSingle();
+        detail.Restaurant.BusinessHours.Should().ContainSingle();
+        detail.CanRate.Should().BeFalse();
+        detail.MyReview.Should().NotBeNull();
+        detail.MyReview!.Status.Should().Be("hidden");
+        detail.MyReview.Images.Should().ContainSingle();
+        detail.Restaurant.MyReview!.Id.Should().Be(detail.MyReview.Id);
+
+        using var missingItem = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999");
+        missingItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await missingItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+
+        var otherRoadmap = await CreateRoadmapAsync(client, "Other owned trip", null, 1);
+        using var mismatchedRoadmap = await client.GetAsync(
+            $"/api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id}");
+        mismatchedRoadmap.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await mismatchedRoadmap.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+
+        var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-detail-other@integration.test");
+        Authorize(client, other.AccessToken);
+        using var foreignItem = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        foreignItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await foreignItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+
+        Authorize(client, owner.AccessToken);
+        using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        deleteResponse.EnsureSuccessStatusCode();
+        using var deletedRoadmapItem = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        deletedRoadmapItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await deletedRoadmapItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+    }
+
+    /// <summary>Creates a valid image media row for PostgreSQL relationship coverage.</summary>
+    private static MediaFile TestMedia(int uploaderId, string name) => new()
+    {
+        UploaderId = uploaderId,
+        StorageKey = $"image/upload/roadmap/{name}-{Guid.NewGuid():N}.jpg",
+        Url = $"https://cdn.test/{name}.jpg",
+        MimeType = "image/jpeg"
+    };
+
     /// <summary>Registers, verifies, and logs in a traveler through public HTTP endpoints.</summary>
     private async Task<AuthResultDto> RegisterTravelerAndLoginAsync(HttpClient client, string email)
     {

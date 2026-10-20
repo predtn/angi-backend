@@ -193,6 +193,41 @@ public sealed class RoadmapRepository : IRoadmapRepository
             .FirstOrDefaultAsync(ct);
     }
 
+    /// <summary>Loads one owned RM-12 item with the full dish and restaurant graph without tracking.</summary>
+    public Task<RoadmapItem?> GetOwnedItemDetailAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct)
+    {
+        return _context.RoadmapItems
+            .AsNoTracking()
+            .Where(item => item.Id == itemId &&
+                           item.RoadmapDay.RoadmapId == roadmapId &&
+                           item.RoadmapDay.Roadmap.UserId == userId)
+            .Include(item => item.RoadmapDay)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.CoverMedia)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Images)
+                    .ThenInclude(image => image.Media)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.DishTags)
+                    .ThenInclude(dishTag => dishTag.Tag)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Restaurant)
+                    .ThenInclude(restaurant => restaurant.CoverMedia)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Restaurant)
+                    .ThenInclude(restaurant => restaurant.Images)
+                        .ThenInclude(image => image.Media)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Restaurant)
+                    .ThenInclude(restaurant => restaurant.BusinessHours)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
     /// <summary>Projects an owned roadmap and only the requested day's route values without tracking.</summary>
     public async Task<RoadmapRouteData?> GetOwnedRouteDataAsync(
         long roadmapId,
