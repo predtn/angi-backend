@@ -384,6 +384,128 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         list.Items.Should().NotContain(item => item.Id == roadmap.Overview.Id);
     }
 
+    // TEST-07: Suggest an eligible dish, add it at the end of a meal, then exclude it from later suggestions.
+    /// <summary>Verifies RM-06 and RM-07 together through HTTP, real repositories, PostgreSQL, and reco fallback.</summary>
+    [PostgresEndToEndFact]
+    public async Task SuggestAndAddRoadmapItem_ShouldPersistAndExcludeExistingDish()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-add-item@integration.test");
+        Authorize(client, traveler.AccessToken);
+        using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
+        {
+            Title = "Manual food trip",
+            NumDays = 1,
+            OriginMode = "pinned",
+            OriginLatitude = 10.775m,
+            OriginLongitude = 106.700m,
+            OriginLabel = "Hotel"
+        });
+        var roadmap = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            context.RoadmapItems.Add(new RoadmapItem
+            {
+                RoadmapDayId = dayId,
+                DishId = publicDish.HiddenDishId,
+                MealSlot = MealSlot.Lunch,
+                SortOrder = 4,
+                Source = RoadmapItemSource.Manual
+            });
+            await context.SaveChangesAsync();
+        });
+
+        using var suggestionsResponse = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/suggestions?province=Ho%20Chi%20Minh%20City&mealSlot=lunch&limit=1");
+
+        suggestionsResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            await suggestionsResponse.Content.ReadAsStringAsync());
+        var suggestions = await SuccessDataAsync<GetRoadmapSuggestionsResponseDto>(suggestionsResponse);
+        suggestions.RequestId.Should().BeNull();
+        suggestions.Items.Should().ContainSingle().Which.Id.Should().Be(publicDish.DishId);
+        suggestions.Items.Single().Rank.Should().Be(1);
+        suggestions.NextCursor.Should().BeNull();
+
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+
+        addResponse.StatusCode.Should().Be(HttpStatusCode.Created, await addResponse.Content.ReadAsStringAsync());
+        var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        added.DayId.Should().Be(dayId);
+        added.DayNumber.Should().Be(1);
+        added.SortOrder.Should().Be(5);
+        added.Source.Should().Be("manual");
+        added.Dish.Id.Should().Be(publicDish.DishId);
+        added.Dish.Status.Should().Be("active");
+        added.Dish.Tags.Should().ContainSingle(item => item.Code == "lunch");
+        added.MyFeedback.Should().BeNull();
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var persisted = await context.RoadmapItems.SingleAsync(item => item.Id == added.Id);
+            persisted.RoadmapDayId.Should().Be(dayId);
+            persisted.DishId.Should().Be(publicDish.DishId);
+            persisted.MealSlot.Should().Be(MealSlot.Lunch);
+            persisted.SortOrder.Should().Be(5);
+            persisted.Source.Should().Be(RoadmapItemSource.Manual);
+        });
+
+        using var repeatedResponse = await client.GetAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/suggestions?province=Ho%20Chi%20Minh%20City&mealSlot=lunch");
+        var repeated = await SuccessDataAsync<GetRoadmapSuggestionsResponseDto>(repeatedResponse);
+        repeated.Items.Should().BeEmpty();
+    }
+
+    // TEST-08: Enforce ownership, day membership, and dish availability at the real RM-07 boundary.
+    /// <summary>Verifies every documented RM-07 business error through HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task AddRoadmapItem_WithInvalidTargets_ShouldReturnDocumentedErrors()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-errors-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Protected trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+
+        using var missingDay = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        missingDay.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await missingDay.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DAY_NOT_FOUND");
+
+        using var hiddenDish = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.HiddenDishId, MealSlot = "lunch" });
+        hiddenDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await hiddenDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes.SingleAsync(item => item.Id == publicDish.DishId);
+            dish.IsAvailable = false;
+            await context.SaveChangesAsync();
+        });
+        using var soldOutDish = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        soldOutDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await soldOutDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
+
+        var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-errors-other@integration.test");
+        Authorize(client, other.AccessToken);
+        using var foreignRoadmap = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        foreignRoadmap.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await foreignRoadmap.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_NOT_FOUND");
+    }
+
     /// <summary>Registers, verifies, and logs in a traveler through public HTTP endpoints.</summary>
     private async Task<AuthResultDto> RegisterTravelerAndLoginAsync(HttpClient client, string email)
     {

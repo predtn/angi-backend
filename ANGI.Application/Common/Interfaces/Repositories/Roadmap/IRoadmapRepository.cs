@@ -39,4 +39,23 @@ public interface IRoadmapRepository
         int userId,
         IReadOnlyCollection<long> roadmapItemIds,
         CancellationToken ct);
+
+    /// <summary>Projects the owned roadmap origin and all dish ids that RM-06 must exclude.</summary>
+    Task<RoadmapSuggestionContext?> GetSuggestionContextAsync(
+        long roadmapId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Locks the owned roadmap and requested day for RM-07; RoadmapExists distinguishes ROADMAP_NOT_FOUND from
+    /// DAY_NOT_FOUND while the returned day includes its current item orders.
+    /// </summary>
+    Task<(bool RoadmapExists, RoadmapDay? Day)> LockAndGetOwnedDayAsync(
+        long roadmapId,
+        long dayId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>Adds one roadmap item to the current unit of work.</summary>
+    void AddItem(RoadmapItem item);
 }
