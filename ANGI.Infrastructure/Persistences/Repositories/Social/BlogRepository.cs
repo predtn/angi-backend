@@ -85,6 +85,76 @@ public sealed class BlogRepository : IBlogRepository
     public Task<bool> SlugExistsAsync(string slug, CancellationToken ct) =>
         _context.Blogs.AsNoTracking().AnyAsync(blog => blog.Slug == slug, ct);
 
+    /// <inheritdoc />
+    public async Task<Blog?> GetPublicDetailAsync(long blogId, CancellationToken ct)
+    {
+        var blog = await _context.Blogs
+            .AsNoTracking()
+            .Where(b => b.Id == blogId && b.Status == BlogStatus.Published)
+            .Include(b => b.Author)
+                .ThenInclude(author => author.AvatarMedia)
+            .Include(b => b.CoverMedia)
+            .Include(b => b.Images)
+                .ThenInclude(image => image.Media)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+
+        if (blog is not null && blog.RoadmapId is long roadmapId)
+        {
+            var roadmapExists = await _context.Roadmaps
+                .AsNoTracking()
+                .AnyAsync(roadmap => roadmap.Id == roadmapId, ct);
+            if (!roadmapExists)
+            {
+                blog.RoadmapId = null;
+            }
+        }
+
+        return blog;
+    }
+
+    /// <inheritdoc />
+    public Task<bool> IsLikedByUserAsync(long blogId, int userId, CancellationToken ct) =>
+        _context.BlogLikes
+            .AsNoTracking()
+            .AnyAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+
+    /// <inheritdoc />
+    public Task<bool> ExistsPublishedAsync(long blogId, CancellationToken ct) =>
+        _context.Blogs
+            .AsNoTracking()
+            .AnyAsync(blog => blog.Id == blogId && blog.Status == BlogStatus.Published, ct);
+
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<BlogComment> Items, long TotalItems)> GetVisibleCommentsAsync(
+        long blogId,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _context.BlogComments
+            .AsNoTracking()
+            .Where(comment => comment.BlogId == blogId && comment.Status == ContentStatus.Visible);
+
+        var totalItems = await query.LongCountAsync(ct);
+        if (totalItems == 0)
+        {
+            return (Array.Empty<BlogComment>(), 0L);
+        }
+
+        var skip = (page - 1) * pageSize;
+        var items = await query
+            .OrderBy(comment => comment.CreatedAt)
+            .ThenBy(comment => comment.Id)
+            .Skip(skip)
+            .Take(pageSize)
+            .Include(comment => comment.User)
+                .ThenInclude(user => user.AvatarMedia)
+            .ToListAsync(ct);
+
+        return (items, totalItems);
+    }
+
     /// <summary>Adds the complete blog aggregate to the scoped context.</summary>
     public void Add(Blog blog)
     {

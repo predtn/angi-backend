@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
+using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Social;
 using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -6,20 +7,68 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi.Controllers.Social;
 
-/// <summary>Exposes traveler-authored blog operations.</summary>
+/// <summary>Exposes public and traveler-authored blog operations (BLOG-02, BLOG-03, BLOG-04).</summary>
 [ApiController]
 [Route("api/v1/blogs")]
 [Authorize(Roles = "TRAVELER")]
 public sealed class BlogsController : ControllerBase
 {
     private readonly ICreateBlogUseCase _createBlogUseCase;
+    private readonly IGetBlogDetailUseCase _getBlogDetailUseCase;
+    private readonly IGetBlogCommentsUseCase _getBlogCommentsUseCase;
 
-    /// <summary>Initializes the HTTP boundary with the BLOG-04 use case.</summary>
-    public BlogsController(ICreateBlogUseCase createBlogUseCase)
+    /// <summary>Initializes the HTTP boundary with blog use cases.</summary>
+    public BlogsController(
+        ICreateBlogUseCase createBlogUseCase,
+        IGetBlogDetailUseCase getBlogDetailUseCase,
+        IGetBlogCommentsUseCase getBlogCommentsUseCase)
     {
         _createBlogUseCase = createBlogUseCase;
+        _getBlogDetailUseCase = getBlogDetailUseCase;
+        _getBlogCommentsUseCase = getBlogCommentsUseCase;
     }
 
+    // BLOG-02
+    /// <summary>Receives BLOG-02 and returns the full detail of a published blog, author, and roadmap snapshot.</summary>
+    /// <param name="blogId">ID của bài viết blog.</param>
+    /// <param name="ct">Mã hủy yêu cầu thao tác bất đồng bộ.</param>
+    /// <response code="200">Lấy chi tiết bài viết thành công.</response>
+    /// <response code="400">Định dạng tham số không hợp lệ (VALIDATION_FAILED).</response>
+    /// <response code="404">Không tìm thấy bài viết (BLOG_NOT_FOUND).</response>
+    [AllowAnonymous]
+    [HttpGet("{blogId}")]
+    [ProducesResponseType(typeof(ApiResponse<BlogDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDetail([FromRoute] long blogId, CancellationToken ct)
+    {
+        var result = await _getBlogDetailUseCase.ExecuteAsync(blogId, ct);
+        return Ok(new ApiResponse<BlogDetailDto> { Success = true, Data = result });
+    }
+
+    // BLOG-03
+    /// <summary>Receives BLOG-03 and returns a paginated list of visible comments for a published blog.</summary>
+    /// <param name="blogId">ID của bài viết blog.</param>
+    /// <param name="request">Tham số phân trang (page, pageSize).</param>
+    /// <param name="ct">Mã hủy yêu cầu thao tác bất đồng bộ.</param>
+    /// <response code="200">Lấy danh sách bình luận thành công.</response>
+    /// <response code="400">Tham số phân trang hoặc ID không hợp lệ (VALIDATION_FAILED).</response>
+    /// <response code="404">Không tìm thấy bài viết (BLOG_NOT_FOUND).</response>
+    [AllowAnonymous]
+    [HttpGet("{blogId}/comments")]
+    [ProducesResponseType(typeof(ApiResponse<Paged<CommentDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetComments(
+        [FromRoute] long blogId,
+        [FromQuery] GetBlogCommentsRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _getBlogCommentsUseCase.ExecuteAsync(blogId, request, ct);
+        return Ok(new ApiResponse<Paged<CommentDto>> { Success = true, Data = result });
+    }
+
+    // BLOG-04
     /// <summary>Receives BLOG-04 and publishes a blog with an optional immutable roadmap snapshot.</summary>
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse<BlogDetailDto>), StatusCodes.Status201Created)]
