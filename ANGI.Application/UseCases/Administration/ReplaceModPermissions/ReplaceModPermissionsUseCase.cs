@@ -15,12 +15,6 @@ namespace ANGI.Application.UseCases.Administration.ReplaceModPermissions;
 /// <summary>Implements ADM-P3 by atomically replacing one MOD account's permission overrides.</summary>
 public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
 {
-    private static readonly IReadOnlySet<string> AdminOnlyPermissions = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "MOD_MANAGE",
-        "SYSTEM_AUDIT_VIEW"
-    };
-
     private readonly IValidator<ReplaceModPermissionsRequestDto> _validator;
     private readonly IAdministrationPermissionRepository _repository;
     private readonly ICurrentUserService _currentUserService;
@@ -60,9 +54,9 @@ public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
         var current = await _repository.GetModPermissionsAsync(userId, ct)
             ?? throw new NotFoundException("MOD_NOT_FOUND", "Không tìm thấy tài khoản Mod.");
         var catalog = await _repository.GetCatalogAsync(ct);
-        var permissionByCode = catalog.Permissions.ToDictionary(item => item.Code, StringComparer.Ordinal);
-
-        EnsureKnownAndGrantable(request.Overrides.Select(item => item.PermissionCode), permissionByCode);
+        var permissionByCode = AdministrationPermissionRules.ResolveGrantable(
+            request.Overrides.Select(item => item.PermissionCode),
+            catalog);
 
         var replacements = request.Overrides
             .Select(item => new PermissionOverrideChange(
@@ -96,27 +90,6 @@ public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
         await transaction.CommitAsync(ct);
 
         return AdministrationPermissionMapper.ToModPermissionsDto(current.RoleDefaults, replacementSnapshots);
-    }
-
-    /// <summary>Rejects codes outside the catalog and permissions reserved exclusively for administrators.</summary>
-    private static void EnsureKnownAndGrantable(
-        IEnumerable<string> codes,
-        IReadOnlyDictionary<string, PermissionDefinition> permissionByCode)
-    {
-        foreach (var code in codes)
-        {
-            if (!permissionByCode.ContainsKey(code))
-            {
-                throw new BadRequestException("UNKNOWN_PERMISSION", "Mã quyền không tồn tại.");
-            }
-
-            if (AdminOnlyPermissions.Contains(code))
-            {
-                throw new BadRequestException(
-                    "PERMISSION_NOT_GRANTABLE",
-                    "Quyền này chỉ dành cho quản trị viên.");
-            }
-        }
     }
 
     /// <summary>Creates a stable audit representation without persistence identifiers.</summary>

@@ -14,12 +14,6 @@ namespace ANGI.Application.UseCases.Administration.ReplaceModRolePermissions;
 /// <summary>Implements ADM-P4 by atomically replacing the MOD role's default permissions.</summary>
 public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermissionsUseCase
 {
-    private static readonly IReadOnlySet<string> AdminOnlyPermissions = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "MOD_MANAGE",
-        "SYSTEM_AUDIT_VIEW"
-    };
-
     private readonly IValidator<ReplaceModRolePermissionsRequestDto> _validator;
     private readonly IAdministrationPermissionRepository _repository;
     private readonly ICurrentUserService _currentUserService;
@@ -53,8 +47,7 @@ public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermission
 
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
         var catalog = await _repository.GetCatalogAsync(ct);
-        var permissionByCode = catalog.Permissions.ToDictionary(item => item.Code, StringComparer.Ordinal);
-        EnsureKnownAndGrantable(request.PermissionCodes, permissionByCode);
+        var permissionByCode = AdministrationPermissionRules.ResolveGrantable(request.PermissionCodes, catalog);
 
         var replacements = request.PermissionCodes
             .Select(code => permissionByCode[code])
@@ -84,24 +77,4 @@ public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermission
         };
     }
 
-    /// <summary>Rejects codes outside the catalog and permissions reserved exclusively for administrators.</summary>
-    private static void EnsureKnownAndGrantable(
-        IEnumerable<string> codes,
-        IReadOnlyDictionary<string, PermissionDefinition> permissionByCode)
-    {
-        foreach (var code in codes)
-        {
-            if (!permissionByCode.ContainsKey(code))
-            {
-                throw new BadRequestException("UNKNOWN_PERMISSION", "Mã quyền không tồn tại.");
-            }
-
-            if (AdminOnlyPermissions.Contains(code))
-            {
-                throw new BadRequestException(
-                    "PERMISSION_NOT_GRANTABLE",
-                    "Quyền này chỉ dành cho quản trị viên.");
-            }
-        }
-    }
 }
