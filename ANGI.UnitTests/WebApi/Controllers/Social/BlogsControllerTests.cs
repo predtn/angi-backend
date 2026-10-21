@@ -24,11 +24,12 @@ public sealed class BlogsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
         var expected = new BlogDetailDto { Id = 45, Title = "Chuyến đi" };
         var request = new CreateBlogRequestDto { Title = "Chuyến đi", Content = "Nội dung" };
+        var getPublicBlogsUseCase = new Mock<IGetPublicBlogsUseCase>();
         var useCase = new Mock<ICreateBlogUseCase>();
         using var source = new CancellationTokenSource();
         useCase.Setup(item => item.ExecuteAsync(request, source.Token)).ReturnsAsync(expected);
 
-        var action = await new BlogsController(useCase.Object).Create(request, source.Token);
+        var action = await new BlogsController(getPublicBlogsUseCase.Object, useCase.Object).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
