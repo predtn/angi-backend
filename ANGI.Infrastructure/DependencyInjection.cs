@@ -2,6 +2,7 @@ using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services.Account;
+using ANGI.Infrastructure.Services.Administration;
 using ANGI.Infrastructure.Services.Audit;
 using ANGI.Infrastructure.Services.Discovery;
 using ANGI.Infrastructure.Services.Auth;
@@ -35,6 +36,7 @@ namespace ANGI.Infrastructure
                                   npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", ANGIContext.Schema))
                        .UseSnakeCaseNamingConvention());
             services.AddScoped<IUnitOfWork, UnitOfWork>();
+            services.AddAdministrationInfrastructure();
             services.AddAccountInfrastructure();
             services.AddAuthInfrastructure(configuration);
             services.AddMediaInfrastructure();
