@@ -32,4 +32,29 @@ public sealed class BlogRepository : IBlogRepository
                 .ThenInclude(author => author.AvatarMedia)
             .ToListAsync(ct);
     }
+
+    /// <inheritdoc />
+    public Task<bool> SlugExistsAsync(string slug, CancellationToken ct)
+    {
+        return _context.Blogs.AnyAsync(blog => blog.Slug == slug, ct);
+    }
+
+    /// <inheritdoc />
+    public void Add(Blog blog)
+    {
+        _context.Blogs.Add(blog);
+    }
+
+    /// <inheritdoc />
+    public async Task<Blog?> GetByIdWithDetailsAsync(long id, CancellationToken ct)
+    {
+        return await _context.Blogs
+            .AsNoTracking()
+            .Include(blog => blog.CoverMedia)
+            .Include(blog => blog.Author)
+                .ThenInclude(author => author.AvatarMedia)
+            .Include(blog => blog.Images)
+                .ThenInclude(image => image.Media)
+            .FirstOrDefaultAsync(blog => blog.Id == id, ct);
+    }
 }

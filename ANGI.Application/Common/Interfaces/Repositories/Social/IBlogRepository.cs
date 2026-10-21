@@ -10,4 +10,13 @@ public interface IBlogRepository
     /// each group by like_count + comment_count, then newest; with the cover and the author's avatar.
     /// </summary>
     Task<IReadOnlyList<Blog>> GetFeaturedAsync(DateTime recentSince, int limit, CancellationToken ct);
+
+    /// <summary>Checks whether an active blog slug already exists.</summary>
+    Task<bool> SlugExistsAsync(string slug, CancellationToken ct);
+
+    /// <summary>Adds a new blog entity to the change tracker.</summary>
+    void Add(Blog blog);
+
+    /// <summary>Loads an undeleted blog by id with author, cover, and image media navigations.</summary>
+    Task<Blog?> GetByIdWithDetailsAsync(long id, CancellationToken ct);
 }
