@@ -123,6 +123,53 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
         });
     }
 
+    // TEST-03: Reject Admin access at HTTP and database permission boundaries without changing verification data.
+    /// <summary>Verifies every endpoint rejects Admin and a stale MOD claim cannot bypass the current database role.</summary>
+    [PostgresEndToEndFact]
+    public async Task AdminAccess_ShouldReturnForbiddenWithoutSideEffects()
+    {
+        await _factory.ResetDatabaseAsync();
+        var seed = await SeedAsync();
+        var adminId = await _factory.ExecuteDbAsync(async context =>
+        {
+            var admin = new User
+            {
+                Email = $"admin-{Guid.NewGuid():N}@integration.test",
+                RoleId = await context.Roles.Where(role => role.Code == "ADMIN").Select(role => role.Id).SingleAsync(),
+                DisplayName = "Verification Admin",
+                Status = UserStatus.Active,
+                EmailVerifiedAt = DateTime.UtcNow
+            };
+            context.Users.Add(admin);
+            await context.SaveChangesAsync();
+            return admin.Id;
+        });
+        using var client = _factory.CreateClient();
+        foreach (var claimRole in new[] { "ADMIN", "MOD" })
+        {
+            Authorize(client, adminId, claimRole);
+            using var list = await client.GetAsync("/api/v1/mod/verifications");
+            using var detail = await client.GetAsync($"/api/v1/mod/verifications/{seed.VerificationId}");
+            using var decision = await client.PostAsJsonAsync(
+                $"/api/v1/mod/verifications/{seed.VerificationId}/decision", new { decision = "approve" });
+
+            foreach (var response in new[] { list, detail, decision })
+            {
+                response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+                await AssertErrorAsync(response, "FORBIDDEN");
+            }
+        }
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var verification = await context.RestaurantVerifications.SingleAsync(item => item.Id == seed.VerificationId);
+            verification.Status.Should().Be(VerificationStatus.Pending);
+            verification.ReviewedBy.Should().BeNull();
+            (await context.Notifications.CountAsync()).Should().Be(0);
+            (await context.AuditLogs.CountAsync()).Should().Be(0);
+        });
+    }
+
     /// <summary>Seeds active owner/Mod accounts, a pending restaurant, linked submissions, and one private document.</summary>
     private async Task<SeedResult> SeedAsync()
     {

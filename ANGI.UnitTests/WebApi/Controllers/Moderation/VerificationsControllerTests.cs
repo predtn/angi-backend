@@ -18,17 +18,17 @@ public sealed class VerificationsControllerTests
     private readonly Mock<IGetVerificationReviewUseCase> _get = new();
     private readonly Mock<IReviewVerificationUseCase> _review = new();
 
-    // TEST-01: Require MOD or ADMIN role authorization at the controller boundary.
+    // TEST-01: Require only the MOD role at the controller boundary.
     /// <summary>Verifies all MOD-V endpoints inherit the documented role restriction.</summary>
     [Fact]
-    public void Controller_ShouldRequireModOrAdminRole()
+    public void Controller_ShouldRequireOnlyModRole()
     {
         var authorize = typeof(VerificationsController)
             .GetCustomAttributes(typeof(AuthorizeAttribute), true)
             .Cast<AuthorizeAttribute>()
             .Single();
 
-        authorize.Roles.Should().Be("MOD,ADMIN");
+        authorize.Roles.Should().Be("MOD");
     }
 
     // TEST-02: Return the MOD-V1 page inside the standard success envelope.

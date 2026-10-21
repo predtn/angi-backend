@@ -8,10 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi.Controllers.Moderation;
 
-/// <summary>Exposes restaurant verification review operations to Mods and Admins.</summary>
+/// <summary>Exposes restaurant verification review operations exclusively to Mods.</summary>
 [ApiController]
 [Route("api/v1/mod/verifications")]
-[Authorize(Roles = "MOD,ADMIN")]
+[Authorize(Roles = "MOD")]
 public sealed class VerificationsController : ControllerBase
 {
     private readonly IListVerificationsUseCase _listVerificationsUseCase;

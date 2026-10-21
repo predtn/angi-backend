@@ -22,9 +22,8 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
     {
         return _context.Users
             .AsNoTracking()
-            .Where(user => user.Id == userId)
+            .Where(user => user.Id == userId && user.Role.Code == "MOD")
             .Select(user =>
-                user.Role.Code == "ADMIN" ||
                 (!_context.UserPermissions.Any(item =>
                     item.UserId == user.Id &&
                     item.Permission.Code == permissionCode &&

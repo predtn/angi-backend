@@ -100,14 +100,37 @@ public sealed class ListVerificationsUseCaseTests
             It.IsAny<ListVerificationsRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-05: Reject non-Mod roles even when the permission boundary would grant access.
+    /// <summary>Verifies MOD-V1 enforces role restrictions before checking permissions or reading submissions.</summary>
+    [Theory]
+    [InlineData("ADMIN")]
+    [InlineData("TRAVELER")]
+    [InlineData("RESTAURANT_OWNER")]
+    public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
+    {
+        var repository = AuthorizedRepository();
+        var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>(), role: role);
+
+        var act = () => useCase.ExecuteAsync(new ListVerificationsRequestDto(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ForbiddenException>();
+        exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        repository.Verify(item => item.HasEffectivePermissionAsync(
+            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(item => item.ListAsync(
+            It.IsAny<ListVerificationsRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     /// <summary>Creates MOD-V1 with real validation and a configurable authenticated identity.</summary>
     private static ListVerificationsUseCase CreateUseCase(
         Mock<IVerificationReviewRepository> repository,
         ICloudinaryService cloudinaryService,
-        int? userId = 9)
+        int? userId = 9,
+        string role = "MOD")
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(userId);
+        currentUser.SetupGet(item => item.Role).Returns(role);
         return new ListVerificationsUseCase(
             new ListVerificationsRequestDtoValidator(),
             repository.Object,

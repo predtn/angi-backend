@@ -90,12 +90,12 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
         _factory.List.LastRequest!.Status.Should().Be("pending");
     }
 
-    // TEST-04: Return MOD-V2 verification fields flattened beside restaurant and previous.
+    // TEST-04: Return MOD-V2 verification fields flattened beside restaurant and previous for a Mod.
     /// <summary>Verifies inheritance serializes the documented response shape without an extra verification object.</summary>
     [Fact]
-    public async Task Get_WithAdminToken_ShouldReturnFlattenedDetailContract()
+    public async Task Get_WithModToken_ShouldReturnFlattenedDetailContract()
     {
-        using var client = Client("ADMIN");
+        using var client = Client("MOD");
 
         using var response = await client.GetAsync("/api/v1/mod/verifications/21");
 
@@ -139,6 +139,21 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         await AssertErrorAsync(response, "VALIDATION_FAILED");
         _factory.Review.LastRequest.Should().BeNull();
+    }
+
+    // TEST-07: Return FORBIDDEN for Admin access to every verification review endpoint.
+    /// <summary>Verifies Admin cannot list, inspect, or decide verification submissions.</summary>
+    [Theory]
+    [MemberData(nameof(Endpoints))]
+    public async Task Endpoint_WithAdminRole_ShouldReturnForbidden(HttpMethod method, string path, object? body)
+    {
+        using var client = Client("ADMIN");
+        using var request = Request(method, path, body);
+
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await AssertErrorAsync(response, "FORBIDDEN");
     }
 
     /// <summary>Creates an authenticated client for the requested role.</summary>

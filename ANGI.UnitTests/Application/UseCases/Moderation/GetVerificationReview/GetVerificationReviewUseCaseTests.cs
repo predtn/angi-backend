@@ -70,13 +70,33 @@ public sealed class GetVerificationReviewUseCaseTests
         repository.Verify(item => item.GetDetailAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    /// <summary>Creates MOD-V2 with an authenticated Mod.</summary>
+    // TEST-04: Reject non-Mod roles before revealing verification details.
+    /// <summary>Verifies MOD-V2 rejects Admin even when RESTAURANT_VERIFY would be granted.</summary>
+    [Theory]
+    [InlineData("ADMIN")]
+    [InlineData("TRAVELER")]
+    [InlineData("RESTAURANT_OWNER")]
+    public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
+    {
+        var repository = AuthorizedRepository();
+        var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>(), role);
+
+        var act = () => useCase.ExecuteAsync(21, CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ForbiddenException>();
+        exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        repository.Verify(item => item.GetDetailAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Creates MOD-V2 with a configurable authenticated role.</summary>
     private static GetVerificationReviewUseCase CreateUseCase(
         Mock<IVerificationReviewRepository> repository,
-        ICloudinaryService cloudinaryService)
+        ICloudinaryService cloudinaryService,
+        string role = "MOD")
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(9);
+        currentUser.SetupGet(item => item.Role).Returns(role);
         return new GetVerificationReviewUseCase(
             repository.Object,
             currentUser.Object,

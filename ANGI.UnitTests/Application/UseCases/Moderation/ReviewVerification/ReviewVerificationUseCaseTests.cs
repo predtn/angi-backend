@@ -179,14 +179,36 @@ public sealed class ReviewVerificationUseCaseTests
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    /// <summary>Creates MOD-V3 with real validation, deterministic time, and an authenticated Mod.</summary>
+    // TEST-07: Reject non-Mod roles before opening a transaction or staging side effects.
+    /// <summary>Verifies MOD-V3 never accepts an Admin decision despite permission grants.</summary>
+    [Theory]
+    [InlineData("ADMIN")]
+    [InlineData("TRAVELER")]
+    [InlineData("RESTAURANT_OWNER")]
+    public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
+    {
+        var repository = AuthorizedRepository();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object, role);
+
+        var act = () => useCase.ExecuteAsync(21, ApproveRequest(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ForbiddenException>();
+        exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(item => item.AddNotification(It.IsAny<Domain.Entities.Notification>()), Times.Never);
+    }
+
+    /// <summary>Creates MOD-V3 with real validation, deterministic time, and a configurable authenticated role.</summary>
     private static ReviewVerificationUseCase CreateUseCase(
         Mock<IVerificationReviewRepository> repository,
         IAuditLogService auditLogService,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        string role = "MOD")
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(9);
+        currentUser.SetupGet(item => item.Role).Returns(role);
         var cloudinary = new Mock<ICloudinaryService>();
         cloudinary.Setup(item => item.GetUrl(It.IsAny<string>()))
             .Returns<string>(key => $"https://signed.test/{key}");

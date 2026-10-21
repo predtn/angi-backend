@@ -18,7 +18,8 @@ internal static class ModerationPermissionGuard
         var userId = currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này.");
 
-        if (!await repository.HasEffectivePermissionAsync(userId, RestaurantVerify, ct))
+        if (currentUserService.Role != "MOD" ||
+            !await repository.HasEffectivePermissionAsync(userId, RestaurantVerify, ct))
         {
             throw new ForbiddenException("FORBIDDEN", "Bạn không có quyền duyệt hồ sơ xác minh nhà hàng.");
         }
