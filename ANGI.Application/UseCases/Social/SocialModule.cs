@@ -1,5 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
 using ANGI.Application.UseCases.Social.CreateBlog;
+using ANGI.Application.UseCases.Social.CreateBlogComment;
+using ANGI.Application.UseCases.Social.DeleteBlogComment;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Social;
@@ -11,6 +13,8 @@ public static class SocialModule
     public static IServiceCollection AddSocialUseCases(this IServiceCollection services)
     {
         services.AddScoped<ICreateBlogUseCase, CreateBlogUseCase>();
+        services.AddScoped<ICreateBlogCommentUseCase, CreateBlogCommentUseCase>();
+        services.AddScoped<IDeleteBlogCommentUseCase, DeleteBlogCommentUseCase>();
         return services;
     }
 }
