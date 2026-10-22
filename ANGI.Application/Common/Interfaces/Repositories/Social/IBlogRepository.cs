@@ -23,4 +23,22 @@ public interface IBlogRepository
 
     /// <summary>Adds a blog aggregate to the current unit of work.</summary>
     void Add(Blog blog);
+
+    /// <summary>Retrieves a blog by its ID, returning null if not found or soft-deleted.</summary>
+    Task<Blog?> GetByIdAsync(long blogId, CancellationToken ct);
+
+    /// <summary>Checks whether a user has liked a blog.</summary>
+    Task<bool> HasUserLikedAsync(long blogId, int userId, CancellationToken ct);
+
+    /// <summary>Retrieves an existing blog like by blog ID and user ID.</summary>
+    Task<BlogLike?> GetLikeAsync(long blogId, int userId, CancellationToken ct);
+
+    /// <summary>Adds a blog like.</summary>
+    void AddLike(BlogLike like);
+
+    /// <summary>Removes a blog like.</summary>
+    void RemoveLike(BlogLike like);
+
+    /// <summary>Adds a blog comment.</summary>
+    void AddComment(BlogComment comment);
 }
