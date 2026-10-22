@@ -24,15 +24,35 @@ public sealed class BlogsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
         var expected = new BlogDetailDto { Id = 45, Title = "Chuyến đi" };
         var request = new CreateBlogRequestDto { Title = "Chuyến đi", Content = "Nội dung" };
-        var useCase = new Mock<ICreateBlogUseCase>();
+        var createUseCase = new Mock<ICreateBlogUseCase>();
+        var editUseCase = new Mock<IEditBlogUseCase>();
         using var source = new CancellationTokenSource();
-        useCase.Setup(item => item.ExecuteAsync(request, source.Token)).ReturnsAsync(expected);
+        createUseCase.Setup(item => item.ExecuteAsync(request, source.Token)).ReturnsAsync(expected);
 
-        var action = await new BlogsController(useCase.Object).Create(request, source.Token);
+        var action = await new BlogsController(createUseCase.Object, editUseCase.Object).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
         result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
-        useCase.Verify(item => item.ExecuteAsync(request, source.Token), Times.Once);
+        createUseCase.Verify(item => item.ExecuteAsync(request, source.Token), Times.Once);
+    }
+
+    // TEST-02: Delegate BLOG-06 to IEditBlogUseCase and return 200 OK wrapped in ApiResponse.
+    [Fact]
+    public async Task Edit_ShouldDelegateToUseCaseAndReturnOkResponse()
+    {
+        var expected = new BlogDetailDto { Id = 45, Title = "Chuyến đi cập nhật" };
+        var request = new EditBlogRequestDto { Title = "Chuyến đi cập nhật" };
+        var createUseCase = new Mock<ICreateBlogUseCase>();
+        var editUseCase = new Mock<IEditBlogUseCase>();
+        using var source = new CancellationTokenSource();
+        editUseCase.Setup(item => item.ExecuteAsync(45, request, source.Token)).ReturnsAsync(expected);
+
+        var action = await new BlogsController(createUseCase.Object, editUseCase.Object).Edit(45, request, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
+        editUseCase.Verify(item => item.ExecuteAsync(45, request, source.Token), Times.Once);
     }
 }
