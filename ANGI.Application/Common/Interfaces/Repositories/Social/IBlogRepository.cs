@@ -21,6 +21,9 @@ public interface IBlogRepository
     /// <summary>Determines whether an undeleted blog already uses the supplied URL slug.</summary>
     Task<bool> SlugExistsAsync(string slug, CancellationToken ct);
 
+    /// <summary>Loads an undeleted blog tracked for modification or soft deletion.</summary>
+    Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct);
+
     /// <summary>Adds a blog aggregate to the current unit of work.</summary>
     void Add(Blog blog);
 }

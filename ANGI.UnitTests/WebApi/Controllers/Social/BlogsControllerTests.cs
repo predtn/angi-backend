@@ -28,11 +28,53 @@ public sealed class BlogsControllerTests
         using var source = new CancellationTokenSource();
         useCase.Setup(item => item.ExecuteAsync(request, source.Token)).ReturnsAsync(expected);
 
-        var action = await new BlogsController(useCase.Object).Create(request, source.Token);
+        var deleteUseCase = new Mock<IDeleteBlogUseCase>();
+        var action = await new BlogsController(useCase.Object, deleteUseCase.Object).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
         result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(request, source.Token), Times.Once);
+    }
+
+    // TEST-02: Require the Traveler role and return a 200 ApiResponse with null data on soft deletion.
+    /// <summary>Verifies BLOG-07 metadata, delegation, and empty response wrapping.</summary>
+    [Fact]
+    public async Task Delete_ShouldRequireTravelerAndReturnOkResponse()
+    {
+        var method = typeof(BlogsController).GetMethod(nameof(BlogsController.Delete))!;
+        var httpDelete = method
+            .GetCustomAttributes(typeof(HttpDeleteAttribute), inherit: false)
+            .Cast<HttpDeleteAttribute>()
+            .Single();
+        httpDelete.Template.Should().Be("{blogId:long}");
+
+        var authorize = method
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: false)
+            .Cast<AuthorizeAttribute>()
+            .Single();
+        authorize.Roles.Should().Contain("TRAVELER");
+
+        var responseTypes = method
+            .GetCustomAttributes(typeof(ProducesResponseTypeAttribute), inherit: false)
+            .Cast<ProducesResponseTypeAttribute>()
+            .Select(attr => attr.StatusCode)
+            .ToHashSet();
+        responseTypes.Should().Contain([200, 400, 401, 403, 404]);
+
+        var createUseCase = new Mock<ICreateBlogUseCase>();
+        var deleteUseCase = new Mock<IDeleteBlogUseCase>();
+        using var source = new CancellationTokenSource();
+        deleteUseCase.Setup(item => item.ExecuteAsync(45, source.Token)).Returns(Task.CompletedTask);
+
+        var controller = new BlogsController(createUseCase.Object, deleteUseCase.Object);
+        var action = await controller.Delete(45, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeNull();
+        deleteUseCase.Verify(item => item.ExecuteAsync(45, source.Token), Times.Once);
     }
 }

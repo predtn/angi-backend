@@ -85,6 +85,10 @@ public sealed class BlogRepository : IBlogRepository
     public Task<bool> SlugExistsAsync(string slug, CancellationToken ct) =>
         _context.Blogs.AsNoTracking().AnyAsync(blog => blog.Slug == slug, ct);
 
+    /// <summary>Loads an undeleted blog tracked by EF Core for modification or soft deletion.</summary>
+    public Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct) =>
+        _context.Blogs.FirstOrDefaultAsync(blog => blog.Id == blogId, ct);
+
     /// <summary>Adds the complete blog aggregate to the scoped context.</summary>
     public void Add(Blog blog)
     {
