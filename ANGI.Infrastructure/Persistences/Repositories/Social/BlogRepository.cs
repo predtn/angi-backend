@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
+using ANGI.Application.Common.Models.Audit;
 using ANGI.Application.Common.Models.Social;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
@@ -33,6 +35,92 @@ public sealed class BlogRepository : IBlogRepository
             .Include(blog => blog.Author)
                 .ThenInclude(author => author.AvatarMedia)
             .ToListAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<Blog> Items, Dictionary<long, string?> ModerationNotes, long TotalCount)> GetByAuthorAsync(
+        int authorId,
+        BlogStatus? status,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _context.Blogs
+            .AsNoTracking()
+            .Where(blog => blog.AuthorId == authorId);
+
+        if (status.HasValue)
+        {
+            query = query.Where(blog => blog.Status == status.Value);
+        }
+
+        var totalItems = await query.LongCountAsync(ct);
+        var totalPages = (int)Math.Ceiling((double)totalItems / pageSize);
+
+        if (totalItems == 0 || page > totalPages)
+        {
+            return (Array.Empty<Blog>(), new Dictionary<long, string?>(), totalItems);
+        }
+
+        var skip = (page - 1) * pageSize;
+
+        var items = await query
+            .OrderByDescending(blog => blog.PublishedAt)
+            .ThenByDescending(blog => blog.Id)
+            .Skip(skip)
+            .Take(pageSize)
+            .Include(blog => blog.CoverMedia)
+            .Include(blog => blog.Author)
+                .ThenInclude(author => author.AvatarMedia)
+            .ToListAsync(ct);
+
+        var moderationNotes = new Dictionary<long, string?>();
+        var moderatedBlogIds = items
+            .Where(blog => blog.Status != BlogStatus.Published)
+            .Select(blog => (long?)blog.Id)
+            .ToList();
+
+        if (moderatedBlogIds.Count > 0)
+        {
+            var auditLogs = await _context.AuditLogs
+                .AsNoTracking()
+                .Where(log => log.EntityType == AuditEntityTypes.Blog
+                    && moderatedBlogIds.Contains(log.EntityId)
+                    && (log.Action == AuditActions.BlogHidden || log.Action == AuditActions.BlogRemoved))
+                .OrderByDescending(log => log.CreatedAt)
+                .ThenByDescending(log => log.Id)
+                .ToListAsync(ct);
+
+            foreach (var log in auditLogs)
+            {
+                if (log.EntityId.HasValue && !moderationNotes.ContainsKey(log.EntityId.Value))
+                {
+                    string? reason = null;
+                    if (!string.IsNullOrWhiteSpace(log.NewValues))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(log.NewValues);
+                            foreach (var prop in doc.RootElement.EnumerateObject())
+                            {
+                                if (string.Equals(prop.Name, "reason", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    reason = prop.Value.GetString();
+                                    break;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore malformed JSON
+                        }
+                    }
+                    moderationNotes[log.EntityId.Value] = reason;
+                }
+            }
+        }
+
+        return (items, moderationNotes, totalItems);
     }
 
     /// <summary>Loads the author identity and avatar needed by a BlogDetail response.</summary>
