@@ -3,6 +3,8 @@ using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Models.Moderation;
 using ANGI.Application.DTOs.Account;
 using ANGI.Application.DTOs.Moderation;
+using ANGI.Application.DTOs.Restaurant;
+using ANGI.Application.DTOs.Social;
 using ANGI.Application.UseCases.Restaurant;
 using ANGI.Domain.Entities;
 
@@ -11,6 +13,45 @@ namespace ANGI.Application.UseCases.Moderation;
 /// <summary>Maps moderation aggregates into their documented API contracts without leaking private account data.</summary>
 internal static class ModerationMapper
 {
+    /// <summary>Maps a report detail without adding moderator-only fields to the public target contract.</summary>
+    internal static ReportDetailDto ReportDetail(Report report, ReportDisplayData display, ICloudinaryService cloudinary,
+        object target, IReadOnlyList<ReportDto> related)
+    {
+        var source = Report(report, display, cloudinary);
+        return new ReportDetailDto
+        {
+            Id = source.Id, TargetType = source.TargetType, TargetId = source.TargetId, TargetName = source.TargetName,
+            ReasonCode = source.ReasonCode, Description = source.Description, EvidenceUrls = source.EvidenceUrls,
+            Reporter = source.Reporter, Status = source.Status, HandledBy = source.HandledBy, HandledAt = source.HandledAt,
+            ResolutionAction = source.ResolutionAction, ResolutionNote = source.ResolutionNote,
+            ReportCountOnTarget = source.ReportCountOnTarget, CreatedAt = source.CreatedAt, Target = target, RelatedReports = related
+        };
+    }
+
+    /// <summary>Maps a reported restaurant to RestaurantCard, including its current Vietnam business hours.</summary>
+    internal static RestaurantCardDto ReportRestaurant(Domain.Entities.Restaurant restaurant, TimeProvider clock) => new()
+    {
+        Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, CoverUrl = restaurant.CoverMedia?.Url,
+        AddressLine = restaurant.AddressLine, District = restaurant.District, ProvinceName = restaurant.ProvinceName,
+        Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
+        RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount, OperatingStatus = Api(restaurant.OperatingStatus),
+        IsOpenNow = OwnerRestaurantMapper.IsOpenNow(restaurant.BusinessHours, clock)
+    };
+
+    /// <summary>Maps the reported blog and its stored immutable roadmap snapshot without incrementing views.</summary>
+    internal static BlogDetailDto ReportBlog(Blog blog, int callerId) => new()
+    {
+        Id = blog.Id, Title = blog.Title, Slug = blog.Slug,
+        Excerpt = blog.Content.Length <= 200 ? blog.Content.Trim() : blog.Content[..200].TrimEnd(),
+        CoverUrl = blog.CoverMedia?.Url, Author = Summary(blog.Author), HasRoadmap = blog.RoadmapSnapshot is not null,
+        LikeCount = blog.LikeCount, CommentCount = blog.CommentCount, ViewCount = blog.ViewCount, PublishedAt = blog.PublishedAt,
+        Content = blog.Content, Images = blog.Images.OrderBy(image => image.SortOrder).ThenBy(image => image.MediaId)
+            .Select(image => image.Media.Url).ToArray(),
+        RoadmapId = blog.RoadmapId, RoadmapSnapshot = blog.RoadmapSnapshot is null ? null
+            : JsonSerializer.Deserialize<RoadmapSnapshotDto>(blog.RoadmapSnapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+        LikedByMe = blog.Likes.Any(like => like.UserId == callerId), IsMine = blog.AuthorId == callerId, UpdatedAt = blog.UpdatedAt
+    };
+
     /// <summary>Converts a domain enum to its exact snake_case API representation.</summary>
     internal static string Api<T>(T value) where T : struct, Enum => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 

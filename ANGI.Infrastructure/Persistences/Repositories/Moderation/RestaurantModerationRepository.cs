@@ -13,6 +13,96 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Moderation;
 /// <summary>Implements PostgreSQL reads and ordered row locks for restaurant and report moderation.</summary>
 public sealed class RestaurantModerationRepository(ANGIContext context) : IRestaurantModerationRepository
 {
+    /// <summary>Applies all MOD-RP1 filters with stable paging and a wide offset calculation.</summary>
+    public async Task<Paged<Report>> ListReportsAsync(ListReportsRequestDto request, CancellationToken ct)
+    {
+        var type = Parse<ReportTargetType>(request.TargetType);
+        var query = context.Reports.AsNoTracking().Where(report => report.TargetType == type);
+        if (request.Status is not null)
+        {
+            var status = Parse<ReportStatus>(request.Status);
+            query = query.Where(report => report.Status == status);
+        }
+        if (request.ReasonCode is not null)
+        {
+            var reason = Parse<ReportReasonCode>(request.ReasonCode);
+            query = query.Where(report => report.ReasonCode == reason);
+        }
+        if (request.TargetId.HasValue)
+            query = query.Where(report => type == ReportTargetType.Restaurant ? report.RestaurantId == request.TargetId : report.BlogId == request.TargetId);
+        var count = await query.LongCountAsync(ct);
+        var offset = ((long)request.Page - 1) * request.PageSize;
+        var items = offset > int.MaxValue ? [] : await query.OrderByDescending(report => report.CreatedAt).ThenByDescending(report => report.Id)
+            .Skip((int)offset).Take(request.PageSize).ToListAsync(ct);
+        return new() { Items = items, Page = request.Page, PageSize = request.PageSize, TotalItems = count,
+            TotalPages = (int)Math.Ceiling((double)count / request.PageSize) };
+    }
+
+    /// <summary>Loads report content without tracking after the use case has checked its target permission.</summary>
+    public Task<Report?> GetReportAsync(long reportId, CancellationToken ct) =>
+        context.Reports.AsNoTracking().SingleOrDefaultAsync(report => report.Id == reportId, ct);
+
+    /// <summary>Returns only other open reports sharing both target type and target identifier.</summary>
+    public async Task<IReadOnlyList<Report>> GetRelatedReportsAsync(ReportTarget target, long reportId, CancellationToken ct) =>
+        await context.Reports.AsNoTracking().Where(report => report.Id != reportId && report.TargetType == target.Type &&
+            (target.Type == ReportTargetType.Restaurant ? report.RestaurantId == target.Id : report.BlogId == target.Id) &&
+            (report.Status == ReportStatus.Pending || report.Status == ReportStatus.InReview))
+            .OrderByDescending(report => report.CreatedAt).ThenByDescending(report => report.Id).ToListAsync(ct);
+
+    /// <summary>Acquires the same report row lock used by resolution so stale claims cannot overwrite conclusions.</summary>
+    public Task<Report?> LockReportAsync(long reportId, CancellationToken ct) => context.Reports
+        .FromSqlInterpolated($"SELECT * FROM core.reports WHERE id = {reportId} FOR UPDATE").SingleOrDefaultAsync(ct);
+
+    /// <summary>Projects the reported restaurant's card fields even when hidden or unverified, respecting soft deletion.</summary>
+    public Task<Domain.Entities.Restaurant?> GetReportRestaurantAsync(long restaurantId, CancellationToken ct) =>
+        context.Restaurants.AsNoTracking().Where(restaurant => restaurant.Id == restaurantId)
+            .Select(restaurant => new Domain.Entities.Restaurant
+            {
+                Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, AddressLine = restaurant.AddressLine,
+                District = restaurant.District, ProvinceName = restaurant.ProvinceName, Latitude = restaurant.Latitude,
+                Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel, RatingAvg = restaurant.RatingAvg,
+                RatingCount = restaurant.RatingCount, OperatingStatus = restaurant.OperatingStatus,
+                CoverMedia = restaurant.CoverMediaId == null ? null : new MediaFile { Url = restaurant.CoverMedia!.Url },
+                BusinessHours = restaurant.BusinessHours.Select(hour => new RestaurantBusinessHour
+                { DayOfWeek = hour.DayOfWeek, OpenTime = hour.OpenTime, CloseTime = hour.CloseTime }).ToList()
+            }).SingleOrDefaultAsync(ct);
+
+    /// <summary>Loads the reported blog including hidden or removed states, ordered media and the caller's like.</summary>
+    public Task<Blog?> GetReportBlogAsync(long blogId, int callerId, CancellationToken ct) => context.Blogs.AsNoTracking()
+        .Include(blog => blog.Author).ThenInclude(author => author.AvatarMedia)
+        .Include(blog => blog.CoverMedia).Include(blog => blog.Images).ThenInclude(image => image.Media)
+        .Include(blog => blog.Likes.Where(like => like.UserId == callerId)).AsSplitQuery().SingleOrDefaultAsync(blog => blog.Id == blogId, ct);
+
+    /// <summary>Loads a page's display data in a fixed number of queries rather than querying each report separately.</summary>
+    public async Task<IReadOnlyDictionary<ReportTarget, ReportDisplayData>> GetReportDisplaysAsync(IReadOnlyList<Report> reports, CancellationToken ct)
+    {
+        if (reports.Count == 0) return new Dictionary<ReportTarget, ReportDisplayData>();
+        var restaurantIds = reports.Where(report => report.TargetType == ReportTargetType.Restaurant).Select(report => report.RestaurantId!.Value).Distinct().ToArray();
+        var blogIds = reports.Where(report => report.TargetType == ReportTargetType.Blog).Select(report => report.BlogId!.Value).Distinct().ToArray();
+        var users = reports.Select(report => report.ReporterId).Concat(reports.Where(report => report.HandledBy.HasValue).Select(report => report.HandledBy!.Value)).Distinct().ToArray();
+        var evidence = reports.SelectMany(report => JsonSerializer.Deserialize<long[]>(report.Evidence) ?? []).Distinct().ToArray();
+        var userMap = await context.Users.IgnoreQueryFilters().AsNoTracking().Where(user => users.Contains(user.Id))
+            .Select(user => new User { Id = user.Id, DisplayName = user.DisplayName,
+                AvatarMedia = user.AvatarMediaId == null ? null : new MediaFile { Url = user.AvatarMedia!.Url } }).ToDictionaryAsync(user => user.Id, ct);
+        var mediaMap = await context.MediaFiles.AsNoTracking().Where(media => evidence.Contains(media.Id))
+            .Select(media => new MediaFile { Id = media.Id, StorageKey = media.StorageKey }).ToDictionaryAsync(media => media.Id, ct);
+        var restaurants = await context.Restaurants.AsNoTracking().Where(restaurant => restaurantIds.Contains(restaurant.Id))
+            .Select(restaurant => new { restaurant.Id, restaurant.Name }).ToDictionaryAsync(restaurant => restaurant.Id, restaurant => restaurant.Name, ct);
+        var blogs = await context.Blogs.AsNoTracking().Where(blog => blogIds.Contains(blog.Id))
+            .Select(blog => new { blog.Id, blog.Title }).ToDictionaryAsync(blog => blog.Id, blog => blog.Title, ct);
+        var counts = await context.Reports.AsNoTracking().Where(report =>
+            (report.TargetType == ReportTargetType.Restaurant && restaurantIds.Contains(report.RestaurantId!.Value) ||
+             report.TargetType == ReportTargetType.Blog && blogIds.Contains(report.BlogId!.Value)) &&
+            (report.Status == ReportStatus.Pending || report.Status == ReportStatus.InReview))
+            .GroupBy(report => new { report.TargetType, report.RestaurantId, report.BlogId })
+            .Select(group => new { group.Key.TargetType, Id = (group.Key.RestaurantId ?? group.Key.BlogId)!.Value, Count = group.Count() }).ToListAsync(ct);
+        var countMap = counts.ToDictionary(item => new ReportTarget(item.TargetType, item.Id), item => item.Count);
+        return reports.Select(report => new ReportTarget(report.TargetType, (report.RestaurantId ?? report.BlogId)!.Value)).Distinct()
+            .ToDictionary(target => target, target => new ReportDisplayData(
+                (target.Type == ReportTargetType.Restaurant ? restaurants : blogs).GetValueOrDefault(target.Id, string.Empty),
+                userMap, mediaMap, countMap.GetValueOrDefault(target)));
+    }
+
     /// <summary>Projects a bounded page and applies each MOD-R1 filter, including pending and in-review counts.</summary>
     public async Task<Paged<ModRestaurantListItem>> ListAsync(ListModRestaurantsRequestDto request, CancellationToken ct)
     {
