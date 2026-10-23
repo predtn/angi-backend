@@ -195,7 +195,7 @@ internal static class RestaurantMenuMapper
     }
 
     /// <summary>Maps a domain dish to the shared DishCard contract.</summary>
-    private static DishCardDto MapDish(Dish dish)
+    public static DishCardDto MapDish(Dish dish)
     {
         return new DishCardDto
         {

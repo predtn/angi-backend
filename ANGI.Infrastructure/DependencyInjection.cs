@@ -9,6 +9,7 @@ using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Media;
 using ANGI.Infrastructure.Services.Mapbox;
 using ANGI.Infrastructure.Services.Notification;
+using ANGI.Infrastructure.Services.Moderation;
 using ANGI.Infrastructure.Services.Outbox;
 using ANGI.Infrastructure.Services.Recommendation;
 using ANGI.Infrastructure.Services.Restaurant;
@@ -48,6 +49,7 @@ namespace ANGI.Infrastructure
             services.AddSocialInfrastructure();
             services.AddAuditInfrastructure();
             services.AddNotificationInfrastructure();
+            services.AddModerationInfrastructure();
 
             return services;
         }

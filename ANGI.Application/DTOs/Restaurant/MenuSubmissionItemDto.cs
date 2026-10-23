@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace ANGI.Application.DTOs.Restaurant;
 
 /// <summary>Represents a proposed dish in a menu submission.</summary>
-public sealed class MenuSubmissionItemDto
+public class MenuSubmissionItemDto
 {
     public long Id { get; set; }
     public int? SourceDishId { get; set; }
