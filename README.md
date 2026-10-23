@@ -54,6 +54,9 @@ Current end-to-end coverage for the tracked tasks:
 | ANGI-66, ANGI-70 | Forgot/reset password, consumed token, changed password, and revoked sessions |
 | ANGI-75 | Private document upload and persisted verification aggregate |
 | ANGI-230 | Real typed-client DI and HTTP transport against a loopback Mapbox server, including response mapping and cache |
+| ANGI-191 | Moderator restaurant filters and detail, visibility changes, dish outbox events, atomic report resolution, sanctions, expiry, rollback and concurrent decisions |
+
+Temporary account suspensions are expired by `AccountSuspensionExpiryWorker` once per minute. It invokes the scoped expiry use case in batches of 100; PostgreSQL `SKIP LOCKED` prevents overwriting concurrent sanctions. Each batch restores active status, clears the deadline, commits, and invalidates the account-status cache. Revoked sessions remain revoked.
 
 ## Local database
 

@@ -1,7 +1,7 @@
 namespace ANGI.Application.DTOs.Restaurant;
 
 /// <summary>Represents a restaurant summary card displayed in lists and search results.</summary>
-public sealed class RestaurantCardDto
+public class RestaurantCardDto
 {
     public long Id { get; init; }
     public string Name { get; init; } = string.Empty;

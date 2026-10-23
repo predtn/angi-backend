@@ -1,7 +1,7 @@
 namespace ANGI.Application.DTOs.Restaurant;
 
 /// <summary>Represents the complete owner-facing restaurant profile.</summary>
-public sealed class OwnerRestaurantDto
+public class OwnerRestaurantDto
 {
     public long Id { get; set; }
     public string Name { get; set; } = string.Empty;
