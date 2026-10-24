@@ -20,6 +20,7 @@ public sealed class RoadmapsController : ControllerBase
     private readonly IGetRoadmapDayRouteUseCase _getRoadmapDayRouteUseCase;
     private readonly IGetRoadmapSuggestionsUseCase _getRoadmapSuggestionsUseCase;
     private readonly IAddRoadmapItemUseCase _addRoadmapItemUseCase;
+    private readonly IUpdateRoadmapItemUseCase _updateRoadmapItemUseCase;
     private readonly IUpdateRoadmapUseCase _updateRoadmapUseCase;
     private readonly IDeleteRoadmapUseCase _deleteRoadmapUseCase;
     private readonly IDeleteRoadmapItemUseCase _deleteRoadmapItemUseCase;
@@ -33,6 +34,7 @@ public sealed class RoadmapsController : ControllerBase
         IGetRoadmapDayRouteUseCase getRoadmapDayRouteUseCase,
         IGetRoadmapSuggestionsUseCase getRoadmapSuggestionsUseCase,
         IAddRoadmapItemUseCase addRoadmapItemUseCase,
+        IUpdateRoadmapItemUseCase updateRoadmapItemUseCase,
         IUpdateRoadmapUseCase updateRoadmapUseCase,
         IDeleteRoadmapUseCase deleteRoadmapUseCase,
         IDeleteRoadmapItemUseCase deleteRoadmapItemUseCase)
@@ -44,6 +46,7 @@ public sealed class RoadmapsController : ControllerBase
         _getRoadmapDayRouteUseCase = getRoadmapDayRouteUseCase;
         _getRoadmapSuggestionsUseCase = getRoadmapSuggestionsUseCase;
         _addRoadmapItemUseCase = addRoadmapItemUseCase;
+        _updateRoadmapItemUseCase = updateRoadmapItemUseCase;
         _updateRoadmapUseCase = updateRoadmapUseCase;
         _deleteRoadmapUseCase = deleteRoadmapUseCase;
         _deleteRoadmapItemUseCase = deleteRoadmapItemUseCase;
@@ -138,6 +141,23 @@ public sealed class RoadmapsController : ControllerBase
             Success = true,
             Data = result
         });
+    }
+
+    /// <summary>Receives RM-08 and replaces or repositions one item in an owned roadmap.</summary>
+    [HttpPatch("{roadmapId:long}/items/{itemId:long}")]
+    [ProducesResponseType(typeof(ApiResponse<RoadmapItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateItem(
+        long roadmapId,
+        long itemId,
+        UpdateRoadmapItemRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _updateRoadmapItemUseCase.ExecuteAsync(roadmapId, itemId, request, ct);
+        return Ok(new ApiResponse<RoadmapItemDto> { Success = true, Data = result });
     }
 
     /// <summary>Receives RM-14 and returns travel legs for one day of an owned roadmap.</summary>
