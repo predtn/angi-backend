@@ -8,6 +8,7 @@ using ANGI.Application.UseCases.Roadmap.GetRoadmapDetail;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapItemDetail;
 using ANGI.Application.UseCases.Roadmap.GetSuggestions;
 using ANGI.Application.UseCases.Roadmap.Update;
+using ANGI.Application.UseCases.Roadmap.UpdateItem;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Roadmap;
@@ -27,6 +28,7 @@ public static class RoadmapModule
         services.AddScoped<IGetRoadmapDayRouteUseCase, GetRoadmapDayRouteUseCase>();
         services.AddScoped<IGetRoadmapSuggestionsUseCase, GetRoadmapSuggestionsUseCase>();
         services.AddScoped<IUpdateRoadmapUseCase, UpdateRoadmapUseCase>();
+        services.AddScoped<IUpdateRoadmapItemUseCase, UpdateRoadmapItemUseCase>();
         return services;
     }
 }
