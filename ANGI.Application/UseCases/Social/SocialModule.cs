@@ -1,12 +1,13 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
-using ANGI.Application.UseCases.Social.Create;
+using ANGI.Application.UseCases.Social.CreateBlog;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Social;
 
-/// <summary>Registers use cases of the Social module.</summary>
+/// <summary>Registers Social use cases for the lifetime of an HTTP request.</summary>
 public static class SocialModule
 {
+    /// <summary>Adds every Social use case to the Application dependency graph.</summary>
     public static IServiceCollection AddSocialUseCases(this IServiceCollection services)
     {
         services.AddScoped<ICreateBlogUseCase, CreateBlogUseCase>();

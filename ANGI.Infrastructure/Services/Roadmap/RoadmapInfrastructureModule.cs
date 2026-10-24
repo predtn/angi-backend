@@ -4,9 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Infrastructure.Services.Roadmap;
 
-/// <summary>Registers persistence and services for the Roadmap module.</summary>
+/// <summary>Centralizes Infrastructure-layer registration for the Roadmap module.</summary>
 public static class RoadmapInfrastructureModule
 {
+    /// <summary>Registers roadmap persistence implementations.</summary>
     public static IServiceCollection AddRoadmapInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IRoadmapRepository, RoadmapRepository>();

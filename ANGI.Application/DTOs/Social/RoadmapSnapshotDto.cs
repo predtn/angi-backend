@@ -1,30 +1,32 @@
 namespace ANGI.Application.DTOs.Social;
 
-/// <summary>Ảnh chụp roadmap lưu trong blogs.roadmap_snapshot.</summary>
+/// <summary>Immutable roadmap data embedded in a blog at sharing time.</summary>
 public sealed class RoadmapSnapshotDto
 {
-    public long RoadmapId { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public DateOnly? StartDate { get; set; }
-    public short NumDays { get; set; }
-    public decimal TotalCost { get; set; }
-    public DateTime CapturedAt { get; set; }
-    public List<RoadmapSnapshotDayDto> Days { get; set; } = [];
+    public long RoadmapId { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public DateOnly? StartDate { get; init; }
+    public short NumDays { get; init; }
+    public decimal TotalCost { get; init; }
+    public DateTime CapturedAt { get; init; }
+    public IReadOnlyList<RoadmapSnapshotDayDto> Days { get; init; } = [];
 }
 
+/// <summary>One ordered day in a shared roadmap snapshot.</summary>
 public sealed class RoadmapSnapshotDayDto
 {
-    public short DayNumber { get; set; }
-    public List<RoadmapSnapshotItemDto> Items { get; set; } = [];
+    public short DayNumber { get; init; }
+    public IReadOnlyList<RoadmapSnapshotItemDto> Items { get; init; } = [];
 }
 
+/// <summary>Dish, restaurant, and captured-price data for one shared roadmap item.</summary>
 public sealed class RoadmapSnapshotItemDto
 {
-    public string MealSlot { get; set; } = string.Empty;
-    public int DishId { get; set; }
-    public string DishName { get; set; } = string.Empty;
-    public decimal Price { get; set; }
-    public long RestaurantId { get; set; }
-    public string RestaurantName { get; set; } = string.Empty;
-    public string Address { get; set; } = string.Empty;
+    public string MealSlot { get; init; } = string.Empty;
+    public int DishId { get; init; }
+    public string DishName { get; init; } = string.Empty;
+    public decimal Price { get; init; }
+    public long RestaurantId { get; init; }
+    public string RestaurantName { get; init; } = string.Empty;
+    public string Address { get; init; } = string.Empty;
 }

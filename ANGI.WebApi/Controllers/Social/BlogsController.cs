@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi.Controllers.Social;
 
-/// <summary>Exposes public and traveler blog operations.</summary>
+/// <summary>Exposes traveler-authored blog operations.</summary>
 [ApiController]
 [Route("api/v1/blogs")]
 [Authorize(Roles = "TRAVELER")]
@@ -14,20 +14,13 @@ public sealed class BlogsController : ControllerBase
 {
     private readonly ICreateBlogUseCase _createBlogUseCase;
 
+    /// <summary>Initializes the HTTP boundary with the BLOG-04 use case.</summary>
     public BlogsController(ICreateBlogUseCase createBlogUseCase)
     {
         _createBlogUseCase = createBlogUseCase;
     }
 
-    // BLOG-04
-    /// <summary>Viết blog hoặc chia sẻ lộ trình (BLOG-04).</summary>
-    /// <param name="request">Dữ liệu tạo blog mới.</param>
-    /// <param name="ct">Mã hủy yêu cầu thao tác bất đồng bộ.</param>
-    /// <response code="201">Tạo bài viết thành công.</response>
-    /// <response code="400">Dữ liệu không hợp lệ (VALIDATION_FAILED).</response>
-    /// <response code="401">Chưa đăng nhập hoặc token không hợp lệ.</response>
-    /// <response code="403">Không có quyền thực hiện hành động này (chỉ dành cho Traveler).</response>
-    /// <response code="404">Không tìm thấy lộ trình (ROADMAP_NOT_FOUND).</response>
+    /// <summary>Receives BLOG-04 and publishes a blog with an optional immutable roadmap snapshot.</summary>
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse<BlogDetailDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
@@ -37,10 +30,8 @@ public sealed class BlogsController : ControllerBase
     public async Task<IActionResult> Create(CreateBlogRequestDto request, CancellationToken ct)
     {
         var result = await _createBlogUseCase.ExecuteAsync(request, ct);
-        return StatusCode(StatusCodes.Status201Created, new ApiResponse<BlogDetailDto>
-        {
-            Success = true,
-            Data = result
-        });
+        return StatusCode(
+            StatusCodes.Status201Created,
+            new ApiResponse<BlogDetailDto> { Success = true, Data = result });
     }
 }

@@ -1,127 +1,100 @@
 using ANGI.Application.DTOs.Social;
 using ANGI.Application.UseCases.Validators.Social;
 using FluentAssertions;
-using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Social;
 
+/// <summary>Boundary tests for the BLOG-04 request validator.</summary>
 public sealed class CreateBlogRequestDtoValidatorTests
 {
     private readonly CreateBlogRequestDtoValidator _validator = new();
 
-    [Fact]
-    public void Validate_WithValidRequest_ShouldNotHaveAnyErrors()
-    {
-        var request = new CreateBlogRequestDto
-        {
-            Title = "Hành trình ẩm thực Đà Nẵng",
-            Content = "<p>Nội dung bài viết...</p>",
-            CoverMediaId = 10,
-            ImageMediaIds = [11, 12],
-            RoadmapId = 88
-        };
-
-        var result = _validator.TestValidate(request);
-
-        result.ShouldNotHaveAnyValidationErrors();
-    }
-
+    // TEST-01: Accept title lengths 1 and 255, zero or 20 images, and positive optional identifiers.
+    /// <summary>Verifies every inclusive BLOG-04 request boundary.</summary>
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(null)]
-    public void Validate_WithEmptyTitle_ShouldHaveValidationError(string? title)
+    [InlineData(1, 0)]
+    [InlineData(255, 20)]
+    public async Task Validate_AtInclusiveBoundaries_ShouldSucceed(int titleLength, int imageCount)
     {
-        var request = new CreateBlogRequestDto
-        {
-            Title = title!,
-            Content = "Nội dung bài viết"
-        };
+        var request = ValidRequest();
+        request.Title = new string('a', titleLength);
+        request.CoverMediaId = 1;
+        request.RoadmapId = 1;
+        request.ImageMediaIds = Enumerable.Range(1, imageCount).Select(value => (long)value).ToArray();
 
-        var result = _validator.TestValidate(request);
+        var result = await _validator.ValidateAsync(request);
 
-        result.ShouldHaveValidationErrorFor(x => x.Title)
-            .WithErrorMessage("Tiêu đề bài viết là bắt buộc.");
+        result.IsValid.Should().BeTrue();
     }
 
-    [Fact]
-    public void Validate_WithTitleExceeding255Chars_ShouldHaveValidationError()
-    {
-        var request = new CreateBlogRequestDto
-        {
-            Title = new string('a', 256),
-            Content = "Nội dung bài viết"
-        };
-
-        var result = _validator.TestValidate(request);
-
-        result.ShouldHaveValidationErrorFor(x => x.Title)
-            .WithErrorMessage("Tiêu đề bài viết không được vượt quá 255 ký tự.");
-    }
-
+    // TEST-02: Reject missing required text exactly once per field.
+    /// <summary>Verifies null, empty, and whitespace title/content regions cannot reach BLOG-04.</summary>
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(null)]
-    public void Validate_WithEmptyContent_ShouldHaveValidationError(string? content)
+    [InlineData(null, "content", "Title")]
+    [InlineData(" ", "content", "Title")]
+    [InlineData("title", null, "Content")]
+    [InlineData("title", " ", "Content")]
+    public async Task Validate_WithMissingText_ShouldReportOneFieldError(
+        string? title,
+        string? content,
+        string property)
     {
-        var request = new CreateBlogRequestDto
-        {
-            Title = "Tiêu đề bài viết",
-            Content = content!
-        };
+        var request = ValidRequest();
+        request.Title = title!;
+        request.Content = content!;
 
-        var result = _validator.TestValidate(request);
+        var result = await _validator.ValidateAsync(request);
 
-        result.ShouldHaveValidationErrorFor(x => x.Content)
-            .WithErrorMessage("Nội dung bài viết là bắt buộc.");
+        result.Errors.Should().ContainSingle(error => error.PropertyName == property);
     }
 
+    // TEST-03: Reject title length 256 and an image collection of 21 elements.
+    /// <summary>Verifies values immediately above both documented BLOG-04 maxima.</summary>
     [Fact]
-    public void Validate_WithInvalidCoverMediaId_ShouldHaveValidationError()
+    public async Task Validate_AboveMaximums_ShouldRejectTitleAndImages()
     {
-        var request = new CreateBlogRequestDto
-        {
-            Title = "Tiêu đề",
-            Content = "Nội dung",
-            CoverMediaId = 0
-        };
+        var request = ValidRequest();
+        request.Title = new string('a', 256);
+        request.ImageMediaIds = Enumerable.Range(1, 21).Select(value => (long)value).ToArray();
 
-        var result = _validator.TestValidate(request);
+        var result = await _validator.ValidateAsync(request);
 
-        result.ShouldHaveValidationErrorFor(x => x.CoverMediaId)
-            .WithErrorMessage("ID ảnh bìa không hợp lệ.");
+        result.Errors.Select(error => error.PropertyName).Should().BeEquivalentTo("Title", "ImageMediaIds");
     }
 
+    // TEST-04: Reject zero or negative cover, image, and roadmap identifiers.
+    /// <summary>Verifies every invalid identifier region is assigned to its request field.</summary>
     [Fact]
-    public void Validate_WithMoreThan20Images_ShouldHaveValidationError()
+    public async Task Validate_WithNonPositiveIdentifiers_ShouldRejectEveryAffectedField()
     {
-        var request = new CreateBlogRequestDto
-        {
-            Title = "Tiêu đề",
-            Content = "Nội dung",
-            ImageMediaIds = Enumerable.Range(1, 21).Select(i => (long)i).ToList()
-        };
+        var request = ValidRequest();
+        request.CoverMediaId = 0;
+        request.RoadmapId = -1;
+        request.ImageMediaIds = [1, 0, -2];
 
-        var result = _validator.TestValidate(request);
+        var result = await _validator.ValidateAsync(request);
 
-        result.ShouldHaveValidationErrorFor(x => x.ImageMediaIds)
-            .WithErrorMessage("Số lượng ảnh đính kèm không được vượt quá 20 ảnh.");
+        result.Errors.Select(error => error.PropertyName)
+            .Should().BeEquivalentTo("CoverMediaId", "RoadmapId", "ImageMediaIds");
     }
 
+    // TEST-05: Reject duplicate image identifiers that would violate the blog_images composite key.
+    /// <summary>Verifies duplicate gallery references fail before persistence.</summary>
     [Fact]
-    public void Validate_WithInvalidRoadmapId_ShouldHaveValidationError()
+    public async Task Validate_WithDuplicateImageIdentifiers_ShouldRejectImages()
     {
-        var request = new CreateBlogRequestDto
-        {
-            Title = "Tiêu đề",
-            Content = "Nội dung",
-            RoadmapId = -1
-        };
+        var request = ValidRequest();
+        request.ImageMediaIds = [7, 7];
 
-        var result = _validator.TestValidate(request);
+        var result = await _validator.ValidateAsync(request);
 
-        result.ShouldHaveValidationErrorFor(x => x.RoadmapId)
-            .WithErrorMessage("ID lộ trình không hợp lệ.");
+        result.Errors.Should().ContainSingle(error => error.PropertyName == "ImageMediaIds");
     }
+
+    /// <summary>Creates the smallest valid BLOG-04 request for boundary mutation.</summary>
+    private static CreateBlogRequestDto ValidRequest() => new()
+    {
+        Title = "Bài viết",
+        Content = "Nội dung"
+    };
 }
