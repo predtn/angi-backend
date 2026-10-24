@@ -144,4 +144,42 @@ public sealed class CreateBlogCommentUseCaseTests
         var ex = await act.Should().ThrowAsync<UnauthorizedException>();
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_OnAnotherTravelersBlog_ShouldNotifyTheAuthor()
+    {
+        const long blogId = 45;
+        var blog = new Blog { Id = blogId, AuthorId = 99, Title = "Quán ăn ngon", Status = BlogStatus.Published };
+        _blogRepository.Setup(r => r.GetAuthorAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = 12, DisplayName = "Nguyễn An" });
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>())).ReturnsAsync(blog);
+        ANGI.Domain.Entities.Notification? notification = null;
+        _blogRepository.Setup(r => r.AddNotification(It.IsAny<ANGI.Domain.Entities.Notification>()))
+            .Callback<ANGI.Domain.Entities.Notification>(value => notification = value);
+        var longContent = new string('a', 60);
+
+        await CreateUseCase().ExecuteAsync(blogId, new CreateBlogCommentRequestDto { Content = longContent }, CancellationToken.None);
+
+        notification.Should().NotBeNull();
+        notification!.RecipientId.Should().Be(99);
+        notification.Type.Should().Be("BLOG_COMMENTED");
+        notification.Title.Should().Be("Có bình luận mới");
+        notification.Body.Should().Be($"Nguyễn An: \"{new string('a', 47)}...\"");
+        notification.Data.Should().Be("{\"blogId\":45}");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OnOwnBlog_ShouldNotNotify()
+    {
+        const long blogId = 45;
+        var blog = new Blog { Id = blogId, AuthorId = 12, Title = "Blog của tôi", Status = BlogStatus.Published };
+        _blogRepository.Setup(r => r.GetAuthorAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = 12, DisplayName = "Nguyễn An" });
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>())).ReturnsAsync(blog);
+
+        await CreateUseCase().ExecuteAsync(blogId, new CreateBlogCommentRequestDto { Content = "Cảm ơn mọi người" }, CancellationToken.None);
+
+        _blogRepository.Verify(r => r.AddNotification(It.IsAny<ANGI.Domain.Entities.Notification>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

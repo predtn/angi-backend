@@ -2,6 +2,7 @@ using ANGI.Application.Common.Interfaces.UseCases.Social;
 using ANGI.Application.UseCases.Social.CreateBlog;
 using ANGI.Application.UseCases.Social.CreateBlogComment;
 using ANGI.Application.UseCases.Social.DeleteBlog;
+using ANGI.Application.UseCases.Social.DeleteBlogComment;
 using ANGI.Application.UseCases.Social.EditBlog;
 using ANGI.Application.UseCases.Social.GetBlogComments;
 using ANGI.Application.UseCases.Social.GetBlogDetail;
@@ -30,6 +31,7 @@ public static class SocialModule
         services.AddScoped<ILikeBlogUseCase, LikeBlogUseCase>();
         services.AddScoped<IUnlikeBlogUseCase, UnlikeBlogUseCase>();
         services.AddScoped<ICreateBlogCommentUseCase, CreateBlogCommentUseCase>();
+        services.AddScoped<IDeleteBlogCommentUseCase, DeleteBlogCommentUseCase>();
         services.AddScoped<IReportBlogUseCase, ReportBlogUseCase>();
         return services;
     }

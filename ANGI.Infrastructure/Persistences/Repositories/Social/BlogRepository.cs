@@ -364,4 +364,10 @@ public sealed class BlogRepository : IBlogRepository
     {
         _context.BlogComments.Add(comment);
     }
+
+    /// <inheritdoc />
+    public void AddNotification(Domain.Entities.Notification notification)
+    {
+        _context.Notifications.Add(notification);
+    }
 }

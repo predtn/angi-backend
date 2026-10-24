@@ -88,4 +88,7 @@ public interface IBlogRepository
 
     /// <summary>Adds a blog comment.</summary>
     void AddComment(BlogComment comment);
+
+    /// <summary>Adds a notification for a blog author to the current unit of work.</summary>
+    void AddNotification(Domain.Entities.Notification notification);
 }

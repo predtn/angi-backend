@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
@@ -12,7 +13,7 @@ using FluentValidation;
 
 namespace ANGI.Application.UseCases.Social.CreateBlogComment;
 
-/// <summary>Implements BLOG-10 to add a comment to a published blog.</summary>
+/// <summary>Implements BLOG-10: adds a comment to a published blog and notifies its author (BLOG_COMMENTED).</summary>
 public sealed class CreateBlogCommentUseCase : ICreateBlogCommentUseCase
 {
     private readonly IValidator<CreateBlogCommentRequestDto> _validator;
@@ -72,6 +73,11 @@ public sealed class CreateBlogCommentUseCase : ICreateBlogCommentUseCase
 
         _blogRepository.AddComment(comment);
         blog.CommentCount += 1;
+        if (blog.AuthorId != userId)
+        {
+            _blogRepository.AddNotification(CreateAuthorNotification(blog, user, sanitizedContent));
+        }
+
         await _unitOfWork.SaveChangesAsync(ct);
 
         return new CommentDto
@@ -87,6 +93,20 @@ public sealed class CreateBlogCommentUseCase : ICreateBlogCommentUseCase
             Content = comment.Content,
             CreatedAt = comment.CreatedAt,
             IsMine = true
+        };
+    }
+
+    /// <summary>Builds the BLOG_COMMENTED notification for the blog author with a short comment excerpt.</summary>
+    private static Domain.Entities.Notification CreateAuthorNotification(Blog blog, User commenter, string content)
+    {
+        var excerpt = content.Length > 50 ? string.Concat(content.AsSpan(0, 47), "...") : content;
+        return new Domain.Entities.Notification
+        {
+            RecipientId = blog.AuthorId,
+            Type = "BLOG_COMMENTED",
+            Title = "Có bình luận mới",
+            Body = $"{commenter.DisplayName}: \"{excerpt}\"",
+            Data = JsonSerializer.Serialize(new { blogId = blog.Id })
         };
     }
 }
