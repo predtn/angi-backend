@@ -232,7 +232,28 @@ public sealed class BlogRepository : IBlogRepository
 
     /// <summary>Checks the active-blog unique index domain for a candidate slug.</summary>
     public Task<bool> SlugExistsAsync(string slug, CancellationToken ct) =>
-        _context.Blogs.AsNoTracking().AnyAsync(blog => blog.Slug == slug, ct);
+        SlugExistsAsync(slug, null, ct);
+
+    /// <inheritdoc />
+    public Task<bool> SlugExistsAsync(string slug, long? excludeBlogId, CancellationToken ct)
+    {
+        var query = _context.Blogs.AsNoTracking().Where(blog => blog.Slug == slug);
+        if (excludeBlogId.HasValue)
+        {
+            query = query.Where(blog => blog.Id != excludeBlogId.Value);
+        }
+
+        return query.AnyAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct) =>
+        _context.Blogs
+            .Include(blog => blog.Images)
+            .Include(blog => blog.CoverMedia)
+            .Include(blog => blog.Author)
+                .ThenInclude(author => author.AvatarMedia)
+            .FirstOrDefaultAsync(blog => blog.Id == blogId, ct);
 
     /// <inheritdoc />
     public async Task<Blog?> GetPublicDetailAsync(long blogId, CancellationToken ct)

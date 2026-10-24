@@ -64,4 +64,10 @@ public interface IBlogRepository
 
     /// <summary>Adds a blog aggregate to the current unit of work.</summary>
     void Add(Blog blog);
+
+    /// <summary>Determines whether an undeleted blog already uses the supplied URL slug, excluding an optional blog id.</summary>
+    Task<bool> SlugExistsAsync(string slug, long? excludeBlogId, CancellationToken ct);
+
+    /// <summary>Loads an undeleted blog aggregate including images and author with tracking for modification.</summary>
+    Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct);
 }

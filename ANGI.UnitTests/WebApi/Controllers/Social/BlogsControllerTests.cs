@@ -11,7 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Social;
 
-/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, and BLOG-04 HTTP boundaries.</summary>
+/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, BLOG-04, and BLOG-06 HTTP boundaries.</summary>
 public sealed class BlogsControllerTests
 {
     // TEST-01: Require the Traveler role and return the BLOG-04 payload in a 201 ApiResponse.
@@ -35,7 +35,8 @@ public sealed class BlogsControllerTests
             getPublicBlogsUseCase.Object,
             useCase.Object,
             Mock.Of<IGetBlogDetailUseCase>(),
-            Mock.Of<IGetBlogCommentsUseCase>()).Create(request, source.Token);
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            Mock.Of<IEditBlogUseCase>()).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
@@ -69,7 +70,8 @@ public sealed class BlogsControllerTests
             getPublicBlogsUseCase.Object,
             createBlogUseCase.Object,
             Mock.Of<IGetBlogDetailUseCase>(),
-            Mock.Of<IGetBlogCommentsUseCase>())
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            Mock.Of<IEditBlogUseCase>())
             .GetPublicBlogs(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
@@ -96,7 +98,8 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetPublicBlogsUseCase>(),
             Mock.Of<ICreateBlogUseCase>(),
             useCase.Object,
-            Mock.Of<IGetBlogCommentsUseCase>());
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            Mock.Of<IEditBlogUseCase>());
         var action = await controller.GetDetail(45, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -131,7 +134,8 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetPublicBlogsUseCase>(),
             Mock.Of<ICreateBlogUseCase>(),
             Mock.Of<IGetBlogDetailUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IEditBlogUseCase>());
         var action = await controller.GetComments(45, request, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -140,5 +144,29 @@ public sealed class BlogsControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(45, request, source.Token), Times.Once);
+    }
+
+    // TEST-05: Delegate BLOG-06 to IEditBlogUseCase and return 200 OK wrapped in ApiResponse.
+    [Fact]
+    public async Task Edit_ShouldDelegateToUseCaseAndReturnOkResponse()
+    {
+        var expected = new BlogDetailDto { Id = 45, Title = "Chuyến đi cập nhật" };
+        var request = new EditBlogRequestDto { Title = "Chuyến đi cập nhật" };
+        var createUseCase = new Mock<ICreateBlogUseCase>();
+        var editUseCase = new Mock<IEditBlogUseCase>();
+        using var source = new CancellationTokenSource();
+        editUseCase.Setup(item => item.ExecuteAsync(45, request, source.Token)).ReturnsAsync(expected);
+
+        var action = await new BlogsController(
+            Mock.Of<IGetPublicBlogsUseCase>(),
+            createUseCase.Object,
+            Mock.Of<IGetBlogDetailUseCase>(),
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            editUseCase.Object).Edit(45, request, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
+        editUseCase.Verify(item => item.ExecuteAsync(45, request, source.Token), Times.Once);
     }
 }
