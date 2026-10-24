@@ -35,6 +35,67 @@ public sealed class BlogRepository : IBlogRepository
             .ToListAsync(ct);
     }
 
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<Blog> Items, long TotalItems)> GetPublicBlogsAsync(
+        string? q,
+        int? authorId,
+        bool? hasRoadmap,
+        string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        // The soft-delete filter hides deleted blogs and blogs of deleted authors.
+        var query = _context.Blogs
+            .AsNoTracking()
+            .Where(blog => blog.Status == BlogStatus.Published && blog.Author.DeletedAt == null);
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var term = $"%{q.Trim()}%";
+            query = query.Where(blog =>
+                EF.Functions.ILike(blog.Title, term) ||
+                EF.Functions.ILike(blog.Content, term));
+        }
+
+        if (authorId.HasValue)
+        {
+            query = query.Where(blog => blog.AuthorId == authorId.Value);
+        }
+
+        if (hasRoadmap.HasValue)
+        {
+            query = hasRoadmap.Value
+                ? query.Where(blog => blog.RoadmapSnapshot != null)
+                : query.Where(blog => blog.RoadmapSnapshot == null);
+        }
+
+        var totalItems = await query.LongCountAsync(ct);
+        if (totalItems == 0)
+        {
+            return (Array.Empty<Blog>(), 0L);
+        }
+
+        query = string.Equals(sort, "popular", StringComparison.OrdinalIgnoreCase)
+            ? query
+                .OrderByDescending(blog => blog.LikeCount + blog.CommentCount)
+                .ThenByDescending(blog => blog.PublishedAt)
+                .ThenByDescending(blog => blog.Id)
+            : query
+                .OrderByDescending(blog => blog.PublishedAt)
+                .ThenByDescending(blog => blog.Id);
+
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Include(blog => blog.CoverMedia)
+            .Include(blog => blog.Author)
+                .ThenInclude(author => author.AvatarMedia)
+            .ToListAsync(ct);
+
+        return (items, totalItems);
+    }
+
     /// <summary>Loads the author identity and avatar needed by a BlogDetail response.</summary>
     public Task<User?> GetAuthorAsync(int userId, CancellationToken ct) =>
         _context.Users
