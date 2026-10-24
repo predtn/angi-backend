@@ -33,7 +33,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.Create(request, CancellationToken.None);
 
@@ -63,7 +65,9 @@ public sealed class RoadmapsControllerTests
             useCase.Object,
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.Update(88, request, CancellationToken.None);
 
@@ -98,7 +102,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.GetMyRoadmaps(request, CancellationToken.None);
 
@@ -127,7 +133,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.GetDetail(88, CancellationToken.None);
 
@@ -157,7 +165,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.GetDayRoute(88, 301, request, CancellationToken.None);
 
@@ -183,7 +193,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             useCase.Object,
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.Delete(88, CancellationToken.None);
 
@@ -215,7 +227,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.GetSuggestions(88, request, CancellationToken.None);
 
@@ -245,7 +259,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.AddItem(88, 301, request, CancellationToken.None);
 
@@ -274,7 +290,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.GetItemDetail(88, 1502, CancellationToken.None);
 
@@ -305,7 +323,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.UpdateItem(88, 1502, request, CancellationToken.None);
 
@@ -332,7 +352,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             useCase.Object,
-            Mock.Of<IRateRoadmapItemUseCase>());
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.DeleteItem(88, 1502, CancellationToken.None);
 
@@ -365,7 +387,9 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IUpdateRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapUseCase>(),
             Mock.Of<IDeleteRoadmapItemUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
         var action = await controller.RateItem(88, 1502, request, CancellationToken.None);
 
@@ -373,5 +397,67 @@ public sealed class RoadmapsControllerTests
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         result.Value.Should().BeOfType<ApiResponse<RateRoadmapItemResponseDto>>().Which.Data.Should().BeSameAs(expected);
         useCase.Verify(item => item.ExecuteAsync(88, 1502, request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-13: Return the RM-10 queued job in ApiResponse with HTTP 202.
+    /// <summary>Verifies route and body delegation and the documented accepted envelope.</summary>
+    [Fact]
+    public async Task Generate_WithValidBody_ShouldReturnAcceptedApiResponse()
+    {
+        var request = new GenerateRoadmapRequestDto { Scope = "full", Province = "Đà Nẵng" };
+        var expected = new GenerateRoadmapResponseDto { JobId = 77, Status = "queued" };
+        var useCase = new Mock<IGenerateRoadmapUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapItemDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>(),
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            useCase.Object,
+            Mock.Of<IGetRoadmapGenerationJobUseCase>());
+
+        var action = await controller.Generate(88, request, CancellationToken.None);
+
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status202Accepted);
+        result.Value.Should().BeOfType<ApiResponse<GenerateRoadmapResponseDto>>().Which.Data.Should().BeSameAs(expected);
+    }
+
+    // TEST-14: Return the RM-11 job in ApiResponse with HTTP 200.
+    /// <summary>Verifies both route values and the documented success envelope.</summary>
+    [Fact]
+    public async Task GetGenerationJob_ShouldReturnOkApiResponse()
+    {
+        var expected = new RoadmapGenerationJobDto { JobId = 77, Scope = "day", Status = "succeeded" };
+        var useCase = new Mock<IGetRoadmapGenerationJobUseCase>();
+        useCase.Setup(item => item.ExecuteAsync(88, 77, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var controller = new RoadmapsController(
+            Mock.Of<ICreateRoadmapUseCase>(),
+            Mock.Of<IGetMyRoadmapsUseCase>(),
+            Mock.Of<IGetRoadmapDetailUseCase>(),
+            Mock.Of<IGetRoadmapItemDetailUseCase>(),
+            Mock.Of<IGetRoadmapDayRouteUseCase>(),
+            Mock.Of<IGetRoadmapSuggestionsUseCase>(),
+            Mock.Of<IAddRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapItemUseCase>(),
+            Mock.Of<IUpdateRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapUseCase>(),
+            Mock.Of<IDeleteRoadmapItemUseCase>(),
+            Mock.Of<IRateRoadmapItemUseCase>(),
+            Mock.Of<IGenerateRoadmapUseCase>(),
+            useCase.Object);
+
+        var action = await controller.GetGenerationJob(88, 77, CancellationToken.None);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.Value.Should().BeOfType<ApiResponse<RoadmapGenerationJobDto>>().Which.Data.Should().BeSameAs(expected);
     }
 }

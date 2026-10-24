@@ -152,7 +152,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 | Brevo | `IEmailService` | Email: verification, password reset |
 | Google | — | Verify Google ID tokens (`Google.Apis.Auth`) |
 | Mapbox Directions | `IRouteService` | Distance and time of each leg of a roadmap day (RM-14) |
-| AI provider | — | Roadmap generation (`core.roadmap_generation_jobs`) |
+| OpenAI (AI provider) | `IRoadmapPlannerService` | Schedules each day of an RM-10 roadmap generation (`core.roadmap_generation_jobs`) |
 
 ### Recommendation service
 
@@ -188,6 +188,14 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 - Cache in `IMemoryCache` for `CacheHours`, key = profile + coordinates (origin rounded to 3 decimals ≈ 100 m). Timeout 3 s; on failure estimate straight line × 1.3 at 25 / 12 / 4 km/h and return `isEstimated = true`.
 - Travel distance and time are never stored. The secret token stays in backend config; the frontend has its own public `pk.*` token. "Open in Google Maps" is a link the frontend builds.
 
+### Roadmap generation (RM-10, RM-11)
+
+- RM-10 only validates, locks the roadmap and queues a job (`queued`), refusing a second queued / running job with 409 `GENERATION_IN_PROGRESS`. `input` stores the request, the origin it resolved (GPS sent for a `gps` roadmap, else the pinned point, else none) and `radiusKm` (10 by default when there is an origin).
+- `RoadmapGenerationWorker` (`Infrastructure/Services/Roadmap`) is a `BackgroundService` like `OutboxWorker`: every `PollSeconds` it marks the oldest queued job `running` (`FOR UPDATE SKIP LOCKED`) and runs `IProcessRoadmapGenerationJobUseCase`. At start it puts jobs left `running` by a stopped host back to `queued`. It does nothing when `ConnectionStrings:Default` is empty.
+- The job follows the steps of the RM-10 note in the API Design. One dish per meal; with `replaceExisting = false` only the empty meals of the scope are filled and dishes already in the roadmap are not suggested again. An unexpected error marks the job `failed` and is logged; it never stays `running`.
+- `OpenAiRoadmapPlannerService`: `POST {BaseUrl}chat/completions`, Bearer `ApiKey`, `Model`, structured output (`json_schema`, strict) whose enums allow only the meals to fill and the dish ids of the day's cluster. Prompt version `rm10-v1` goes to `prompt_version`. Missing key, non-2xx, timeout (`TimeoutSeconds`) or unreadable answer → `null`; a plan that does not fill each meal once with distinct cluster dishes is rejected too. The job then schedules the day itself (meal-time tag, then preferred tag, then reco rank) and records `model_name = fallback`. The caller's cancellation is rethrown.
+- On success: items with `source = ai` and the reco `request_id`, `raw_output` with each day's plan and `createdItemIds` (read by RM-11), a `ROADMAP_GENERATED` notification (`data` = `{roadmapId, jobId}`) in the same transaction, then RECO-06 for the dishes added.
+
 ### Roadmap origin
 
 `roadmaps.origin_mode`: `pinned` stores `origin_latitude / origin_longitude / origin_label`; `gps` stores nothing and the app sends coordinates on each RM-10 / RM-14 call; `none` = province only. Coordinates exist if and only if `pinned` (CHECK). Switching away from `pinned` clears the coordinates in the use case (RM-04).
@@ -211,6 +219,8 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Frontend` | `BaseUrl` (`http://localhost:3000`): base of the links sent by email |
 | `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
+| `RoadmapGeneration` | `PollSeconds` (2) |
+| `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.

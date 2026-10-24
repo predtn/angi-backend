@@ -147,6 +147,7 @@ The API reads its keys from `appsettings.json`, user secrets and environment var
 | `Google:ClientId` | Verifying Google ID tokens; same client id as the frontend | Google sign-in |
 | `Brevo:ApiKey` | Verification and password-reset emails | Sending emails: without it the API starts, but every email returns 503 `SERVICE_UNAVAILABLE` |
 | `Mapbox:AccessToken` | Mapbox Directions (RM-14); the secret token, not the frontend's public `pk.*` token | Roadmap routes |
+| `Ai:ApiKey` | OpenAI key for AI roadmap generation (RM-10) | Optional: without it every day is scheduled by the job's own fallback |
 
 Set each one once:
 
@@ -159,6 +160,7 @@ dotnet user-secrets set "Cloudinary:ApiSecret" "<value>" --project ANGI.WebApi
 dotnet user-secrets set "Google:ClientId" "<value>" --project ANGI.WebApi
 dotnet user-secrets set "Brevo:ApiKey" "<value>" --project ANGI.WebApi
 dotnet user-secrets set "Mapbox:AccessToken" "<value>" --project ANGI.WebApi
+dotnet user-secrets set "Ai:ApiKey" "<value>" --project ANGI.WebApi
 dotnet user-secrets list --project ANGI.WebApi    # check what is set
 ```
 
