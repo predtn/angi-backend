@@ -8,6 +8,7 @@ using ANGI.Infrastructure.Services.Discovery;
 using ANGI.Infrastructure.Services.Auth;
 using ANGI.Infrastructure.Services.Email;
 using ANGI.Infrastructure.Services.Media;
+using ANGI.Infrastructure.Services.Moderation;
 using ANGI.Infrastructure.Services.Mapbox;
 using ANGI.Infrastructure.Services.Notification;
 using ANGI.Infrastructure.Services.Outbox;
@@ -40,6 +41,7 @@ namespace ANGI.Infrastructure
             services.AddAccountInfrastructure();
             services.AddAuthInfrastructure(configuration);
             services.AddMediaInfrastructure();
+            services.AddModerationInfrastructure();
             services.AddMapboxInfrastructure(configuration);
             services.AddRecommendationInfrastructure(configuration);
             services.AddOutboxInfrastructure(configuration);
