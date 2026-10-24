@@ -15,12 +15,15 @@ public sealed class ReplaceModPermissionsRequestDtoValidator : AbstractValidator
 
         RuleFor(x => x.Overrides)
             .Must(items => items is null || items
+                .Where(item => item is not null)
                 .Select(item => item.PermissionCode)
                 .Distinct(StringComparer.Ordinal)
-                .Count() == items.Count)
+                .Count() == items.Count(item => item is not null))
             .WithMessage("Mỗi quyền chỉ được ghi đè một lần.");
 
         RuleForEach(x => x.Overrides)
+            .NotNull()
+            .WithMessage("Ghi đè quyền không được là null.")
             .SetValidator(new PermissionOverrideDtoValidator());
     }
 }
