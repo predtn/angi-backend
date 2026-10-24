@@ -796,6 +796,117 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
     }
 
+    // TEST-12: Hard-delete an owned item while retaining feedback and review history with null item references.
+    /// <summary>Verifies RM-09 persistence semantics, response shape, and repeat-delete behavior through PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task DeleteRoadmapItem_ShouldRemoveOnlyItemAndPreserveRelatedHistory()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Delete item trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "dinner" });
+        var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        var relatedIds = await _factory.ExecuteDbAsync(async context =>
+        {
+            var feedback = new DishFeedback
+            {
+                EventUuid = Guid.NewGuid(),
+                UserId = owner.User.Id,
+                DishId = publicDish.DishId,
+                RoadmapItemId = added.Id,
+                Value = FeedbackValue.Like
+            };
+            var review = new RestaurantReview
+            {
+                RestaurantId = publicDish.RestaurantId,
+                UserId = owner.User.Id,
+                Rating = 5,
+                Content = "History must survive item deletion",
+                RoadmapItemId = added.Id,
+                Status = ContentStatus.Visible
+            };
+            context.DishFeedbacks.Add(feedback);
+            context.RestaurantReviews.Add(review);
+            await context.SaveChangesAsync();
+            return (FeedbackId: feedback.Id, ReviewId: review.Id);
+        });
+
+        using var response = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            (await context.RoadmapItems.AnyAsync(item => item.Id == added.Id)).Should().BeFalse();
+            (await context.RoadmapDays.AnyAsync(day => day.Id == dayId)).Should().BeTrue();
+            (await context.Roadmaps.AnyAsync(value => value.Id == roadmap.Overview.Id)).Should().BeTrue();
+            (await context.Dishes.AnyAsync(dish => dish.Id == publicDish.DishId)).Should().BeTrue();
+            var feedback = await context.DishFeedbacks.SingleAsync(value => value.Id == relatedIds.FeedbackId);
+            feedback.RoadmapItemId.Should().BeNull();
+            var review = await context.RestaurantReviews.SingleAsync(value => value.Id == relatedIds.ReviewId);
+            review.RoadmapItemId.Should().BeNull();
+        });
+
+        using var repeated = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        repeated.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await repeated.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+            .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+    }
+
+    // TEST-13: Conceal missing, mismatched, foreign, and soft-deleted-parent items without deleting them.
+    /// <summary>Verifies every RM-09 ownership and membership boundary through HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task DeleteRoadmapItem_WithInvalidScope_ShouldReturnItemNotFoundWithoutMutation()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-scope-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Protected item trip", null, 1);
+        var otherRoadmap = await CreateRoadmapAsync(client, "Other matching owner trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+
+        using var missing = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999");
+        using var mismatched = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id}");
+        var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-scope-other@integration.test");
+        Authorize(client, other.AccessToken);
+        using var foreign = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+
+        Authorize(client, owner.AccessToken);
+        using var deleteRoadmap = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        deleteRoadmap.EnsureSuccessStatusCode();
+        using var deletedParent = await client.DeleteAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+
+        foreach (var response in new[] { missing, mismatched, foreign, deletedParent })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            (await response.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
+                .Should().Be("ROADMAP_ITEM_NOT_FOUND");
+        }
+
+        await _factory.ExecuteDbAsync(async context =>
+            (await context.RoadmapItems.AnyAsync(item => item.Id == added.Id)).Should().BeTrue());
+    }
+
     /// <summary>Creates a valid image media row for PostgreSQL relationship coverage.</summary>
     private static MediaFile TestMedia(int uploaderId, string name) => new()
     {

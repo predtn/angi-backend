@@ -72,6 +72,13 @@ public interface IRoadmapRepository
     /// <summary>Adds one roadmap item to the current unit of work.</summary>
     void AddItem(RoadmapItem item);
 
-    /// <summary>Hard-deletes an item so dependent feedback and review links become null.</summary>
+    /// <summary>Locks and tracks an item only when it belongs to the requested owned, visible roadmap.</summary>
+    Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>Hard-deletes a tracked item (RM-08 replacement, RM-09) so dependent feedback and review links become null.</summary>
     void RemoveItem(RoadmapItem item);
 }
