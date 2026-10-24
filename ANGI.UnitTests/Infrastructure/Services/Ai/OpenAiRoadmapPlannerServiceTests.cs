@@ -32,14 +32,14 @@ public sealed class OpenAiRoadmapPlannerServiceTests
         var result = await CreateService(handler).PlanDayAsync(Request, CancellationToken.None);
 
         result.Should().BeEquivalentTo(new RoadmapPlanResult(
-            "gpt-4o-mini-2024-07-18",
+            "gpt-5.6-luna",
             [new RoadmapPlanAssignment(MealSlot.Breakfast, 1501), new RoadmapPlanAssignment(MealSlot.LateNight, 1502)]));
         var request = handler.Requests.Should().ContainSingle().Subject;
         request.Method.Should().Be(HttpMethod.Post);
         request.Uri.Should().Be(new Uri("https://ai.angi.test/v1/chat/completions"));
         request.Authorization.Should().Be("Bearer test-ai-key");
         using var body = JsonDocument.Parse(request.Body!);
-        body.RootElement.GetProperty("model").GetString().Should().Be("gpt-4o-mini");
+        body.RootElement.GetProperty("model").GetString().Should().Be("gpt-5.6-luna");
         body.RootElement.TryGetProperty("temperature", out _).Should().BeFalse("newer models reject any non-default temperature");
         var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema");
         schema.GetProperty("strict").GetBoolean().Should().BeTrue();
@@ -106,12 +106,12 @@ public sealed class OpenAiRoadmapPlannerServiceTests
     private static OpenAiRoadmapPlannerService CreateService(HttpMessageHandler handler, string apiKey = "test-ai-key") =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://ai.angi.test/v1/") },
-            Options.Create(new AiSettings { BaseUrl = "https://ai.angi.test/v1/", ApiKey = apiKey, Model = "gpt-4o-mini", TimeoutSeconds = 30 }),
+            Options.Create(new AiSettings { BaseUrl = "https://ai.angi.test/v1/", ApiKey = apiKey, Model = "gpt-5.6-luna", TimeoutSeconds = 30 }),
             NullLogger<OpenAiRoadmapPlannerService>.Instance);
 
     private static HttpResponseMessage Completion(string content) => Json(JsonSerializer.Serialize(new
     {
-        model = "gpt-4o-mini-2024-07-18",
+        model = "gpt-5.6-luna",
         choices = new[] { new { message = new { role = "assistant", content } } }
     }));
 

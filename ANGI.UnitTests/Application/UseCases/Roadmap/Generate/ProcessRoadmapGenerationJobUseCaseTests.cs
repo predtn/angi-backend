@@ -71,13 +71,13 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     {
         var fixture = new Fixture(new GenerateRoadmapRequestDto { Scope = "day", DayId = 301, Province = "Huế", MealSlots = ["dinner", "lunch"], Note = "Ít cay" });
         fixture.Planner.Setup(value => value.PlanDayAsync(It.IsAny<RoadmapPlanRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RoadmapPlanResult("gpt-4o-mini-2024-07-18", [new(MealSlot.Dinner, 3), new(MealSlot.Lunch, 4)]));
+            .ReturnsAsync(new RoadmapPlanResult("gpt-5.6-luna", [new(MealSlot.Dinner, 3), new(MealSlot.Lunch, 4)]));
 
         await fixture.UseCase.ExecuteAsync(77, CancellationToken.None);
 
         fixture.Created.Select(item => (item.RoadmapDayId, item.MealSlot, item.DishId)).Should()
             .Equal((301L, MealSlot.Lunch, 4), (301L, MealSlot.Dinner, 3));
-        fixture.Tracked.ModelName.Should().Be("gpt-4o-mini-2024-07-18");
+        fixture.Tracked.ModelName.Should().Be("gpt-5.6-luna");
         fixture.Planner.Verify(value => value.PlanDayAsync(
             It.Is<RoadmapPlanRequest>(request => request.DayNumber == 1 && request.Note == "Ít cay" &&
                 request.MealSlots.SequenceEqual(new[] { MealSlot.Lunch, MealSlot.Dinner }) &&

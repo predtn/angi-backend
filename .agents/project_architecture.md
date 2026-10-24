@@ -220,7 +220,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
 | `RoadmapGeneration` | `PollSeconds` (2) |
-| `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-4o-mini`), `TimeoutSeconds` (30) |
+| `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
