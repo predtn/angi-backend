@@ -40,6 +40,7 @@ public sealed class OpenAiRoadmapPlannerServiceTests
         request.Authorization.Should().Be("Bearer test-ai-key");
         using var body = JsonDocument.Parse(request.Body!);
         body.RootElement.GetProperty("model").GetString().Should().Be("gpt-4o-mini");
+        body.RootElement.TryGetProperty("temperature", out _).Should().BeFalse("newer models reject any non-default temperature");
         var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema");
         schema.GetProperty("strict").GetBoolean().Should().BeTrue();
         var item = schema.GetProperty("schema").GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties");

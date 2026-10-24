@@ -69,7 +69,10 @@ public sealed class OpenAiRoadmapPlannerService : IRoadmapPlannerService
             using var response = await _httpClient.SendAsync(message, ct);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("AI roadmap planning answered {StatusCode}; the job plans the day itself.", (int)response.StatusCode);
+                _logger.LogWarning(
+                    "AI roadmap planning answered {StatusCode} ({Error}); the job plans the day itself.",
+                    (int)response.StatusCode,
+                    await ReadErrorAsync(response, ct));
                 return null;
             }
 
@@ -124,8 +127,8 @@ public sealed class OpenAiRoadmapPlannerService : IRoadmapPlannerService
 
         return new
         {
+            // No temperature: newer models only accept the default, and the strict schema already bounds the answer.
             model = _settings.Model,
-            temperature = 0.2,
             messages = new object[]
             {
                 new { role = "system", content = SystemPrompt },
@@ -167,6 +170,20 @@ public sealed class OpenAiRoadmapPlannerService : IRoadmapPlannerService
         };
     }
 
+    /// <summary>OpenAI's error.message (e.g. an unsupported parameter); it never contains the key.</summary>
+    private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var error = await response.Content.ReadFromJsonAsync<ErrorResponse>(Json, ct);
+            return error?.Error?.Message;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static string ToApi(MealSlot meal) => JsonNamingPolicy.SnakeCaseLower.ConvertName(meal.ToString());
 
     private static MealSlot ParseMealSlot(string? value) => value switch
@@ -188,4 +205,8 @@ public sealed class OpenAiRoadmapPlannerService : IRoadmapPlannerService
     private sealed record DayPlan(IReadOnlyList<DayPlanItem>? Items);
 
     private sealed record DayPlanItem(string? MealSlot, int DishId);
+
+    private sealed record ErrorResponse(ErrorDetail? Error);
+
+    private sealed record ErrorDetail(string? Message);
 }
