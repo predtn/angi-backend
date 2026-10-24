@@ -11,9 +11,26 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Social;
 
-/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06, and BLOG-07 HTTP boundaries.</summary>
+/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06, BLOG-07, BLOG-08, BLOG-09, and BLOG-10 HTTP boundaries.</summary>
 public sealed class BlogsControllerTests
 {
+    private readonly Mock<ICreateBlogUseCase> _createBlogUseCase = new();
+    private readonly Mock<ILikeBlogUseCase> _likeBlogUseCase = new();
+    private readonly Mock<IUnlikeBlogUseCase> _unlikeBlogUseCase = new();
+    private readonly Mock<ICreateBlogCommentUseCase> _createBlogCommentUseCase = new();
+
+    private BlogsController CreateController() =>
+        new(
+            Mock.Of<IGetPublicBlogsUseCase>(),
+            _createBlogUseCase.Object,
+            Mock.Of<IGetBlogDetailUseCase>(),
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            Mock.Of<IEditBlogUseCase>(),
+            Mock.Of<IDeleteBlogUseCase>(),
+            _likeBlogUseCase.Object,
+            _unlikeBlogUseCase.Object,
+            _createBlogCommentUseCase.Object);
+
     // TEST-01: Require the Traveler role and return the BLOG-04 payload in a 201 ApiResponse.
     /// <summary>Verifies authorization metadata, delegation, cancellation, and response wrapping.</summary>
     [Fact]
@@ -37,7 +54,10 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
             Mock.Of<IEditBlogUseCase>(),
-            Mock.Of<IDeleteBlogUseCase>()).Create(request, source.Token);
+            Mock.Of<IDeleteBlogUseCase>(),
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>()).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
@@ -73,7 +93,10 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
             Mock.Of<IEditBlogUseCase>(),
-            Mock.Of<IDeleteBlogUseCase>())
+            Mock.Of<IDeleteBlogUseCase>(),
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>())
             .GetPublicBlogs(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
@@ -102,7 +125,10 @@ public sealed class BlogsControllerTests
             useCase.Object,
             Mock.Of<IGetBlogCommentsUseCase>(),
             Mock.Of<IEditBlogUseCase>(),
-            Mock.Of<IDeleteBlogUseCase>());
+            Mock.Of<IDeleteBlogUseCase>(),
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>());
         var action = await controller.GetDetail(45, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -139,7 +165,10 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetBlogDetailUseCase>(),
             useCase.Object,
             Mock.Of<IEditBlogUseCase>(),
-            Mock.Of<IDeleteBlogUseCase>());
+            Mock.Of<IDeleteBlogUseCase>(),
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>());
         var action = await controller.GetComments(45, request, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -167,7 +196,10 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
             editUseCase.Object,
-            Mock.Of<IDeleteBlogUseCase>()).Edit(45, request, source.Token);
+            Mock.Of<IDeleteBlogUseCase>(),
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>()).Edit(45, request, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.StatusCode.Should().Be(200);
@@ -211,7 +243,10 @@ public sealed class BlogsControllerTests
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
             Mock.Of<IEditBlogUseCase>(),
-            deleteUseCase.Object);
+            deleteUseCase.Object,
+            Mock.Of<ILikeBlogUseCase>(),
+            Mock.Of<IUnlikeBlogUseCase>(),
+            Mock.Of<ICreateBlogCommentUseCase>());
         var action = await controller.Delete(45, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -220,5 +255,64 @@ public sealed class BlogsControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeNull();
         deleteUseCase.Verify(item => item.ExecuteAsync(45, source.Token), Times.Once);
+    }
+
+    [Fact]
+    public void Controller_ShouldRequireTravelerRole()
+    {
+        var authorize = typeof(BlogsController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .Single();
+        authorize.Roles.Should().Be("TRAVELER");
+    }
+
+    [Fact]
+    public async Task Like_ShouldReturnOkWithLikeResponse()
+    {
+        const long blogId = 45;
+        var expected = new BlogLikeResponseDto { Liked = true, LikeCount = 10 };
+        using var source = new CancellationTokenSource();
+        _likeBlogUseCase.Setup(item => item.ExecuteAsync(blogId, source.Token)).ReturnsAsync(expected);
+
+        var action = await CreateController().Like(blogId, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        result.Value.Should().BeOfType<ApiResponse<BlogLikeResponseDto>>().Which.Data.Should().BeSameAs(expected);
+        _likeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task Unlike_ShouldReturnOkWithLikeResponse()
+    {
+        const long blogId = 45;
+        var expected = new BlogLikeResponseDto { Liked = false, LikeCount = 9 };
+        using var source = new CancellationTokenSource();
+        _unlikeBlogUseCase.Setup(item => item.ExecuteAsync(blogId, source.Token)).ReturnsAsync(expected);
+
+        var action = await CreateController().Unlike(blogId, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        result.Value.Should().BeOfType<ApiResponse<BlogLikeResponseDto>>().Which.Data.Should().BeSameAs(expected);
+        _unlikeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task Comment_ShouldReturnCreatedWithCommentResponse()
+    {
+        const long blogId = 45;
+        var request = new CreateBlogCommentRequestDto { Content = "Quán ngon" };
+        var expected = new CommentDto { Id = 302, BlogId = blogId, Content = "Quán ngon" };
+        using var source = new CancellationTokenSource();
+        _createBlogCommentUseCase.Setup(item => item.ExecuteAsync(blogId, request, source.Token)).ReturnsAsync(expected);
+
+        var action = await CreateController().Comment(blogId, request, source.Token);
+
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(201);
+        result.Value.Should().BeOfType<ApiResponse<CommentDto>>().Which.Data.Should().BeSameAs(expected);
+        _createBlogCommentUseCase.Verify(item => item.ExecuteAsync(blogId, request, source.Token), Times.Once);
     }
 }

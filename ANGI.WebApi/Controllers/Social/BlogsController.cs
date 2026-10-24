@@ -4,10 +4,11 @@ using ANGI.Application.DTOs.Social;
 using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.WebApi.Controllers.Social;
 
-/// <summary>Exposes public and traveler-authored blog operations (BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06, BLOG-07).</summary>
+/// <summary>Exposes public and traveler-authored blog operations (BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06 to BLOG-10).</summary>
 [ApiController]
 [Route("api/v1/blogs")]
 [Authorize(Roles = "TRAVELER")]
@@ -19,6 +20,9 @@ public sealed class BlogsController : ControllerBase
     private readonly IGetBlogCommentsUseCase _getBlogCommentsUseCase;
     private readonly IEditBlogUseCase _editBlogUseCase;
     private readonly IDeleteBlogUseCase _deleteBlogUseCase;
+    private readonly ILikeBlogUseCase _likeBlogUseCase;
+    private readonly IUnlikeBlogUseCase _unlikeBlogUseCase;
+    private readonly ICreateBlogCommentUseCase _createBlogCommentUseCase;
 
     /// <summary>Initializes the HTTP boundary with Social blog use cases.</summary>
     public BlogsController(
@@ -27,7 +31,10 @@ public sealed class BlogsController : ControllerBase
         IGetBlogDetailUseCase getBlogDetailUseCase,
         IGetBlogCommentsUseCase getBlogCommentsUseCase,
         IEditBlogUseCase editBlogUseCase,
-        IDeleteBlogUseCase deleteBlogUseCase)
+        IDeleteBlogUseCase deleteBlogUseCase,
+        ILikeBlogUseCase likeBlogUseCase,
+        IUnlikeBlogUseCase unlikeBlogUseCase,
+        ICreateBlogCommentUseCase createBlogCommentUseCase)
     {
         _getPublicBlogsUseCase = getPublicBlogsUseCase;
         _createBlogUseCase = createBlogUseCase;
@@ -35,6 +42,9 @@ public sealed class BlogsController : ControllerBase
         _getBlogCommentsUseCase = getBlogCommentsUseCase;
         _editBlogUseCase = editBlogUseCase;
         _deleteBlogUseCase = deleteBlogUseCase;
+        _likeBlogUseCase = likeBlogUseCase;
+        _unlikeBlogUseCase = unlikeBlogUseCase;
+        _createBlogCommentUseCase = createBlogCommentUseCase;
     }
 
     // BLOG-01
@@ -143,5 +153,53 @@ public sealed class BlogsController : ControllerBase
     {
         await _deleteBlogUseCase.ExecuteAsync(blogId, ct);
         return Ok(new ApiResponse<object> { Success = true, Data = null });
+    }
+
+    // BLOG-08
+    /// <summary>Receives BLOG-08 and idempotently likes a blog.</summary>
+    [HttpPut("{blogId:long}/like")]
+    [ProducesResponseType(typeof(ApiResponse<BlogLikeResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Like([FromRoute] long blogId, CancellationToken ct)
+    {
+        var result = await _likeBlogUseCase.ExecuteAsync(blogId, ct);
+        return Ok(new ApiResponse<BlogLikeResponseDto> { Success = true, Data = result });
+    }
+
+    // BLOG-09
+    /// <summary>Receives BLOG-09 and idempotently unlikes a blog.</summary>
+    [HttpDelete("{blogId:long}/like")]
+    [ProducesResponseType(typeof(ApiResponse<BlogLikeResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Unlike([FromRoute] long blogId, CancellationToken ct)
+    {
+        var result = await _unlikeBlogUseCase.ExecuteAsync(blogId, ct);
+        return Ok(new ApiResponse<BlogLikeResponseDto> { Success = true, Data = result });
+    }
+
+    // BLOG-10
+    /// <summary>Receives BLOG-10 and posts a comment on a blog.</summary>
+    [HttpPost("{blogId:long}/comments")]
+    [ProducesResponseType(typeof(ApiResponse<CommentDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Comment(
+        [FromRoute] long blogId,
+        [FromBody, BindRequired] CreateBlogCommentRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _createBlogCommentUseCase.ExecuteAsync(blogId, request, ct);
+        return StatusCode(
+            StatusCodes.Status201Created,
+            new ApiResponse<CommentDto> { Success = true, Data = result });
     }
 }

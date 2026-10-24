@@ -330,4 +330,38 @@ public sealed class BlogRepository : IBlogRepository
     {
         _context.Blogs.Add(blog);
     }
+
+    /// <inheritdoc />
+    public Task<Blog?> GetByIdAsync(long blogId, CancellationToken ct) =>
+        _context.Blogs
+            .FirstOrDefaultAsync(blog => blog.Id == blogId, ct);
+
+    /// <inheritdoc />
+    public Task<bool> HasUserLikedAsync(long blogId, int userId, CancellationToken ct) =>
+        _context.BlogLikes
+            .AsNoTracking()
+            .AnyAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+
+    /// <inheritdoc />
+    public Task<BlogLike?> GetLikeAsync(long blogId, int userId, CancellationToken ct) =>
+        _context.BlogLikes
+            .FirstOrDefaultAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+
+    /// <inheritdoc />
+    public void AddLike(BlogLike like)
+    {
+        _context.BlogLikes.Add(like);
+    }
+
+    /// <inheritdoc />
+    public void RemoveLike(BlogLike like)
+    {
+        _context.BlogLikes.Remove(like);
+    }
+
+    /// <inheritdoc />
+    public void AddComment(BlogComment comment)
+    {
+        _context.BlogComments.Add(comment);
+    }
 }
