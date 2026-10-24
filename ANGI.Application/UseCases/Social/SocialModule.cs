@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
 using ANGI.Application.UseCases.Social.CreateBlog;
+using ANGI.Application.UseCases.Social.GetPublicBlogs;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Social;
@@ -10,6 +11,7 @@ public static class SocialModule
     /// <summary>Adds every Social use case to the Application dependency graph.</summary>
     public static IServiceCollection AddSocialUseCases(this IServiceCollection services)
     {
+        services.AddScoped<IGetPublicBlogsUseCase, GetPublicBlogsUseCase>();
         services.AddScoped<ICreateBlogUseCase, CreateBlogUseCase>();
         return services;
     }
