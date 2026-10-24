@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi.Controllers.Social;
 
-/// <summary>Exposes public and traveler-authored blog operations (BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06).</summary>
+/// <summary>Exposes public and traveler-authored blog operations (BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06, BLOG-07).</summary>
 [ApiController]
 [Route("api/v1/blogs")]
 [Authorize(Roles = "TRAVELER")]
@@ -18,6 +18,7 @@ public sealed class BlogsController : ControllerBase
     private readonly IGetBlogDetailUseCase _getBlogDetailUseCase;
     private readonly IGetBlogCommentsUseCase _getBlogCommentsUseCase;
     private readonly IEditBlogUseCase _editBlogUseCase;
+    private readonly IDeleteBlogUseCase _deleteBlogUseCase;
 
     /// <summary>Initializes the HTTP boundary with Social blog use cases.</summary>
     public BlogsController(
@@ -25,13 +26,15 @@ public sealed class BlogsController : ControllerBase
         ICreateBlogUseCase createBlogUseCase,
         IGetBlogDetailUseCase getBlogDetailUseCase,
         IGetBlogCommentsUseCase getBlogCommentsUseCase,
-        IEditBlogUseCase editBlogUseCase)
+        IEditBlogUseCase editBlogUseCase,
+        IDeleteBlogUseCase deleteBlogUseCase)
     {
         _getPublicBlogsUseCase = getPublicBlogsUseCase;
         _createBlogUseCase = createBlogUseCase;
         _getBlogDetailUseCase = getBlogDetailUseCase;
         _getBlogCommentsUseCase = getBlogCommentsUseCase;
         _editBlogUseCase = editBlogUseCase;
+        _deleteBlogUseCase = deleteBlogUseCase;
     }
 
     // BLOG-01
@@ -126,5 +129,19 @@ public sealed class BlogsController : ControllerBase
     {
         var result = await _editBlogUseCase.ExecuteAsync(blogId, request, ct);
         return Ok(new ApiResponse<BlogDetailDto> { Success = true, Data = result });
+    }
+
+    /// <summary>Receives BLOG-07 and soft-deletes a traveler-owned blog.</summary>
+    [HttpDelete("{blogId:long}")]
+    [Authorize(Roles = "TRAVELER,Traveler")]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(long blogId, CancellationToken ct)
+    {
+        await _deleteBlogUseCase.ExecuteAsync(blogId, ct);
+        return Ok(new ApiResponse<object> { Success = true, Data = null });
     }
 }

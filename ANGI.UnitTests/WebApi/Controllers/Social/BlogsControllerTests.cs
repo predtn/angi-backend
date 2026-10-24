@@ -11,7 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Social;
 
-/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, BLOG-04, and BLOG-06 HTTP boundaries.</summary>
+/// <summary>Unit tests for the thin BLOG-01, BLOG-02, BLOG-03, BLOG-04, BLOG-06, and BLOG-07 HTTP boundaries.</summary>
 public sealed class BlogsControllerTests
 {
     // TEST-01: Require the Traveler role and return the BLOG-04 payload in a 201 ApiResponse.
@@ -36,7 +36,8 @@ public sealed class BlogsControllerTests
             useCase.Object,
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
-            Mock.Of<IEditBlogUseCase>()).Create(request, source.Token);
+            Mock.Of<IEditBlogUseCase>(),
+            Mock.Of<IDeleteBlogUseCase>()).Create(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
@@ -71,7 +72,8 @@ public sealed class BlogsControllerTests
             createBlogUseCase.Object,
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
-            Mock.Of<IEditBlogUseCase>())
+            Mock.Of<IEditBlogUseCase>(),
+            Mock.Of<IDeleteBlogUseCase>())
             .GetPublicBlogs(request, source.Token);
 
         var result = action.Should().BeOfType<ObjectResult>().Subject;
@@ -99,7 +101,8 @@ public sealed class BlogsControllerTests
             Mock.Of<ICreateBlogUseCase>(),
             useCase.Object,
             Mock.Of<IGetBlogCommentsUseCase>(),
-            Mock.Of<IEditBlogUseCase>());
+            Mock.Of<IEditBlogUseCase>(),
+            Mock.Of<IDeleteBlogUseCase>());
         var action = await controller.GetDetail(45, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -135,7 +138,8 @@ public sealed class BlogsControllerTests
             Mock.Of<ICreateBlogUseCase>(),
             Mock.Of<IGetBlogDetailUseCase>(),
             useCase.Object,
-            Mock.Of<IEditBlogUseCase>());
+            Mock.Of<IEditBlogUseCase>(),
+            Mock.Of<IDeleteBlogUseCase>());
         var action = await controller.GetComments(45, request, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
@@ -162,11 +166,59 @@ public sealed class BlogsControllerTests
             createUseCase.Object,
             Mock.Of<IGetBlogDetailUseCase>(),
             Mock.Of<IGetBlogCommentsUseCase>(),
-            editUseCase.Object).Edit(45, request, source.Token);
+            editUseCase.Object,
+            Mock.Of<IDeleteBlogUseCase>()).Edit(45, request, source.Token);
 
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.StatusCode.Should().Be(200);
         result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
         editUseCase.Verify(item => item.ExecuteAsync(45, request, source.Token), Times.Once);
+    }
+
+    // TEST-06: Require the Traveler role and return a 200 ApiResponse with null data on soft deletion.
+    /// <summary>Verifies BLOG-07 metadata, delegation, and empty response wrapping.</summary>
+    [Fact]
+    public async Task Delete_ShouldRequireTravelerAndReturnOkResponse()
+    {
+        var method = typeof(BlogsController).GetMethod(nameof(BlogsController.Delete))!;
+        var httpDelete = method
+            .GetCustomAttributes(typeof(HttpDeleteAttribute), inherit: false)
+            .Cast<HttpDeleteAttribute>()
+            .Single();
+        httpDelete.Template.Should().Be("{blogId:long}");
+
+        var authorize = method
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: false)
+            .Cast<AuthorizeAttribute>()
+            .Single();
+        authorize.Roles.Should().Contain("TRAVELER");
+
+        var responseTypes = method
+            .GetCustomAttributes(typeof(ProducesResponseTypeAttribute), inherit: false)
+            .Cast<ProducesResponseTypeAttribute>()
+            .Select(attr => attr.StatusCode)
+            .ToHashSet();
+        responseTypes.Should().Contain([200, 400, 401, 403, 404]);
+
+        var createUseCase = new Mock<ICreateBlogUseCase>();
+        var deleteUseCase = new Mock<IDeleteBlogUseCase>();
+        using var source = new CancellationTokenSource();
+        deleteUseCase.Setup(item => item.ExecuteAsync(45, source.Token)).Returns(Task.CompletedTask);
+
+        var controller = new BlogsController(
+            Mock.Of<IGetPublicBlogsUseCase>(),
+            createUseCase.Object,
+            Mock.Of<IGetBlogDetailUseCase>(),
+            Mock.Of<IGetBlogCommentsUseCase>(),
+            Mock.Of<IEditBlogUseCase>(),
+            deleteUseCase.Object);
+        var action = await controller.Delete(45, source.Token);
+
+        var result = action.Should().BeOfType<OkObjectResult>().Subject;
+        result.StatusCode.Should().Be(200);
+        var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeNull();
+        deleteUseCase.Verify(item => item.ExecuteAsync(45, source.Token), Times.Once);
     }
 }
