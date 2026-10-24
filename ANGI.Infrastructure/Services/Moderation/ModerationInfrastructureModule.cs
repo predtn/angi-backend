@@ -11,6 +11,7 @@ public static class ModerationInfrastructureModule
     public static IServiceCollection AddModerationInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IVerificationReviewRepository, VerificationReviewRepository>();
+        services.AddScoped<IMenuReviewRepository, MenuReviewRepository>();
         return services;
     }
 }
