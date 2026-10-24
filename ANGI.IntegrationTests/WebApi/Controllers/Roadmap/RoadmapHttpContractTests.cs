@@ -49,6 +49,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
+    [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -73,6 +74,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
+    [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -85,12 +87,13 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-03: Return VALIDATION_FAILED for missing JSON bodies on every roadmap body endpoint.
-    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, RM-07, and RM-08.</summary>
+    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, RM-07, RM-08, and RM-13.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
     [InlineData("PATCH", "/api/v1/roadmaps/88/items/1502")]
+    [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
     public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path);
@@ -346,11 +349,13 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         provider.GetRequiredService<IValidator<GetRoadmapSuggestionsRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<AddRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapItemRequestDto>>().Should().NotBeNull();
+        provider.GetRequiredService<IValidator<RateRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IGetRoadmapItemDetailUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IUpdateRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapItemUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IRateRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
             .Select(parameter => provider.GetService(parameter.ParameterType))
@@ -366,7 +371,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(11);
+        endpoints.Should().HaveCount(12);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -389,6 +394,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .TryGetProperty("patch", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}")
             .TryGetProperty("delete", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}/feedback")
+            .TryGetProperty("post", out _).Should().BeTrue();
     }
 
     // TEST-17: Serialize every RM-12 section and bind both route values.
@@ -497,6 +504,42 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
     }
 
+    // TEST-22: Bind RM-13 route and body values and serialize the feedback with HTTP 201.
+    /// <summary>Verifies RM-13 routing, delegation, and the documented response JSON shape.</summary>
+    [Fact]
+    public async Task RateItem_WithValue_ShouldSerializeCreatedFeedback()
+    {
+        using var request = JsonRequest("POST", "/api/v1/roadmaps/88/items/1502/feedback", "{\"value\":\"like\"}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("feedbackId").GetInt64().Should().Be(2201);
+        data.GetProperty("value").GetString().Should().Be("like");
+        data.GetProperty("dishId").GetInt32().Should().Be(105);
+        data.GetProperty("likeCount").GetInt32().Should().Be(129);
+        data.GetProperty("dislikeCount").GetInt32().Should().Be(9);
+        data.GetProperty("createdAt").GetDateTime().Should().Be(new DateTime(2026, 10, 10, 2, 0, 0, DateTimeKind.Utc));
+        _factory.RateItem.LastCall.Should().Be(new RoadmapApiFactory.RateItemCall(88, 1502, "like"));
+    }
+
+    // TEST-23: Preserve FEEDBACK_ALREADY_EXISTS through the RM-13 HTTP boundary.
+    /// <summary>Verifies the documented 409 envelope (the value rule runs in the use case and has unit tests).</summary>
+    [Fact]
+    public async Task RateItem_WhenAlreadyRated_ShouldReturnConflictEnvelope()
+    {
+        using var request = JsonRequest("POST", "/api/v1/roadmaps/88/items/409/feedback", "{\"value\":\"dislike\"}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await AssertErrorCode(response, "FEEDBACK_ALREADY_EXISTS");
+    }
+
     /// <summary>Builds an HTTP request with an application/json body.</summary>
     private static HttpRequestMessage JsonRequest(string method, string path, string json) => new(new HttpMethod(method), path)
     {
@@ -563,6 +606,9 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
     /// <summary>Gets the stateful RM-09 stub used to inspect both delete-item route values.</summary>
     public StubDeleteRoadmapItemUseCase DeleteItem { get; } = new();
 
+    /// <summary>Gets the stateful RM-13 stub used to inspect route and body values.</summary>
+    public StubRateRoadmapItemUseCase RateItem { get; } = new();
+
     /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -616,6 +662,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IUpdateRoadmapUseCase>();
             services.RemoveAll<IDeleteRoadmapUseCase>();
             services.RemoveAll<IDeleteRoadmapItemUseCase>();
+            services.RemoveAll<IRateRoadmapItemUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
             services.AddScoped<ICreateRoadmapUseCase, StubCreateRoadmapUseCase>();
             services.AddSingleton(GetMyRoadmaps);
@@ -638,6 +685,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IDeleteRoadmapUseCase>(Delete);
             services.AddSingleton(DeleteItem);
             services.AddSingleton<IDeleteRoadmapItemUseCase>(DeleteItem);
+            services.AddSingleton(RateItem);
+            services.AddSingleton<IRateRoadmapItemUseCase>(RateItem);
         });
     }
 
@@ -863,6 +912,38 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             }
 
             return Task.CompletedTask;
+        }
+    }
+
+    public sealed record RateItemCall(long RoadmapId, long ItemId, string Value);
+
+    public sealed class StubRateRoadmapItemUseCase : IRateRoadmapItemUseCase
+    {
+        public RateItemCall? LastCall { get; private set; }
+
+        /// <summary>Captures route and body values, or emits the RM-13 conflict for item 409.</summary>
+        public Task<RateRoadmapItemResponseDto> ExecuteAsync(
+            long roadmapId,
+            long itemId,
+            RateRoadmapItemRequestDto request,
+            CancellationToken ct)
+        {
+            LastCall = new RateItemCall(roadmapId, itemId, request.Value);
+            if (itemId == 409)
+            {
+                throw new ANGI.Application.Common.Exceptions.ConflictException(
+                    "FEEDBACK_ALREADY_EXISTS", "Món này đã được đánh giá.");
+            }
+
+            return Task.FromResult(new RateRoadmapItemResponseDto
+            {
+                FeedbackId = 2201,
+                Value = request.Value,
+                DishId = 105,
+                LikeCount = 129,
+                DislikeCount = 9,
+                CreatedAt = new DateTime(2026, 10, 10, 2, 0, 0, DateTimeKind.Utc)
+            });
         }
     }
 

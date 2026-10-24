@@ -907,6 +907,110 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             (await context.RoadmapItems.AnyAsync(item => item.Id == added.Id)).Should().BeTrue());
     }
 
+    // TEST-14: Rate an item once: dish_feedbacks keeps the item's reco request id, the dish counters move, the
+    // outbox carries FEEDBACK_CREATED for RECO-04, and RM-12 shows the traveler's feedback.
+    /// <summary>Verifies the RM-13 transaction through HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task RateRoadmapItem_ShouldStoreFeedbackCountersAndOutboxEventOnce()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-rate-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Rate trip", null, 1);
+        var dayId = roadmap.Itinerary.Single().DayId;
+        var recoRequestId = Guid.NewGuid();
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch", RecoRequestId = recoRequestId });
+        var item = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+
+        using var rated = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}/feedback", new { value = "like" });
+
+        rated.StatusCode.Should().Be(HttpStatusCode.Created, await rated.Content.ReadAsStringAsync());
+        var feedback = await SuccessDataAsync<RateRoadmapItemResponseDto>(rated);
+        feedback.Should().BeEquivalentTo(new { Value = "like", DishId = publicDish.DishId, LikeCount = 1, DislikeCount = 0 });
+        feedback.FeedbackId.Should().BePositive();
+        feedback.CreatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromMinutes(1));
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var row = await context.DishFeedbacks.SingleAsync(value => value.Id == feedback.FeedbackId);
+            row.Should().BeEquivalentTo(new
+            {
+                UserId = owner.User.Id,
+                DishId = publicDish.DishId,
+                Value = FeedbackValue.Like,
+                RoadmapItemId = (long?)item.Id,
+                RecoRequestId = (Guid?)recoRequestId
+            });
+            var outbox = await context.OutboxMessages.SingleAsync(message => message.EventUuid == row.EventUuid);
+            outbox.EventType.Should().Be(OutboxEventType.FeedbackCreated);
+            outbox.AggregateKey.Should().Be($"user:{owner.User.Id}");
+            using var payload = JsonDocument.Parse(outbox.Payload);
+            payload.RootElement.GetProperty("event_type").GetString().Should().Be("like");
+            payload.RootElement.GetProperty("dish_id").GetInt32().Should().Be(publicDish.DishId);
+            payload.RootElement.GetProperty("request_id").GetGuid().Should().Be(recoRequestId);
+        });
+
+        using var detail = await client.GetAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}");
+        (await SuccessDataAsync<RoadmapItemDetailDto>(detail)).MyFeedback.Should().Be("like");
+
+        using var again = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}/feedback", new { value = "dislike" });
+        again.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await again.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("FEEDBACK_ALREADY_EXISTS");
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes.AsNoTracking().SingleAsync(value => value.Id == publicDish.DishId);
+            (dish.LikeCount, dish.DislikeCount).Should().Be((1, 0));
+            (await context.DishFeedbacks.CountAsync()).Should().Be(1);
+        });
+    }
+
+    // TEST-15: Conceal foreign or mismatched items, and still accept feedback after the dish was hidden.
+    /// <summary>Verifies RM-13 ownership boundaries and the decision that a hidden dish can still be rated.</summary>
+    [PostgresEndToEndFact]
+    public async Task RateRoadmapItem_ShouldHideForeignItemsAndAcceptHiddenDishes()
+    {
+        await _factory.ResetDatabaseAsync();
+        var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        using var client = _factory.CreateClient();
+        var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-rate-scope-owner@integration.test");
+        Authorize(client, owner.AccessToken);
+        var roadmap = await CreateRoadmapAsync(client, "Scoped rate trip", null, 1);
+        var otherRoadmap = await CreateRoadmapAsync(client, "Other trip", null, 1);
+        using var addResponse = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{roadmap.Itinerary.Single().DayId}/items",
+            new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "dinner" });
+        var item = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+
+        using var mismatched = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{item.Id}/feedback", new { value = "like" });
+        mismatched.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await mismatched.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("ROADMAP_ITEM_NOT_FOUND");
+
+        using var stranger = _factory.CreateClient();
+        var other = await RegisterTravelerAndLoginAsync(stranger, "roadmap-rate-stranger@integration.test");
+        Authorize(stranger, other.AccessToken);
+        using var foreign = await stranger.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}/feedback", new { value = "like" });
+        foreign.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes.SingleAsync(value => value.Id == publicDish.DishId);
+            dish.Status = DishStatus.Hidden;
+            await context.SaveChangesAsync();
+        });
+        using var hidden = await client.PostAsJsonAsync(
+            $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}/feedback", new { value = "dislike" });
+
+        hidden.StatusCode.Should().Be(HttpStatusCode.Created, await hidden.Content.ReadAsStringAsync());
+        (await SuccessDataAsync<RateRoadmapItemResponseDto>(hidden)).Should().BeEquivalentTo(new { Value = "dislike", LikeCount = 0, DislikeCount = 1 });
+    }
+
     /// <summary>Creates a valid image media row for PostgreSQL relationship coverage.</summary>
     private static MediaFile TestMedia(int uploaderId, string name) => new()
     {
