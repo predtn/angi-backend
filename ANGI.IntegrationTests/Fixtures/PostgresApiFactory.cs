@@ -40,24 +40,37 @@ public sealed class PostgresApiFactory : WebApplicationFactory<Program>
         Environment.GetEnvironmentVariable(ConnectionStringVariable)
         ?? throw new InvalidOperationException($"{ConnectionStringVariable} is required.");
 
-    /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
+    /// <summary>
+    /// Provides JWT and rate-limit values before Program reads them while registering services: overrides added in
+    /// ConfigureAppConfiguration arrive too late for those reads, so the limits would stay at 100 requests a minute.
+    /// </summary>
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        var previousIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer");
-        var previousAudience = Environment.GetEnvironmentVariable("Jwt__Audience");
-        var previousSecret = Environment.GetEnvironmentVariable("Jwt__SecretKey");
-        Environment.SetEnvironmentVariable("Jwt__Issuer", "ANGI.IntegrationTests");
-        Environment.SetEnvironmentVariable("Jwt__Audience", "ANGI.IntegrationTests.Client");
-        Environment.SetEnvironmentVariable("Jwt__SecretKey", JwtSecret);
+        var values = new Dictionary<string, string>
+        {
+            ["Jwt__Issuer"] = "ANGI.IntegrationTests",
+            ["Jwt__Audience"] = "ANGI.IntegrationTests.Client",
+            ["Jwt__SecretKey"] = JwtSecret,
+            ["RateLimit__GeneralPermitLimit"] = "10000",
+            ["RateLimit__LoginPermitLimit"] = "10000",
+            ["RateLimit__SensitiveAuthPermitLimit"] = "10000"
+        };
+        var previous = values.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        foreach (var (name, value) in values)
+        {
+            Environment.SetEnvironmentVariable(name, value);
+        }
+
         try
         {
             return base.CreateHost(builder);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("Jwt__Issuer", previousIssuer);
-            Environment.SetEnvironmentVariable("Jwt__Audience", previousAudience);
-            Environment.SetEnvironmentVariable("Jwt__SecretKey", previousSecret);
+            foreach (var (name, value) in previous)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
         }
     }
 
