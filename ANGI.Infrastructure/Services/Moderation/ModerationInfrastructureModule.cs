@@ -4,12 +4,13 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Infrastructure.Services.Moderation;
 
-/// <summary>Registers persistence for menu moderation.</summary>
+/// <summary>Centralizes Infrastructure-layer registrations for moderation features.</summary>
 public static class ModerationInfrastructureModule
 {
-    /// <summary>Adds the scoped menu review repository to the infrastructure container.</summary>
+    /// <summary>Registers moderation persistence implementations.</summary>
     public static IServiceCollection AddModerationInfrastructure(this IServiceCollection services)
     {
+        services.AddScoped<IVerificationReviewRepository, VerificationReviewRepository>();
         services.AddScoped<IMenuReviewRepository, MenuReviewRepository>();
         return services;
     }

@@ -1,10 +1,11 @@
 using FluentValidation;
+using ANGI.Application.UseCases.Administration;
 using ANGI.Application.UseCases.Account;
 using ANGI.Application.UseCases.Auth;
 using ANGI.Application.UseCases.Discovery;
 using ANGI.Application.UseCases.Media;
-using ANGI.Application.UseCases.Notification;
 using ANGI.Application.UseCases.Moderation;
+using ANGI.Application.UseCases.Notification;
 using ANGI.Application.UseCases.Restaurant;
 using ANGI.Application.UseCases.Roadmap;
 using ANGI.Application.UseCases.Social;
@@ -22,12 +23,13 @@ namespace ANGI.Application
             services.AddSingleton(TimeProvider.System);
             // Thread-safe shared generator, injected so tests can seed it (DISH-03 weighted roll).
             services.AddSingleton(Random.Shared);
+            services.AddAdministrationUseCases();
             services.AddAccountUseCases();
             services.AddAuthUseCases();
             services.AddDiscoveryUseCases();
             services.AddMediaUseCases();
-            services.AddNotificationUseCases();
             services.AddModerationUseCases();
+            services.AddNotificationUseCases();
             services.AddRestaurantUseCases();
             services.AddRoadmapUseCases();
             services.AddSocialUseCases();
