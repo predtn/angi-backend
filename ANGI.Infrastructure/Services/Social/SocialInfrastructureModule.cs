@@ -12,6 +12,8 @@ public static class SocialInfrastructureModule
     public static IServiceCollection AddSocialInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IBlogRepository, BlogRepository>();
+        services.AddScoped<IBlogCommentRepository, BlogCommentRepository>();
+        services.AddScoped<IReportRepository, ReportRepository>();
         services.AddScoped<IBlogContentSanitizer, BlogContentSanitizer>();
         return services;
     }

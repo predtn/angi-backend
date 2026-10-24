@@ -4,12 +4,14 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Infrastructure.Services.Moderation;
 
-/// <summary>Registers persistence required by the moderation module.</summary>
-public static class ModerationModule
+/// <summary>Centralizes Infrastructure-layer registrations for moderation features.</summary>
+public static class ModerationInfrastructureModule
 {
-    /// <summary>Adds a scoped moderation repository sharing the request's unit of work.</summary>
+    /// <summary>Registers moderation persistence and the account suspension expiry worker.</summary>
     public static IServiceCollection AddModerationInfrastructure(this IServiceCollection services)
     {
+        services.AddScoped<IVerificationReviewRepository, VerificationReviewRepository>();
+        services.AddScoped<IMenuReviewRepository, MenuReviewRepository>();
         services.AddScoped<IRestaurantModerationRepository, RestaurantModerationRepository>();
         services.AddHostedService<AccountSuspensionExpiryWorker>();
         return services;
