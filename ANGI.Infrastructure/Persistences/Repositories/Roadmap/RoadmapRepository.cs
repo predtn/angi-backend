@@ -330,9 +330,84 @@ public sealed class RoadmapRepository : IRoadmapRepository
         return (true, day);
     }
 
+    /// <summary>Locks the owned roadmap row and tracks one RM-08 item with the graph required by RoadmapItem.</summary>
+    public async Task<RoadmapItem?> LockAndGetOwnedItemAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmaps
+            WHERE id = {{roadmapId}}
+              AND user_id = {{userId}}
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """, ct);
+
+        return await _context.RoadmapItems
+            .Where(item => item.Id == itemId &&
+                           item.RoadmapDay.RoadmapId == roadmapId &&
+                           item.RoadmapDay.Roadmap.UserId == userId)
+            .Include(item => item.RoadmapDay)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.CoverMedia)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.Restaurant)
+            .Include(item => item.Dish)
+                .ThenInclude(dish => dish.DishTags)
+                    .ThenInclude(dishTag => dishTag.Tag)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>Tracks an RM-08 destination day after constraining it to the current user's roadmap.</summary>
+    public Task<RoadmapDay?> GetOwnedDayAsync(long roadmapId, long dayId, int userId, CancellationToken ct)
+    {
+        return _context.RoadmapDays
+            .Where(day => day.Id == dayId &&
+                          day.RoadmapId == roadmapId &&
+                          day.Roadmap.UserId == userId)
+            .FirstOrDefaultAsync(ct);
+    }
+
     /// <summary>Adds one RM-07 item to the current unit of work.</summary>
     public void AddItem(RoadmapItem item)
     {
         _context.RoadmapItems.Add(item);
+    }
+
+    /// <summary>Loads and row-locks an RM-09 item after checking route membership, ownership, and visibility.</summary>
+    public async Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct)
+    {
+        await _context.Database.ExecuteSqlInterpolatedAsync($$"""
+            SELECT 1
+            FROM core.roadmap_items AS item
+            INNER JOIN core.roadmap_days AS day ON day.id = item.roadmap_day_id
+            INNER JOIN core.roadmaps AS roadmap ON roadmap.id = day.roadmap_id
+            WHERE item.id = {{itemId}}
+              AND roadmap.id = {{roadmapId}}
+              AND roadmap.user_id = {{userId}}
+              AND roadmap.deleted_at IS NULL
+            FOR UPDATE OF item
+            """, ct);
+
+        return await _context.RoadmapItems.FirstOrDefaultAsync(
+            item => item.Id == itemId &&
+                    item.RoadmapDay.RoadmapId == roadmapId &&
+                    item.RoadmapDay.Roadmap.UserId == userId &&
+                    item.RoadmapDay.Roadmap.DeletedAt == null,
+            ct);
+    }
+
+    /// <summary>Marks a tracked item (the old RM-08 item, or the RM-09 item) for hard deletion in the current unit of work.</summary>
+    public void RemoveItem(RoadmapItem item)
+    {
+        _context.RoadmapItems.Remove(item);
     }
 }

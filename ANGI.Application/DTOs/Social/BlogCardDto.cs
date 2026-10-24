@@ -3,7 +3,7 @@ using ANGI.Application.DTOs.Account;
 namespace ANGI.Application.DTOs.Social;
 
 /// <summary>BlogCard of the API Design: a blog in a list.</summary>
-public sealed class BlogCardDto
+public class BlogCardDto
 {
     public long Id { get; init; }
     public string Title { get; init; } = string.Empty;
