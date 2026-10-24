@@ -3,6 +3,7 @@ using ANGI.Application.UseCases.Roadmap.Create;
 using ANGI.Application.UseCases.Roadmap.Delete;
 using ANGI.Application.UseCases.Roadmap.DeleteItem;
 using ANGI.Application.UseCases.Roadmap.AddItem;
+using ANGI.Application.UseCases.Roadmap.Generate;
 using ANGI.Application.UseCases.Roadmap.GetMyRoadmaps;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapDayRoute;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapDetail;
@@ -33,6 +34,9 @@ public static class RoadmapModule
         services.AddScoped<IUpdateRoadmapUseCase, UpdateRoadmapUseCase>();
         services.AddScoped<IUpdateRoadmapItemUseCase, UpdateRoadmapItemUseCase>();
         services.AddScoped<IRateRoadmapItemUseCase, RateRoadmapItemUseCase>();
+        services.AddScoped<IGenerateRoadmapUseCase, GenerateRoadmapUseCase>();
+        services.AddScoped<IGetRoadmapGenerationJobUseCase, GetRoadmapGenerationJobUseCase>();
+        services.AddScoped<IProcessRoadmapGenerationJobUseCase, ProcessRoadmapGenerationJobUseCase>();
         return services;
     }
 }

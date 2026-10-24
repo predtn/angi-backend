@@ -2,6 +2,7 @@ using ANGI.Application.Common.Interfaces.Repositories;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Persistences.Repositories;
 using ANGI.Infrastructure.Services.Account;
+using ANGI.Infrastructure.Services.Ai;
 using ANGI.Infrastructure.Services.Administration;
 using ANGI.Infrastructure.Services.Audit;
 using ANGI.Infrastructure.Services.Discovery;
@@ -48,7 +49,8 @@ namespace ANGI.Infrastructure
             services.AddEmailInfrastructure(configuration);
             services.AddRestaurantInfrastructure();
             services.AddDiscoveryInfrastructure();
-            services.AddRoadmapInfrastructure();
+            services.AddRoadmapInfrastructure(configuration);
+            services.AddAiInfrastructure(configuration);
             services.AddSocialInfrastructure();
             services.AddAuditInfrastructure();
             services.AddNotificationInfrastructure();

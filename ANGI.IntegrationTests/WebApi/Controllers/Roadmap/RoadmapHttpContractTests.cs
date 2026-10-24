@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Interfaces.UseCases.Auth;
+using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
 using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Roadmap;
@@ -50,6 +51,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
+    [InlineData("POST", "/api/v1/roadmaps/88/generate")]
+    [InlineData("GET", "/api/v1/roadmaps/88/generation-jobs/77")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -75,6 +78,8 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("DELETE", "/api/v1/roadmaps/88")]
     [InlineData("DELETE", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
+    [InlineData("POST", "/api/v1/roadmaps/88/generate")]
+    [InlineData("GET", "/api/v1/roadmaps/88/generation-jobs/77")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
         using var request = JsonRequest(method, path, "{}");
@@ -87,13 +92,14 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 
     // TEST-03: Return VALIDATION_FAILED for missing JSON bodies on every roadmap body endpoint.
-    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, RM-07, RM-08, and RM-13.</summary>
+    /// <summary>Verifies the shared null-body filter covers RM-01, RM-04, RM-07, RM-08, RM-10, and RM-13.</summary>
     [Theory]
     [InlineData("POST", "/api/v1/roadmaps")]
     [InlineData("PATCH", "/api/v1/roadmaps/88")]
     [InlineData("POST", "/api/v1/roadmaps/88/days/301/items")]
     [InlineData("PATCH", "/api/v1/roadmaps/88/items/1502")]
     [InlineData("POST", "/api/v1/roadmaps/88/items/1502/feedback")]
+    [InlineData("POST", "/api/v1/roadmaps/88/generate")]
     public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path);
@@ -350,12 +356,18 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         provider.GetRequiredService<IValidator<AddRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<RateRoadmapItemRequestDto>>().Should().NotBeNull();
+        provider.GetRequiredService<IValidator<GenerateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IGetRoadmapItemDetailUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IUpdateRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IDeleteRoadmapItemUseCase>().Should().NotBeNull();
         provider.GetRequiredService<IRateRoadmapItemUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IGenerateRoadmapUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IGetRoadmapGenerationJobUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IProcessRoadmapGenerationJobUseCase>().Should().NotBeNull();
+        provider.GetRequiredService<IRoadmapGenerationRepository>().Should().NotBeNull();
+        provider.GetRequiredService<IRoadmapPlannerService>().Should().NotBeNull();
         provider.GetRequiredService<IRoadmapRepository>().Should().NotBeNull();
         typeof(RoadmapsController).GetConstructors().Single().GetParameters()
             .Select(parameter => provider.GetService(parameter.ParameterType))
@@ -371,7 +383,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
-        endpoints.Should().HaveCount(12);
+        endpoints.Should().HaveCount(14);
 
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -396,6 +408,9 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
             .TryGetProperty("delete", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}/items/{itemId}/feedback")
             .TryGetProperty("post", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/generate").TryGetProperty("post", out _).Should().BeTrue();
+        paths.GetProperty("/api/v1/roadmaps/{roadmapId}/generation-jobs/{jobId}")
+            .TryGetProperty("get", out _).Should().BeTrue();
     }
 
     // TEST-17: Serialize every RM-12 section and bind both route values.
@@ -540,6 +555,90 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
         await AssertErrorCode(response, "FEEDBACK_ALREADY_EXISTS");
     }
 
+    // TEST-24: Bind every RM-10 body value and serialize the queued job with HTTP 202.
+    /// <summary>Verifies RM-10 routing, delegation, and the documented response JSON shape.</summary>
+    [Fact]
+    public async Task Generate_WithBody_ShouldSerializeAcceptedJob()
+    {
+        using var request = JsonRequest("POST", "/api/v1/roadmaps/88/generate",
+            "{\"scope\":\"day\",\"dayId\":301,\"replaceExisting\":false,\"province\":\"Thành phố Đà Nẵng\","
+            + "\"mealSlots\":[\"breakfast\",\"lunch\",\"dinner\"],\"maxPricePerMeal\":80000,\"tagIds\":[9],"
+            + "\"excludeTagIds\":[12],\"note\":\"Ưu tiên món nước\",\"radiusKm\":10}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+
+        using var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("jobId").GetInt64().Should().Be(77);
+        data.GetProperty("status").GetString().Should().Be("queued");
+        _factory.Generate.LastCall.Should().NotBeNull();
+        _factory.Generate.LastCall!.RoadmapId.Should().Be(88);
+        _factory.Generate.LastCall.Request.Should().BeEquivalentTo(new
+        {
+            Scope = "day",
+            DayId = (long?)301,
+            ReplaceExisting = (bool?)false,
+            Province = "Thành phố Đà Nẵng",
+            MealSlots = new[] { "breakfast", "lunch", "dinner" },
+            MaxPricePerMeal = (decimal?)80000,
+            TagIds = new short[] { 9 },
+            ExcludeTagIds = new short[] { 12 },
+            Note = "Ưu tiên món nước",
+            RadiusKm = (decimal?)10
+        });
+    }
+
+    // TEST-25: Preserve GENERATION_IN_PROGRESS and DAY_NOT_FOUND through the RM-10 HTTP boundary.
+    /// <summary>Verifies the documented 409 and 404 envelopes.</summary>
+    [Fact]
+    public async Task Generate_WhenBusyOrDayMissing_ShouldReturnDocumentedErrors()
+    {
+        using var busy = JsonRequest("POST", "/api/v1/roadmaps/409/generate", "{\"scope\":\"full\",\"province\":\"Huế\"}");
+        busy.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+        using var missingDay = JsonRequest("POST", "/api/v1/roadmaps/404/generate", "{\"scope\":\"day\",\"dayId\":9,\"province\":\"Huế\"}");
+        missingDay.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+        var client = _factory.CreateClient();
+
+        using var busyResponse = await client.SendAsync(busy);
+        using var missingDayResponse = await client.SendAsync(missingDay);
+
+        busyResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await AssertErrorCode(busyResponse, "GENERATION_IN_PROGRESS");
+        missingDayResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await AssertErrorCode(missingDayResponse, "DAY_NOT_FOUND");
+    }
+
+    // TEST-26: Serialize every RM-11 field and preserve JOB_NOT_FOUND.
+    /// <summary>Verifies RM-11 routing, both route values, nullable fields, and the 404 envelope.</summary>
+    [Fact]
+    public async Task GetGenerationJob_ShouldSerializeJobOrNotFound()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/generation-jobs/77");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+        using var missing = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/generation-jobs/404");
+        missing.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
+        var client = _factory.CreateClient();
+
+        using var response = await client.SendAsync(request);
+        using var missingResponse = await client.SendAsync(missing);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("jobId").GetInt64().Should().Be(77);
+        data.GetProperty("scope").GetString().Should().Be("day");
+        data.GetProperty("status").GetString().Should().Be("succeeded");
+        data.GetProperty("errorMessage").ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("createdItemIds").EnumerateArray().Select(id => id.GetInt64()).Should().Equal(1510, 1511, 1512);
+        data.GetProperty("createdAt").GetDateTime().Should().Be(new DateTime(2026, 10, 2, 2, 20, 0, DateTimeKind.Utc));
+        data.GetProperty("finishedAt").GetDateTime().Should().Be(new DateTime(2026, 10, 2, 2, 20, 4, DateTimeKind.Utc));
+        _factory.GetGenerationJob.LastCall.Should().Be(new RoadmapApiFactory.ItemDetailCall(88, 404));
+        missingResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await AssertErrorCode(missingResponse, "JOB_NOT_FOUND");
+    }
+
     /// <summary>Builds an HTTP request with an application/json body.</summary>
     private static HttpRequestMessage JsonRequest(string method, string path, string json) => new(new HttpMethod(method), path)
     {
@@ -609,6 +708,12 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
     /// <summary>Gets the stateful RM-13 stub used to inspect route and body values.</summary>
     public StubRateRoadmapItemUseCase RateItem { get; } = new();
 
+    /// <summary>Gets the stateful RM-10 stub used to inspect route and body values.</summary>
+    public StubGenerateRoadmapUseCase Generate { get; } = new();
+
+    /// <summary>Gets the stateful RM-11 stub used to inspect both route values.</summary>
+    public StubGetRoadmapGenerationJobUseCase GetGenerationJob { get; } = new();
+
     /// <summary>Provides JWT values before Program performs its immediate authentication configuration.</summary>
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -663,6 +768,8 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IDeleteRoadmapUseCase>();
             services.RemoveAll<IDeleteRoadmapItemUseCase>();
             services.RemoveAll<IRateRoadmapItemUseCase>();
+            services.RemoveAll<IGenerateRoadmapUseCase>();
+            services.RemoveAll<IGetRoadmapGenerationJobUseCase>();
             services.AddScoped<IEnsureActiveAccountUseCase, NoOpAccountCheck>();
             services.AddScoped<ICreateRoadmapUseCase, StubCreateRoadmapUseCase>();
             services.AddSingleton(GetMyRoadmaps);
@@ -687,6 +794,10 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IDeleteRoadmapItemUseCase>(DeleteItem);
             services.AddSingleton(RateItem);
             services.AddSingleton<IRateRoadmapItemUseCase>(RateItem);
+            services.AddSingleton(Generate);
+            services.AddSingleton<IGenerateRoadmapUseCase>(Generate);
+            services.AddSingleton(GetGenerationJob);
+            services.AddSingleton<IGetRoadmapGenerationJobUseCase>(GetGenerationJob);
         });
     }
 
@@ -943,6 +1054,56 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
                 LikeCount = 129,
                 DislikeCount = 9,
                 CreatedAt = new DateTime(2026, 10, 10, 2, 0, 0, DateTimeKind.Utc)
+            });
+        }
+    }
+
+    public sealed record GenerateCall(long RoadmapId, GenerateRoadmapRequestDto Request);
+
+    public sealed class StubGenerateRoadmapUseCase : IGenerateRoadmapUseCase
+    {
+        public GenerateCall? LastCall { get; private set; }
+
+        /// <summary>Captures route and body values, or emits the RM-10 errors for roadmaps 409 and 404.</summary>
+        public Task<GenerateRoadmapResponseDto> ExecuteAsync(
+            long roadmapId,
+            GenerateRoadmapRequestDto request,
+            CancellationToken ct)
+        {
+            LastCall = new GenerateCall(roadmapId, request);
+            return roadmapId switch
+            {
+                409 => throw new ANGI.Application.Common.Exceptions.ConflictException(
+                    "GENERATION_IN_PROGRESS", "Roadmap đang được AI tạo, vui lòng chờ xong."),
+                404 => throw new ANGI.Application.Common.Exceptions.NotFoundException(
+                    "DAY_NOT_FOUND", "Không tìm thấy ngày trong roadmap."),
+                _ => Task.FromResult(new GenerateRoadmapResponseDto { JobId = 77, Status = "queued" })
+            };
+        }
+    }
+
+    public sealed class StubGetRoadmapGenerationJobUseCase : IGetRoadmapGenerationJobUseCase
+    {
+        public ItemDetailCall? LastCall { get; private set; }
+
+        /// <summary>Captures both route values and returns the documented sample job, or JOB_NOT_FOUND for job 404.</summary>
+        public Task<RoadmapGenerationJobDto> ExecuteAsync(long roadmapId, long jobId, CancellationToken ct)
+        {
+            LastCall = new ItemDetailCall(roadmapId, jobId);
+            if (jobId == 404)
+            {
+                throw new ANGI.Application.Common.Exceptions.NotFoundException(
+                    "JOB_NOT_FOUND", "Không tìm thấy tiến trình tạo roadmap.");
+            }
+
+            return Task.FromResult(new RoadmapGenerationJobDto
+            {
+                JobId = 77,
+                Scope = "day",
+                Status = "succeeded",
+                CreatedItemIds = [1510, 1511, 1512],
+                CreatedAt = new DateTime(2026, 10, 2, 2, 20, 0, DateTimeKind.Utc),
+                FinishedAt = new DateTime(2026, 10, 2, 2, 20, 4, DateTimeKind.Utc)
             });
         }
     }
