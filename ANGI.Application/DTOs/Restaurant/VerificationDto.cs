@@ -3,7 +3,7 @@ using ANGI.Application.DTOs.Account;
 namespace ANGI.Application.DTOs.Restaurant;
 
 /// <summary>Represents a restaurant verification submission in owner-facing responses.</summary>
-public sealed class VerificationDto
+public class VerificationDto
 {
     public long Id { get; set; }
     public long RestaurantId { get; set; }

@@ -24,7 +24,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
 
             builder.HasOne(x => x.Submission).WithMany(x => x.Items).HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Cascade);
             builder.HasOne(x => x.SourceDish).WithMany().HasForeignKey(x => x.SourceDishId);
-            builder.HasOne<Dish>().WithMany().HasForeignKey(x => x.ResultDishId);
+            builder.HasOne(x => x.ResultDish).WithMany().HasForeignKey(x => x.ResultDishId);
             builder.HasOne(x => x.CoverMedia).WithMany().HasForeignKey(x => x.CoverMediaId);
         }
     }
