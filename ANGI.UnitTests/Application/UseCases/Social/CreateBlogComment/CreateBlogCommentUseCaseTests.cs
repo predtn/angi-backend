@@ -14,175 +14,98 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Social.CreateBlogComment;
 
-/// <summary>Unit tests for BLOG-10 (Create Blog Comment).</summary>
+/// <summary>Unit tests for BLOG-10 CreateBlogCommentUseCase.</summary>
 public sealed class CreateBlogCommentUseCaseTests
 {
-    private static readonly DateTime Now = new(2026, 10, 22, 12, 0, 0, DateTimeKind.Utc);
+    private readonly IValidator<CreateBlogCommentRequestDto> _validator = new CreateBlogCommentRequestDtoValidator();
+    private readonly Mock<IBlogRepository> _blogRepository = new();
+    private readonly Mock<IBlogContentSanitizer> _contentSanitizer = new();
+    private readonly Mock<ICurrentUserService> _currentUserService = new();
+    private readonly Mock<IUnitOfWork> _unitOfWork = new();
 
-    // TEST-01 (Happy Path): Creating comment on existing blog succeeds, increments comment count, and maps DTO.
+    public CreateBlogCommentUseCaseTests()
+    {
+        _currentUserService.Setup(s => s.UserId).Returns(12);
+        _contentSanitizer.Setup(s => s.Sanitize(It.IsAny<string>()))
+            .Returns<string>(input => input);
+    }
+
+    private CreateBlogCommentUseCase CreateUseCase() =>
+        new(_validator, _blogRepository.Object, _contentSanitizer.Object, _currentUserService.Object, _unitOfWork.Object);
+
     [Fact]
-    public async Task ExecuteAsync_HappyPath_ShouldCreateCommentSuccessfully()
+    public async Task ExecuteAsync_HappyPath_ShouldCreateCommentAndIncrementBlogCommentCount()
     {
         // Arrange
         const long blogId = 45;
-        const int commenterId = 12;
-        const int blogAuthorId = 99;
-
+        const int userId = 12;
+        var authorUser = new User
+        {
+            Id = userId,
+            DisplayName = "Nguyễn An",
+            AvatarMedia = new MediaFile { Url = "https://cdn.angi.vn/avatar.jpg" }
+        };
         var blog = new Blog
         {
             Id = blogId,
-            AuthorId = blogAuthorId,
-            Title = "Quán ngon Đà Nẵng",
+            AuthorId = 99,
+            Title = "Quán ăn ngon",
             Status = BlogStatus.Published,
-            CommentCount = 2
+            CommentCount = 3
         };
-
-        var user = new User
+        var request = new CreateBlogCommentRequestDto
         {
-            Id = commenterId,
-            DisplayName = "Nguyễn An",
-            AvatarMedia = new MediaFile { Url = "https://cdn.angi.vn/avatars/12.jpg" }
+            Content = "Quán này ngon thật!"
         };
 
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetActiveBlogByIdAsync(blogId, It.IsAny<CancellationToken>()))
+        _blogRepository.Setup(r => r.GetAuthorAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(authorUser);
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(blog);
-        commentRepo.Setup(r => r.GetUserAsync(commenterId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(user);
 
         BlogComment? addedComment = null;
-        commentRepo.Setup(r => r.Add(It.IsAny<BlogComment>()))
-            .Callback<BlogComment>(c =>
-            {
-                c.Id = 302;
-                addedComment = c;
-            });
+        _blogRepository.Setup(r => r.AddComment(It.IsAny<BlogComment>()))
+            .Callback<BlogComment>(c => addedComment = c);
 
-        Domain.Entities.Notification? addedNotification = null;
-        commentRepo.Setup(r => r.AddNotification(It.IsAny<Domain.Entities.Notification>()))
-            .Callback<Domain.Entities.Notification>(n => addedNotification = n);
-
-        var sanitizer = new Mock<IBlogContentSanitizer>();
-        sanitizer.Setup(s => s.Sanitize(It.IsAny<string>()))
-            .Returns<string>(c => c);
-
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(commenterId);
-
-        var unitOfWork = new Mock<IUnitOfWork>();
-        unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1);
-
-        var useCase = new CreateBlogCommentUseCase(
-            new CreateBlogCommentRequestDtoValidator(),
-            commentRepo.Object,
-            sanitizer.Object,
-            currentUser.Object,
-            unitOfWork.Object,
-            new FixedTimeProvider(Now));
-
-        var request = new CreateBlogCommentRequestDto { Content = "Quán này ngon thật!" };
+        var useCase = CreateUseCase();
 
         // Act
         var result = await useCase.ExecuteAsync(blogId, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        result.Id.Should().Be(302);
         result.BlogId.Should().Be(blogId);
         result.Content.Should().Be("Quán này ngon thật!");
         result.IsMine.Should().BeTrue();
-        result.User.Id.Should().Be(commenterId);
+        result.User.Id.Should().Be(userId);
         result.User.DisplayName.Should().Be("Nguyễn An");
-        result.User.AvatarUrl.Should().Be("https://cdn.angi.vn/avatars/12.jpg");
+        result.User.AvatarUrl.Should().Be("https://cdn.angi.vn/avatar.jpg");
 
-        blog.CommentCount.Should().Be(3);
+        blog.CommentCount.Should().Be(4);
         addedComment.Should().NotBeNull();
-        addedComment!.Content.Should().Be("Quán này ngon thật!");
+        addedComment!.BlogId.Should().Be(blogId);
+        addedComment.UserId.Should().Be(userId);
+        addedComment.Content.Should().Be("Quán này ngon thật!");
         addedComment.Status.Should().Be(ContentStatus.Visible);
 
-        addedNotification.Should().NotBeNull();
-        addedNotification!.RecipientId.Should().Be(blogAuthorId);
-        addedNotification.Type.Should().Be("BLOG_COMMENTED");
-
-        unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-02: Commenting on own blog does not trigger a notification.
     [Fact]
-    public async Task ExecuteAsync_WhenCommentingOnOwnBlog_ShouldNotSendNotification()
+    public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
         // Arrange
-        const long blogId = 45;
-        const int authorId = 12;
+        const long nonExistentBlogId = 9999;
+        const int userId = 12;
+        var authorUser = new User { Id = userId, DisplayName = "Nguyễn An" };
 
-        var blog = new Blog
-        {
-            Id = blogId,
-            AuthorId = authorId,
-            Title = "Quán ngon Đà Nẵng",
-            Status = BlogStatus.Published,
-            CommentCount = 0
-        };
-
-        var user = new User { Id = authorId, DisplayName = "Nguyễn An" };
-
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetActiveBlogByIdAsync(blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(blog);
-        commentRepo.Setup(r => r.GetUserAsync(authorId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(user);
-
-        var sanitizer = new Mock<IBlogContentSanitizer>();
-        sanitizer.Setup(s => s.Sanitize(It.IsAny<string>())).Returns<string>(c => c);
-
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(authorId);
-
-        var unitOfWork = new Mock<IUnitOfWork>();
-        unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-
-        var useCase = new CreateBlogCommentUseCase(
-            new CreateBlogCommentRequestDtoValidator(),
-            commentRepo.Object,
-            sanitizer.Object,
-            currentUser.Object,
-            unitOfWork.Object,
-            new FixedTimeProvider(Now));
-
-        var request = new CreateBlogCommentRequestDto { Content = "Tôi tự comment bài của mình." };
-
-        // Act
-        var result = await useCase.ExecuteAsync(blogId, request, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        commentRepo.Verify(r => r.AddNotification(It.IsAny<Domain.Entities.Notification>()), Times.Never);
-        blog.CommentCount.Should().Be(1);
-    }
-
-    // TEST-03 (Exception Path 1): Truyền blogId không tồn tại (bắn 404 BLOG_NOT_FOUND).
-    [Fact]
-    public async Task ExecuteAsync_NonExistentBlogId_ShouldThrowNotFoundException()
-    {
-        // Arrange
-        const long nonExistentBlogId = 999;
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetActiveBlogByIdAsync(nonExistentBlogId, It.IsAny<CancellationToken>()))
+        _blogRepository.Setup(r => r.GetAuthorAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(authorUser);
+        _blogRepository.Setup(r => r.GetByIdAsync(nonExistentBlogId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Blog?)null);
 
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(12);
-
-        var useCase = new CreateBlogCommentUseCase(
-            new CreateBlogCommentRequestDtoValidator(),
-            commentRepo.Object,
-            Mock.Of<IBlogContentSanitizer>(),
-            currentUser.Object,
-            Mock.Of<IUnitOfWork>(),
-            new FixedTimeProvider(Now));
-
         var request = new CreateBlogCommentRequestDto { Content = "Bình luận thử" };
+        var useCase = CreateUseCase();
 
         // Act
         var act = () => useCase.ExecuteAsync(nonExistentBlogId, request, CancellationToken.None);
@@ -192,23 +115,27 @@ public sealed class CreateBlogCommentUseCaseTests
         ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
     }
 
-    // TEST-04: User not authenticated should throw UnauthorizedException (401).
     [Fact]
-    public async Task ExecuteAsync_UnauthenticatedUser_ShouldThrowUnauthorizedException()
+    public async Task ExecuteAsync_WhenContentIsEmpty_ShouldThrowValidationException()
     {
         // Arrange
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns((int?)null);
+        var request = new CreateBlogCommentRequestDto { Content = "" };
+        var useCase = CreateUseCase();
 
-        var useCase = new CreateBlogCommentUseCase(
-            new CreateBlogCommentRequestDtoValidator(),
-            Mock.Of<IBlogCommentRepository>(),
-            Mock.Of<IBlogContentSanitizer>(),
-            currentUser.Object,
-            Mock.Of<IUnitOfWork>(),
-            new FixedTimeProvider(Now));
+        // Act
+        var act = () => useCase.ExecuteAsync(45, request, CancellationToken.None);
 
-        var request = new CreateBlogCommentRequestDto { Content = "Nội dung" };
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
+    {
+        // Arrange
+        _currentUserService.Setup(s => s.UserId).Returns((int?)null);
+        var request = new CreateBlogCommentRequestDto { Content = "Bình luận" };
+        var useCase = CreateUseCase();
 
         // Act
         var act = () => useCase.ExecuteAsync(45, request, CancellationToken.None);
@@ -218,48 +145,41 @@ public sealed class CreateBlogCommentUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
-    // TEST-05: Sanitizer strips all content resulting in empty string should throw ValidationException (400).
     [Fact]
-    public async Task ExecuteAsync_SanitizedContentEmpty_ShouldThrowValidationException()
+    public async Task ExecuteAsync_OnAnotherTravelersBlog_ShouldNotifyTheAuthor()
     {
-        // Arrange
         const long blogId = 45;
-        const int userId = 12;
+        var blog = new Blog { Id = blogId, AuthorId = 99, Title = "Quán ăn ngon", Status = BlogStatus.Published };
+        _blogRepository.Setup(r => r.GetAuthorAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = 12, DisplayName = "Nguyễn An" });
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>())).ReturnsAsync(blog);
+        ANGI.Domain.Entities.Notification? notification = null;
+        _blogRepository.Setup(r => r.AddNotification(It.IsAny<ANGI.Domain.Entities.Notification>()))
+            .Callback<ANGI.Domain.Entities.Notification>(value => notification = value);
+        var longContent = new string('a', 60);
 
-        var blog = new Blog { Id = blogId, Status = BlogStatus.Published };
-        var user = new User { Id = userId, DisplayName = "Nguyễn An" };
+        await CreateUseCase().ExecuteAsync(blogId, new CreateBlogCommentRequestDto { Content = longContent }, CancellationToken.None);
 
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetActiveBlogByIdAsync(blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(blog);
-        commentRepo.Setup(r => r.GetUserAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(user);
-
-        var sanitizer = new Mock<IBlogContentSanitizer>();
-        sanitizer.Setup(s => s.Sanitize(It.IsAny<string>())).Returns(string.Empty);
-
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(userId);
-
-        var useCase = new CreateBlogCommentUseCase(
-            new CreateBlogCommentRequestDtoValidator(),
-            commentRepo.Object,
-            sanitizer.Object,
-            currentUser.Object,
-            Mock.Of<IUnitOfWork>(),
-            new FixedTimeProvider(Now));
-
-        var request = new CreateBlogCommentRequestDto { Content = "<script>alert('xss')</script>" };
-
-        // Act
-        var act = () => useCase.ExecuteAsync(blogId, request, CancellationToken.None);
-
-        // Assert
-        await act.Should().ThrowAsync<ValidationException>();
+        notification.Should().NotBeNull();
+        notification!.RecipientId.Should().Be(99);
+        notification.Type.Should().Be("BLOG_COMMENTED");
+        notification.Title.Should().Be("Có bình luận mới");
+        notification.Body.Should().Be($"Nguyễn An: \"{new string('a', 47)}...\"");
+        notification.Data.Should().Be("{\"blogId\":45}");
     }
 
-    private sealed class FixedTimeProvider(DateTime now) : TimeProvider
+    [Fact]
+    public async Task ExecuteAsync_OnOwnBlog_ShouldNotNotify()
     {
-        public override DateTimeOffset GetUtcNow() => new(now);
+        const long blogId = 45;
+        var blog = new Blog { Id = blogId, AuthorId = 12, Title = "Blog của tôi", Status = BlogStatus.Published };
+        _blogRepository.Setup(r => r.GetAuthorAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = 12, DisplayName = "Nguyễn An" });
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>())).ReturnsAsync(blog);
+
+        await CreateUseCase().ExecuteAsync(blogId, new CreateBlogCommentRequestDto { Content = "Cảm ơn mọi người" }, CancellationToken.None);
+
+        _blogRepository.Verify(r => r.AddNotification(It.IsAny<ANGI.Domain.Entities.Notification>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

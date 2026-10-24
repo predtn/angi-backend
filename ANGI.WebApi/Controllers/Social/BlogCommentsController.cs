@@ -1,46 +1,22 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
-using ANGI.Application.DTOs.Social;
 using ANGI.WebApi.Common.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ANGI.WebApi.Controllers.Social;
 
-/// <summary>Exposes traveler-authored blog comment operations.</summary>
+/// <summary>Exposes BLOG-11; BLOG-10 is served by BlogsController.</summary>
 [ApiController]
 [Route("api/v1/blogs/{blogId:long}/comments")]
 [Authorize(Roles = "TRAVELER")]
 public sealed class BlogCommentsController : ControllerBase
 {
-    private readonly ICreateBlogCommentUseCase _createBlogCommentUseCase;
     private readonly IDeleteBlogCommentUseCase _deleteBlogCommentUseCase;
 
-    /// <summary>Initializes the HTTP boundary with the comment use cases.</summary>
-    public BlogCommentsController(
-        ICreateBlogCommentUseCase createBlogCommentUseCase,
-        IDeleteBlogCommentUseCase deleteBlogCommentUseCase)
+    /// <summary>Initializes the HTTP boundary with the BLOG-11 use case.</summary>
+    public BlogCommentsController(IDeleteBlogCommentUseCase deleteBlogCommentUseCase)
     {
-        _createBlogCommentUseCase = createBlogCommentUseCase;
         _deleteBlogCommentUseCase = deleteBlogCommentUseCase;
-    }
-
-    // BLOG-10
-    /// <summary>Receives BLOG-10 and posts a top-level comment to an active blog.</summary>
-    [HttpPost]
-    [ProducesResponseType(typeof(ApiResponse<CommentDto>), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> CreateComment(
-        [FromRoute] long blogId,
-        [FromBody] CreateBlogCommentRequestDto request,
-        CancellationToken ct)
-    {
-        var result = await _createBlogCommentUseCase.ExecuteAsync(blogId, request, ct);
-        return StatusCode(
-            StatusCodes.Status201Created,
-            new ApiResponse<CommentDto> { Success = true, Data = result });
     }
 
     // BLOG-11

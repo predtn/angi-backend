@@ -27,11 +27,13 @@ public sealed class MediaController : ControllerBase
     /// <response code="201">Tải lên tệp thành công.</response>
     /// <response code="400">Tệp vượt quá dung lượng cho phép hoặc định dạng không hỗ trợ.</response>
     /// <response code="401">Chưa đăng nhập hoặc token không hợp lệ.</response>
+    /// <response code="403">Không có quyền thực hiện hành động này.</response>
     [HttpPost]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApiResponse<MediaFileDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Upload([FromForm] UploadMediaForm form, CancellationToken ct)
     {
         await using var content = form.File?.OpenReadStream();

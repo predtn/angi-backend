@@ -13,6 +13,7 @@ public static class SocialInfrastructureModule
     {
         services.AddScoped<IBlogRepository, BlogRepository>();
         services.AddScoped<IBlogCommentRepository, BlogCommentRepository>();
+        services.AddScoped<IReportRepository, ReportRepository>();
         services.AddScoped<IBlogContentSanitizer, BlogContentSanitizer>();
         return services;
     }

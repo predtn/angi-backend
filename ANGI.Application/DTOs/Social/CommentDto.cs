@@ -2,13 +2,13 @@ using ANGI.Application.DTOs.Account;
 
 namespace ANGI.Application.DTOs.Social;
 
-/// <summary>Represents a blog comment response (Comment DTO in API Design Ver 1.8).</summary>
+/// <summary>Represents a single-level blog comment returned by BLOG-03 and BLOG-10.</summary>
 public sealed class CommentDto
 {
-    public long Id { get; set; }
-    public long BlogId { get; set; }
-    public UserSummaryDto User { get; set; } = null!;
-    public string Content { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
-    public bool IsMine { get; set; }
+    public long Id { get; init; }
+    public long BlogId { get; init; }
+    public UserSummaryDto User { get; init; } = new();
+    public string Content { get; init; } = string.Empty;
+    public DateTime CreatedAt { get; init; }
+    public bool IsMine { get; init; }
 }

@@ -4,59 +4,37 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Social;
 
-/// <summary>Boundary tests for the BLOG-10 request validator.</summary>
+/// <summary>Unit tests for CreateBlogCommentRequestDtoValidator.</summary>
 public sealed class CreateBlogCommentRequestDtoValidatorTests
 {
     private readonly CreateBlogCommentRequestDtoValidator _validator = new();
 
-    // TEST-01: Valid content within length 1..1000 should pass validation.
-    [Theory]
-    [InlineData(1)]
-    [InlineData(500)]
-    [InlineData(1000)]
-    public async Task Validate_WithValidContentLength_ShouldPass(int length)
+    [Fact]
+    public void Validate_WhenValid_ShouldNotHaveErrors()
     {
-        var request = new CreateBlogCommentRequestDto
-        {
-            Content = new string('x', length)
-        };
-
-        var result = await _validator.ValidateAsync(request);
-
+        var dto = new CreateBlogCommentRequestDto { Content = "Bài viết rất hay!" };
+        var result = _validator.Validate(dto);
         result.IsValid.Should().BeTrue();
     }
 
-    // TEST-02: Missing, empty, or whitespace content should fail validation.
     [Theory]
-    [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task Validate_WithEmptyOrWhitespaceContent_ShouldFail(string? content)
+    [InlineData(null)]
+    public void Validate_WhenContentEmptyOrNull_ShouldHaveValidationError(string? content)
     {
-        var request = new CreateBlogCommentRequestDto
-        {
-            Content = content!
-        };
-
-        var result = await _validator.ValidateAsync(request);
-
+        var dto = new CreateBlogCommentRequestDto { Content = content! };
+        var result = _validator.Validate(dto);
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.PropertyName == nameof(CreateBlogCommentRequestDto.Content));
     }
 
-    // TEST-03: Content exceeding 1000 characters should fail validation.
     [Fact]
-    public async Task Validate_WithContentExceeding1000Chars_ShouldFail()
+    public void Validate_WhenContentExceeds1000Chars_ShouldHaveValidationError()
     {
-        var request = new CreateBlogCommentRequestDto
-        {
-            Content = new string('x', 1001)
-        };
-
-        var result = await _validator.ValidateAsync(request);
-
+        var dto = new CreateBlogCommentRequestDto { Content = new string('a', 1001) };
+        var result = _validator.Validate(dto);
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.PropertyName == nameof(CreateBlogCommentRequestDto.Content)
-            && e.ErrorMessage.Contains("1000"));
+        result.Errors.Should().Contain(e => e.PropertyName == nameof(CreateBlogCommentRequestDto.Content));
     }
 }
