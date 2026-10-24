@@ -1,5 +1,6 @@
-using ANGI.Domain.Entities;
 using ANGI.Application.Common.Models.Social;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Social;
 
@@ -12,6 +13,30 @@ public interface IBlogRepository
     /// </summary>
     Task<IReadOnlyList<Blog>> GetFeaturedAsync(DateTime recentSince, int limit, CancellationToken ct);
 
+    /// <summary>
+    /// Queries published, undeleted blogs for BLOG-01 with optional keyword, author, and roadmap filters,
+    /// ordered by newest or popularity (like_count + comment_count), and returns the page items with total count.
+    /// </summary>
+    Task<(IReadOnlyList<Blog> Items, long TotalItems)> GetPublicBlogsAsync(
+        string? q,
+        int? authorId,
+        bool? hasRoadmap,
+        string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Retrieves a paged list of blogs authored by the specified user, optionally filtered by status,
+    /// along with the latest moderation note for hidden or removed blogs and the total count (BLOG-05).
+    /// </summary>
+    Task<(IReadOnlyList<Blog> Items, Dictionary<long, string?> ModerationNotes, long TotalCount)> GetByAuthorAsync(
+        int authorId,
+        BlogStatus? status,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
     /// <summary>Loads the current author and avatar for a newly created BlogDetail response.</summary>
     Task<User?> GetAuthorAsync(int userId, CancellationToken ct);
 
@@ -21,9 +46,28 @@ public interface IBlogRepository
     /// <summary>Determines whether an undeleted blog already uses the supplied URL slug.</summary>
     Task<bool> SlugExistsAsync(string slug, CancellationToken ct);
 
-    /// <summary>Loads an undeleted blog tracked for modification or soft deletion.</summary>
-    Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct);
+    /// <summary>Loads a published, undeleted blog with its author, cover media, and ordered gallery images (BLOG-02).</summary>
+    Task<Blog?> GetPublicDetailAsync(long blogId, CancellationToken ct);
+
+    /// <summary>Determines whether the specified user has liked the given blog.</summary>
+    Task<bool> IsLikedByUserAsync(long blogId, int userId, CancellationToken ct);
+
+    /// <summary>Determines whether a published, undeleted blog with the given identifier exists.</summary>
+    Task<bool> ExistsPublishedAsync(long blogId, CancellationToken ct);
+
+    /// <summary>Loads a paginated list of visible, undeleted comments for a blog ordered oldest first (BLOG-03).</summary>
+    Task<(IReadOnlyList<BlogComment> Items, long TotalItems)> GetVisibleCommentsAsync(
+        long blogId,
+        int page,
+        int pageSize,
+        CancellationToken ct);
 
     /// <summary>Adds a blog aggregate to the current unit of work.</summary>
     void Add(Blog blog);
+
+    /// <summary>Determines whether an undeleted blog already uses the supplied URL slug, excluding an optional blog id.</summary>
+    Task<bool> SlugExistsAsync(string slug, long? excludeBlogId, CancellationToken ct);
+
+    /// <summary>Loads an undeleted blog aggregate including images and author with tracking for modification or soft deletion.</summary>
+    Task<Blog?> GetTrackedByIdAsync(long blogId, CancellationToken ct);
 }

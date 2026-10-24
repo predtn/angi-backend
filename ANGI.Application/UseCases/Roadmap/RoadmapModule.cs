@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
 using ANGI.Application.UseCases.Roadmap.Create;
 using ANGI.Application.UseCases.Roadmap.Delete;
+using ANGI.Application.UseCases.Roadmap.DeleteItem;
 using ANGI.Application.UseCases.Roadmap.AddItem;
 using ANGI.Application.UseCases.Roadmap.GetMyRoadmaps;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapDayRoute;
@@ -8,6 +9,7 @@ using ANGI.Application.UseCases.Roadmap.GetRoadmapDetail;
 using ANGI.Application.UseCases.Roadmap.GetRoadmapItemDetail;
 using ANGI.Application.UseCases.Roadmap.GetSuggestions;
 using ANGI.Application.UseCases.Roadmap.Update;
+using ANGI.Application.UseCases.Roadmap.UpdateItem;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Roadmap;
@@ -21,12 +23,14 @@ public static class RoadmapModule
         services.AddScoped<ICreateRoadmapUseCase, CreateRoadmapUseCase>();
         services.AddScoped<IAddRoadmapItemUseCase, AddRoadmapItemUseCase>();
         services.AddScoped<IDeleteRoadmapUseCase, DeleteRoadmapUseCase>();
+        services.AddScoped<IDeleteRoadmapItemUseCase, DeleteRoadmapItemUseCase>();
         services.AddScoped<IGetMyRoadmapsUseCase, GetMyRoadmapsUseCase>();
         services.AddScoped<IGetRoadmapDetailUseCase, GetRoadmapDetailUseCase>();
         services.AddScoped<IGetRoadmapItemDetailUseCase, GetRoadmapItemDetailUseCase>();
         services.AddScoped<IGetRoadmapDayRouteUseCase, GetRoadmapDayRouteUseCase>();
         services.AddScoped<IGetRoadmapSuggestionsUseCase, GetRoadmapSuggestionsUseCase>();
         services.AddScoped<IUpdateRoadmapUseCase, UpdateRoadmapUseCase>();
+        services.AddScoped<IUpdateRoadmapItemUseCase, UpdateRoadmapItemUseCase>();
         return services;
     }
 }
