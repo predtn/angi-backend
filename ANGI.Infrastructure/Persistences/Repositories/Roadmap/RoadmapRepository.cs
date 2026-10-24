@@ -379,7 +379,23 @@ public sealed class RoadmapRepository : IRoadmapRepository
     }
 
     /// <summary>Loads and row-locks an RM-09 item after checking route membership, ownership, and visibility.</summary>
-    public async Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+    public Task<RoadmapItem?> LockAndGetOwnedItemForDeleteAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct) =>
+        LockAndGetOwnedItemCoreAsync(roadmapId, itemId, userId, ct);
+
+    /// <inheritdoc />
+    public Task<RoadmapItem?> LockAndGetOwnedItemForFeedbackAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct) =>
+        LockAndGetOwnedItemCoreAsync(roadmapId, itemId, userId, ct);
+
+    /// <summary>Row-locks an item after checking route membership, ownership, and visibility, then tracks it.</summary>
+    private async Task<RoadmapItem?> LockAndGetOwnedItemCoreAsync(
         long roadmapId,
         long itemId,
         int userId,
@@ -409,5 +425,39 @@ public sealed class RoadmapRepository : IRoadmapRepository
     public void RemoveItem(RoadmapItem item)
     {
         _context.RoadmapItems.Remove(item);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ItemHasFeedbackAsync(long roadmapItemId, CancellationToken ct) =>
+        _context.DishFeedbacks.AnyAsync(feedback => feedback.RoadmapItemId == roadmapItemId, ct);
+
+    /// <inheritdoc />
+    public void AddFeedback(DishFeedback feedback)
+    {
+        _context.DishFeedbacks.Add(feedback);
+    }
+
+    /// <inheritdoc />
+    public async Task<(int LikeCount, int DislikeCount)> IncrementDishFeedbackCountAsync(
+        int dishId,
+        FeedbackValue value,
+        CancellationToken ct)
+    {
+        // One UPDATE with the increment in SQL, so concurrent feedback on the same dish never loses a count.
+        var dish = _context.Dishes.Where(item => item.Id == dishId);
+        if (value == FeedbackValue.Like)
+        {
+            await dish.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LikeCount, item => item.LikeCount + 1), ct);
+        }
+        else
+        {
+            await dish.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DislikeCount, item => item.DislikeCount + 1), ct);
+        }
+
+        var counts = await dish
+            .AsNoTracking()
+            .Select(item => new { item.LikeCount, item.DislikeCount })
+            .SingleAsync(ct);
+        return (counts.LikeCount, counts.DislikeCount);
     }
 }

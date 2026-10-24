@@ -24,6 +24,7 @@ public sealed class RoadmapsController : ControllerBase
     private readonly IUpdateRoadmapUseCase _updateRoadmapUseCase;
     private readonly IDeleteRoadmapUseCase _deleteRoadmapUseCase;
     private readonly IDeleteRoadmapItemUseCase _deleteRoadmapItemUseCase;
+    private readonly IRateRoadmapItemUseCase _rateRoadmapItemUseCase;
 
     /// <summary>Initializes the HTTP boundary with roadmap planning use cases.</summary>
     public RoadmapsController(
@@ -37,7 +38,8 @@ public sealed class RoadmapsController : ControllerBase
         IUpdateRoadmapItemUseCase updateRoadmapItemUseCase,
         IUpdateRoadmapUseCase updateRoadmapUseCase,
         IDeleteRoadmapUseCase deleteRoadmapUseCase,
-        IDeleteRoadmapItemUseCase deleteRoadmapItemUseCase)
+        IDeleteRoadmapItemUseCase deleteRoadmapItemUseCase,
+        IRateRoadmapItemUseCase rateRoadmapItemUseCase)
     {
         _createRoadmapUseCase = createRoadmapUseCase;
         _getMyRoadmapsUseCase = getMyRoadmapsUseCase;
@@ -50,6 +52,7 @@ public sealed class RoadmapsController : ControllerBase
         _updateRoadmapUseCase = updateRoadmapUseCase;
         _deleteRoadmapUseCase = deleteRoadmapUseCase;
         _deleteRoadmapItemUseCase = deleteRoadmapItemUseCase;
+        _rateRoadmapItemUseCase = rateRoadmapItemUseCase;
     }
 
     /// <summary>Receives RM-02 and returns one page of the current traveler's roadmap cards.</summary>
@@ -216,5 +219,27 @@ public sealed class RoadmapsController : ControllerBase
     {
         await _deleteRoadmapItemUseCase.ExecuteAsync(roadmapId, itemId, ct);
         return Ok(new ApiResponse<object> { Success = true, Data = null });
+    }
+
+    /// <summary>Receives RM-13 and records the traveler's one like or dislike for a roadmap item's dish.</summary>
+    [HttpPost("{roadmapId:long}/items/{itemId:long}/feedback")]
+    [ProducesResponseType(typeof(ApiResponse<RateRoadmapItemResponseDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RateItem(
+        long roadmapId,
+        long itemId,
+        RateRoadmapItemRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _rateRoadmapItemUseCase.ExecuteAsync(roadmapId, itemId, request, ct);
+        return StatusCode(StatusCodes.Status201Created, new ApiResponse<RateRoadmapItemResponseDto>
+        {
+            Success = true,
+            Data = result
+        });
     }
 }

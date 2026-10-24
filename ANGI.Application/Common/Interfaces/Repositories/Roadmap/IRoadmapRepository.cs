@@ -81,4 +81,23 @@ public interface IRoadmapRepository
 
     /// <summary>Hard-deletes a tracked item (RM-08 replacement, RM-09) so dependent feedback and review links become null.</summary>
     void RemoveItem(RoadmapItem item);
+
+    /// <summary>Locks and loads an item for RM-13 only when it belongs to the requested owned, visible roadmap.</summary>
+    Task<RoadmapItem?> LockAndGetOwnedItemForFeedbackAsync(
+        long roadmapId,
+        long itemId,
+        int userId,
+        CancellationToken ct);
+
+    /// <summary>Whether the roadmap item already has its one like or dislike (RM-13).</summary>
+    Task<bool> ItemHasFeedbackAsync(long roadmapItemId, CancellationToken ct);
+
+    /// <summary>Adds one dish feedback to the current unit of work; its insert trigger writes FEEDBACK_CREATED.</summary>
+    void AddFeedback(DishFeedback feedback);
+
+    /// <summary>Adds one to dishes.like_count or dislike_count atomically and returns both counters after the change.</summary>
+    Task<(int LikeCount, int DislikeCount)> IncrementDishFeedbackCountAsync(
+        int dishId,
+        FeedbackValue value,
+        CancellationToken ct);
 }
