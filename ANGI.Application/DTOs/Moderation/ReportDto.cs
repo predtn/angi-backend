@@ -3,7 +3,7 @@ using ANGI.Application.DTOs.Account;
 namespace ANGI.Application.DTOs.Moderation;
 
 /// <summary>Represents a restaurant or blog report with signed evidence and public user summaries.</summary>
-public sealed class ReportDto
+public class ReportDto
 {
     public long Id { get; init; }
     public string TargetType { get; init; } = string.Empty;

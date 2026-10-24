@@ -8,6 +8,20 @@ namespace ANGI.Application.Common.Interfaces.Repositories.Moderation;
 /// <summary>Provides moderation reads and tracked writes without owning transactions or business rules.</summary>
 public interface IRestaurantModerationRepository
 {
+    /// <summary>Lists reports with exact target, state and reason filters in deterministic newest-first order.</summary>
+    Task<Paged<Report>> ListReportsAsync(ListReportsRequestDto request, CancellationToken ct);
+    /// <summary>Reads a report without tracking for authorized detail retrieval.</summary>
+    Task<Report?> GetReportAsync(long reportId, CancellationToken ct);
+    /// <summary>Reads other pending and in-review reports on the same target without tracking.</summary>
+    Task<IReadOnlyList<Report>> GetRelatedReportsAsync(ReportTarget target, long reportId, CancellationToken ct);
+    /// <summary>Locks and tracks only the selected report to serialize claims with claims and conclusions.</summary>
+    Task<Report?> LockReportAsync(long reportId, CancellationToken ct);
+    /// <summary>Reads only the restaurant fields needed by a report's RestaurantCard target.</summary>
+    Task<Domain.Entities.Restaurant?> GetReportRestaurantAsync(long restaurantId, CancellationToken ct);
+    /// <summary>Reads the blog detail graph and only the caller's like without changing its view count.</summary>
+    Task<Blog?> GetReportBlogAsync(long blogId, int callerId, CancellationToken ct);
+    /// <summary>Batch-loads target names, public users, evidence metadata and open counts for a report page.</summary>
+    Task<IReadOnlyDictionary<ReportTarget, ReportDisplayData>> GetReportDisplaysAsync(IReadOnlyList<Report> reports, CancellationToken ct);
     /// <summary>Lists restaurants including unverified and hidden rows, excluding soft-deleted rows.</summary>
     Task<Paged<ModRestaurantListItem>> ListAsync(ListModRestaurantsRequestDto request, CancellationToken ct);
     /// <summary>Loads the complete MOD-R2 restaurant aggregate without tracking.</summary>
