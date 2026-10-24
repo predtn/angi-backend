@@ -1,5 +1,6 @@
-using ANGI.Domain.Entities;
 using ANGI.Application.Common.Models.Social;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Social;
 
@@ -21,6 +22,17 @@ public interface IBlogRepository
         int? authorId,
         bool? hasRoadmap,
         string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Retrieves a paged list of blogs authored by the specified user, optionally filtered by status,
+    /// along with the latest moderation note for hidden or removed blogs and the total count (BLOG-05).
+    /// </summary>
+    Task<(IReadOnlyList<Blog> Items, Dictionary<long, string?> ModerationNotes, long TotalCount)> GetByAuthorAsync(
+        int authorId,
+        BlogStatus? status,
         int page,
         int pageSize,
         CancellationToken ct);
