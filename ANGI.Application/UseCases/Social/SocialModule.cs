@@ -1,5 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Social;
 using ANGI.Application.UseCases.Social.CreateBlog;
+using ANGI.Application.UseCases.Social.GetBlogComments;
+using ANGI.Application.UseCases.Social.GetBlogDetail;
 using ANGI.Application.UseCases.Social.GetPublicBlogs;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +15,8 @@ public static class SocialModule
     {
         services.AddScoped<IGetPublicBlogsUseCase, GetPublicBlogsUseCase>();
         services.AddScoped<ICreateBlogUseCase, CreateBlogUseCase>();
+        services.AddScoped<IGetBlogDetailUseCase, GetBlogDetailUseCase>();
+        services.AddScoped<IGetBlogCommentsUseCase, GetBlogCommentsUseCase>();
         return services;
     }
 }
