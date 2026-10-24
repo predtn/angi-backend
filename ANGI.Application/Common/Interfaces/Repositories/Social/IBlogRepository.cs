@@ -12,6 +12,19 @@ public interface IBlogRepository
     /// </summary>
     Task<IReadOnlyList<Blog>> GetFeaturedAsync(DateTime recentSince, int limit, CancellationToken ct);
 
+    /// <summary>
+    /// Queries published, undeleted blogs for BLOG-01 with optional keyword, author, and roadmap filters,
+    /// ordered by newest or popularity (like_count + comment_count), and returns the page items with total count.
+    /// </summary>
+    Task<(IReadOnlyList<Blog> Items, long TotalItems)> GetPublicBlogsAsync(
+        string? q,
+        int? authorId,
+        bool? hasRoadmap,
+        string? sort,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
     /// <summary>Loads the current author and avatar for a newly created BlogDetail response.</summary>
     Task<User?> GetAuthorAsync(int userId, CancellationToken ct);
 
