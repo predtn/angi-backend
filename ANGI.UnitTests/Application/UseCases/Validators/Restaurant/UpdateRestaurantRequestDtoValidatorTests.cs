@@ -98,19 +98,33 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         result.IsValid.Should().Be(expectedValid);
     }
 
-    // TEST-07: Enforce required phone nullability and length boundaries.
-    /// <summary>Verifies null, blank, maximum, and over-maximum phone values.</summary>
+    // TEST-07: Enforce supplied phone nullability, Vietnamese formats, and length boundaries.
+    /// <summary>Verifies invalid contact numbers cannot bypass registration rules through a partial update.</summary>
     [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("   ", false)]
-    [InlineData("12345678901234567890", true)]
+    [InlineData("12345678901234567890", false)]
     [InlineData("123456789012345678901", false)]
+    [InlineData("1234567890", false)]
+    [InlineData("0123456789", false)]
+    [InlineData("090123456", false)]
+    [InlineData("09012345678", false)]
+    [InlineData("0901234567\n", false)]
+    [InlineData("+840901234567", false)]
+    [InlineData("+6590123456", false)]
+    [InlineData("0901234567", true)]
+    [InlineData("0236 3812 345", true)]
+    [InlineData("+84 90 123 4567", true)]
     public async Task ValidateAsync_WithPhoneBoundary_ShouldMatchContract(string? phone, bool expectedValid)
     {
         var result = await _validator.ValidateAsync(new UpdateRestaurantRequestDto { Phone = phone });
 
         result.IsValid.Should().Be(expectedValid);
+        if (!expectedValid)
+        {
+            result.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("Phone");
+        }
     }
 
     // TEST-08: Validate email syntax, including normalization-safe surrounding whitespace.

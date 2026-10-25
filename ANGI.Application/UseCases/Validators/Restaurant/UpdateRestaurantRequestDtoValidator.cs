@@ -18,8 +18,13 @@ public sealed class UpdateRestaurantRequestDtoValidator : AbstractValidator<Upda
             .When(x => x.DescriptionSpecified && x.Description is not null);
         RuleFor(x => x.Phone)
             .NotEmpty().WithMessage("Số điện thoại không được để trống.")
-            .MaximumLength(20).WithMessage("Số điện thoại không được vượt quá 20 ký tự.")
             .When(x => x.PhoneSpecified);
+        RuleFor(x => x.Phone)
+            .Cascade(CascadeMode.Stop)
+            .MaximumLength(20).WithMessage("Số điện thoại không được vượt quá 20 ký tự.")
+            .Must(VietnamesePhoneNumberRules.IsValid)
+            .WithMessage("Số điện thoại phải là số di động hoặc số cố định Việt Nam hợp lệ.")
+            .When(x => x.PhoneSpecified && !string.IsNullOrWhiteSpace(x.Phone));
         RuleFor(x => x.Email)
             .Must(BeValidEmail).WithMessage("Email không đúng định dạng.")
             .When(x => x.EmailSpecified && !string.IsNullOrWhiteSpace(x.Email));
