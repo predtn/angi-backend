@@ -373,6 +373,14 @@ public sealed class RestaurantRepository : IRestaurantRepository
                         && r.ModerationStatus == RestaurantModerationStatus.Visible, ct);
     }
 
+    /// <inheritdoc />
+    public Task<bool> ExistsAsync(long restaurantId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .AnyAsync(r => r.Id == restaurantId, ct);
+    }
+
     /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
     public Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct)
     {
