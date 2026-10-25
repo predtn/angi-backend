@@ -74,4 +74,25 @@ public interface IRestaurantRepository
         int page,
         int pageSize,
         CancellationToken ct);
+
+    /// <summary>Loads the owner's active restaurant row without tracking.</summary>
+    Task<Domain.Entities.Restaurant?> GetByOwnerIdAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>Loads paginated reviews (including hidden ones) for the owner's restaurant (OWN-19).</summary>
+    Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems)> GetOwnerReviewsAsync(
+        long restaurantId,
+        bool? replied,
+        short? rating,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
+    /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
+    Task<RestaurantReview?> GetReviewForReplyAsync(long reviewId, CancellationToken ct);
+
+    /// <summary>Adds a review reply to the current unit of work.</summary>
+    void AddReviewReply(ReviewReply reply);
+
+    /// <summary>Adds a notification to the current unit of work.</summary>
+    void AddNotification(Domain.Entities.Notification notification);
 }

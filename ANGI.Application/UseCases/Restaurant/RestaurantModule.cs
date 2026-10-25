@@ -16,6 +16,8 @@ using ANGI.Application.UseCases.Restaurant.ResubmitVerification;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantDetail;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantMenu;
 using ANGI.Application.UseCases.Restaurant.GetRestaurantReviews;
+using ANGI.Application.UseCases.Restaurant.GetOwnerReviews;
+using ANGI.Application.UseCases.Restaurant.ReplyReview;
 using ANGI.Application.UseCases.Restaurant.GetVerificationStatus;
 using ANGI.Application.UseCases.Restaurant.Register;
 using ANGI.Application.UseCases.Restaurant.UpdateBusinessHours;
@@ -53,6 +55,8 @@ public static class RestaurantModule
         services.AddScoped<IGetRestaurantDetailUseCase, GetRestaurantDetailUseCase>();
         services.AddScoped<IGetRestaurantMenuUseCase, GetRestaurantMenuUseCase>();
         services.AddScoped<IGetRestaurantReviewsUseCase, GetRestaurantReviewsUseCase>();
+        services.AddScoped<IGetOwnerReviewsUseCase, GetOwnerReviewsUseCase>();
+        services.AddScoped<IReplyReviewUseCase, ReplyReviewUseCase>();
         return services;
     }
 }
