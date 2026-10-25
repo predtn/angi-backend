@@ -33,6 +33,7 @@ public static class SocialModule
         services.AddScoped<ICreateBlogCommentUseCase, CreateBlogCommentUseCase>();
         services.AddScoped<IDeleteBlogCommentUseCase, DeleteBlogCommentUseCase>();
         services.AddScoped<IReportBlogUseCase, ReportBlogUseCase>();
+        services.AddScoped<ICreateReportUseCase, CreateReportUseCase>();
         return services;
     }
 }

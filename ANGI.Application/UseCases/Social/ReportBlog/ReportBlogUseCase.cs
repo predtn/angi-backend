@@ -12,7 +12,7 @@ using FluentValidation;
 namespace ANGI.Application.UseCases.Social.ReportBlog;
 
 /// <summary>Implements REP-02 to report a blog.</summary>
-public sealed class ReportBlogUseCase : IReportBlogUseCase
+public class ReportBlogUseCase : IReportBlogUseCase, ICreateReportUseCase
 {
     private readonly IValidator<ReportBlogRequestDto> _validator;
     private readonly IBlogRepository _blogRepository;

@@ -9,6 +9,9 @@ public interface IReportRepository
     /// <summary>Checks whether the user has a pending or in-review report on the target.</summary>
     Task<bool> HasPendingReportAsync(int reporterId, ReportTargetType targetType, long targetId, CancellationToken ct);
 
+    /// <summary>Checks whether a pending report exists for this user and blog.</summary>
+    Task<bool> ExistsPendingReportAsync(int reporterId, long blogId, CancellationToken ct);
+
     /// <summary>Adds a new report aggregate.</summary>
     void Add(Report report);
 }
