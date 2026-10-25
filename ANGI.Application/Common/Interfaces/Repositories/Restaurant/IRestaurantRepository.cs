@@ -74,4 +74,25 @@ public interface IRestaurantRepository
         int page,
         int pageSize,
         CancellationToken ct);
+
+    /// <summary>Locks and tracks a restaurant row for review updates to safely recompute rating average and count.</summary>
+    Task<Domain.Entities.Restaurant?> LockRestaurantForReviewAsync(long restaurantId, CancellationToken ct);
+
+    /// <summary>Checks whether a traveler has already submitted a review for the restaurant.</summary>
+    Task<bool> HasUserReviewedRestaurantAsync(long restaurantId, int userId, CancellationToken ct);
+
+    /// <summary>Loads the user profile with avatar for constructing the review response.</summary>
+    Task<User?> GetReviewerUserAsync(int userId, CancellationToken ct);
+
+    /// <summary>Loads uploaded media files owned by the user.</summary>
+    Task<IReadOnlyList<MediaFile>> GetUserReviewMediaFilesAsync(int userId, IReadOnlyList<long> mediaIds, CancellationToken ct);
+
+    /// <summary>Checks whether a roadmap item belongs to the user and references a dish of this restaurant.</summary>
+    Task<bool> IsRoadmapItemValidForRestaurantAsync(int userId, long roadmapItemId, long restaurantId, CancellationToken ct);
+
+    /// <summary>Adds a restaurant review aggregate to the current unit of work.</summary>
+    void AddReview(RestaurantReview review);
+
+    /// <summary>Adds a notification to the current unit of work.</summary>
+    void AddNotification(Domain.Entities.Notification notification);
 }
