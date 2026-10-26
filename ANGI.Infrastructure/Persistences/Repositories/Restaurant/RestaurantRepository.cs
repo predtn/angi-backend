@@ -373,14 +373,6 @@ public sealed class RestaurantRepository : IRestaurantRepository
                         && r.ModerationStatus == RestaurantModerationStatus.Visible, ct);
     }
 
-    /// <inheritdoc />
-    public Task<bool> ExistsAsync(long restaurantId, CancellationToken ct)
-    {
-        return _context.Restaurants
-            .AsNoTracking()
-            .AnyAsync(r => r.Id == restaurantId, ct);
-    }
-
     /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
     public Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct)
     {
@@ -612,9 +604,22 @@ public sealed class RestaurantRepository : IRestaurantRepository
                 SELECT *
                 FROM core.restaurants
                 WHERE id = {{restaurantId}} AND deleted_at IS NULL
+                  AND verification_status = 'verified' AND moderation_status = 'visible'
                 FOR UPDATE
                 """)
             .SingleOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<(int Count, int RatingSum)> GetVisibleRatingStatsAsync(long restaurantId, CancellationToken ct)
+    {
+        var stats = await _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status == ContentStatus.Visible)
+            .GroupBy(_ => 1)
+            .Select(group => new { Count = group.Count(), RatingSum = group.Sum(r => (int)r.Rating) })
+            .SingleOrDefaultAsync(ct);
+        return stats is null ? (0, 0) : (stats.Count, stats.RatingSum);
     }
 
     /// <summary>Checks whether a traveler has already submitted a review for the restaurant.</summary>

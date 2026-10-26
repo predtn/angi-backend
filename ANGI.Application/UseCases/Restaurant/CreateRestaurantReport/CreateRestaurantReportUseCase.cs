@@ -49,7 +49,8 @@ public sealed class CreateRestaurantReportUseCase : ICreateRestaurantReportUseCa
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để báo cáo nhà hàng.");
 
-        var restaurantExists = await _restaurantRepository.ExistsAsync(restaurantId, ct);
+        // Only a restaurant the traveler can see (REST-02: verified and visible) can be reported.
+        var restaurantExists = await _restaurantRepository.ExistsAndActiveAsync(restaurantId, ct);
         if (!restaurantExists)
         {
             throw new NotFoundException("RESTAURANT_NOT_FOUND", "Không tìm thấy nhà hàng.");

@@ -56,9 +56,6 @@ public interface IRestaurantRepository
     /// <summary>Checks whether a restaurant exists and is publicly visible.</summary>
     Task<bool> ExistsAndActiveAsync(long restaurantId, CancellationToken ct);
 
-    /// <summary>Checks whether a restaurant exists (non-deleted).</summary>
-    Task<bool> ExistsAsync(long restaurantId, CancellationToken ct);
-
     /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
     Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct);
 
@@ -96,8 +93,14 @@ public interface IRestaurantRepository
     /// <summary>Adds a review reply to the current unit of work.</summary>
     void AddReviewReply(ReviewReply reply);
 
-    /// <summary>Locks and tracks a restaurant row for review updates to safely recompute rating average and count.</summary>
+    /// <summary>
+    /// Locks and tracks a publicly visible restaurant (verified, visible, not deleted) for REV-01, so concurrent reviews
+    /// recompute rating_avg / rating_count one after the other; null for any other restaurant.
+    /// </summary>
     Task<Domain.Entities.Restaurant?> LockRestaurantForReviewAsync(long restaurantId, CancellationToken ct);
+
+    /// <summary>Counts the restaurant's visible reviews and sums their ratings.</summary>
+    Task<(int Count, int RatingSum)> GetVisibleRatingStatsAsync(long restaurantId, CancellationToken ct);
 
     /// <summary>Checks whether a traveler has already submitted a review for the restaurant.</summary>
     Task<bool> HasUserReviewedRestaurantAsync(long restaurantId, int userId, CancellationToken ct);

@@ -50,7 +50,7 @@ public sealed class CreateRestaurantReportUseCaseTests
             EvidenceMediaIds = [9301]
         };
 
-        _restaurantRepository.Setup(r => r.ExistsAsync(restaurantId, It.IsAny<CancellationToken>()))
+        _restaurantRepository.Setup(r => r.ExistsAndActiveAsync(restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _reportRepository.Setup(r => r.HasPendingReportAsync(userId, ReportTargetType.Restaurant, restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -97,7 +97,7 @@ public sealed class CreateRestaurantReportUseCaseTests
             Description = "Sai địa chỉ"
         };
 
-        _restaurantRepository.Setup(r => r.ExistsAsync(restaurantId, It.IsAny<CancellationToken>()))
+        _restaurantRepository.Setup(r => r.ExistsAndActiveAsync(restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         var useCase = CreateUseCase();
@@ -126,7 +126,7 @@ public sealed class CreateRestaurantReportUseCaseTests
             Description = "Quán đã đóng cửa vĩnh viễn"
         };
 
-        _restaurantRepository.Setup(r => r.ExistsAsync(restaurantId, It.IsAny<CancellationToken>()))
+        _restaurantRepository.Setup(r => r.ExistsAndActiveAsync(restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _reportRepository.Setup(r => r.HasPendingReportAsync(userId, ReportTargetType.Restaurant, restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -185,7 +185,7 @@ public sealed class CreateRestaurantReportUseCaseTests
             Description = "Chi tiết báo cáo"
         };
 
-        _restaurantRepository.Setup(r => r.ExistsAsync(restaurantId, It.IsAny<CancellationToken>()))
+        _restaurantRepository.Setup(r => r.ExistsAndActiveAsync(restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _reportRepository.Setup(r => r.HasPendingReportAsync(It.IsAny<int>(), ReportTargetType.Restaurant, restaurantId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -211,7 +211,7 @@ public sealed class CreateRestaurantReportUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
     {
-        _restaurantRepository.Setup(r => r.ExistsAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _restaurantRepository.Setup(r => r.ExistsAndActiveAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new MediaFile { Id = 9301 }]);
         var request = new CreateRestaurantReportRequestDto { ReasonCode = "scam", EvidenceMediaIds = [9301, 7777] };
