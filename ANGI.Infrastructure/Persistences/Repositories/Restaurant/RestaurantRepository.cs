@@ -530,6 +530,72 @@ public sealed class RestaurantRepository : IRestaurantRepository
         return (items, totalItems, ratingBreakdown, ratingAvg, ratingCount);
     }
 
+    /// <summary>Loads the owner's active restaurant row without tracking.</summary>
+    public Task<Domain.Entities.Restaurant?> GetByOwnerIdAsync(int ownerId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.OwnerId == ownerId, ct);
+    }
+
+    /// <summary>Loads paginated reviews (including hidden ones) for the owner's restaurant (OWN-19).</summary>
+    public async Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems)> GetOwnerReviewsAsync(
+        long restaurantId,
+        bool? replied,
+        short? rating,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status != ContentStatus.Removed);
+
+        if (rating.HasValue)
+        {
+            query = query.Where(r => r.Rating == rating.Value);
+        }
+
+        if (replied.HasValue)
+        {
+            query = replied.Value
+                ? query.Where(r => r.Reply != null)
+                : query.Where(r => r.Reply == null);
+        }
+
+        var totalItems = await query.LongCountAsync(ct);
+
+        var skip = (page - 1) * pageSize;
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip(skip)
+            .Take(pageSize)
+            .Include(r => r.User)
+                .ThenInclude(u => u.AvatarMedia)
+            .Include(r => r.Images)
+                .ThenInclude(i => i.Media)
+            .Include(r => r.Reply)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        return (items, totalItems);
+    }
+
+    /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
+    public Task<RestaurantReview?> GetReviewForReplyAsync(long reviewId, CancellationToken ct)
+    {
+        return _context.RestaurantReviews
+            .Include(r => r.Restaurant)
+            .Include(r => r.Reply)
+            .FirstOrDefaultAsync(r => r.Id == reviewId, ct);
+    }
+
+    /// <summary>Adds a review reply to the current unit of work.</summary>
+    public void AddReviewReply(ReviewReply reply)
+    {
+        _context.ReviewReplies.Add(reply);
+    }
+
     /// <summary>Locks and tracks a restaurant row for review updates to safely recompute rating average and count.</summary>
     public Task<Domain.Entities.Restaurant?> LockRestaurantForReviewAsync(long restaurantId, CancellationToken ct)
     {
