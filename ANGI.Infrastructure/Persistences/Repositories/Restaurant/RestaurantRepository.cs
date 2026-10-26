@@ -283,7 +283,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             query = query.OrderByDescending(r => r.RatingAvg).ThenByDescending(r => r.RatingCount);
         }
 
-        var skip = (request.Page - 1) * request.PageSize;
+        var skip = PageOffset.Of(request.Page, request.PageSize);
         var totalPages = (int)Math.Ceiling((double)totalItems / request.PageSize);
 
         var pagedEntities = await query
@@ -515,7 +515,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             query = query.OrderByDescending(r => r.CreatedAt);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
         var items = await query
             .Skip(skip)
             .Take(pageSize)
@@ -528,5 +528,150 @@ public sealed class RestaurantRepository : IRestaurantRepository
             .ToListAsync(ct);
 
         return (items, totalItems, ratingBreakdown, ratingAvg, ratingCount);
+    }
+
+    /// <summary>Loads the owner's active restaurant row without tracking.</summary>
+    public Task<Domain.Entities.Restaurant?> GetByOwnerIdAsync(int ownerId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.OwnerId == ownerId, ct);
+    }
+
+    /// <summary>Loads paginated reviews (including hidden ones) for the owner's restaurant (OWN-19).</summary>
+    public async Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems)> GetOwnerReviewsAsync(
+        long restaurantId,
+        bool? replied,
+        short? rating,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status != ContentStatus.Removed);
+
+        if (rating.HasValue)
+        {
+            query = query.Where(r => r.Rating == rating.Value);
+        }
+
+        if (replied.HasValue)
+        {
+            query = replied.Value
+                ? query.Where(r => r.Reply != null)
+                : query.Where(r => r.Reply == null);
+        }
+
+        var totalItems = await query.LongCountAsync(ct);
+
+        var skip = PageOffset.Of(page, pageSize);
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip(skip)
+            .Take(pageSize)
+            .Include(r => r.User)
+                .ThenInclude(u => u.AvatarMedia)
+            .Include(r => r.Images)
+                .ThenInclude(i => i.Media)
+            .Include(r => r.Reply)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        return (items, totalItems);
+    }
+
+    /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
+    public async Task<RestaurantReview?> LockReviewForReplyAsync(long reviewId, CancellationToken ct)
+    {
+        // Lock in its own statement: a statement that waited on the lock still reads review_replies as of its start,
+        // so loading the reply in the same statement would miss the reply the other request just committed.
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM core.restaurant_reviews WHERE id = {reviewId} FOR UPDATE", ct);
+        return await _context.RestaurantReviews
+            .Include(r => r.Restaurant)
+            .Include(r => r.Reply)
+            .FirstOrDefaultAsync(r => r.Id == reviewId, ct);
+    }
+
+    /// <summary>Adds a review reply to the current unit of work.</summary>
+    public void AddReviewReply(ReviewReply reply)
+    {
+        _context.ReviewReplies.Add(reply);
+    }
+
+    /// <summary>Locks and tracks a restaurant row for review updates to safely recompute rating average and count.</summary>
+    public Task<Domain.Entities.Restaurant?> LockRestaurantForReviewAsync(long restaurantId, CancellationToken ct)
+    {
+        return _context.Restaurants
+            .FromSqlInterpolated($$"""
+                SELECT *
+                FROM core.restaurants
+                WHERE id = {{restaurantId}} AND deleted_at IS NULL
+                  AND verification_status = 'verified' AND moderation_status = 'visible'
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<(int Count, int RatingSum)> GetVisibleRatingStatsAsync(long restaurantId, CancellationToken ct)
+    {
+        var stats = await _context.RestaurantReviews
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId && r.Status == ContentStatus.Visible)
+            .GroupBy(_ => 1)
+            .Select(group => new { Count = group.Count(), RatingSum = group.Sum(r => (int)r.Rating) })
+            .SingleOrDefaultAsync(ct);
+        return stats is null ? (0, 0) : (stats.Count, stats.RatingSum);
+    }
+
+    /// <summary>Checks whether a traveler has already submitted a review for the restaurant.</summary>
+    public Task<bool> HasUserReviewedRestaurantAsync(long restaurantId, int userId, CancellationToken ct)
+    {
+        return _context.RestaurantReviews
+            .AnyAsync(r => r.RestaurantId == restaurantId && r.UserId == userId, ct);
+    }
+
+    /// <summary>Loads the user profile with avatar for constructing the review response.</summary>
+    public Task<User?> GetReviewerUserAsync(int userId, CancellationToken ct)
+    {
+        return _context.Users
+            .Include(u => u.AvatarMedia)
+            .FirstOrDefaultAsync(u => u.Id == userId, ct);
+    }
+
+    /// <summary>Loads uploaded media files owned by the user.</summary>
+    public async Task<IReadOnlyList<MediaFile>> GetUserReviewMediaFilesAsync(int userId, IReadOnlyList<long> mediaIds, CancellationToken ct)
+    {
+        if (mediaIds.Count == 0)
+        {
+            return Array.Empty<MediaFile>();
+        }
+
+        return await _context.MediaFiles
+            .Where(m => mediaIds.Contains(m.Id) && m.UploaderId == userId)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Checks whether a roadmap item belongs to the user and references a dish of this restaurant.</summary>
+    public Task<bool> IsRoadmapItemValidForRestaurantAsync(int userId, long roadmapItemId, long restaurantId, CancellationToken ct)
+    {
+        return _context.RoadmapItems
+            .AnyAsync(ri => ri.Id == roadmapItemId 
+                         && ri.RoadmapDay.Roadmap.UserId == userId 
+                         && ri.Dish.RestaurantId == restaurantId, ct);
+    }
+
+    /// <summary>Adds a restaurant review aggregate to the current unit of work.</summary>
+    public void AddReview(RestaurantReview review)
+    {
+        _context.RestaurantReviews.Add(review);
+    }
+
+    /// <summary>Adds a notification to the current unit of work.</summary>
+    public void AddNotification(Domain.Entities.Notification notification)
+    {
+        _context.Notifications.Add(notification);
     }
 }

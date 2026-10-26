@@ -44,7 +44,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
             };
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
 
         var items = await query
             .OrderByDescending(roadmap => roadmap.CreatedAt)

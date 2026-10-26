@@ -30,7 +30,7 @@ public sealed class MenuReviewRepository(ANGIContext context) : IMenuReviewRepos
             query = query.Where(s => s.RestaurantId == request.RestaurantId);
         var total = await query.LongCountAsync(ct);
         var page = query.OrderBy(s => s.SubmittedAt).ThenBy(s => s.Id)
-            .Skip((request.Page - 1) * request.PageSize).Take(request.PageSize);
+            .Skip(PageOffset.Of(request.Page, request.PageSize)).Take(request.PageSize);
         return (await Graph(page).ToListAsync(ct), total);
     }
 

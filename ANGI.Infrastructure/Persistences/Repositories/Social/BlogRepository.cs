@@ -88,7 +88,7 @@ public sealed class BlogRepository : IBlogRepository
                 .ThenByDescending(blog => blog.Id);
 
         var items = await query
-            .Skip((page - 1) * pageSize)
+            .Skip(PageOffset.Of(page, pageSize))
             .Take(pageSize)
             .Include(blog => blog.CoverMedia)
             .Include(blog => blog.Author)
@@ -123,7 +123,7 @@ public sealed class BlogRepository : IBlogRepository
             return (Array.Empty<Blog>(), new Dictionary<long, string?>(), totalItems);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
 
         var items = await query
             .OrderByDescending(blog => blog.PublishedAt)
@@ -312,7 +312,7 @@ public sealed class BlogRepository : IBlogRepository
             return (Array.Empty<BlogComment>(), 0L);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
         var items = await query
             .OrderBy(comment => comment.CreatedAt)
             .ThenBy(comment => comment.Id)
@@ -337,27 +337,39 @@ public sealed class BlogRepository : IBlogRepository
             .FirstOrDefaultAsync(blog => blog.Id == blogId, ct);
 
     /// <inheritdoc />
-    public Task<bool> HasUserLikedAsync(long blogId, int userId, CancellationToken ct) =>
-        _context.BlogLikes
-            .AsNoTracking()
-            .AnyAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+    public async Task<bool> TryAddLikeAsync(long blogId, int userId, DateTime likedAt, CancellationToken ct) =>
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO core.blog_likes (blog_id, user_id, created_at)
+            VALUES ({blogId}, {userId}, {likedAt})
+            ON CONFLICT (blog_id, user_id) DO NOTHING
+            """, ct) == 1;
 
     /// <inheritdoc />
-    public Task<BlogLike?> GetLikeAsync(long blogId, int userId, CancellationToken ct) =>
-        _context.BlogLikes
-            .FirstOrDefaultAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+    public async Task<bool> TryRemoveLikeAsync(long blogId, int userId, CancellationToken ct) =>
+        await _context.BlogLikes
+            .Where(like => like.BlogId == blogId && like.UserId == userId)
+            .ExecuteDeleteAsync(ct) == 1;
 
     /// <inheritdoc />
-    public void AddLike(BlogLike like)
+    public async Task<int> AddToLikeCountAsync(long blogId, int delta, CancellationToken ct)
     {
-        _context.BlogLikes.Add(like);
+        // The arithmetic runs in SQL, so concurrent likes never overwrite each other's count.
+        var blog = _context.Blogs.Where(item => item.Id == blogId);
+        if (delta != 0)
+        {
+            await blog.ExecuteUpdateAsync(
+                setters => setters.SetProperty(item => item.LikeCount, item => Math.Max(item.LikeCount + delta, 0)), ct);
+        }
+
+        return await blog.Select(item => item.LikeCount).SingleAsync(ct);
     }
 
     /// <inheritdoc />
-    public void RemoveLike(BlogLike like)
-    {
-        _context.BlogLikes.Remove(like);
-    }
+    public Task AddToCommentCountAsync(long blogId, int delta, CancellationToken ct) =>
+        _context.Blogs
+            .Where(item => item.Id == blogId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(item => item.CommentCount, item => Math.Max(item.CommentCount + delta, 0)), ct);
 
     /// <inheritdoc />
     public void AddComment(BlogComment comment)

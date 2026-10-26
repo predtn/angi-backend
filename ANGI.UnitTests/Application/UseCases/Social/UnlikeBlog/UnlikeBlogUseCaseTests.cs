@@ -16,99 +16,54 @@ public sealed class UnlikeBlogUseCaseTests
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
+    private readonly Mock<IUnitOfWorkTransaction> _transaction = new();
 
     public UnlikeBlogUseCaseTests()
     {
         _currentUserService.Setup(s => s.UserId).Returns(10);
+        _unitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transaction.Object);
+        _blogRepository.Setup(r => r.GetByIdAsync(45, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Blog { Id = 45, AuthorId = 99, Title = "Blog", Status = BlogStatus.Published, LikeCount = 6 });
     }
 
     private UnlikeBlogUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
+    // TEST-01: Removing an existing like subtracts 1 from like_count in SQL, in one transaction.
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldRemoveLikeAndDecrementLikeCount()
     {
-        // Arrange
-        const long blogId = 45;
-        const int userId = 10;
-        var blog = new Blog
-        {
-            Id = blogId,
-            AuthorId = 99,
-            Title = "Đà Nẵng ẩm thực",
-            Status = BlogStatus.Published,
-            LikeCount = 5
-        };
-        var existingLike = new BlogLike { BlogId = blogId, UserId = userId };
+        _blogRepository.Setup(r => r.TryRemoveLikeAsync(45, 10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _blogRepository.Setup(r => r.AddToLikeCountAsync(45, -1, It.IsAny<CancellationToken>())).ReturnsAsync(5);
 
-        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(blog);
-        _blogRepository.Setup(r => r.GetLikeAsync(blogId, userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingLike);
+        var result = await CreateUseCase().ExecuteAsync(45, CancellationToken.None);
 
-        var useCase = CreateUseCase();
-
-        // Act
-        var result = await useCase.ExecuteAsync(blogId, CancellationToken.None);
-
-        // Assert
         result.Liked.Should().BeFalse();
-        result.LikeCount.Should().Be(4);
-        blog.LikeCount.Should().Be(4);
-
-        _blogRepository.Verify(r => r.RemoveLike(existingLike), Times.Once);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        result.LikeCount.Should().Be(5);
+        _transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: Unliking a blog that is not liked (or losing a concurrent race) keeps the count.
     [Fact]
     public async Task ExecuteAsync_WhenNotLiked_ShouldBeIdempotentAndNotDecrement()
     {
-        // Arrange
-        const long blogId = 45;
-        const int userId = 10;
-        var blog = new Blog
-        {
-            Id = blogId,
-            AuthorId = 99,
-            Title = "Đà Nẵng ẩm thực",
-            Status = BlogStatus.Published,
-            LikeCount = 5
-        };
+        _blogRepository.Setup(r => r.TryRemoveLikeAsync(45, 10, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _blogRepository.Setup(r => r.AddToLikeCountAsync(45, 0, It.IsAny<CancellationToken>())).ReturnsAsync(6);
 
-        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(blog);
-        _blogRepository.Setup(r => r.GetLikeAsync(blogId, userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((BlogLike?)null);
+        var result = await CreateUseCase().ExecuteAsync(45, CancellationToken.None);
 
-        var useCase = CreateUseCase();
-
-        // Act
-        var result = await useCase.ExecuteAsync(blogId, CancellationToken.None);
-
-        // Assert
         result.Liked.Should().BeFalse();
-        result.LikeCount.Should().Be(5);
-        blog.LikeCount.Should().Be(5);
-
-        _blogRepository.Verify(r => r.RemoveLike(It.IsAny<BlogLike>()), Times.Never);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        result.LikeCount.Should().Be(6);
+        _blogRepository.Verify(r => r.AddToLikeCountAsync(45, -1, It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-03: A missing blog is BLOG_NOT_FOUND and writes nothing.
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
-        // Arrange
-        const long nonExistentBlogId = 9999;
-        _blogRepository.Setup(r => r.GetByIdAsync(nonExistentBlogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Blog?)null);
+        var act = () => CreateUseCase().ExecuteAsync(999, CancellationToken.None);
 
-        var useCase = CreateUseCase();
-
-        // Act
-        var act = () => useCase.ExecuteAsync(nonExistentBlogId, CancellationToken.None);
-
-        // Assert
-        var ex = await act.Should().ThrowAsync<NotFoundException>();
-        ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
+        (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
+        _blogRepository.Verify(r => r.TryRemoveLikeAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

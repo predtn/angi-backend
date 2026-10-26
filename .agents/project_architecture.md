@@ -194,7 +194,7 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 - `RoadmapGenerationWorker` (`Infrastructure/Services/Roadmap`) is a `BackgroundService` like `OutboxWorker`: every `PollSeconds` it marks the oldest queued job `running` (`FOR UPDATE SKIP LOCKED`) and runs `IProcessRoadmapGenerationJobUseCase`. At start it puts jobs left `running` by a stopped host back to `queued`. It does nothing when `ConnectionStrings:Default` is empty.
 - The job follows the steps of the RM-10 note in the API Design. One dish per meal; with `replaceExisting = false` only the empty meals of the scope are filled and dishes already in the roadmap are not suggested again. An unexpected error marks the job `failed` and is logged; it never stays `running`.
 - `OpenAiRoadmapPlannerService`: `POST {BaseUrl}chat/completions`, Bearer `ApiKey`, `Model`, structured output (`json_schema`, strict) whose enums allow only the meals to fill and the dish ids of the day's cluster. Prompt version `rm10-v1` goes to `prompt_version`. Missing key, non-2xx, timeout (`TimeoutSeconds`) or unreadable answer → `null`; a plan that does not fill each meal once with distinct cluster dishes is rejected too. The job then schedules the day itself (meal-time tag, then preferred tag, then reco rank) and records `model_name = fallback`. The caller's cancellation is rethrown.
-- On success: items with `source = ai` and the reco `request_id`, `raw_output` with each day's plan and `createdItemIds` (read by RM-11), a `ROADMAP_GENERATED` notification (`data` = `{roadmapId, jobId}`) in the same transaction, then RECO-06 for the dishes added.
+- On success: items with `source = ai` and the reco `request_id`, `raw_output` with each day's plan and `createdItemIds` (read by RM-11), a `ROADMAP_GENERATED` notification (`data` = `{roadmap_id, job_id}`, snake_case like every `notifications.data`) in the same transaction, then RECO-06 for the dishes added.
 
 ### Roadmap origin
 
@@ -212,6 +212,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Jwt` | `Issuer`, `Audience`, `SecretKey` (≥ 32 bytes, validated at startup), `AccessTokenMinutes`, `RefreshTokenDays` |
 | `Cors` | `AllowedOrigins` |
 | `RateLimit` | `GeneralPermitLimit`, `GeneralWindowSeconds`, `LoginPermitLimit`, `LoginWindowMinutes`, `SensitiveAuthPermitLimit`, `SensitiveAuthWindowSeconds` |
+| `ForwardedHeaders` | `Enabled` (`false`; `true` on Render), `ForwardLimit` (1) |
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
 | `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
 | `Google` | `ClientId` |
@@ -225,3 +226,4 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
 - Render: environment variables with `__`, e.g. `ConnectionStrings__Default`.
+- Behind Render's proxy every connection comes from the proxy, so the per-IP limits (anonymous requests, login failures per email + IP) would count all clients as one. Set `ForwardedHeaders__Enabled=true` there: the app then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Keep it off locally, where the header would let a client choose its IP. Requests the frontend relays through its own Next.js server reach the backend with that server's IP; they count per client only if the frontend passes the browser IP in `X-Forwarded-For` and `ForwardLimit` is raised to 2, which also lets a direct caller forge one hop.

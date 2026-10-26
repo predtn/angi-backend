@@ -97,7 +97,10 @@ internal static class RestaurantDetailMapper
     }
 
     /// <summary>Maps a RestaurantReview entity to ReviewDto for REST-04.</summary>
-    public static ReviewDto MapReview(RestaurantReview review)
+    public static ReviewDto MapReview(RestaurantReview review) => MapReview(review, false);
+
+    /// <summary>Maps a RestaurantReview entity to ReviewDto for REST-04 and OWN-19.</summary>
+    public static ReviewDto MapReview(RestaurantReview review, bool includeAllReplies)
     {
         return new ReviewDto
         {
@@ -117,15 +120,21 @@ internal static class RestaurantDetailMapper
             RoadmapItemId = review.RoadmapItemId,
             Status = ToApiValue(review.Status),
             CreatedAt = review.CreatedAt,
-            Reply = review.Reply != null && review.Reply.Status == ContentStatus.Visible
-                ? new ReviewReplyDto
-                {
-                    Content = review.Reply.Content,
-                    Status = ToApiValue(review.Reply.Status),
-                    CreatedAt = review.Reply.CreatedAt,
-                    UpdatedAt = review.Reply.UpdatedAt
-                }
+            Reply = review.Reply != null && (includeAllReplies || review.Reply.Status == ContentStatus.Visible)
+                ? MapReviewReply(review.Reply)
                 : null
+        };
+    }
+
+    /// <summary>Maps a ReviewReply entity to ReviewReplyDto for OWN-20.</summary>
+    public static ReviewReplyDto MapReviewReply(ReviewReply reply)
+    {
+        return new ReviewReplyDto
+        {
+            Content = reply.Content,
+            Status = ToApiValue(reply.Status),
+            CreatedAt = reply.CreatedAt,
+            UpdatedAt = reply.UpdatedAt
         };
     }
 

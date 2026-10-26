@@ -26,7 +26,7 @@ public sealed class ApproveMenuSubmissionUseCase(
         var reviewerId = await MenuPermissionGuard.RequireAsync(currentUser, repository, ct);
         await using var transaction = await unitOfWork.BeginTransactionAsync(ct);
         var submission = await repository.LockAsync(submissionId, ct)
-            ?? throw new NotFoundException("SUBMISSION_NOT_FOUND", "KhÃ´ng tÃ¬m tháº¥y báº£n menu.");
+            ?? throw new NotFoundException("SUBMISSION_NOT_FOUND", "Không tìm thấy bản menu.");
         MenuReviewDecision.RequirePending(submission);
         var changes = submission.Items.ToDictionary(item => item, item => RestaurantMenuMapper.MapItem(item).Change);
         var retained = submission.Items.Where(item => item.SourceDishId.HasValue)

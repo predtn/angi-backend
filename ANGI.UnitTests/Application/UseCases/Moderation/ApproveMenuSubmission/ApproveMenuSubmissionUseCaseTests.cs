@@ -63,7 +63,7 @@ public sealed class ApproveMenuSubmissionUseCaseTests
         _repository.Verify(x => x.ReplaceTags(It.Is<Dish>(d => d.Id == 1), It.IsAny<IReadOnlyCollection<short>>()), Times.Once);
         _repository.Verify(x => x.ReplaceTags(It.Is<Dish>(d => d.Id == 2), It.IsAny<IReadOnlyCollection<short>>()), Times.Never);
         _repository.Verify(x => x.AddNotification(It.Is<ANGI.Domain.Entities.Notification>(n =>
-            n.RecipientId == 20 && n.Type == "MENU_APPROVED" && n.Body == "Reviewed")), Times.Once);
+            n.RecipientId == 20 && n.Type == "MENU_APPROVED" && n.Title == "Menu đã được duyệt" && n.Body == "Reviewed")), Times.Once);
         _audit.Verify(x => x.Add(It.Is<AuditLogEntry>(e => e.Action == AuditActions.MenuApproved &&
             e.EntityId == 14 && e.EntityType == AuditEntityTypes.MenuSubmission && e.SubjectUserId == 20)), Times.Once);
         _unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);

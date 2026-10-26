@@ -41,15 +41,8 @@ public sealed class DeleteBlogCommentUseCase : IDeleteBlogCommentUseCase
             throw new ForbiddenException("NOT_OWNER", "Bạn không có quyền xóa bình luận này.");
         }
 
-        var now = _timeProvider.GetUtcNow().UtcDateTime;
-        comment.DeletedAt = now;
-        comment.UpdatedAt = now;
-
-        if (comment.Blog is not null)
-        {
-            comment.Blog.CommentCount = Math.Max(0, comment.Blog.CommentCount - 1);
-        }
-
-        await _unitOfWork.SaveChangesAsync(ct);
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        await _blogCommentRepository.TrySoftDeleteAsync(commentId, blogId, _timeProvider.GetUtcNow().UtcDateTime, ct);
+        await transaction.CommitAsync(ct);
     }
 }

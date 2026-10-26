@@ -110,7 +110,7 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
         var items = await query
             .OrderByDescending(submission => submission.CreatedAt)
             .ThenByDescending(submission => submission.Id)
-            .Skip((page - 1) * pageSize)
+            .Skip(PageOffset.Of(page, pageSize))
             .Take(pageSize)
             .ToListAsync(ct);
 

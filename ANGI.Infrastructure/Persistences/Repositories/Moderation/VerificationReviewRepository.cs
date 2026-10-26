@@ -64,7 +64,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
         var items = await query
             .OrderBy(verification => verification.SubmittedAt)
             .ThenBy(verification => verification.Id)
-            .Skip((request.Page - 1) * request.PageSize)
+            .Skip(PageOffset.Of(request.Page, request.PageSize))
             .Take(request.PageSize)
             .Include(verification => verification.Documents)
                 .ThenInclude(document => document.Media)

@@ -52,6 +52,7 @@ namespace ANGI.WebApi
             services.AddJwtConfiguration(configuration);
             services.AddCorsConfiguration(configuration);
             services.AddRateLimitConfiguration(configuration);
+            services.AddForwardedHeadersConfiguration(configuration);
 
             return services;
         }

@@ -74,17 +74,17 @@ public interface IBlogRepository
     /// <summary>Retrieves a blog by its ID, returning null if not found or soft-deleted.</summary>
     Task<Blog?> GetByIdAsync(long blogId, CancellationToken ct);
 
-    /// <summary>Checks whether a user has liked a blog.</summary>
-    Task<bool> HasUserLikedAsync(long blogId, int userId, CancellationToken ct);
+    /// <summary>Inserts the user's like unless it exists (safe under concurrent calls); true when a row was inserted.</summary>
+    Task<bool> TryAddLikeAsync(long blogId, int userId, DateTime likedAt, CancellationToken ct);
 
-    /// <summary>Retrieves an existing blog like by blog ID and user ID.</summary>
-    Task<BlogLike?> GetLikeAsync(long blogId, int userId, CancellationToken ct);
+    /// <summary>Deletes the user's like; true when a row was deleted.</summary>
+    Task<bool> TryRemoveLikeAsync(long blogId, int userId, CancellationToken ct);
 
-    /// <summary>Adds a blog like.</summary>
-    void AddLike(BlogLike like);
+    /// <summary>Adds delta to blogs.like_count in one SQL update (never below 0) and returns the current count.</summary>
+    Task<int> AddToLikeCountAsync(long blogId, int delta, CancellationToken ct);
 
-    /// <summary>Removes a blog like.</summary>
-    void RemoveLike(BlogLike like);
+    /// <summary>Adds delta to blogs.comment_count in one SQL update, never below 0.</summary>
+    Task AddToCommentCountAsync(long blogId, int delta, CancellationToken ct);
 
     /// <summary>Adds a blog comment.</summary>
     void AddComment(BlogComment comment);
