@@ -13,6 +13,8 @@ public static class AiModule
         var aiSection = configuration.GetSection(AiSettings.SectionName);
         var aiSettings = aiSection.Get<AiSettings>() ?? new AiSettings();
 
+        // Bind section "Ai" vào IOptions<AiSettings>, dùng chung cho RM-10 và OpenAiAgentLlmService.
+        // Agent đọc Ai:ApiKey (biến môi trường Ai__ApiKey) từ options và gắn vào Authorization header.
         services.AddOptions<AiSettings>().Bind(aiSection);
         services.AddHttpClient<IRoadmapPlannerService, OpenAiRoadmapPlannerService>(client =>
         {

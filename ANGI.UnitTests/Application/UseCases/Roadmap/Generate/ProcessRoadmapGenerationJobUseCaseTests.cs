@@ -184,6 +184,23 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         fixture.Jobs.Verify(value => value.MarkFailedAsync(77, ProcessRoadmapGenerationJobUseCase.UnexpectedMessage, CancellationToken.None), Times.Once);
     }
 
+    // TEST-09: An Agent or manual edit during provider planning invalidates the RM-10 source snapshot before any item writes.
+    /// <summary>Verifies a delayed generation job cannot overwrite a newer confirmed roadmap revision.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenRoadmapChangedDuringPlanning_ShouldFailWithoutOverwritingItems()
+    {
+        var fixture = new Fixture(new GenerateRoadmapRequestDto { Scope = "full", Province = "Huế", ReplaceExisting = true });
+        fixture.Roadmaps.Setup(value => value.LockAndGetTrackedAsync(88, 12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Domain.Entities.Roadmap { Id = 88, UserId = 12, Version = 2 });
+
+        await fixture.UseCase.ExecuteAsync(77, CancellationToken.None);
+
+        fixture.Jobs.Verify(value => value.MarkFailedAsync(77, ProcessRoadmapGenerationJobUseCase.RoadmapChangedMessage, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Created.Should().BeEmpty(); fixture.Removed.Should().BeEmpty(); fixture.Notifications.Should().BeEmpty();
+        fixture.UnitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Recommendation.Verify(value => value.RecordImpressionsAsync(It.IsAny<int>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture
     {
         public Fixture(

@@ -6,6 +6,7 @@ namespace ANGI.Application.DTOs.Roadmap;
 public sealed class RoadmapSummaryDto
 {
     public long Id { get; set; }
+    public long Version { get; set; }
     public string Title { get; set; } = string.Empty;
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }

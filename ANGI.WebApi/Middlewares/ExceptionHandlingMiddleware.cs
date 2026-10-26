@@ -47,6 +47,8 @@ namespace ANGI.WebApi.Middlewares
 
                 context.Response.Clear();
                 context.Response.StatusCode = statusCode;
+                if (exception is AgentRateLimitedException limited)
+                    context.Response.Headers.RetryAfter = limited.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 await context.Response.WriteAsJsonAsync(response);
             }
         }
@@ -81,6 +83,10 @@ namespace ANGI.WebApi.Middlewares
                     ErrorCode = openException.ErrorCode,
                     Data = new SubmissionAlreadyOpenErrorDto { Id = openException.SubmissionId }
                 }),
+                AgentProposalValidationException proposalException => (StatusCodes.Status409Conflict, new ApiResponse<object>
+                {
+                    Success = false, Message = proposalException.Message, ErrorCode = proposalException.ErrorCode, Data = proposalException.Validation
+                }),
                 AppException appException => (GetStatusCode(appException), new ApiResponse<object>
                 {
                     Success = false,
@@ -109,6 +115,8 @@ namespace ANGI.WebApi.Middlewares
                 NotFoundException => StatusCodes.Status404NotFound,
                 ConflictException => StatusCodes.Status409Conflict,
                 ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
+                GoneException => StatusCodes.Status410Gone,
+                AgentRateLimitedException => StatusCodes.Status429TooManyRequests,
                 _ => StatusCodes.Status500InternalServerError
             };
         }

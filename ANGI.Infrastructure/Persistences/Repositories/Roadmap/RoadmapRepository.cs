@@ -54,6 +54,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
             .Select(roadmap => new RoadmapSummaryDto
             {
                 Id = roadmap.Id,
+                Version = roadmap.Version,
                 Title = roadmap.Title,
                 StartDate = roadmap.StartDate,
                 EndDate = roadmap.StartDate.HasValue
@@ -401,6 +402,8 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int userId,
         CancellationToken ct)
     {
+        // Use the same parent-before-child lock order as Agent confirmation and all other roadmap mutations.
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM core.roadmaps WHERE id = {roadmapId} AND user_id = {userId} AND deleted_at IS NULL FOR UPDATE", ct);
         await _context.Database.ExecuteSqlInterpolatedAsync($$"""
             SELECT 1
             FROM core.roadmap_items AS item

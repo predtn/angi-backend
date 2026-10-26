@@ -25,6 +25,292 @@ namespace ANGI.Infrastructure.Persistences.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "citext");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentConversation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<long?>("CurrentProposalId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("current_proposal_id");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<long?>("ProcessingAttemptId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("processing_attempt_id");
+
+                    b.Property<long?>("ProcessingTurnId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("processing_turn_id");
+
+                    b.Property<DateTime?>("ProcessingUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processing_until");
+
+                    b.Property<long?>("RoadmapId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("roadmap_id");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("state");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_agent_conversations");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_agent_conversations_expires_at");
+
+                    b.HasIndex("RoadmapId")
+                        .HasDatabaseName("ix_agent_conversations_roadmap_id");
+
+                    b.HasIndex("Id", "CurrentProposalId")
+                        .HasDatabaseName("ix_agent_conversations_id_current_proposal_id");
+
+                    b.HasIndex("UserId", "UpdatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_agent_conversations_user_id_updated_at");
+
+                    b.ToTable("agent_conversations", "core", t =>
+                        {
+                            t.HasCheckConstraint("ck_agent_conversations_lease", "(processing_turn_id IS NULL AND processing_attempt_id IS NULL AND processing_until IS NULL) OR (processing_turn_id IS NOT NULL AND processing_attempt_id IS NOT NULL AND processing_until IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_agent_conversations_processing_ids", "(processing_turn_id IS NULL OR processing_turn_id > 0) AND (processing_attempt_id IS NULL OR processing_attempt_id > 0)");
+
+                            t.HasCheckConstraint("ck_agent_conversations_status", "status IN ('active', 'closed', 'expired')");
+
+                            t.HasCheckConstraint("ck_agent_conversations_version", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("ClientMessageId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("client_message_id");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("ProcessingStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("processing_status");
+
+                    b.Property<string>("RequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<string>("ResponsePayload")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("response_payload");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("role");
+
+                    b.Property<int>("SequenceNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence_no");
+
+                    b.Property<long>("TurnId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("turn_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_agent_messages");
+
+                    b.HasIndex("ConversationId", "ClientMessageId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_agent_messages_conversation_id_client_message_id")
+                        .HasFilter("client_message_id IS NOT NULL");
+
+                    b.HasIndex("ConversationId", "SequenceNo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_agent_messages_conversation_id_sequence_no");
+
+                    b.ToTable("agent_messages", "core", t =>
+                        {
+                            t.HasCheckConstraint("ck_agent_messages_ids", "turn_id > 0 AND (client_message_id IS NULL OR client_message_id > 0)");
+
+                            t.HasCheckConstraint("ck_agent_messages_processing_status", "processing_status IN ('processing', 'completed', 'failed')");
+
+                            t.HasCheckConstraint("ck_agent_messages_retry", "(role = 'user' AND client_message_id IS NOT NULL AND processing_status IS NOT NULL AND request_hash IS NOT NULL) OR (role <> 'user' AND client_message_id IS NULL AND processing_status IS NULL AND request_hash IS NULL AND response_payload IS NULL)");
+
+                            t.HasCheckConstraint("ck_agent_messages_role", "role IN ('user', 'assistant', 'tool')");
+
+                            t.HasCheckConstraint("ck_agent_messages_sequence", "sequence_no > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentProposal", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("BaseRoadmapId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("base_roadmap_id");
+
+                    b.Property<long?>("BaseRoadmapVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("base_roadmap_version");
+
+                    b.Property<string>("CommitResult")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("commit_result");
+
+                    b.Property<DateTime?>("CommittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committed_at");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("operation");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<int>("ProposalVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("proposal_version");
+
+                    b.PrimitiveCollection<Guid[]>("RecoRequestIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("reco_request_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
+                    b.Property<long?>("ResultRoadmapId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("result_roadmap_id");
+
+                    b.Property<long?>("ResultRoadmapVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("result_roadmap_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("ValidationResult")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("validation_result");
+
+                    b.HasKey("Id")
+                        .HasName("pk_agent_proposals");
+
+                    b.HasAlternateKey("ConversationId", "Id")
+                        .HasName("ak_agent_proposals_conversation_id_id");
+
+                    b.HasIndex("BaseRoadmapId")
+                        .HasDatabaseName("ix_agent_proposals_base_roadmap_id");
+
+                    b.HasIndex("ResultRoadmapId")
+                        .HasDatabaseName("ix_agent_proposals_result_roadmap_id");
+
+                    b.HasIndex("ConversationId", "ProposalVersion")
+                        .IsUnique()
+                        .HasDatabaseName("ix_agent_proposals_conversation_id_proposal_version");
+
+                    b.ToTable("agent_proposals", "core", t =>
+                        {
+                            t.HasCheckConstraint("ck_agent_proposals_base", "(operation = 'update' AND base_roadmap_id IS NOT NULL AND base_roadmap_version IS NOT NULL AND base_roadmap_version > 0) OR (operation = 'create' AND base_roadmap_id IS NULL AND base_roadmap_version IS NULL)");
+
+                            t.HasCheckConstraint("ck_agent_proposals_commit", "(status = 'committed' AND result_roadmap_id IS NOT NULL AND result_roadmap_version IS NOT NULL AND result_roadmap_version > 0 AND commit_result IS NOT NULL AND committed_at IS NOT NULL) OR (status <> 'committed' AND result_roadmap_id IS NULL AND result_roadmap_version IS NULL AND commit_result IS NULL AND committed_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_agent_proposals_operation", "operation IN ('create', 'update')");
+
+                            t.HasCheckConstraint("ck_agent_proposals_status", "status IN ('ready', 'invalid', 'superseded', 'committed', 'discarded', 'expired')");
+
+                            t.HasCheckConstraint("ck_agent_proposals_version", "proposal_version > 0");
+                        });
+                });
+
             modelBuilder.Entity("ANGI.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<long>("Id")
@@ -1655,6 +1941,12 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("user_id");
 
+                    b.Property<long>("Version")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasDefaultValueSql("1");
+
                     b.HasKey("Id")
                         .HasName("pk_roadmaps");
 
@@ -1670,6 +1962,8 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                             t.HasCheckConstraint("ck_roadmaps_origin", "(origin_mode = 'pinned' AND origin_latitude IS NOT NULL AND origin_longitude IS NOT NULL) OR (origin_mode <> 'pinned' AND origin_latitude IS NULL AND origin_longitude IS NULL)");
 
                             t.HasCheckConstraint("ck_roadmaps_origin_mode", "origin_mode IN ('none', 'pinned', 'gps')");
+
+                            t.HasCheckConstraint("ck_roadmaps_version", "version > 0");
                         });
                 });
 
@@ -2455,19 +2749,80 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentConversation", b =>
+                {
+                    b.HasOne("ANGI.Domain.Entities.Roadmap", null)
+                        .WithMany()
+                        .HasForeignKey("RoadmapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_agent_conversations_roadmaps_roadmap_id");
+
+                    b.HasOne("ANGI.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_agent_conversations_users_user_id");
+
+                    b.HasOne("ANGI.Domain.Entities.AgentProposal", "CurrentProposal")
+                        .WithMany()
+                        .HasForeignKey("Id", "CurrentProposalId")
+                        .HasPrincipalKey("ConversationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_agent_conversations_agent_proposals_id_current_proposal_id");
+
+                    b.Navigation("CurrentProposal");
+                });
+
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentMessage", b =>
+                {
+                    b.HasOne("ANGI.Domain.Entities.AgentConversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_agent_messages_agent_conversations_conversation_id");
+                });
+
+            modelBuilder.Entity("ANGI.Domain.Entities.AgentProposal", b =>
+                {
+                    b.HasOne("ANGI.Domain.Entities.Roadmap", null)
+                        .WithMany()
+                        .HasForeignKey("BaseRoadmapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_agent_proposals_roadmaps_base_roadmap_id");
+
+                    b.HasOne("ANGI.Domain.Entities.AgentConversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_agent_proposals_agent_conversations_conversation_id");
+
+                    b.HasOne("ANGI.Domain.Entities.Roadmap", null)
+                        .WithMany()
+                        .HasForeignKey("ResultRoadmapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_agent_proposals_roadmaps_result_roadmap_id");
+                });
+
             modelBuilder.Entity("ANGI.Domain.Entities.AuditLog", b =>
                 {
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Actor")
                         .WithMany()
                         .HasForeignKey("ActorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_audit_logs_users_actor_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "SubjectUser")
                         .WithMany()
                         .HasForeignKey("SubjectUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_audit_logs_users_subject_user_id");
+
+                    b.Navigation("Actor");
+
+                    b.Navigation("SubjectUser");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.Blog", b =>
@@ -2682,36 +3037,38 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasConstraintName("fk_menu_submissions_users_created_by");
 
                     b.HasOne("ANGI.Domain.Entities.Restaurant", "Restaurant")
-                        .WithMany()
+                        .WithMany("MenuSubmissions")
                         .HasForeignKey("RestaurantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_menu_submissions_restaurants_restaurant_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Reviewer")
                         .WithMany()
                         .HasForeignKey("ReviewedBy")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submissions_users_reviewed_by");
 
                     b.Navigation("Restaurant");
+
+                    b.Navigation("Reviewer");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.MenuSubmissionItem", b =>
                 {
-                    b.HasOne("ANGI.Domain.Entities.MediaFile", null)
+                    b.HasOne("ANGI.Domain.Entities.MediaFile", "CoverMedia")
                         .WithMany()
                         .HasForeignKey("CoverMediaId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submission_items_media_files_cover_media_id");
 
-                    b.HasOne("ANGI.Domain.Entities.Dish", null)
+                    b.HasOne("ANGI.Domain.Entities.Dish", "ResultDish")
                         .WithMany()
                         .HasForeignKey("ResultDishId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submission_items_dishes_result_dish_id");
 
-                    b.HasOne("ANGI.Domain.Entities.Dish", null)
+                    b.HasOne("ANGI.Domain.Entities.Dish", "SourceDish")
                         .WithMany()
                         .HasForeignKey("SourceDishId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2723,6 +3080,12 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_menu_submission_items_menu_submissions_submission_id");
+
+                    b.Navigation("CoverMedia");
+
+                    b.Navigation("ResultDish");
+
+                    b.Navigation("SourceDish");
 
                     b.Navigation("Submission");
                 });
@@ -2860,7 +3223,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_restaurant_verifications_restaurants_restaurant_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Reviewer")
                         .WithMany()
                         .HasForeignKey("ReviewedBy")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2876,6 +3239,8 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.Navigation("Previous");
 
                     b.Navigation("Restaurant");
+
+                    b.Navigation("Reviewer");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.RestaurantVerificationDocument", b =>
@@ -3162,6 +3527,8 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.Navigation("Dishes");
 
                     b.Navigation("Images");
+
+                    b.Navigation("MenuSubmissions");
 
                     b.Navigation("Verifications");
                 });

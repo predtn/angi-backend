@@ -58,6 +58,9 @@ namespace ANGI.Infrastructure.Persistences
         public DbSet<Notification> Notifications { get; set; } = null!;
         public DbSet<AuditLog> AuditLogs { get; set; } = null!;
         public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
+        public DbSet<AgentConversation> AgentConversations { get; set; } = null!;
+        public DbSet<AgentMessage> AgentMessages { get; set; } = null!;
+        public DbSet<AgentProposal> AgentProposals { get; set; } = null!;
 
         /// <summary>Configures warnings for required navigations whose principals may be soft deleted.</summary>
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -117,7 +120,8 @@ namespace ANGI.Infrastructure.Persistences
                     created.CreatedAt = now;
                 }
 
-                if (entry.State is EntityState.Added or EntityState.Modified && entry.Entity is IHasUpdatedAt updated)
+                if (entry.State is EntityState.Added or EntityState.Modified && entry.Entity is IHasUpdatedAt updated &&
+                    entry.Entity is not AgentConversation { Status: ANGI.Domain.Enums.AgentConversationStatus.Expired })
                 {
                     updated.UpdatedAt = now;
                 }

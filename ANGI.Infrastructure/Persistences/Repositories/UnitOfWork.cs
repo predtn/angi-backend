@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -23,6 +24,12 @@ namespace ANGI.Infrastructure.Persistences.Repositories
             try
             {
                 return await _context.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                if (exception.Entries.Any(entry => entry.Entity is AgentConversation))
+                    throw new ConflictException("CONVERSATION_VERSION_CONFLICT", "Hội thoại đã thay đổi. Vui lòng tải lại trước khi tiếp tục.");
+                throw new ConflictException("ROADMAP_VERSION_CONFLICT", "Dữ liệu đã thay đổi. Vui lòng tải lại roadmap.");
             }
             catch (DbUpdateException exception) when (
                 exception.InnerException is PostgresException

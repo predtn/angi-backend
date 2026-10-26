@@ -33,6 +33,7 @@ namespace ANGI.Application
             services.AddRestaurantUseCases();
             services.AddRoadmapUseCases();
             services.AddSocialUseCases();
+            ANGI.Application.UseCases.Agent.AgentModule.AddAgentUseCases(services);
 
             return services;
         }

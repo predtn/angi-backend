@@ -30,6 +30,7 @@ internal static class RoadmapMapper
             Overview = new RoadmapSummaryDto
             {
                 Id = roadmap.Id,
+                Version = roadmap.Version,
                 Title = roadmap.Title,
                 StartDate = roadmap.StartDate,
                 EndDate = roadmap.StartDate?.AddDays(roadmap.NumDays - 1),

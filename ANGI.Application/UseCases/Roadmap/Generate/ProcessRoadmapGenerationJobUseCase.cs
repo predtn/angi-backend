@@ -31,6 +31,7 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
     public const string NoCandidateMessage = "Không tìm thấy món phù hợp với các điều kiện đã chọn.";
     public const string RoadmapGoneMessage = "Roadmap đã bị xóa trước khi tạo xong.";
     public const string DayGoneMessage = "Ngày được chọn không còn trong roadmap.";
+    public const string RoadmapChangedMessage = "Roadmap đã thay đổi trong lúc tạo. Vui lòng tạo lại.";
     public const string UnexpectedMessage = "Không tạo được roadmap, vui lòng thử lại.";
 
     private readonly IRoadmapGenerationRepository _generationRepository;
@@ -75,6 +76,7 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
         }
     }
 
+    /// <summary>Plans from an immutable aggregate snapshot and defers final writes until the source revision is rechecked.</summary>
     private async Task RunAsync(long jobId, CancellationToken ct)
     {
         var job = await _generationRepository.GetJobSnapshotAsync(jobId, ct);
@@ -227,6 +229,14 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
         if (roadmap is null)
         {
             await _generationRepository.MarkFailedAsync(job.Id, RoadmapGoneMessage, ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        if (roadmap.Version != job.Roadmap.Version)
+        {
+            // Planning happens outside the transaction; never replace edits committed while providers were running.
+            await _generationRepository.MarkFailedAsync(job.Id, RoadmapChangedMessage, ct);
             await transaction.CommitAsync(ct);
             return;
         }
