@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Repositories.Restaurant;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Interfaces.Services.Auth;
@@ -18,6 +19,7 @@ public sealed class CreateRestaurantReportUseCase : ICreateRestaurantReportUseCa
     private readonly IValidator<CreateRestaurantReportRequestDto> _validator;
     private readonly IRestaurantRepository _restaurantRepository;
     private readonly IReportRepository _reportRepository;
+    private readonly IMediaRepository _mediaRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -25,12 +27,14 @@ public sealed class CreateRestaurantReportUseCase : ICreateRestaurantReportUseCa
         IValidator<CreateRestaurantReportRequestDto> validator,
         IRestaurantRepository restaurantRepository,
         IReportRepository reportRepository,
+        IMediaRepository mediaRepository,
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork)
     {
         _validator = validator;
         _restaurantRepository = restaurantRepository;
         _reportRepository = reportRepository;
+        _mediaRepository = mediaRepository;
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
     }
@@ -59,6 +63,14 @@ public sealed class CreateRestaurantReportUseCase : ICreateRestaurantReportUseCa
             throw new ConflictException("REPORT_ALREADY_PENDING", "Bạn đã có báo cáo về nhà hàng này đang chờ xử lý.");
         }
 
+        var evidenceIds = request.EvidenceMediaIds?.Distinct().ToArray() ?? [];
+        if (evidenceIds.Length > 0 &&
+            (await _mediaRepository.GetOwnedByIdsAsync(userId, evidenceIds, ct)).Count != evidenceIds.Length)
+        {
+            // Evidence URLs are signed for the Mod, so only the reporter's own uploads may be referenced.
+            throw new BadRequestException("VALIDATION_FAILED", "Bằng chứng chỉ được là ảnh do chính bạn tải lên.");
+        }
+
         var reasonCode = ParseReasonCode(request.ReasonCode);
 
         var report = new Report
@@ -68,9 +80,7 @@ public sealed class CreateRestaurantReportUseCase : ICreateRestaurantReportUseCa
             RestaurantId = restaurantId,
             ReasonCode = reasonCode,
             Description = request.Description?.Trim(),
-            Evidence = request.EvidenceMediaIds is { Count: > 0 }
-                ? JsonSerializer.Serialize(request.EvidenceMediaIds)
-                : "[]",
+            Evidence = JsonSerializer.Serialize(evidenceIds),
             Status = ReportStatus.Pending
         };
 
