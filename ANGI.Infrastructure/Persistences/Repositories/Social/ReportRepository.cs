@@ -32,6 +32,12 @@ public sealed class ReportRepository : IReportRepository
     }
 
     /// <inheritdoc />
+    public Task<bool> ExistsPendingReportAsync(int reporterId, long blogId, CancellationToken ct)
+    {
+        return HasPendingReportAsync(reporterId, ReportTargetType.Blog, blogId, ct);
+    }
+
+    /// <inheritdoc />
     public void Add(Report report)
     {
         _context.Reports.Add(report);

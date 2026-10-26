@@ -284,6 +284,34 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
         restaurant.ProvinceName.Should().Be("Thành phố Hồ Chí Minh");
     }
 
+    // TEST-09: Reject invalid replacement phones before querying, mutating, auditing, or saving the restaurant.
+    /// <summary>Proves an invalid contact cannot enter persistence through the partial update workflow.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("1234567890")]
+    [InlineData("0123456789")]
+    [InlineData("090123456")]
+    [InlineData("09012345678")]
+    [InlineData("+840901234567")]
+    public async Task ExecuteAsync_WithInvalidPhone_ShouldRejectBeforeAnySideEffect(string? phone)
+    {
+        var repository = new Mock<IRestaurantRepository>(MockBehavior.Strict);
+        var media = new Mock<IMediaRepository>(MockBehavior.Strict);
+        var audit = new Mock<IAuditLogService>(MockBehavior.Strict);
+        var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        var useCase = CreateUseCase(repository, media, audit, unitOfWork);
+
+        var act = () => useCase.ExecuteAsync(new UpdateRestaurantRequestDto { Phone = phone }, CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("Phone");
+        repository.VerifyNoOtherCalls();
+        media.VerifyNoOtherCalls();
+        audit.VerifyNoOtherCalls();
+        unitOfWork.VerifyNoOtherCalls();
+    }
+
     /// <summary>Creates OWN-03 with an authenticated owner and default response dependencies.</summary>
     private static UpdateOwnerRestaurantUseCase CreateUseCase(
         Mock<IRestaurantRepository> repository,

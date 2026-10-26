@@ -219,6 +219,260 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         });
     }
 
+    // TEST-05: Reject invalid registration phones with one Vietnamese field error and no persisted restaurant aggregate.
+    /// <summary>Exercises real validation, HTTP error mapping, and PostgreSQL state for rejected OWN-01 contacts.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterRestaurant_WithInvalidPhones_ShouldReturnValidationWithoutCreatingRows()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "invalid-phone-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+
+        foreach (var phone in InvalidPhones())
+        {
+            using var response = await client.PostAsJsonAsync(
+                "/api/v1/owner/restaurant", RegistrationRequest("Rejected Phone Restaurant", phone!));
+
+            await AssertPhoneValidationAsync(response, phone, isRegistration: true);
+        }
+
+        // Omitting the property must behave like the empty DTO default.
+        using var omittedResponse = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new
+        {
+            Name = "Missing Phone Restaurant", AddressLine = "1 Integration Street",
+            District = "District 1", ProvinceName = "Ho Chi Minh City", Latitude = 10m, Longitude = 106m
+        });
+        await AssertPhoneValidationAsync(omittedResponse, "", isRegistration: true);
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            (await context.Restaurants.CountAsync()).Should().Be(0);
+            (await context.RestaurantImages.CountAsync()).Should().Be(0);
+            (await context.RestaurantBusinessHours.CountAsync()).Should().Be(0);
+        });
+
+        // An earlier invalid attempt must not consume the owner's right to register.
+        var restaurant = await RegisterRestaurantAsync(client, "Recovered Phone Restaurant");
+        restaurant.Phone.Should().Be("0900000000");
+    }
+
+    // TEST-06: Register valid domestic and international mobile and landline contacts and preserve their readable formatting.
+    /// <summary>Verifies successful OWN-01 responses, GET round trips, and persisted phone values with real use cases.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterRestaurant_WithValidPhones_ShouldPersistAndReturnFormattedNumbers()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        string[] phones =
+        [
+            "0901234567", " 0901234567 ", "0236 3812 345", "024 3812 3456",
+            "028 3812 3456", "+84 90 123 4567", "+84 236 3812 345", "090.123.4567",
+            "090-123-4567", "0901234567".PadRight(20)
+        ];
+        for (var index = 0; index < phones.Length; index++)
+        {
+            client.DefaultRequestHeaders.Authorization = null;
+            var auth = await RegisterOwnerAndLoginAsync(client, $"valid-phone-{index}@integration.test");
+            Authorize(client, auth.AccessToken);
+            var restaurant = await RegisterRestaurantAsync(client, $"Valid Phone Restaurant {index}", phones[index]);
+
+            restaurant.Phone.Should().Be(phones[index].Trim());
+            restaurant.VerificationStatus.Should().Be("unverified");
+            restaurant.OperatingStatus.Should().Be("open");
+            restaurant.ModerationStatus.Should().Be("visible");
+            using var get = await client.GetAsync("/api/v1/owner/restaurant");
+            (await SuccessDataAsync<OwnerRestaurantDto>(get)).Phone.Should().Be(restaurant.Phone);
+            await _factory.ExecuteDbAsync(async context =>
+            {
+                var stored = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
+                stored.OwnerId.Should().Be(auth.User.Id);
+                stored.Phone.Should().Be(restaurant.Phone);
+            });
+        }
+    }
+
+    // TEST-07: Reject invalid PATCH phones without changing other supplied fields, the stored contact, or audit history.
+    /// <summary>Proves the registration fix cannot be bypassed by a later partial update.</summary>
+    [PostgresEndToEndFact]
+    public async Task UpdateRestaurant_WithInvalidPhones_ShouldLeaveProfileAndAuditUnchanged()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "patch-phone-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+        var restaurant = await RegisterRestaurantAsync(client, "Unchanged Phone Restaurant");
+        var auditCount = await _factory.ExecuteDbAsync(context => context.AuditLogs.CountAsync());
+        var updatedAt = await _factory.ExecuteDbAsync(context => context.Restaurants
+            .Where(value => value.Id == restaurant.Id).Select(value => value.UpdatedAt).SingleAsync());
+
+        foreach (var phone in InvalidPhones())
+        {
+            using var response = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new
+            {
+                Phone = phone, Name = "Must Not Be Saved"
+            });
+            await AssertPhoneValidationAsync(response, phone, isRegistration: false);
+        }
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var stored = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
+            stored.Phone.Should().Be(restaurant.Phone);
+            stored.Name.Should().Be(restaurant.Name);
+            stored.UpdatedAt.Should().Be(updatedAt);
+            (await context.AuditLogs.CountAsync()).Should().Be(auditCount);
+        });
+
+        // Omitting phone still permits a legitimate partial update.
+        using var omitted = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { Description = "Phone omitted" });
+        omitted.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await SuccessDataAsync<OwnerRestaurantDto>(omitted)).Phone.Should().Be(restaurant.Phone);
+
+        using var valid = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { Phone = "+84 236 3812 345" });
+        valid.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await SuccessDataAsync<OwnerRestaurantDto>(valid)).Phone.Should().Be("+84 236 3812 345");
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            (await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id))
+                .Phone.Should().Be("+84 236 3812 345");
+            (await context.AuditLogs.CountAsync()).Should().Be(auditCount + 2);
+        });
+    }
+
+    // TEST-08: Concurrent valid registrations for one owner create exactly one restaurant.
+    /// <summary>Verifies phone validation preserves transactional owner uniqueness and the documented conflict response.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterRestaurant_WithConcurrentValidPhones_ShouldCreateOnlyOneRestaurant()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "concurrent-phone-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+
+        var responses = await Task.WhenAll(
+            client.PostAsJsonAsync("/api/v1/owner/restaurant", RegistrationRequest("First Contact", "0901234567")),
+            client.PostAsJsonAsync("/api/v1/owner/restaurant", RegistrationRequest("Second Contact", "0236 3812 345")));
+        try
+        {
+            responses.Select(response => response.StatusCode)
+                .Should().BeEquivalentTo(new[] { HttpStatusCode.Created, HttpStatusCode.Conflict });
+            var conflict = responses.Single(response => response.StatusCode == HttpStatusCode.Conflict);
+            var error = await conflict.Content.ReadFromJsonAsync<ApiResponse<object>>();
+            error!.Success.Should().BeFalse();
+            error.ErrorCode.Should().Be("OWNER_ALREADY_HAS_RESTAURANT");
+            await _factory.ExecuteDbAsync(async context =>
+                (await context.Restaurants.CountAsync(value => value.OwnerId == auth.User.Id)).Should().Be(1));
+        }
+        finally
+        {
+            foreach (var response in responses) response.Dispose();
+        }
+    }
+
+    // TEST-09: Reject a JSON null business-hour element with an indexed validation error and no restaurant writes.
+    /// <summary>Guards the registration aggregate mapper from malformed nested requests.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterRestaurant_WithNullBusinessHour_ShouldRejectBeforePersistence()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "null-hours-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+        var request = RegistrationRequest("Null Hours Restaurant", "0901234567");
+        request.BusinessHours = [null!];
+
+        using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        envelope!.Success.Should().BeFalse();
+        envelope.ErrorCode.Should().Be("VALIDATION_FAILED");
+        envelope.Errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
+        {
+            ["businessHours[0]"] = ["Khung giờ mở cửa không hợp lệ."]
+        });
+        await _factory.ExecuteDbAsync(async context => (await context.Restaurants.CountAsync()).Should().Be(0));
+    }
+
+    // TEST-10: Reject owned PDFs as cover or gallery images, then register successfully with an owned image and opening hours.
+    /// <summary>Verifies image-only validation, rollback, and complete aggregate persistence through real HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterRestaurant_WithOwnedMedia_ShouldRequireImagesAndPersistValidAggregate()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "image-contact-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+        using var pdfUpload = await UploadAsync(client, "verification_doc", "license.pdf", "application/pdf", "%PDF test"u8.ToArray());
+        var document = await SuccessDataAsync<MediaFileDto>(pdfUpload);
+
+        foreach (var isCover in new[] { true, false })
+        {
+            var invalid = RegistrationRequest("Document Image Restaurant", "0901234567");
+            invalid.CoverMediaId = isCover ? document.Id : null;
+            invalid.ImageMediaIds = isCover ? null : [document.Id];
+            using var rejected = await client.PostAsJsonAsync("/api/v1/owner/restaurant", invalid);
+
+            rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var error = await rejected.Content.ReadFromJsonAsync<ApiResponse<object>>();
+            error!.Success.Should().BeFalse();
+            error.ErrorCode.Should().Be("VALIDATION_FAILED");
+            error.Errors.Should().ContainSingle().Which.Key.Should().Be(isCover ? "coverMediaId" : "imageMediaIds");
+        }
+
+        await _factory.ExecuteDbAsync(async context => (await context.Restaurants.CountAsync()).Should().Be(0));
+        using var imageUpload = await UploadAsync(client, "restaurant", "restaurant.png", "image/png", [1, 2, 3, 4]);
+        var image = await SuccessDataAsync<MediaFileDto>(imageUpload);
+        var request = RegistrationRequest("Complete Image Restaurant", "0236 3812 345");
+        request.CoverMediaId = image.Id;
+        request.ImageMediaIds = [image.Id];
+        request.BusinessHours = [new BusinessHourDto { DayOfWeek = 6, OpenTime = "22:00", CloseTime = "02:00" }];
+
+        using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var restaurant = await SuccessDataAsync<OwnerRestaurantDto>(response);
+        restaurant.CoverUrl.Should().Be(image.Url);
+        restaurant.Images.Should().Equal(image.Url);
+        restaurant.BusinessHours.Should().BeEquivalentTo(request.BusinessHours);
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var stored = await context.Restaurants.Include(value => value.Images).Include(value => value.BusinessHours)
+                .AsSplitQuery().SingleAsync(value => value.Id == restaurant.Id);
+            stored.Phone.Should().Be(request.Phone);
+            stored.CoverMediaId.Should().Be(image.Id);
+            stored.Images.Should().ContainSingle().Which.MediaId.Should().Be(image.Id);
+            stored.BusinessHours.Should().ContainSingle().Which.OpenTime.Should().Be(new TimeOnly(22, 0));
+        });
+    }
+
+    /// <summary>Provides invalid phone regions shared by registration and update HTTP regression scenarios.</summary>
+    private static string?[] InvalidPhones() =>
+    [
+        null, "", "   ", "1234567890", "0000000000", "0123456789", "0301234567",
+        "0541234567", "0711234567", "02023812345", "090123456", "09012345678",
+        "0236381234", "023638123456", "+840901234567", "+6590123456",
+        "090123456a", "０９０１２３４５６７", "090\t1234567", "0901234567\n",
+        "090\u200b1234567", "090..1234567", "0901234567".PadRight(21)
+    ];
+
+    /// <summary>Asserts the exact Vietnamese validation envelope and a single camelCase phone field error.</summary>
+    private static async Task AssertPhoneValidationAsync(HttpResponseMessage response, string? phone, bool isRegistration)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        envelope.Should().NotBeNull();
+        envelope!.Success.Should().BeFalse();
+        envelope.ErrorCode.Should().Be("VALIDATION_FAILED");
+        envelope.Data.Should().BeNull();
+        var expected = string.IsNullOrWhiteSpace(phone)
+            ? isRegistration ? "Số điện thoại là bắt buộc." : "Số điện thoại không được để trống."
+            : phone.Length > 20 ? "Số điện thoại không được vượt quá 20 ký tự."
+            : "Số điện thoại phải là số di động hoặc số cố định Việt Nam hợp lệ.";
+        envelope.Errors.Should().BeEquivalentTo(new Dictionary<string, string[]> { ["phone"] = [expected] });
+    }
+
     /// <summary>Registers, verifies, and logs in a restaurant owner through public HTTP endpoints.</summary>
     private async Task<AuthResultDto> RegisterOwnerAndLoginAsync(HttpClient client, string email)
     {
@@ -245,13 +499,20 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     }
 
     /// <summary>Registers a valid restaurant through the authenticated owner endpoint.</summary>
-    private static async Task<OwnerRestaurantDto> RegisterRestaurantAsync(HttpClient client, string name)
+    private static async Task<OwnerRestaurantDto> RegisterRestaurantAsync(
+        HttpClient client, string name, string phone = "0900000000")
     {
-        using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new RegisterRestaurantRequestDto
+        using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", RegistrationRequest(name, phone));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        return await SuccessDataAsync<OwnerRestaurantDto>(response);
+    }
+
+    /// <summary>Creates a valid registration request while allowing each test to choose the contact input.</summary>
+    private static RegisterRestaurantRequestDto RegistrationRequest(string name, string phone) => new()
         {
             Name = name,
             Description = "Restaurant created by the end-to-end integration suite.",
-            Phone = "0900000000",
+            Phone = phone,
             Email = "restaurant@integration.test",
             AddressLine = "1 Integration Street",
             District = "District 1",
@@ -259,10 +520,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             Latitude = 10.775m,
             Longitude = 106.700m,
             PriceLevel = 2
-        });
-        response.EnsureSuccessStatusCode();
-        return await SuccessDataAsync<OwnerRestaurantDto>(response);
-    }
+        };
 
     /// <summary>Uploads one multipart file through MEDIA-01 and returns the live HTTP response.</summary>
     private static Task<HttpResponseMessage> UploadAsync(

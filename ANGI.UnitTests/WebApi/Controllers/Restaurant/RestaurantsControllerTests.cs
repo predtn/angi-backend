@@ -16,13 +16,15 @@ public sealed class RestaurantsControllerTests
     private readonly Mock<IGetRestaurantDetailUseCase> _getDetailUseCaseMock = new();
     private readonly Mock<IGetRestaurantMenuUseCase> _getMenuUseCaseMock = new();
     private readonly Mock<IGetRestaurantReviewsUseCase> _getReviewsUseCaseMock = new();
+    private readonly Mock<ICreateRestaurantReviewUseCase> _createReviewUseCaseMock = new();
 
     private RestaurantsController CreateController() =>
         new(
             _browseUseCaseMock.Object,
             _getDetailUseCaseMock.Object,
             _getMenuUseCaseMock.Object,
-            _getReviewsUseCaseMock.Object);
+            _getReviewsUseCaseMock.Object,
+            _createReviewUseCaseMock.Object);
 
     // TEST-01: Return REST-01 payload wrapped in ApiResponse with HTTP 200 OK
     [Fact]
@@ -158,5 +160,38 @@ public sealed class RestaurantsControllerTests
         var response = objectResult.Value.Should().BeOfType<ApiResponse<RestaurantReviewsDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expectedReviews);
+    }
+
+    // TEST-05: Return REV-01 payload wrapped in ApiResponse with HTTP 201 Created
+    [Fact]
+    public async Task CreateReview_WithValidRequest_ShouldReturnCreatedApiResponse()
+    {
+        var restaurantId = 7L;
+        var request = new CreateRestaurantReviewRequestDto
+        {
+            Rating = 5,
+            Content = "Nước dùng đậm đà"
+        };
+        var expectedReview = new ReviewDto
+        {
+            Id = 640,
+            RestaurantId = restaurantId,
+            Rating = 5,
+            Content = "Nước dùng đậm đà"
+        };
+
+        _createReviewUseCaseMock
+            .Setup(u => u.ExecuteAsync(restaurantId, request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedReview);
+
+        var controller = CreateController();
+        var actionResult = await controller.CreateReview(restaurantId, request, CancellationToken.None);
+
+        var objectResult = actionResult.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status201Created);
+
+        var response = objectResult.Value.Should().BeOfType<ApiResponse<ReviewDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expectedReview);
     }
 }

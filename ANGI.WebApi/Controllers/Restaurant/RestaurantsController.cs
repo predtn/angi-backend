@@ -2,8 +2,10 @@ using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
 using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.WebApi.Common.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.WebApi.Controllers.Restaurant;
 
@@ -16,18 +18,21 @@ public sealed class RestaurantsController : ControllerBase
     private readonly IGetRestaurantDetailUseCase _getRestaurantDetailUseCase;
     private readonly IGetRestaurantMenuUseCase _getRestaurantMenuUseCase;
     private readonly IGetRestaurantReviewsUseCase _getRestaurantReviewsUseCase;
+    private readonly ICreateRestaurantReviewUseCase _createRestaurantReviewUseCase;
 
     /// <summary>Initializes the controller with restaurant use cases.</summary>
     public RestaurantsController(
         IBrowseRestaurantsUseCase browseRestaurantsUseCase,
         IGetRestaurantDetailUseCase getRestaurantDetailUseCase,
         IGetRestaurantMenuUseCase getRestaurantMenuUseCase,
-        IGetRestaurantReviewsUseCase getRestaurantReviewsUseCase)
+        IGetRestaurantReviewsUseCase getRestaurantReviewsUseCase,
+        ICreateRestaurantReviewUseCase createRestaurantReviewUseCase)
     {
         _browseRestaurantsUseCase = browseRestaurantsUseCase;
         _getRestaurantDetailUseCase = getRestaurantDetailUseCase;
         _getRestaurantMenuUseCase = getRestaurantMenuUseCase;
         _getRestaurantReviewsUseCase = getRestaurantReviewsUseCase;
+        _createRestaurantReviewUseCase = createRestaurantReviewUseCase;
     }
 
     // REST-01
@@ -127,6 +132,29 @@ public sealed class RestaurantsController : ControllerBase
         };
         var result = await _getRestaurantReviewsUseCase.ExecuteAsync(request, ct);
         return StatusCode(StatusCodes.Status200OK, new ApiResponse<RestaurantReviewsDto>
+        {
+            Success = true,
+            Data = result
+        });
+    }
+
+    // REV-01
+    /// <summary>Receives a REV-01 request, invokes CreateRestaurantReviewUseCase, and returns the created review.</summary>
+    [HttpPost("{restaurantId:long}/reviews")]
+    [Authorize(Roles = "TRAVELER,Traveler")]
+    [ProducesResponseType(typeof(ApiResponse<ReviewDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateReview(
+        [FromRoute] long restaurantId,
+        [FromBody, BindRequired] CreateRestaurantReviewRequestDto request,
+        CancellationToken ct)
+    {
+        var result = await _createRestaurantReviewUseCase.ExecuteAsync(restaurantId, request, ct);
+        return StatusCode(StatusCodes.Status201Created, new ApiResponse<ReviewDto>
         {
             Success = true,
             Data = result

@@ -77,4 +77,43 @@ public interface IRestaurantRepository
         int page,
         int pageSize,
         CancellationToken ct);
+
+    /// <summary>Loads the owner's active restaurant row without tracking.</summary>
+    Task<Domain.Entities.Restaurant?> GetByOwnerIdAsync(int ownerId, CancellationToken ct);
+
+    /// <summary>Loads paginated reviews (including hidden ones) for the owner's restaurant (OWN-19).</summary>
+    Task<(IReadOnlyList<RestaurantReview> Items, long TotalItems)> GetOwnerReviewsAsync(
+        long restaurantId,
+        bool? replied,
+        short? rating,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
+    /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
+    Task<RestaurantReview?> GetReviewForReplyAsync(long reviewId, CancellationToken ct);
+
+    /// <summary>Adds a review reply to the current unit of work.</summary>
+    void AddReviewReply(ReviewReply reply);
+
+    /// <summary>Locks and tracks a restaurant row for review updates to safely recompute rating average and count.</summary>
+    Task<Domain.Entities.Restaurant?> LockRestaurantForReviewAsync(long restaurantId, CancellationToken ct);
+
+    /// <summary>Checks whether a traveler has already submitted a review for the restaurant.</summary>
+    Task<bool> HasUserReviewedRestaurantAsync(long restaurantId, int userId, CancellationToken ct);
+
+    /// <summary>Loads the user profile with avatar for constructing the review response.</summary>
+    Task<User?> GetReviewerUserAsync(int userId, CancellationToken ct);
+
+    /// <summary>Loads uploaded media files owned by the user.</summary>
+    Task<IReadOnlyList<MediaFile>> GetUserReviewMediaFilesAsync(int userId, IReadOnlyList<long> mediaIds, CancellationToken ct);
+
+    /// <summary>Checks whether a roadmap item belongs to the user and references a dish of this restaurant.</summary>
+    Task<bool> IsRoadmapItemValidForRestaurantAsync(int userId, long roadmapItemId, long restaurantId, CancellationToken ct);
+
+    /// <summary>Adds a restaurant review aggregate to the current unit of work.</summary>
+    void AddReview(RestaurantReview review);
+
+    /// <summary>Adds a notification to the current unit of work.</summary>
+    void AddNotification(Domain.Entities.Notification notification);
 }
