@@ -38,8 +38,8 @@ public sealed class RegisterRestaurantUseCaseTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
-                new MediaFile { Id = 100, UploaderId = 12, Url = "https://cdn.test/cover.jpg" },
-                new MediaFile { Id = 101, UploaderId = 12, Url = "https://cdn.test/gallery.jpg" }
+                new MediaFile { Id = 100, UploaderId = 12, MimeType = "image/jpeg", Url = "https://cdn.test/cover.jpg" },
+                new MediaFile { Id = 101, UploaderId = 12, MimeType = "image/png", Url = "https://cdn.test/gallery.jpg" }
             ]);
         var unitOfWork = new Mock<IUnitOfWork>();
         var transaction = new Mock<IUnitOfWorkTransaction>();
@@ -139,7 +139,7 @@ public sealed class RegisterRestaurantUseCaseTests
                 12,
                 It.IsAny<IReadOnlyCollection<long>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new MediaFile { Id = 101, UploaderId = 12, Url = "https://cdn.test/gallery.jpg" }]);
+            .ReturnsAsync([new MediaFile { Id = 101, UploaderId = 12, MimeType = "image/png", Url = "https://cdn.test/gallery.jpg" }]);
         var useCase = CreateUseCase(restaurantRepository, mediaRepository, new Mock<IUnitOfWork>());
 
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
@@ -168,6 +168,178 @@ public sealed class RegisterRestaurantUseCaseTests
         restaurantRepository.Verify(
             repo => repo.ExistsByOwnerIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // TEST-06: Reject invalid phone input before opening a transaction or calling any persistence dependency.
+    /// <summary>Proves phone validation stops registration before owner locking, media access, or writes.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("1234567890")]
+    [InlineData("0123456789")]
+    [InlineData("090123456")]
+    [InlineData("09012345678")]
+    [InlineData("+840901234567")]
+    public async Task ExecuteAsync_WithInvalidPhone_ShouldRejectBeforeAnySideEffect(string? phone)
+    {
+        var repository = new Mock<IRestaurantRepository>(MockBehavior.Strict);
+        var media = new Mock<IMediaRepository>(MockBehavior.Strict);
+        var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        var currentUser = new Mock<ICurrentUserService>(MockBehavior.Strict);
+        var useCase = new RegisterRestaurantUseCase(
+            new RegisterRestaurantRequestDtoValidator(), repository.Object, media.Object,
+            currentUser.Object, unitOfWork.Object, new FixedTimeProvider(Now));
+        var request = ValidRequest();
+        request.Phone = phone!;
+
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("Phone");
+        repository.VerifyNoOtherCalls();
+        media.VerifyNoOtherCalls();
+        currentUser.VerifyNoOtherCalls();
+        unitOfWork.VerifyNoOtherCalls();
+    }
+
+    // TEST-07: Persist supported phone formatting while trimming surrounding whitespace.
+    /// <summary>Verifies accepted mobile and landline contacts are returned exactly as persisted.</summary>
+    [Theory]
+    [InlineData(" 0901234567 ", "0901234567")]
+    [InlineData("0236 3812 345", "0236 3812 345")]
+    [InlineData("+84 90 123 4567", "+84 90 123 4567")]
+    public async Task ExecuteAsync_WithValidPhone_ShouldPersistAndReturnContact(string phone, string expected)
+    {
+        var repository = new Mock<IRestaurantRepository>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        var transaction = new Mock<IUnitOfWorkTransaction>();
+        var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), unitOfWork, transaction);
+        var request = ValidRequest();
+        request.Phone = phone;
+        request.CoverMediaId = null;
+        request.ImageMediaIds = null;
+
+        var result = await useCase.ExecuteAsync(request, CancellationToken.None);
+
+        result.Phone.Should().Be(expected);
+        repository.Verify(item => item.Add(It.Is<Domain.Entities.Restaurant>(value => value.Phone == expected)), Times.Once);
+        unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-08: Accept supported restaurant image types and reject owned documents or unknown MIME types on each field.
+    /// <summary>Verifies registration uses the same image-only boundary as profile updates before saving or committing.</summary>
+    [Theory]
+    [InlineData("image/jpeg", true)]
+    [InlineData("image/png", true)]
+    [InlineData("image/webp", true)]
+    [InlineData(" IMAGE/JPEG ", true)]
+    [InlineData("application/pdf", false)]
+    [InlineData("image/gif", false)]
+    [InlineData("image/svg+xml", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public async Task ExecuteAsync_WithOwnedMediaType_ShouldEnforceImageBoundary(string? mimeType, bool expectedValid)
+    {
+        foreach (var isCover in new[] { true, false })
+        {
+            var repository = new Mock<IRestaurantRepository>();
+            var media = new Mock<IMediaRepository>();
+            media.Setup(item => item.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync([new MediaFile { Id = 100, UploaderId = 12, MimeType = mimeType!, Url = "https://cdn.test/image" }]);
+            var unitOfWork = new Mock<IUnitOfWork>();
+            var transaction = new Mock<IUnitOfWorkTransaction>();
+            var useCase = CreateUseCase(repository, media, unitOfWork, transaction);
+            var request = ValidRequest();
+            request.CoverMediaId = isCover ? 100 : null;
+            request.ImageMediaIds = isCover ? null : [100];
+
+            var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+            if (expectedValid)
+            {
+                await act.Should().NotThrowAsync();
+                unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+                transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+            }
+            else
+            {
+                var exception = await act.Should().ThrowAsync<ValidationException>();
+                exception.Which.Errors.Should().ContainSingle().Which.PropertyName
+                    .Should().Be(isCover ? "CoverMediaId" : "ImageMediaIds");
+                repository.Verify(item => item.Add(It.IsAny<Domain.Entities.Restaurant>()), Times.Never);
+                unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+                transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+            }
+        }
+    }
+
+    // TEST-09: Reject an unauthenticated caller after validation and before any transaction or repository access.
+    /// <summary>Verifies the registration use case independently enforces the caller identity boundary.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithoutOwnerIdentity_ShouldThrowUnauthorizedBeforePersistence()
+    {
+        var repository = new Mock<IRestaurantRepository>(MockBehavior.Strict);
+        var media = new Mock<IMediaRepository>(MockBehavior.Strict);
+        var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        var useCase = new RegisterRestaurantUseCase(new RegisterRestaurantRequestDtoValidator(),
+            repository.Object, media.Object, new Mock<ICurrentUserService>().Object,
+            unitOfWork.Object, new FixedTimeProvider(Now));
+
+        var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        repository.VerifyNoOtherCalls();
+        media.VerifyNoOtherCalls();
+        unitOfWork.VerifyNoOtherCalls();
+    }
+
+    // TEST-10: Normalize Vietnamese names and punctuation or fall back to a safe slug, then resolve existing suffixes.
+    /// <summary>Verifies registration produces a readable unique slug even when the base name is already taken.</summary>
+    [Theory]
+    [InlineData("Đặng's Bún", "dang-s-bun")]
+    [InlineData("🍜", "restaurant")]
+    public async Task ExecuteAsync_WithCollidingSlug_ShouldUseNextAvailableSuffix(string name, string baseSlug)
+    {
+        var repository = new Mock<IRestaurantRepository>();
+        repository.SetupSequence(item => item.SlugExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true).ReturnsAsync(true).ReturnsAsync(false);
+        var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        var request = ValidRequest();
+        request.Name = name;
+        request.CoverMediaId = null;
+        request.ImageMediaIds = null;
+
+        var result = await useCase.ExecuteAsync(request, CancellationToken.None);
+
+        result.Slug.Should().Be(baseSlug + "-3");
+        foreach (var slug in new[] { baseSlug, baseSlug + "-2", baseSlug + "-3" })
+        {
+            repository.Verify(item => item.SlugExistsAsync(slug, It.IsAny<CancellationToken>()), Times.Once);
+        }
+    }
+
+    // TEST-11: Dispose an uncommitted transaction and propagate a persistence failure without returning a successful registration.
+    /// <summary>Verifies registration cannot report success or commit when its single save fails.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenSavingFails_ShouldDisposeWithoutCommit()
+    {
+        var repository = new Mock<IRestaurantRepository>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Persistence failure"));
+        var transaction = new Mock<IUnitOfWorkTransaction>();
+        var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), unitOfWork, transaction);
+        var request = ValidRequest();
+        request.CoverMediaId = null;
+        request.ImageMediaIds = null;
+
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Persistence failure");
+        unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        transaction.Verify(item => item.DisposeAsync(), Times.Once);
     }
 
     /// <summary>Creates a registration use case with an authenticated owner and fixed clock.</summary>

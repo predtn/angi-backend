@@ -19,6 +19,11 @@ namespace ANGI.Application.UseCases.Restaurant.Register;
 /// <summary>Implements OWN-01 by creating a restaurant and its owned child records.</summary>
 public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
 {
+    private static readonly IReadOnlySet<string> _allowedImageMimeTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg", "image/png", "image/webp"
+    };
+
     private readonly IValidator<RegisterRestaurantRequestDto> _validator;
     private readonly IRestaurantRepository _restaurantRepository;
     private readonly IMediaRepository _mediaRepository;
@@ -67,7 +72,7 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
         var mediaFiles = mediaIds.Count == 0
             ? Array.Empty<MediaFile>()
             : await _mediaRepository.GetOwnedByIdsAsync(ownerId, mediaIds, ct);
-        EnsureAllMediaExist(request, mediaFiles);
+        EnsureValidMedia(request, mediaFiles);
 
         var mediaById = mediaFiles.ToDictionary(media => media.Id);
         var restaurant = new Domain.Entities.Restaurant
@@ -116,20 +121,22 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
 
     /// <summary>
     /// Raises VALIDATION_FAILED on the field that holds the media id (coverMediaId or imageMediaIds)
-    /// when the media is absent or belongs to another user.
+    /// when the media is absent, belongs to another user, or is not a supported restaurant image.
     /// </summary>
-    private static void EnsureAllMediaExist(
+    private static void EnsureValidMedia(
         RegisterRestaurantRequestDto request,
         IReadOnlyCollection<MediaFile> mediaFiles)
     {
-        var foundIds = mediaFiles.Select(media => media.Id).ToHashSet();
+        var foundIds = mediaFiles
+            .Where(media => !string.IsNullOrWhiteSpace(media.MimeType) && _allowedImageMimeTypes.Contains(media.MimeType.Trim()))
+            .Select(media => media.Id).ToHashSet();
         var failures = new List<ValidationFailure>();
 
         if (request.CoverMediaId is { } coverMediaId && !foundIds.Contains(coverMediaId))
         {
             failures.Add(new ValidationFailure(
                 nameof(request.CoverMediaId),
-                $"Ảnh bìa {coverMediaId} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
+                $"Ảnh bìa {coverMediaId} không tồn tại, không thuộc tài khoản của bạn hoặc không phải ảnh hợp lệ."));
         }
 
         var missingImageIds = (request.ImageMediaIds ?? Array.Empty<long>())
@@ -139,7 +146,7 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
         {
             failures.Add(new ValidationFailure(
                 nameof(request.ImageMediaIds),
-                $"Ảnh {string.Join(", ", missingImageIds)} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
+                $"Ảnh {string.Join(", ", missingImageIds)} không tồn tại, không thuộc tài khoản của bạn hoặc không phải ảnh hợp lệ."));
         }
 
         if (failures.Count > 0)

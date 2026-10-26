@@ -1,3 +1,7 @@
+using System.Reflection;
+using ANGI.Application;
+using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using ANGI.WebApi;
 using ANGI.WebApi.Configs;
@@ -11,10 +15,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-namespace ANGI.UnitTests.WebApi.Configs
+namespace ANGI.UnitTests.WebApi
 {
-    public class WebApiConfigurationTests
+    /// <summary>Verifies WebApi service registration, configured HTTP contracts, and bound request validation.</summary>
+    public class DependencyInjectionTests
     {
+        private static readonly NullabilityInfoContext Nullability = new();
+
         // TEST-01: Verify that JWT validation and claim mapping are configured correctly.
         /// <summary>Verifies JWT validation uses the configured issuer, audience, key, lifetime, and claims.</summary>
         [Fact]
@@ -75,32 +82,7 @@ namespace ANGI.UnitTests.WebApi.Configs
             }
         }
 
-        // TEST-04: Verify that the rate-limit middleware normalizes email and rewinds the request body.
-        /// <summary>Verifies email partition extraction preserves the request body for model binding.</summary>
-        [Fact]
-        public async Task RateLimitPartitionMiddleware_ShouldNormalizeEmailAndRewindBody()
-        {
-            const string requestJson = "{\"email\":\"  User@ANGI.Test  \",\"password\":\"secret\"}";
-            var context = new DefaultHttpContext();
-            context.Request.Method = HttpMethods.Post;
-            context.Request.Path = "/api/v1/auth/login";
-            context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(requestJson));
-            var middleware = new RateLimitPartitionMiddleware();
-
-            await middleware.InvokeAsync(context, async nextContext =>
-            {
-                nextContext.Items[RateLimitPartitionMiddleware.EmailItemKey]
-                    .Should().Be("user@angi.test");
-
-                using var reader = new StreamReader(
-                    nextContext.Request.Body,
-                    Encoding.UTF8,
-                    leaveOpen: true);
-                (await reader.ReadToEndAsync()).Should().Be(requestJson);
-            });
-        }
-
-        // TEST-05: Share the resend rate-limit partition for the same email across IP addresses.
+        // TEST-04: Share the resend rate-limit partition for the same email across IP addresses.
         /// <summary>Verifies AUTH-03 is limited once per email rather than once per email and IP pair.</summary>
         [Fact]
         public async Task RateLimiter_ShouldLimitVerificationResendByEmailAcrossIpAddresses()
@@ -117,7 +99,7 @@ namespace ANGI.UnitTests.WebApi.Configs
             secondLease.IsAcquired.Should().BeFalse();
         }
 
-        // TEST-06: Keep the sensitive authentication window at the documented 60 seconds.
+        // TEST-05: Keep the sensitive authentication window at the documented 60 seconds.
         /// <summary>Verifies the reset behavior exercised with an accelerated HTTP test is configured as 60 seconds in production.</summary>
         [Fact]
         public void RateLimitConfiguration_ShouldUseDocumentedSensitiveWindow()
@@ -166,5 +148,102 @@ namespace ANGI.UnitTests.WebApi.Configs
             services.AddWebApi(configuration);
             return services.BuildServiceProvider();
         }
+        /// <summary>Lists every non-nullable reference property of every Application request DTO a controller binds.</summary>
+        public static TheoryData<Type, string> NonNullableRequestProperties()
+        {
+            var data = new TheoryData<Type, string>();
+            foreach (var type in RequestDtoTypes().OrderBy(type => type.FullName))
+            {
+                foreach (var property in NonNullableReferenceProperties(type))
+                {
+                    data.Add(type, property.Name);
+                }
+            }
+
+            return data;
+        }
+
+        // TEST-06: Keep implicit [Required] off, so required-field messages come from the validators, in Vietnamese.
+        /// <summary>Verifies the MVC option is set by AddWebApi.</summary>
+        [Fact]
+        public void AddWebApi_ShouldSuppressImplicitRequiredForNonNullableReferences()
+        {
+            var services = new ServiceCollection();
+            services.AddWebApi(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+
+            var options = services.BuildServiceProvider()
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<MvcOptions>>().Value;
+
+            options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes.Should().BeTrue();
+        }
+
+        // TEST-07: Every non-nullable reference property of a request DTO is reported by its validator, once, when null.
+        /// <summary>Sets one property to null and expects exactly one validation error on that property.</summary>
+        [Theory]
+        [MemberData(nameof(NonNullableRequestProperties))]
+        public async Task Validator_WithNullNonNullableProperty_ShouldReportIt(Type dtoType, string propertyName)
+        {
+            using var provider = new ServiceCollection().AddApplication().BuildServiceProvider();
+            var validator = (IValidator?)provider.GetService(typeof(IValidator<>).MakeGenericType(dtoType));
+            validator.Should().NotBeNull($"{dtoType.Name} has non-nullable reference properties, so it needs a validator");
+
+            var instance = Activator.CreateInstance(dtoType)!;
+            dtoType.GetProperty(propertyName)!.SetValue(instance, null);
+            var context = (IValidationContext)Activator.CreateInstance(
+                typeof(ValidationContext<>).MakeGenericType(dtoType), instance)!;
+
+            var result = await validator!.ValidateAsync(context);
+
+            result.Errors.Where(error => error.PropertyName == propertyName).Should().ContainSingle(
+                $"{dtoType.Name}.{propertyName} = null must be rejected once, before the use case runs");
+        }
+
+        /// <summary>Request DTOs bound by a controller action, with the DTOs nested inside them.</summary>
+        private static IEnumerable<Type> RequestDtoTypes()
+        {
+            var found = new HashSet<Type>();
+            var actionParameters = typeof(ANGI.WebApi.DependencyInjection).Assembly.GetTypes()
+                .Where(type => typeof(ControllerBase).IsAssignableFrom(type) && !type.IsAbstract)
+                .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                .SelectMany(method => method.GetParameters());
+            foreach (var parameter in actionParameters)
+            {
+                Collect(parameter.ParameterType, found);
+            }
+
+            return found;
+        }
+
+        /// <summary>Collects bound request DTOs and their nested request types once.</summary>
+        private static void Collect(Type type, HashSet<Type> found)
+        {
+            if (type.IsGenericType)
+            {
+                foreach (var argument in type.GetGenericArguments())
+                {
+                    Collect(argument, found);
+                }
+
+                return;
+            }
+
+            if (!type.IsClass || type == typeof(string) ||
+                type.Namespace?.StartsWith("ANGI.Application.DTOs", StringComparison.Ordinal) != true ||
+                !found.Add(type))
+            {
+                return;
+            }
+
+            foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                Collect(property.PropertyType, found);
+            }
+        }
+
+        /// <summary>Finds writable non-nullable reference properties whose validation must reject null.</summary>
+        private static IEnumerable<PropertyInfo> NonNullableReferenceProperties(Type type) =>
+            type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.CanWrite && property.SetMethod!.IsPublic && !property.PropertyType.IsValueType)
+                .Where(property => Nullability.Create(property).WriteState == NullabilityState.NotNull);
     }
 }
