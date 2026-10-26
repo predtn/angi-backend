@@ -59,7 +59,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
             Body = "AI đã thêm 6 món vào roadmap \"Huế 2 ngày\"."
         });
         using var data = JsonDocument.Parse(notification.Data!);
-        (data.RootElement.GetProperty("roadmapId").GetInt64(), data.RootElement.GetProperty("jobId").GetInt64()).Should().Be((88, 77));
+        (data.RootElement.GetProperty("roadmap_id").GetInt64(), data.RootElement.GetProperty("job_id").GetInt64()).Should().Be((88, 77));
         fixture.Transaction.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.Recommendation.Verify(value => value.RecordImpressionsAsync(
             12, RequestId, It.Is<IReadOnlyList<int>>(ids => ids.Count == 6), Now, It.IsAny<CancellationToken>()));

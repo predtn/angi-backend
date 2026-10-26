@@ -106,7 +106,7 @@ public sealed class CreateBlogCommentUseCase : ICreateBlogCommentUseCase
             Type = "BLOG_COMMENTED",
             Title = "Có bình luận mới",
             Body = $"{commenter.DisplayName}: \"{excerpt}\"",
-            Data = JsonSerializer.Serialize(new { blogId = blog.Id })
+            Data = JsonSerializer.Serialize(new { blog_id = blog.Id })
         };
     }
 }

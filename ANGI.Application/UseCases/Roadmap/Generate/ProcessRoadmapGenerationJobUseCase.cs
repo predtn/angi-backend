@@ -304,7 +304,7 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
             Type = NotificationType,
             Title = "Roadmap đã được tạo xong",
             Body = $"AI đã thêm {created.Count} món vào roadmap \"{roadmap.Title}\".",
-            Data = RoadmapGenerationValues.Serialize(new { roadmapId = roadmap.Id, jobId = job.Id })
+            Data = RoadmapGenerationValues.Serialize(new { roadmap_id = roadmap.Id, job_id = job.Id })
         });
         await _unitOfWork.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

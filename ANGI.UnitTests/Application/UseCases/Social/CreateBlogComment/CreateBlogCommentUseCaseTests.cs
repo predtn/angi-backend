@@ -165,7 +165,7 @@ public sealed class CreateBlogCommentUseCaseTests
         notification.Type.Should().Be("BLOG_COMMENTED");
         notification.Title.Should().Be("Có bình luận mới");
         notification.Body.Should().Be($"Nguyễn An: \"{new string('a', 47)}...\"");
-        notification.Data.Should().Be("{\"blogId\":45}");
+        notification.Data.Should().Be("{\"blog_id\":45}");
     }
 
     [Fact]
