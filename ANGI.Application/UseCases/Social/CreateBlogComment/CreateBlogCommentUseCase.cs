@@ -71,14 +71,16 @@ public sealed class CreateBlogCommentUseCase : ICreateBlogCommentUseCase
             Status = ContentStatus.Visible
         };
 
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
         _blogRepository.AddComment(comment);
-        blog.CommentCount += 1;
         if (blog.AuthorId != userId)
         {
             _blogRepository.AddNotification(CreateAuthorNotification(blog, user, sanitizedContent));
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+        await _blogRepository.AddToCommentCountAsync(blogId, 1, ct);
+        await transaction.CommitAsync(ct);
 
         return new CommentDto
         {

@@ -15,57 +15,16 @@ public sealed class DeleteBlogCommentUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 22, 14, 0, 0, DateTimeKind.Utc);
 
-    // TEST-01 (Happy Path): Soft-deletes own comment and decrements blog comment count.
+    // TEST-01 (Happy Path): Soft-deletes own comment; the repository also decrements comment_count, in one transaction.
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldSoftDeleteCommentAndDecrementBlogCount()
     {
-        // Arrange
-        const long blogId = 45;
-        const long commentId = 302;
-        const int authorId = 12;
+        var harness = CreateHarness(commentOwnerId: 12, currentUserId: 12, deleted: true);
 
-        var blog = new Blog
-        {
-            Id = blogId,
-            CommentCount = 5,
-            Status = BlogStatus.Published
-        };
+        await harness.UseCase.ExecuteAsync(45, 302, CancellationToken.None);
 
-        var comment = new BlogComment
-        {
-            Id = commentId,
-            BlogId = blogId,
-            UserId = authorId,
-            Content = "Bình luận cần xóa",
-            Blog = blog,
-            CreatedAt = Now.AddHours(-1)
-        };
-
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetByIdAndBlogIdAsync(commentId, blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(comment);
-
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(authorId);
-
-        var unitOfWork = new Mock<IUnitOfWork>();
-        unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1);
-
-        var useCase = new DeleteBlogCommentUseCase(
-            commentRepo.Object,
-            currentUser.Object,
-            unitOfWork.Object,
-            new FixedTimeProvider(Now));
-
-        // Act
-        await useCase.ExecuteAsync(blogId, commentId, CancellationToken.None);
-
-        // Assert
-        comment.DeletedAt.Should().Be(Now);
-        comment.UpdatedAt.Should().Be(Now);
-        blog.CommentCount.Should().Be(4);
-        unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        harness.Comments.Verify(r => r.TrySoftDeleteAsync(302, 45, Now, It.IsAny<CancellationToken>()), Times.Once);
+        harness.Transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // TEST-02 (Exception Path 2): User cố tình xóa bình luận của người khác (bắn 403 NOT_OWNER).
@@ -162,45 +121,38 @@ public sealed class DeleteBlogCommentUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
-    // TEST-05: Comment count should not drop below zero when deleting.
+    // TEST-05: When a concurrent delete wins, this call still succeeds and decrements nothing (the repository skips it).
     [Fact]
-    public async Task ExecuteAsync_WhenCommentCountIsZero_ShouldNotDropBelowZero()
+    public async Task ExecuteAsync_WhenConcurrentDeleteWins_ShouldSucceedWithoutSecondDecrement()
     {
-        // Arrange
-        const long blogId = 45;
-        const long commentId = 302;
-        const int authorId = 12;
+        var harness = CreateHarness(commentOwnerId: 12, currentUserId: 12, deleted: false);
 
-        var blog = new Blog { Id = blogId, CommentCount = 0 };
-        var comment = new BlogComment
-        {
-            Id = commentId,
-            BlogId = blogId,
-            UserId = authorId,
-            Blog = blog
-        };
+        await harness.UseCase.ExecuteAsync(45, 302, CancellationToken.None);
 
-        var commentRepo = new Mock<IBlogCommentRepository>();
-        commentRepo.Setup(r => r.GetByIdAndBlogIdAsync(commentId, blogId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(comment);
-
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.SetupGet(u => u.UserId).Returns(authorId);
-
-        var unitOfWork = new Mock<IUnitOfWork>();
-
-        var useCase = new DeleteBlogCommentUseCase(
-            commentRepo.Object,
-            currentUser.Object,
-            unitOfWork.Object,
-            new FixedTimeProvider(Now));
-
-        // Act
-        await useCase.ExecuteAsync(blogId, commentId, CancellationToken.None);
-
-        // Assert
-        blog.CommentCount.Should().Be(0);
+        harness.Transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    private static Harness CreateHarness(int commentOwnerId, int currentUserId, bool deleted)
+    {
+        var comments = new Mock<IBlogCommentRepository>();
+        comments.Setup(r => r.GetByIdAndBlogIdAsync(302, 45, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BlogComment { Id = 302, BlogId = 45, UserId = commentOwnerId, Content = "Bình luận cần xóa" });
+        comments.Setup(r => r.TrySoftDeleteAsync(302, 45, Now, It.IsAny<CancellationToken>())).ReturnsAsync(deleted);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(u => u.UserId).Returns(currentUserId);
+        var transaction = new Mock<IUnitOfWorkTransaction>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(transaction.Object);
+        return new Harness(
+            new DeleteBlogCommentUseCase(comments.Object, currentUser.Object, unitOfWork.Object, new FixedTimeProvider(Now)),
+            comments,
+            transaction);
+    }
+
+    private sealed record Harness(
+        DeleteBlogCommentUseCase UseCase,
+        Mock<IBlogCommentRepository> Comments,
+        Mock<IUnitOfWorkTransaction> Transaction);
 
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {

@@ -42,24 +42,17 @@ public sealed class LikeBlogUseCase : ILikeBlogUseCase
             throw new NotFoundException("BLOG_NOT_FOUND", "Không tìm thấy bài viết.");
         }
 
-        var alreadyLiked = await _blogRepository.HasUserLikedAsync(blogId, userId, ct);
-        if (!alreadyLiked)
-        {
-            var like = new BlogLike
-            {
-                BlogId = blogId,
-                UserId = userId,
-                CreatedAt = _timeProvider.GetUtcNow().UtcDateTime
-            };
-            _blogRepository.AddLike(like);
-            blog.LikeCount += 1;
-            await _unitOfWork.SaveChangesAsync(ct);
-        }
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        var inserted = await _blogRepository.TryAddLikeAsync(blogId, userId, _timeProvider.GetUtcNow().UtcDateTime, ct);
+
+        // A repeated like changes nothing (BLOG-08); delta 0 only reads the current count.
+        var likeCount = await _blogRepository.AddToLikeCountAsync(blogId, inserted ? 1 : 0, ct);
+        await transaction.CommitAsync(ct);
 
         return new BlogLikeResponseDto
         {
             Liked = true,
-            LikeCount = blog.LikeCount
+            LikeCount = likeCount
         };
     }
 }

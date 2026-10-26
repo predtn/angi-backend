@@ -90,8 +90,11 @@ public interface IRestaurantRepository
         int pageSize,
         CancellationToken ct);
 
-    /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
-    Task<RestaurantReview?> GetReviewForReplyAsync(long reviewId, CancellationToken ct);
+    /// <summary>
+    /// Locks the review row (FOR UPDATE) and loads it with its restaurant and existing reply for OWN-20, so two replies
+    /// to the same review run one after the other instead of colliding on the one-reply-per-review index.
+    /// </summary>
+    Task<RestaurantReview?> LockReviewForReplyAsync(long reviewId, CancellationToken ct);
 
     /// <summary>Adds a review reply to the current unit of work.</summary>
     void AddReviewReply(ReviewReply reply);
