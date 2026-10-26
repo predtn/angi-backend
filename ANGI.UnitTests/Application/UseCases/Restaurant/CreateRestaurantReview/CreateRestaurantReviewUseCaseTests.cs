@@ -73,6 +73,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
         _currentUserServiceMock.Setup(s => s.UserId).Returns(userId);
         _repositoryMock.Setup(r => r.GetReviewerUserAsync(userId, It.IsAny<CancellationToken>())).ReturnsAsync(reviewer);
         _repositoryMock.Setup(r => r.LockRestaurantForReviewAsync(restaurantId, It.IsAny<CancellationToken>())).ReturnsAsync(restaurant);
+        _repositoryMock.Setup(r => r.GetVisibleRatingStatsAsync(restaurantId, It.IsAny<CancellationToken>())).ReturnsAsync((1, 4));
         _repositoryMock.Setup(r => r.HasUserReviewedRestaurantAsync(restaurantId, userId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         _repositoryMock.Setup(r => r.IsRoadmapItemValidForRestaurantAsync(userId, 1502L, restaurantId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _repositoryMock.Setup(r => r.GetUserReviewMediaFilesAsync(userId, It.IsAny<IReadOnlyList<long>>(), It.IsAny<CancellationToken>())).ReturnsAsync(mediaFiles);
@@ -252,5 +253,21 @@ public sealed class CreateRestaurantReviewUseCaseTests
 
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("VALIDATION_FAILED");
+    }
+
+    // The aggregate is recomputed from the visible reviews, so a stale or rounded stored value never carries over.
+    [Fact]
+    public async Task ExecuteAsync_ShouldRecomputeRatingFromVisibleReviews()
+    {
+        var restaurant = new Domain.Entities.Restaurant { Id = 7L, OwnerId = 99, Name = "Quán", RatingAvg = 3.0m, RatingCount = 5 };
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(12);
+        _repositoryMock.Setup(r => r.GetReviewerUserAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = 12, DisplayName = "An" });
+        _repositoryMock.Setup(r => r.LockRestaurantForReviewAsync(7L, It.IsAny<CancellationToken>())).ReturnsAsync(restaurant);
+        _repositoryMock.Setup(r => r.GetVisibleRatingStatsAsync(7L, It.IsAny<CancellationToken>())).ReturnsAsync((2, 10));
+
+        await CreateUseCase().ExecuteAsync(7L, new CreateRestaurantReviewRequestDto { Rating = 5 }, CancellationToken.None);
+
+        (restaurant.RatingCount, restaurant.RatingAvg).Should().Be((3, 5.00m));
     }
 }

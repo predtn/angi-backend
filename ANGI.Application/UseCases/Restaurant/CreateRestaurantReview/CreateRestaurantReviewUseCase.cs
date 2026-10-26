@@ -109,15 +109,12 @@ public sealed class CreateRestaurantReviewUseCase : ICreateRestaurantReviewUseCa
 
         _restaurantRepository.AddReview(review);
 
-        // Recalculate restaurant rating metrics safely
-        var newCount = restaurant.RatingCount + 1;
-        var newAvg = Math.Round(
-            ((restaurant.RatingAvg * restaurant.RatingCount) + request.Rating) / newCount,
-            2,
-            MidpointRounding.AwayFromZero);
-
+        // Recompute from the visible reviews (the restaurant row is locked): adding to the rounded rating_avg would
+        // let the rounding error grow with every review.
+        var (visibleCount, ratingSum) = await _restaurantRepository.GetVisibleRatingStatsAsync(restaurantId, ct);
+        var newCount = visibleCount + 1;
         restaurant.RatingCount = newCount;
-        restaurant.RatingAvg = newAvg;
+        restaurant.RatingAvg = Math.Round((decimal)(ratingSum + request.Rating) / newCount, 2, MidpointRounding.AwayFromZero);
 
         // The review id exists only once saved, and the notification data points to it.
         await _unitOfWork.SaveChangesAsync(ct);
