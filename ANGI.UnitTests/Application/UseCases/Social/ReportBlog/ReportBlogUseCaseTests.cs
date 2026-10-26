@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.DTOs.Social;
@@ -19,16 +20,21 @@ public sealed class ReportBlogUseCaseTests
     private readonly IValidator<ReportBlogRequestDto> _validator = new ReportBlogRequestDtoValidator();
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<IReportRepository> _reportRepository = new();
+    private readonly Mock<IMediaRepository> _mediaRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
 
     public ReportBlogUseCaseTests()
     {
         _currentUserService.Setup(s => s.UserId).Returns(12);
+        // By default every evidence id is one of the reporter's own uploads.
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyCollection<long> ids, CancellationToken _) =>
+                ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
     private ReportBlogUseCase CreateUseCase() =>
-        new(_validator, _blogRepository.Object, _reportRepository.Object, _currentUserService.Object, _unitOfWork.Object);
+        new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReport()
@@ -178,5 +184,20 @@ public sealed class ReportBlogUseCaseTests
 
         // Assert
         await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
+    {
+        _blogRepository.Setup(r => r.GetByIdAsync(45, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Blog { Id = 45, AuthorId = 999, Title = "Blog", Status = BlogStatus.Published });
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        var request = new ReportBlogRequestDto { ReasonCode = "spam", EvidenceMediaIds = [7777] };
+
+        var act = () => CreateUseCase().ExecuteAsync(45, request, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("VALIDATION_FAILED");
+        _reportRepository.Verify(r => r.Add(It.IsAny<Report>()), Times.Never);
     }
 }

@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.DTOs.Social;
@@ -19,16 +20,21 @@ public sealed class CreateReportUseCaseTests
     private readonly IValidator<ReportBlogRequestDto> _validator = new ReportBlogRequestDtoValidator();
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<IReportRepository> _reportRepository = new();
+    private readonly Mock<IMediaRepository> _mediaRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
 
     public CreateReportUseCaseTests()
     {
         _currentUserService.Setup(s => s.UserId).Returns(100);
+        // By default every evidence id is one of the reporter's own uploads.
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(100, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyCollection<long> ids, CancellationToken _) =>
+                ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
     private CreateReportUseCase CreateUseCase() =>
-        new(_validator, _blogRepository.Object, _reportRepository.Object, _currentUserService.Object, _unitOfWork.Object);
+        new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReportSuccessfully()

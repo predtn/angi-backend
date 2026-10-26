@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.DTOs.Social;
@@ -13,9 +14,10 @@ public sealed class CreateReportUseCase : ReportBlogUseCase
         IValidator<ReportBlogRequestDto> validator,
         IBlogRepository blogRepository,
         IReportRepository reportRepository,
+        IMediaRepository mediaRepository,
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork)
-        : base(validator, blogRepository, reportRepository, currentUserService, unitOfWork)
+        : base(validator, blogRepository, reportRepository, mediaRepository, currentUserService, unitOfWork)
     {
     }
 }

@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
 using ANGI.Application.Common.Interfaces.Repositories.Restaurant;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Interfaces.Services.Auth;
@@ -20,16 +21,21 @@ public sealed class CreateRestaurantReportUseCaseTests
     private readonly IValidator<CreateRestaurantReportRequestDto> _validator = new CreateRestaurantReportRequestDtoValidator();
     private readonly Mock<IRestaurantRepository> _restaurantRepository = new();
     private readonly Mock<IReportRepository> _reportRepository = new();
+    private readonly Mock<IMediaRepository> _mediaRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
 
     public CreateRestaurantReportUseCaseTests()
     {
         _currentUserService.Setup(s => s.UserId).Returns(12);
+        // By default every evidence id is one of the reporter's own uploads.
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyCollection<long> ids, CancellationToken _) =>
+                ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
     private CreateRestaurantReportUseCase CreateUseCase() =>
-        new(_validator, _restaurantRepository.Object, _reportRepository.Object, _currentUserService.Object, _unitOfWork.Object);
+        new(_validator, _restaurantRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReportSuccessfully()
@@ -200,5 +206,19 @@ public sealed class CreateRestaurantReportUseCaseTests
         // Assert
         addedReport.Should().NotBeNull();
         addedReport!.ReasonCode.Should().Be(expectedEnum);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
+    {
+        _restaurantRepository.Setup(r => r.ExistsAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MediaFile { Id = 9301 }]);
+        var request = new CreateRestaurantReportRequestDto { ReasonCode = "scam", EvidenceMediaIds = [9301, 7777] };
+
+        var act = () => CreateUseCase().ExecuteAsync(100, request, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("VALIDATION_FAILED");
+        _reportRepository.Verify(r => r.Add(It.IsAny<Report>()), Times.Never);
     }
 }
