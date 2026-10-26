@@ -129,6 +129,47 @@ public sealed class AuthEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
+    // TEST-03b: Someone registers a victim's email first; the victim's Google sign-in must lock that password out.
+    /// <summary>Covers the AUTH-05 rule for linking Google to a password account whose email was never verified.</summary>
+    [PostgresEndToEndFact]
+    public async Task GoogleLogin_OnUnverifiedPasswordAccount_ShouldRemoveThatPassword()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        const string email = "pre-registered@integration.test";
+        using var register = await client.PostAsJsonAsync("/api/v1/auth/register", new RegisterAccountRequestDto
+        {
+            Email = email,
+            Password = Password,
+            DisplayName = "Squatter",
+            Role = "TRAVELER"
+        });
+        register.EnsureSuccessStatusCode();
+        _factory.Google.Add("victim-google-token", new GoogleIdentity("google-subject-victim", email, "Real Owner"));
+
+        using var google = await client.PostAsJsonAsync("/api/v1/auth/google", new GoogleLoginRequestDto
+        {
+            IdToken = "victim-google-token"
+        });
+        using var squatterLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequestDto
+        {
+            Email = email,
+            Password = Password
+        });
+
+        google.StatusCode.Should().Be(HttpStatusCode.OK, await google.Content.ReadAsStringAsync());
+        (await SuccessDataAsync<GoogleLoginResponseDto>(google)).IsNewUser.Should().BeFalse();
+        squatterLogin.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await squatterLogin.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("INVALID_CREDENTIALS");
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var user = await context.Users.SingleAsync(value => value.Email == email);
+            user.PasswordHash.Should().BeNull();
+            user.Status.Should().Be(UserStatus.Active);
+            user.EmailVerifiedAt.Should().NotBeNull();
+        });
+    }
+
     // TEST-04: Request and consume a reset token through HTTP, changing the password and revoking every session.
     /// <summary>Covers ANGI-66 and ANGI-70 through the complete reset-password persistence workflow.</summary>
     [PostgresEndToEndFact]
