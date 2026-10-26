@@ -15,7 +15,7 @@ internal static class MenuReviewDecision
     public static void RequirePending(MenuSubmission submission)
     {
         if (submission.Status != MenuSubmissionStatus.Pending)
-            throw new ConflictException("SUBMISSION_NOT_PENDING", "Báº£n menu khÃ´ng cÃ²n chá» duyá»‡t.");
+            throw new ConflictException("SUBMISSION_NOT_PENDING", "Bản menu không còn chờ duyệt.");
     }
 
     /// <summary>Records review metadata, the owner's notification and the matching audit action before saving.</summary>
@@ -31,7 +31,7 @@ internal static class MenuReviewDecision
         {
             RecipientId = submission.Restaurant.OwnerId,
             Type = approved ? "MENU_APPROVED" : "MENU_REJECTED",
-            Title = approved ? "Menu Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t" : "Menu bá»‹ tá»« chá»‘i",
+            Title = approved ? "Menu đã được duyệt" : "Menu bị từ chối",
             Body = note,
             Data = JsonSerializer.Serialize(new { submission_id = submission.Id, restaurant_id = submission.RestaurantId })
         });
