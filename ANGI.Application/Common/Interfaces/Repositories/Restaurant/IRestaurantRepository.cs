@@ -56,6 +56,9 @@ public interface IRestaurantRepository
     /// <summary>Checks whether a restaurant exists and is publicly visible.</summary>
     Task<bool> ExistsAndActiveAsync(long restaurantId, CancellationToken ct);
 
+    /// <summary>Checks whether a restaurant exists (non-deleted).</summary>
+    Task<bool> ExistsAsync(long restaurantId, CancellationToken ct);
+
     /// <summary>Loads public restaurant detail with images and business hours for REST-02.</summary>
     Task<Domain.Entities.Restaurant?> GetPublicDetailAsync(long restaurantId, CancellationToken ct);
 
