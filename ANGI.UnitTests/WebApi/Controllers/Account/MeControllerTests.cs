@@ -19,6 +19,8 @@ public sealed class MeControllerTests
     private MeController CreateController() =>
         new(_getMyProfileUseCase.Object, _updateMyProfileUseCase.Object, _changePasswordUseCase.Object);
 
+    // TEST-01: Verify Controller should require authorization.
+    /// <summary>Verify Controller should require authorization.</summary>
     [Fact]
     public void Controller_ShouldRequireAuthorization()
     {
@@ -26,6 +28,8 @@ public sealed class MeControllerTests
         attributes.Should().NotBeEmpty();
     }
 
+    // TEST-02: Verify GetProfile should call use case and return ok.
+    /// <summary>Verify GetProfile should call use case and return ok.</summary>
     [Fact]
     public async Task GetProfile_ShouldCallUseCaseAndReturnOk()
     {
@@ -55,6 +59,8 @@ public sealed class MeControllerTests
         response.Data.Should().BeEquivalentTo(profile);
     }
 
+    // TEST-03: Verify UpdateProfile should call use case and return ok.
+    /// <summary>Verify UpdateProfile should call use case and return ok.</summary>
     [Fact]
     public async Task UpdateProfile_ShouldCallUseCaseAndReturnOk()
     {
@@ -84,6 +90,8 @@ public sealed class MeControllerTests
         response.Data.Should().BeEquivalentTo(updatedProfile);
     }
 
+    // TEST-04: Verify ChangePassword should have documented open api produces response types.
+    /// <summary>Verify ChangePassword should have documented open api produces response types.</summary>
     [Fact]
     public void ChangePassword_ShouldHaveDocumentedOpenApiProducesResponseTypes()
     {
@@ -101,6 +109,8 @@ public sealed class MeControllerTests
         producesResponseTypes.Should().Contain(StatusCodes.Status401Unauthorized);
     }
 
+    // TEST-05: Verify ChangePassword when successful; should return ok with null data.
+    /// <summary>Verify ChangePassword when successful; should return ok with null data.</summary>
     [Fact]
     public async Task ChangePassword_WhenSuccessful_ShouldReturnOkWithNullData()
     {

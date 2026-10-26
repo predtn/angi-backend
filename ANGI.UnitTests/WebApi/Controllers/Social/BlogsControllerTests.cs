@@ -257,6 +257,8 @@ public sealed class BlogsControllerTests
         deleteUseCase.Verify(item => item.ExecuteAsync(45, source.Token), Times.Once);
     }
 
+    // TEST-07: Verify Controller should require traveler role.
+    /// <summary>Verify Controller should require traveler role.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -267,6 +269,8 @@ public sealed class BlogsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
     }
 
+    // TEST-08: Verify Like should return ok with like response.
+    /// <summary>Verify Like should return ok with like response.</summary>
     [Fact]
     public async Task Like_ShouldReturnOkWithLikeResponse()
     {
@@ -283,6 +287,8 @@ public sealed class BlogsControllerTests
         _likeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
     }
 
+    // TEST-09: Verify Unlike should return ok with like response.
+    /// <summary>Verify Unlike should return ok with like response.</summary>
     [Fact]
     public async Task Unlike_ShouldReturnOkWithLikeResponse()
     {
@@ -299,6 +305,8 @@ public sealed class BlogsControllerTests
         _unlikeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
     }
 
+    // TEST-10: Verify Comment should return created with comment response.
+    /// <summary>Verify Comment should return created with comment response.</summary>
     [Fact]
     public async Task Comment_ShouldReturnCreatedWithCommentResponse()
     {

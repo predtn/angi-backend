@@ -9,6 +9,8 @@ public sealed class CreateBlogCommentRequestDtoValidatorTests
 {
     private readonly CreateBlogCommentRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate when valid; should not have errors.
+    /// <summary>Verify Validate when valid; should not have errors.</summary>
     [Fact]
     public void Validate_WhenValid_ShouldNotHaveErrors()
     {
@@ -17,6 +19,8 @@ public sealed class CreateBlogCommentRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate when content empty or null; should have validation error.
+    /// <summary>Verify Validate when content empty or null; should have validation error.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -29,6 +33,8 @@ public sealed class CreateBlogCommentRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(CreateBlogCommentRequestDto.Content));
     }
 
+    // TEST-03: Verify Validate when content exceeds1000 chars; should have validation error.
+    /// <summary>Verify Validate when content exceeds1000 chars; should have validation error.</summary>
     [Fact]
     public void Validate_WhenContentExceeds1000Chars_ShouldHaveValidationError()
     {

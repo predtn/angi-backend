@@ -21,6 +21,8 @@ public sealed class GetBlogDetailUseCaseTests
         new(_blogRepository.Object, _currentUserService.Object);
 
     // Happy Path 1: Lấy thông tin chi tiết blog thành công cho Guest (kèm dữ liệu map chính xác)
+    // TEST-01: Verify ExecuteAsync when blog exists for guest; should return mapped blog detail dto.
+    /// <summary>Verify ExecuteAsync when blog exists for guest; should return mapped blog detail dto.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogExistsForGuest_ShouldReturnMappedBlogDetailDto()
     {
@@ -145,6 +147,8 @@ public sealed class GetBlogDetailUseCaseTests
     }
 
     // Happy Path 2: Người dùng đã đăng nhập là tác giả và đã like bài viết, nội dung dài > 200 ký tự
+    // TEST-02: Verify ExecuteAsync when authenticated author liked blog; should set liked by me and is mine true.
+    /// <summary>Verify ExecuteAsync when authenticated author liked blog; should set liked by me and is mine true.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAuthenticatedAuthorLikedBlog_ShouldSetLikedByMeAndIsMineTrue()
     {
@@ -192,6 +196,8 @@ public sealed class GetBlogDetailUseCaseTests
     }
 
     // Exception Path: Bắn lỗi 404 BLOG_NOT_FOUND khi truyền blogId không tồn tại
+    // TEST-03: Verify ExecuteAsync when blog does not exist; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when blog does not exist; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {

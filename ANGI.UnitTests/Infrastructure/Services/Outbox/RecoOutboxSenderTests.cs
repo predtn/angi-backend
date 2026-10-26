@@ -74,6 +74,8 @@ public sealed class RecoOutboxSenderTests
         result.Error.Should().Be(error);
     }
 
+    // TEST-03: Verify SendAsync with503 retry after; should retry after that delay.
+    /// <summary>Verify SendAsync with503 retry after; should retry after that delay.</summary>
     [Fact]
     public async Task SendAsync_With503RetryAfter_ShouldRetryAfterThatDelay()
     {
@@ -89,7 +91,7 @@ public sealed class RecoOutboxSenderTests
         result.Should().Be(new OutboxDeliveryResult(OutboxDeliveryOutcome.Retry, "HTTP 503 DISH_VECTOR_NOT_READY", TimeSpan.FromSeconds(30)));
     }
 
-    // TEST-03: Timeouts and network errors are retried; an unreadable payload is dead without any call.
+    // TEST-04: Timeouts and network errors are retried; an unreadable payload is dead without any call.
     [Fact]
     public async Task SendAsync_WithTimeoutOrNetworkError_ShouldRetry()
     {
@@ -102,6 +104,8 @@ public sealed class RecoOutboxSenderTests
             .Outcome.Should().Be(OutboxDeliveryOutcome.Retry);
     }
 
+    // TEST-05: Verify SendAsync with unreadable payload; should be dead without calling.
+    /// <summary>Verify SendAsync with unreadable payload; should be dead without calling.</summary>
     [Theory]
     [InlineData(OutboxEventType.DishUpserted, "{not json")]
     [InlineData(OutboxEventType.DishDeactivated, """{"occurred_at":"x"}""")]
@@ -115,7 +119,7 @@ public sealed class RecoOutboxSenderTests
         handler.Method.Should().BeNull();
     }
 
-    // TEST-04: Backoff doubles from 5 s and stops at 15 min.
+    // TEST-06: Backoff doubles from 5 s and stops at 15 min.
     [Theory]
     [InlineData(1, 5)]
     [InlineData(2, 10)]

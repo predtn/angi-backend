@@ -9,6 +9,8 @@ public sealed class GetBlogCommentsRequestDtoValidatorTests
 {
     private readonly GetBlogCommentsRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify ValidateAsync with valid defaults; should be valid.
+    /// <summary>Verify ValidateAsync with valid defaults; should be valid.</summary>
     [Fact]
     public async Task ValidateAsync_WithValidDefaults_ShouldBeValid()
     {
@@ -17,6 +19,8 @@ public sealed class GetBlogCommentsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify ValidateAsync with invalid page; should report page error.
+    /// <summary>Verify ValidateAsync with invalid page; should report page error.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -28,6 +32,8 @@ public sealed class GetBlogCommentsRequestDtoValidatorTests
         result.Errors.Should().ContainSingle(e => e.PropertyName == nameof(GetBlogCommentsRequestDto.Page));
     }
 
+    // TEST-03: Verify ValidateAsync with invalid page size; should report page size error.
+    /// <summary>Verify ValidateAsync with invalid page size; should report page size error.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(101)]

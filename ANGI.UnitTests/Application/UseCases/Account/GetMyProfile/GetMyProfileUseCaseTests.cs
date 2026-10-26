@@ -20,6 +20,8 @@ public sealed class GetMyProfileUseCaseTests
     private GetMyProfileUseCase CreateUseCase() =>
         new(_currentUserService.Object, _accountRepository.Object, _recommendationService.Object);
 
+    // TEST-01: Verify ExecuteAsync when authenticated traveler; should return complete profile.
+    /// <summary>Verify ExecuteAsync when authenticated traveler; should return complete profile.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAuthenticatedTraveler_ShouldReturnCompleteProfile()
     {
@@ -75,6 +77,8 @@ public sealed class GetMyProfileUseCaseTests
         result.Permissions.Should().BeEmpty();
     }
 
+    // TEST-02: Verify ExecuteAsync when restaurant owner; should include restaurant id.
+    /// <summary>Verify ExecuteAsync when restaurant owner; should include restaurant id.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantOwner_ShouldIncludeRestaurantId()
     {
@@ -112,6 +116,8 @@ public sealed class GetMyProfileUseCaseTests
         result.PreferenceStatus.Should().BeNull();
     }
 
+    // TEST-03: Verify ExecuteAsync when mod user; should include effective permissions.
+    /// <summary>Verify ExecuteAsync when mod user; should include effective permissions.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenModUser_ShouldIncludeEffectivePermissions()
     {
@@ -146,6 +152,8 @@ public sealed class GetMyProfileUseCaseTests
         result.Permissions.Should().BeEquivalentTo(["USER_SUSPEND", "MENU_APPROVE"]);
     }
 
+    // TEST-04: Verify ExecuteAsync when not authenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when not authenticated; should throw unauthorized exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -161,6 +169,8 @@ public sealed class GetMyProfileUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
+    // TEST-05: Verify ExecuteAsync when user not found; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when user not found; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotFound_ShouldThrowNotFoundException()
     {

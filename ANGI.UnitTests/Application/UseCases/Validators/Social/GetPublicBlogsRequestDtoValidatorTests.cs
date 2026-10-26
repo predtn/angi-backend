@@ -9,6 +9,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
 {
     private readonly GetPublicBlogsRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate when default request; should be valid.
+    /// <summary>Verify Validate when default request; should be valid.</summary>
     [Fact]
     public void Validate_WhenDefaultRequest_ShouldBeValid()
     {
@@ -19,6 +21,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate when valid parameters provided; should be valid.
+    /// <summary>Verify Validate when valid parameters provided; should be valid.</summary>
     [Theory]
     [InlineData("newest")]
     [InlineData("popular")]
@@ -41,6 +45,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-03: Verify Validate when author id is not positive; should fail.
+    /// <summary>Verify Validate when author id is not positive; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-3)]
@@ -54,6 +60,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetPublicBlogsRequestDto.AuthorId));
     }
 
+    // TEST-04: Verify Validate when sort is unsupported; should fail.
+    /// <summary>Verify Validate when sort is unsupported; should fail.</summary>
     [Fact]
     public void Validate_WhenSortIsUnsupported_ShouldFail()
     {
@@ -65,6 +73,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetPublicBlogsRequestDto.Sort));
     }
 
+    // TEST-05: Verify Validate when page is less than one; should fail.
+    /// <summary>Verify Validate when page is less than one; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -78,6 +88,8 @@ public sealed class GetPublicBlogsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetPublicBlogsRequestDto.Page));
     }
 
+    // TEST-06: Verify Validate when page size is out of range; should fail.
+    /// <summary>Verify Validate when page size is out of range; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-10)]

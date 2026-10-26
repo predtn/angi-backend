@@ -37,6 +37,8 @@ public sealed class UpdateMyProfileUseCaseTests
             _recommendationService.Object,
             _unitOfWork.Object);
 
+    // TEST-01: Verify ExecuteAsync with valid scalar updates; should apply changes write audit log and save.
+    /// <summary>Verify ExecuteAsync with valid scalar updates; should apply changes write audit log and save.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidScalarUpdates_ShouldApplyChangesWriteAuditLogAndSave()
     {
@@ -100,6 +102,8 @@ public sealed class UpdateMyProfileUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: Verify ExecuteAsync with valid avatar media id; should update avatar and return profile.
+    /// <summary>Verify ExecuteAsync with valid avatar media id; should update avatar and return profile.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidAvatarMediaId_ShouldUpdateAvatarAndReturnProfile()
     {
@@ -157,6 +161,8 @@ public sealed class UpdateMyProfileUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-03: Verify ExecuteAsync with null avatar media id; should clear avatar.
+    /// <summary>Verify ExecuteAsync with null avatar media id; should clear avatar.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNullAvatarMediaId_ShouldClearAvatar()
     {
@@ -202,6 +208,8 @@ public sealed class UpdateMyProfileUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-04: Verify ExecuteAsync when not authenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when not authenticated; should throw unauthorized exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -218,6 +226,8 @@ public sealed class UpdateMyProfileUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
+    // TEST-05: Verify ExecuteAsync when avatar media not found or not owned; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when avatar media not found or not owned; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAvatarMediaNotFoundOrNotOwned_ShouldThrowNotFoundException()
     {
@@ -250,6 +260,8 @@ public sealed class UpdateMyProfileUseCaseTests
         ex.Which.ErrorCode.Should().Be("MEDIA_NOT_FOUND");
     }
 
+    // TEST-06: Verify ExecuteAsync when avatar media is not image; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when avatar media is not image; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAvatarMediaIsNotImage_ShouldThrowNotFoundException()
     {
@@ -290,6 +302,8 @@ public sealed class UpdateMyProfileUseCaseTests
         ex.Which.ErrorCode.Should().Be("MEDIA_NOT_FOUND");
     }
 
+    // TEST-07: Verify ExecuteAsync when nothing changed; should not write audit log or save.
+    /// <summary>Verify ExecuteAsync when nothing changed; should not write audit log or save.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNothingChanged_ShouldNotWriteAuditLogOrSave()
     {

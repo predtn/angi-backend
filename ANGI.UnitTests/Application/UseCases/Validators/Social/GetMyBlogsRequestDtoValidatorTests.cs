@@ -8,6 +8,8 @@ public sealed class GetMyBlogsRequestDtoValidatorTests
 {
     private readonly GetMyBlogsRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate with default values; should pass.
+    /// <summary>Verify Validate with default values; should pass.</summary>
     [Fact]
     public void Validate_WithDefaultValues_ShouldPass()
     {
@@ -16,6 +18,8 @@ public sealed class GetMyBlogsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate with valid status; should pass.
+    /// <summary>Verify Validate with valid status; should pass.</summary>
     [Theory]
     [InlineData("published")]
     [InlineData("hidden")]
@@ -32,6 +36,8 @@ public sealed class GetMyBlogsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-03: Verify Validate with invalid page; should fail.
+    /// <summary>Verify Validate with invalid page; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -44,6 +50,8 @@ public sealed class GetMyBlogsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetMyBlogsRequestDto.Page));
     }
 
+    // TEST-04: Verify Validate with invalid page size; should fail.
+    /// <summary>Verify Validate with invalid page size; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -57,6 +65,8 @@ public sealed class GetMyBlogsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetMyBlogsRequestDto.PageSize));
     }
 
+    // TEST-05: Verify Validate with invalid status; should fail.
+    /// <summary>Verify Validate with invalid status; should fail.</summary>
     [Theory]
     [InlineData("draft")]
     [InlineData("pending")]

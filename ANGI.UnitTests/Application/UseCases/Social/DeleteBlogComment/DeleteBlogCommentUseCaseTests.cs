@@ -15,7 +15,8 @@ public sealed class DeleteBlogCommentUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 22, 14, 0, 0, DateTimeKind.Utc);
 
-    // TEST-01 (Happy Path): Soft-deletes own comment; the repository also decrements comment_count, in one transaction.
+    // TEST-01: (Happy Path) Soft-deletes own comment; the repository also decrements comment_count, in one transaction.
+    /// <summary>Soft-deletes own comment; the repository also decrements comment_count, in one transaction.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldSoftDeleteCommentAndDecrementBlogCount()
     {
@@ -27,7 +28,8 @@ public sealed class DeleteBlogCommentUseCaseTests
         harness.Transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-02 (Exception Path 2): User cố tình xóa bình luận của người khác (bắn 403 NOT_OWNER).
+    // TEST-02: Verify ExecuteAsync when user is not owner; should throw forbidden exception.
+    /// <summary>Verify ExecuteAsync when user is not owner; should throw forbidden exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserIsNotOwner_ShouldThrowForbiddenException()
     {

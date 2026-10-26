@@ -21,6 +21,8 @@ public sealed class GetNotificationsUseCaseTests
         new(_validator, _currentUserService.Object, _notificationRepository.Object);
 
     // Happy Path 1: Có dữ liệu, đúng phân trang và unreadCount
+    // TEST-01: Verify ExecuteAsync when notifications exist; should return paginated list and unread count.
+    /// <summary>Verify ExecuteAsync when notifications exist; should return paginated list and unread count.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotificationsExist_ShouldReturnPaginatedListAndUnreadCount()
     {
@@ -94,6 +96,8 @@ public sealed class GetNotificationsUseCaseTests
     }
 
     // Happy Path 1: Danh sách rỗng
+    // TEST-02: Verify ExecuteAsync when no notifications exist; should return empty list and zero total pages.
+    /// <summary>Verify ExecuteAsync when no notifications exist; should return empty list and zero total pages.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNoNotificationsExist_ShouldReturnEmptyListAndZeroTotalPages()
     {
@@ -131,6 +135,8 @@ public sealed class GetNotificationsUseCaseTests
     }
 
     // Exception Path: Truyền sai tham số phân trang (Page = 0)
+    // TEST-03: Verify ExecuteAsync when page is zero; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when page is zero; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenPageIsZero_ShouldThrowValidationException()
     {
@@ -154,6 +160,8 @@ public sealed class GetNotificationsUseCaseTests
     }
 
     // Exception Path: Truyền sai pageSize (> 100)
+    // TEST-04: Verify ExecuteAsync when page size exceeds100; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when page size exceeds100; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenPageSizeExceeds100_ShouldThrowValidationException()
     {
@@ -177,6 +185,8 @@ public sealed class GetNotificationsUseCaseTests
     }
 
     // Exception Path: Chưa đăng nhập (UserId == null)
+    // TEST-05: Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUnauthenticated_ShouldThrowUnauthorizedException()
     {

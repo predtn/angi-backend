@@ -20,6 +20,8 @@ public sealed class GetPublicBlogsUseCaseTests
         new(_validator, _blogRepository.Object);
 
     // Happy Path 1: Có dữ liệu blog công khai, trả về đúng cấu trúc phân trang và mapping BlogCardDto
+    // TEST-01: Verify ExecuteAsync when public blogs exist; should return paginated blog cards.
+    /// <summary>Verify ExecuteAsync when public blogs exist; should return paginated blog cards.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenPublicBlogsExist_ShouldReturnPaginatedBlogCards()
     {
@@ -132,6 +134,8 @@ public sealed class GetPublicBlogsUseCaseTests
     }
 
     // Happy Path 2: Danh sách rỗng, trả về đúng cấu trúc phân trang (Items rỗng, TotalItems = 0, TotalPages = 0)
+    // TEST-02: Verify ExecuteAsync when no public blogs exist; should return empty page.
+    /// <summary>Verify ExecuteAsync when no public blogs exist; should return empty page.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNoPublicBlogsExist_ShouldReturnEmptyPage()
     {
@@ -168,6 +172,8 @@ public sealed class GetPublicBlogsUseCaseTests
     }
 
     // Exception Path 1: Tham số phân trang Page <= 0
+    // TEST-03: Verify ExecuteAsync when page is not positive; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when page is not positive; should throw validation exception.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -192,6 +198,8 @@ public sealed class GetPublicBlogsUseCaseTests
     }
 
     // Exception Path 2: Tham số phân trang PageSize ngoài khoảng 1..100
+    // TEST-04: Verify ExecuteAsync when page size is out of range; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when page size is out of range; should throw validation exception.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
@@ -217,6 +225,8 @@ public sealed class GetPublicBlogsUseCaseTests
     }
 
     // Exception Path 3: Tham số Sort hoặc AuthorId không hợp lệ
+    // TEST-05: Verify ExecuteAsync when sort or author id is invalid; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when sort or author id is invalid; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenSortOrAuthorIdIsInvalid_ShouldThrowValidationException()
     {

@@ -53,6 +53,8 @@ public sealed class EditBlogRequestDtoValidatorTests
         result.Errors.Should().ContainSingle(error => error.PropertyName == property);
     }
 
+    // TEST-04: Verify Validate with empty content; should report content error.
+    /// <summary>Verify Validate with empty content; should report content error.</summary>
     [Theory]
     [InlineData(null, "Content")]
     [InlineData("", "Content")]
@@ -66,7 +68,7 @@ public sealed class EditBlogRequestDtoValidatorTests
         result.Errors.Should().ContainSingle(error => error.PropertyName == property);
     }
 
-    // TEST-04: Reject title > 255 chars and images > 20 elements.
+    // TEST-05: Reject title > 255 chars and images > 20 elements.
     [Fact]
     public async Task Validate_AboveMaximums_ShouldRejectTitleAndImages()
     {
@@ -81,7 +83,7 @@ public sealed class EditBlogRequestDtoValidatorTests
         result.Errors.Select(error => error.PropertyName).Should().BeEquivalentTo("Title", "ImageMediaIds");
     }
 
-    // TEST-05: Reject non-positive cover media and non-positive image media IDs.
+    // TEST-06: Reject non-positive cover media and non-positive image media IDs.
     [Fact]
     public async Task Validate_WithNonPositiveIdentifiers_ShouldRejectAffectedFields()
     {
@@ -96,7 +98,7 @@ public sealed class EditBlogRequestDtoValidatorTests
         result.Errors.Select(error => error.PropertyName).Should().BeEquivalentTo("CoverMediaId", "ImageMediaIds");
     }
 
-    // TEST-06: Reject duplicate image IDs.
+    // TEST-07: Reject duplicate image IDs.
     [Fact]
     public async Task Validate_WithDuplicateImageIdentifiers_ShouldRejectImages()
     {

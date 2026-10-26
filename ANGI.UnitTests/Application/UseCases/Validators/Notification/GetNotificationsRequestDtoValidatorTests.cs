@@ -8,6 +8,8 @@ public sealed class GetNotificationsRequestDtoValidatorTests
 {
     private readonly GetNotificationsRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate when default request; should be valid.
+    /// <summary>Verify Validate when default request; should be valid.</summary>
     [Fact]
     public void Validate_WhenDefaultRequest_ShouldBeValid()
     {
@@ -16,6 +18,8 @@ public sealed class GetNotificationsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate when all valid properties provided; should be valid.
+    /// <summary>Verify Validate when all valid properties provided; should be valid.</summary>
     [Fact]
     public void Validate_WhenAllValidPropertiesProvided_ShouldBeValid()
     {
@@ -30,6 +34,8 @@ public sealed class GetNotificationsRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-03: Verify Validate when page less than1; should fail.
+    /// <summary>Verify Validate when page less than1; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -41,6 +47,8 @@ public sealed class GetNotificationsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetNotificationsRequestDto.Page));
     }
 
+    // TEST-04: Verify Validate when page size out of range; should fail.
+    /// <summary>Verify Validate when page size out of range; should fail.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
@@ -53,6 +61,8 @@ public sealed class GetNotificationsRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(GetNotificationsRequestDto.PageSize));
     }
 
+    // TEST-05: Verify Validate when type exceeds40 characters; should fail.
+    /// <summary>Verify Validate when type exceeds40 characters; should fail.</summary>
     [Fact]
     public void Validate_WhenTypeExceeds40Characters_ShouldFail()
     {

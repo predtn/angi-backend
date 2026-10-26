@@ -16,6 +16,8 @@ public sealed class GetUnreadNotificationCountUseCaseTests
         new(_currentUserService.Object, _notificationRepository.Object);
 
     // Happy Path 2: Đếm đúng số lượng thông báo chưa đọc
+    // TEST-01: Verify ExecuteAsync when authenticated; should return correct unread count.
+    /// <summary>Verify ExecuteAsync when authenticated; should return correct unread count.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAuthenticated_ShouldReturnCorrectUnreadCount()
     {
@@ -39,6 +41,8 @@ public sealed class GetUnreadNotificationCountUseCaseTests
     }
 
     // Exception Path: Chưa đăng nhập (UserId == null)
+    // TEST-02: Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUnauthenticated_ShouldThrowUnauthorizedException()
     {

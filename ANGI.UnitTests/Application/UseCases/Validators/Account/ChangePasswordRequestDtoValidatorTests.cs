@@ -8,6 +8,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
 {
     private readonly ChangePasswordRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate with valid data; should be valid.
+    /// <summary>Verify Validate with valid data; should be valid.</summary>
     [Fact]
     public void Validate_WithValidData_ShouldBeValid()
     {
@@ -22,6 +24,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate with empty new password; should be invalid.
+    /// <summary>Verify Validate with empty new password; should be invalid.</summary>
     [Theory]
     [InlineData("")]
     [InlineData(null)]
@@ -39,6 +43,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(ChangePasswordRequestDto.NewPassword));
     }
 
+    // TEST-03: Verify Validate with new password shorter than8 chars; should be invalid.
+    /// <summary>Verify Validate with new password shorter than8 chars; should be invalid.</summary>
     [Fact]
     public void Validate_WithNewPasswordShorterThan8Chars_ShouldBeInvalid()
     {
@@ -54,6 +60,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("ít nhất 8 ký tự"));
     }
 
+    // TEST-04: Verify Validate with new password longer than64 chars; should be invalid.
+    /// <summary>Verify Validate with new password longer than64 chars; should be invalid.</summary>
     [Fact]
     public void Validate_WithNewPasswordLongerThan64Chars_ShouldBeInvalid()
     {
@@ -69,6 +77,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("vượt quá 64 ký tự"));
     }
 
+    // TEST-05: Verify Validate with new password without digits; should be invalid.
+    /// <summary>Verify Validate with new password without digits; should be invalid.</summary>
     [Fact]
     public void Validate_WithNewPasswordWithoutDigits_ShouldBeInvalid()
     {
@@ -84,6 +94,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("ít nhất một chữ số"));
     }
 
+    // TEST-06: Verify Validate with new password without letters; should be invalid.
+    /// <summary>Verify Validate with new password without letters; should be invalid.</summary>
     [Fact]
     public void Validate_WithNewPasswordWithoutLetters_ShouldBeInvalid()
     {
@@ -99,6 +111,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("ít nhất một chữ cái"));
     }
 
+    // TEST-07: Verify Validate when new password matches current password; should be invalid.
+    /// <summary>Verify Validate when new password matches current password; should be invalid.</summary>
     [Fact]
     public void Validate_WhenNewPasswordMatchesCurrentPassword_ShouldBeInvalid()
     {
@@ -114,6 +128,8 @@ public sealed class ChangePasswordRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.ErrorMessage.Contains("không được trùng"));
     }
 
+    // TEST-08: Verify Validate when new password matches old password alias; should be invalid.
+    /// <summary>Verify Validate when new password matches old password alias; should be invalid.</summary>
     [Fact]
     public void Validate_WhenNewPasswordMatchesOldPasswordAlias_ShouldBeInvalid()
     {
