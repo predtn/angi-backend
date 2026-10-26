@@ -42,7 +42,8 @@ public sealed class ReplyReviewUseCase : IReplyReviewUseCase
         var ownerId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này.");
 
-        var review = await _restaurantRepository.GetReviewForReplyAsync(reviewId, ct);
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        var review = await _restaurantRepository.LockReviewForReplyAsync(reviewId, ct);
         if (review == null)
         {
             throw new NotFoundException("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá.");
@@ -93,6 +94,7 @@ public sealed class ReplyReviewUseCase : IReplyReviewUseCase
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         return RestaurantDetailMapper.MapReviewReply(reply);
     }

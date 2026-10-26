@@ -38,18 +38,15 @@ public sealed class UnlikeBlogUseCase : IUnlikeBlogUseCase
             throw new NotFoundException("BLOG_NOT_FOUND", "Không tìm thấy bài viết.");
         }
 
-        var existingLike = await _blogRepository.GetLikeAsync(blogId, userId, ct);
-        if (existingLike is not null)
-        {
-            _blogRepository.RemoveLike(existingLike);
-            blog.LikeCount = Math.Max(0, blog.LikeCount - 1);
-            await _unitOfWork.SaveChangesAsync(ct);
-        }
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        var removed = await _blogRepository.TryRemoveLikeAsync(blogId, userId, ct);
+        var likeCount = await _blogRepository.AddToLikeCountAsync(blogId, removed ? -1 : 0, ct);
+        await transaction.CommitAsync(ct);
 
         return new BlogLikeResponseDto
         {
             Liked = false,
-            LikeCount = blog.LikeCount
+            LikeCount = likeCount
         };
     }
 }

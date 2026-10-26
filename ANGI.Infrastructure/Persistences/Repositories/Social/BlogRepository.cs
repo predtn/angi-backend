@@ -337,27 +337,39 @@ public sealed class BlogRepository : IBlogRepository
             .FirstOrDefaultAsync(blog => blog.Id == blogId, ct);
 
     /// <inheritdoc />
-    public Task<bool> HasUserLikedAsync(long blogId, int userId, CancellationToken ct) =>
-        _context.BlogLikes
-            .AsNoTracking()
-            .AnyAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+    public async Task<bool> TryAddLikeAsync(long blogId, int userId, DateTime likedAt, CancellationToken ct) =>
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO core.blog_likes (blog_id, user_id, created_at)
+            VALUES ({blogId}, {userId}, {likedAt})
+            ON CONFLICT (blog_id, user_id) DO NOTHING
+            """, ct) == 1;
 
     /// <inheritdoc />
-    public Task<BlogLike?> GetLikeAsync(long blogId, int userId, CancellationToken ct) =>
-        _context.BlogLikes
-            .FirstOrDefaultAsync(like => like.BlogId == blogId && like.UserId == userId, ct);
+    public async Task<bool> TryRemoveLikeAsync(long blogId, int userId, CancellationToken ct) =>
+        await _context.BlogLikes
+            .Where(like => like.BlogId == blogId && like.UserId == userId)
+            .ExecuteDeleteAsync(ct) == 1;
 
     /// <inheritdoc />
-    public void AddLike(BlogLike like)
+    public async Task<int> AddToLikeCountAsync(long blogId, int delta, CancellationToken ct)
     {
-        _context.BlogLikes.Add(like);
+        // The arithmetic runs in SQL, so concurrent likes never overwrite each other's count.
+        var blog = _context.Blogs.Where(item => item.Id == blogId);
+        if (delta != 0)
+        {
+            await blog.ExecuteUpdateAsync(
+                setters => setters.SetProperty(item => item.LikeCount, item => Math.Max(item.LikeCount + delta, 0)), ct);
+        }
+
+        return await blog.Select(item => item.LikeCount).SingleAsync(ct);
     }
 
     /// <inheritdoc />
-    public void RemoveLike(BlogLike like)
-    {
-        _context.BlogLikes.Remove(like);
-    }
+    public Task AddToCommentCountAsync(long blogId, int delta, CancellationToken ct) =>
+        _context.Blogs
+            .Where(item => item.Id == blogId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(item => item.CommentCount, item => Math.Max(item.CommentCount + delta, 0)), ct);
 
     /// <inheritdoc />
     public void AddComment(BlogComment comment)

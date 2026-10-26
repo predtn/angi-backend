@@ -20,8 +20,13 @@ public sealed class ReplyReviewUseCaseTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly ReplyReviewRequestDtoValidator _validator = new();
 
-    private ReplyReviewUseCase CreateUseCase() =>
-        new(_repositoryMock.Object, _currentUserServiceMock.Object, _unitOfWorkMock.Object, _validator);
+    private readonly Mock<IUnitOfWorkTransaction> _transactionMock = new();
+
+    private ReplyReviewUseCase CreateUseCase()
+    {
+        _unitOfWorkMock.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transactionMock.Object);
+        return new(_repositoryMock.Object, _currentUserServiceMock.Object, _unitOfWorkMock.Object, _validator);
+    }
 
     // TEST-01: Happy Path - Create new reply to review and send notification to traveler
     [Fact]
@@ -59,7 +64,7 @@ public sealed class ReplyReviewUseCaseTests
 
         _currentUserServiceMock.Setup(s => s.UserId).Returns(ownerId);
         _repositoryMock
-            .Setup(r => r.GetReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
+            .Setup(r => r.LockReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(review);
 
         var useCase = CreateUseCase();
@@ -132,7 +137,7 @@ public sealed class ReplyReviewUseCaseTests
 
         _currentUserServiceMock.Setup(s => s.UserId).Returns(ownerId);
         _repositoryMock
-            .Setup(r => r.GetReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
+            .Setup(r => r.LockReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(review);
 
         var useCase = CreateUseCase();
@@ -180,7 +185,7 @@ public sealed class ReplyReviewUseCaseTests
 
         _currentUserServiceMock.Setup(s => s.UserId).Returns(currentOwnerId);
         _repositoryMock
-            .Setup(r => r.GetReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
+            .Setup(r => r.LockReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(review);
 
         var useCase = CreateUseCase();
@@ -205,7 +210,7 @@ public sealed class ReplyReviewUseCaseTests
 
         _currentUserServiceMock.Setup(s => s.UserId).Returns(ownerId);
         _repositoryMock
-            .Setup(r => r.GetReviewForReplyAsync(nonexistentReviewId, It.IsAny<CancellationToken>()))
+            .Setup(r => r.LockReviewForReplyAsync(nonexistentReviewId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RestaurantReview?)null);
 
         var useCase = CreateUseCase();
@@ -248,7 +253,7 @@ public sealed class ReplyReviewUseCaseTests
 
         _currentUserServiceMock.Setup(s => s.UserId).Returns(ownerId);
         _repositoryMock
-            .Setup(r => r.GetReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
+            .Setup(r => r.LockReviewForReplyAsync(reviewId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(review);
 
         var useCase = CreateUseCase();

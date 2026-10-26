@@ -582,9 +582,13 @@ public sealed class RestaurantRepository : IRestaurantRepository
     }
 
     /// <summary>Loads a review with its restaurant and existing reply for OWN-20.</summary>
-    public Task<RestaurantReview?> GetReviewForReplyAsync(long reviewId, CancellationToken ct)
+    public async Task<RestaurantReview?> LockReviewForReplyAsync(long reviewId, CancellationToken ct)
     {
-        return _context.RestaurantReviews
+        // Lock in its own statement: a statement that waited on the lock still reads review_replies as of its start,
+        // so loading the reply in the same statement would miss the reply the other request just committed.
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM core.restaurant_reviews WHERE id = {reviewId} FOR UPDATE", ct);
+        return await _context.RestaurantReviews
             .Include(r => r.Restaurant)
             .Include(r => r.Reply)
             .FirstOrDefaultAsync(r => r.Id == reviewId, ct);

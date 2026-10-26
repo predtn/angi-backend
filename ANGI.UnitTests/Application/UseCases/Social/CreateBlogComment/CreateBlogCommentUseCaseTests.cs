@@ -22,10 +22,12 @@ public sealed class CreateBlogCommentUseCaseTests
     private readonly Mock<IBlogContentSanitizer> _contentSanitizer = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
+    private readonly Mock<IUnitOfWorkTransaction> _transaction = new();
 
     public CreateBlogCommentUseCaseTests()
     {
         _currentUserService.Setup(s => s.UserId).Returns(12);
+        _unitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transaction.Object);
         _contentSanitizer.Setup(s => s.Sanitize(It.IsAny<string>()))
             .Returns<string>(input => input);
     }
@@ -81,7 +83,10 @@ public sealed class CreateBlogCommentUseCaseTests
         result.User.DisplayName.Should().Be("Nguyễn An");
         result.User.AvatarUrl.Should().Be("https://cdn.angi.vn/avatar.jpg");
 
-        blog.CommentCount.Should().Be(4);
+        // The count is added in SQL after the comment row, not on the loaded blog.
+        blog.CommentCount.Should().Be(3);
+        _blogRepository.Verify(r => r.AddToCommentCountAsync(blogId, 1, It.IsAny<CancellationToken>()), Times.Once);
+        _transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         addedComment.Should().NotBeNull();
         addedComment!.BlogId.Should().Be(blogId);
         addedComment.UserId.Should().Be(userId);
