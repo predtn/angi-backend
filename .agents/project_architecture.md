@@ -23,9 +23,11 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 
 - Actors: Guest, Traveler, Restaurant Owner, Mod, Admin.
 - Out of scope, never build: payment, ordering or delivery, table booking, third-party data import, native mobile app.
-- Recommendation and roadmap requests answer within 3 s.
+- Recommendation and existing roadmap requests answer within 3 s. Agent chat has a configured 90 s total processing timeout and a 120 s fenced lease; duplicate in-flight turns return 202.
 
 **Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`. `Media` is MEDIA-01 (module "Media" in the API Design): one upload used by every other module, which then refers to the file by `mediaId`. `Discovery` also holds PREF-02 / PREF-03 (module "Sở thích" in the API Design, F-17 in epic EP-DISC), in their own `PreferenceSurveyController` under `/api/v1/me/preference-survey`, and the home, dish, impression and tag endpoints HOME-01, DISH-01..03, IMP-01 and CAT-02 (`HomeController`, `DishesController`, `ImpressionsController`, `TagsController`).
+
+`Agent` is the additional module for AGENT-01..04 (ANGI-231), implemented from `.agents/ANGI_Agent_Implementation_Ver1.1.md` and the Agent additions in the API Design and Data Dictionary. Its services live in `Application/Services/Agent`, use cases in `Application/UseCases/Agent`, and adapters in `Infrastructure/Services/Agent`.
 
 ## 2. Tech stack
 
@@ -192,9 +194,21 @@ Every external service is an interface in `Application/Common/Interfaces/Service
 
 - RM-10 only validates, locks the roadmap and queues a job (`queued`), refusing a second queued / running job with 409 `GENERATION_IN_PROGRESS`. `input` stores the request, the origin it resolved (GPS sent for a `gps` roadmap, else the pinned point, else none) and `radiusKm` (10 by default when there is an origin).
 - `RoadmapGenerationWorker` (`Infrastructure/Services/Roadmap`) is a `BackgroundService` like `OutboxWorker`: every `PollSeconds` it marks the oldest queued job `running` (`FOR UPDATE SKIP LOCKED`) and runs `IProcessRoadmapGenerationJobUseCase`. At start it puts jobs left `running` by a stopped host back to `queued`. It does nothing when `ConnectionStrings:Default` is empty.
-- The job follows the steps of the RM-10 note in the API Design. One dish per meal; with `replaceExisting = false` only the empty meals of the scope are filled and dishes already in the roadmap are not suggested again. An unexpected error marks the job `failed` and is logged; it never stays `running`.
+- The job follows the steps of the RM-10 note in the API Design. One dish per meal; with `replaceExisting = false` only the empty meals of the scope are filled and dishes already in the roadmap are not suggested again. Before writing, it compares the parent revision under its lock with the snapshot used during planning; a changed source fails the job without replacing items or emitting completion side effects. An unexpected error marks the job `failed` and is logged; it never stays `running`.
 - `OpenAiRoadmapPlannerService`: `POST {BaseUrl}chat/completions`, Bearer `ApiKey`, `Model`, structured output (`json_schema`, strict) whose enums allow only the meals to fill and the dish ids of the day's cluster. Prompt version `rm10-v1` goes to `prompt_version`. Missing key, non-2xx, timeout (`TimeoutSeconds`) or unreadable answer → `null`; a plan that does not fill each meal once with distinct cluster dishes is rejected too. The job then schedules the day itself (meal-time tag, then preferred tag, then reco rank) and records `model_name = fallback`. The caller's cancellation is rethrown.
 - On success: items with `source = ai` and the reco `request_id`, `raw_output` with each day's plan and `createdItemIds` (read by RM-11), a `ROADMAP_GENERATED` notification (`data` = `{roadmap_id, job_id}`, snake_case like every `notifications.data`) in the same transaction, then RECO-06 for the dishes added.
+
+### Agent conversations (AGENT-01..04)
+
+- PostgreSQL owns short-term state in `core.agent_conversations`, ordered logical turns in `agent_messages`, and immutable snapshots/provenance in `agent_proposals`. No vector memory or long-term preference updates are inferred from chat.
+- `IAgentLlmService` uses the configured `Ai` provider with strict tool/output schemas, checked again in backend code. Only `get_recommendation`, `estimate_day_route`, and conversation-bound `get_roadmap` are allowed. Tools do not write official roadmaps or emit impressions. The UI reports actually visible preview items through IMP-01 grouped by their recommendation request ID.
+- Message claim/finalization are short transactions separated from all LLM/reco/map calls. Unique client message IDs, business hashes, optimistic versions, persistent per-user quotas and attempt/lease fencing protect retries and concurrent requests. Failed-attempt recovery clears rolled-back tracking before any new flush.
+- Agent identifiers use integer IDs. `clientMessageId` is a positive bigint unique per conversation; the frontend may use the current conversation version for a new message and retains the same ID on retry. `turnId` is the user message sequence number within that conversation; `attemptId` is the increasing conversation version allocated under its row lock. Recommendation request IDs retain their existing UUID contract.
+- Unrestricted budget and relaxed hard constraints require explicit request `confirmedState`. A model-generated consent flag grants no permission. Dietary notes alone do not guarantee catalog-backed constraints. Province/tag/price/radius requirements are never silently relaxed.
+- Confirm uses no LLM. It checks ownership, proposal version/currentness/expiry, current constraints, prices and catalog, then applies the full snapshot under conversation → roadmap → catalog locks. Route estimates run before the transaction. Committed replay returns its original roadmap revision; replacing a dish creates a fresh item and detaches prior feedback.
+- `roadmaps.version` starts at 1. Database triggers advance it once per changed aggregate per transaction for metadata, days and items, including all legacy writers and RM-10. Creation remains version 1. Every writer locks the parent before child mutations; Agent compares the source revision under that lock. EF reads the database-generated revision without an extra version predicate, since a child trigger can advance it earlier in the same SaveChanges batch. Parent-before-child locking applies to deletion and feedback as well.
+- Idle expiry is 7 days; GET does not renew it. Completed message/confirm replay remains available after expiry. Cleanup expires idle rows without changing the last business-activity timestamp and deletes unlinked children/conversations after 30 days with no live lease. Saved roadmaps survive cleanup.
+- Agent alone additionally documents 410 `CONVERSATION_EXPIRED` / `PROPOSAL_EXPIRED`, 429 `AGENT_RATE_LIMITED` with `Retry-After`, and 503 `AGENT_UNAVAILABLE`. Other modules retain their existing error contracts.
 
 ### Roadmap origin
 
@@ -222,6 +236,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
 | `RoadmapGeneration` | `PollSeconds` (2) |
 | `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
+| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (5), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20), `MaxCandidates` (2000), `MaxRanked` (200), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (10), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.

@@ -4,7 +4,7 @@ Rules every change to the backend code must follow. System facts and contracts: 
 
 ## 1. Project structure
 
-`<Module>` is one of `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media` (`project_architecture.md` §1). `<Feature>` is one use case of that module (`Login`, `Refresh`).
+`<Module>` is one of `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`, `Agent` (`project_architecture.md` §1). `<Feature>` is one use case of that module (`Login`, `Refresh`). Shared Agent business services live in `Services/Agent/` in Application.
 
 ```
 ANGI.Domain/
@@ -209,7 +209,7 @@ ServiceUnavailableException  → 503  ErrorCode from the exception
 any other Exception          → 500  INTERNAL_ERROR, generic message; log the exception, never return its details
 ```
 
-The API Design uses only 400, 401, 403, 404, 405 (wrong method only), 409, 429, 500 and 503; there is no 410, 413, 415, 422 or 204: data and business-rule errors (expired token, file too large, wrong file type) are `BadRequestException` with their own `ErrorCode`.
+Existing modules use 400, 401, 403, 404, 405 (wrong method only), 409, 429, 500 and 503. The Agent extension additionally uses its documented 410 expiry errors (`GoneException`) and per-user 429 (`AgentRateLimitedException`). There is no 413, 415, 422 or 204: existing data and business-rule errors (expired token, file too large, wrong file type) remain `BadRequestException` with their own `ErrorCode`.
 
 ## 9. Queries
 
@@ -287,6 +287,7 @@ A use case that needs the caller's identity (author, ownership check) uses `ICur
 
 - Every write goes through `IUnitOfWork`; repositories never expose `SaveChangesAsync`.
 - Call `_unitOfWork.SaveChangesAsync(ct)` once, at the end of the use case.
+- Agent message claim and finalization are separate short transactions; each flushes once. Confirmation may flush generated roadmap/item IDs before storing its commit-result snapshot, and cleanup must unlink the restrictive circular proposal pointer before deletion. Those dependent flushes remain inside a single use-case-controlled transaction; no external service runs while it is held.
 - When reads and writes must be atomic together (e.g. rotating a refresh token), use `await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);` and `await transaction.CommitAsync(ct)` after `SaveChangesAsync`. Disposing without commit rolls back.
 - Transactions are controlled in the use case only, never in a controller or repository.
 
