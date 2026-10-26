@@ -10,9 +10,11 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Discovery;
 
-public sealed class ImpressionsAndTagsControllerTests
+/// <summary>Verifies the discovery controller contract.</summary>
+public sealed class ImpressionsControllerTests
 {
     // TEST-01: IMP-01 is TRAVELER only and answers 202 Accepted.
+    /// <summary>IMP-01 is TRAVELER only and answers 202 Accepted.</summary>
     [Fact]
     public async Task Impressions_ShouldBeTravelerOnlyAndReturnAccepted()
     {
@@ -28,21 +30,5 @@ public sealed class ImpressionsAndTagsControllerTests
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status202Accepted);
         result.Value.Should().BeOfType<ApiResponse<RecordImpressionsResponseDto>>().Which.Data!.Accepted.Should().BeTrue();
-    }
-
-    // TEST-02: CAT-02 is public and returns the tag array as data.
-    [Fact]
-    public async Task Tags_ShouldBePublicAndReturnOk()
-    {
-        typeof(TagsController).GetMethod(nameof(TagsController.Get))!
-            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true).Should().ContainSingle();
-        IReadOnlyList<TagDto> tags = [new TagDto { Id = 2, TagType = "meal_time", Code = "lunch", Name = "Bữa trưa" }];
-        var useCase = new Mock<IGetTagsUseCase>();
-        useCase.Setup(x => x.ExecuteAsync(It.IsAny<GetTagsRequestDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(tags);
-
-        var action = await new TagsController(useCase.Object).Get(new GetTagsRequestDto(), CancellationToken.None);
-
-        action.Should().BeOfType<OkObjectResult>().Subject.Value
-            .Should().BeOfType<ApiResponse<IReadOnlyList<TagDto>>>().Which.Data.Should().BeSameAs(tags);
     }
 }

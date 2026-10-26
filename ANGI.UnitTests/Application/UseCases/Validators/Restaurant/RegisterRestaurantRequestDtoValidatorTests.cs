@@ -16,7 +16,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         var request = new RegisterRestaurantRequestDto
         {
             Name = "Test Restaurant",
-            Phone = "0123456789",
+            Phone = "0901234567",
             AddressLine = "1 Test Street",
             District = "Test District",
             ProvinceName = "Test Province",
@@ -36,6 +36,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-02: Reject an overnight interval that overlaps the following day's interval.
+    /// <summary>Reject an overnight interval that overlaps the following day&apos;s interval.</summary>
     [Fact]
     public async Task ValidateAsync_WithOvernightOverlapOnFollowingDay_ShouldBeInvalid()
     {
@@ -51,6 +52,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-03: Allow separate early and overnight intervals that start on the same day.
+    /// <summary>Allow separate early and overnight intervals that start on the same day.</summary>
     [Fact]
     public async Task ValidateAsync_WithNonOverlappingEarlyAndOvernightIntervals_ShouldBeValid()
     {
@@ -65,6 +67,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-04: Detect overlaps that cross from Saturday into Sunday at the week boundary.
+    /// <summary>Detect overlaps that cross from Saturday into Sunday at the week boundary.</summary>
     [Fact]
     public async Task ValidateAsync_WithOverlapAcrossWeekBoundary_ShouldBeInvalid()
     {
@@ -79,6 +82,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-05: Return Vietnamese messages, as for every other validator (coding_rule.md §8).
+    /// <summary>Return Vietnamese messages, as for every other validator (coding_rule.md §8).</summary>
     [Fact]
     public async Task ValidateAsync_WithInvalidFields_ShouldReturnVietnameseMessages()
     {
@@ -101,6 +105,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-06: Enforce every required OWN-01 text field.
+    /// <summary>Enforce every required OWN-01 text field.</summary>
     [Theory]
     [InlineData("name")]
     [InlineData("phone")]
@@ -126,12 +131,13 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-07: Exercise every documented restaurant text-length boundary.
+    /// <summary>Exercise every documented restaurant text-length boundary.</summary>
     [Theory]
     [InlineData("name", 200, true)]
     [InlineData("name", 201, false)]
     [InlineData("description", 2000, true)]
     [InlineData("description", 2001, false)]
-    [InlineData("phone", 20, true)]
+    [InlineData("phone", 20, false)]
     [InlineData("phone", 21, false)]
     [InlineData("addressLine", 255, true)]
     [InlineData("addressLine", 256, false)]
@@ -166,6 +172,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-08: Accept normalized email and web URLs while rejecting malformed values and unsupported schemes.
+    /// <summary>Accept normalized email and web URLs while rejecting malformed values and unsupported schemes.</summary>
     [Theory]
     [InlineData(" owner@example.com ", " https://example.com ", true)]
     [InlineData("owner.example.com", "https://example.com", false)]
@@ -187,6 +194,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-09: Accept coordinate endpoints and reject values immediately outside the geographic ranges.
+    /// <summary>Accept coordinate endpoints and reject values immediately outside the geographic ranges.</summary>
     [Theory]
     [InlineData(-90, -180, true)]
     [InlineData(90, 180, true)]
@@ -210,6 +218,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-10: Require both coordinates rather than accepting nullable numeric defaults.
+    /// <summary>Require both coordinates rather than accepting nullable numeric defaults.</summary>
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -228,6 +237,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-11: Exercise nullable price level and both sides of its 1-to-4 range.
+    /// <summary>Exercise nullable price level and both sides of its 1-to-4 range.</summary>
     [Theory]
     [InlineData(null, true)]
     [InlineData(1, true)]
@@ -248,6 +258,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-12: Enforce positive, unique media ids and the ten-image gallery maximum.
+    /// <summary>Enforce positive, unique media ids and the ten-image gallery maximum.</summary>
     [Fact]
     public async Task ValidateAsync_WithInvalidMediaIdentifiers_ShouldReportEachField()
     {
@@ -264,6 +275,7 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     }
 
     // TEST-13: Accept optional fields and the exact ten-image gallery boundary.
+    /// <summary>Accept optional fields and the exact ten-image gallery boundary.</summary>
     [Fact]
     public async Task ValidateAsync_WithOptionalFieldsOmittedAndTenImages_ShouldBeValid()
     {
@@ -283,10 +295,78 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-14: Validate Vietnamese phone formats and return exactly one error for invalid or missing phone values.
+    /// <summary>Verifies registration enforces contact number rules before any restaurant can be created.</summary>
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("1234567890", false)]
+    [InlineData("0123456789", false)]
+    [InlineData("090123456", false)]
+    [InlineData("09012345678", false)]
+    [InlineData("0901234567\n", false)]
+    [InlineData("+840901234567", false)]
+    [InlineData("+6590123456", false)]
+    [InlineData("0901234567", true)]
+    [InlineData("0236 3812 345", true)]
+    [InlineData("+84 90 123 4567", true)]
+    public async Task ValidateAsync_WithVietnamesePhone_ShouldReportOnlyThePhoneError(string? phone, bool expectedValid)
+    {
+        var request = ValidRequest();
+        request.Phone = phone!;
+
+        var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
+
+        result.IsValid.Should().Be(expectedValid);
+        if (!expectedValid)
+        {
+            result.Errors.Should().ContainSingle().Which.PropertyName.Should().Be(nameof(request.Phone));
+            result.Errors[0].ErrorMessage.Should().Be(string.IsNullOrWhiteSpace(phone)
+                ? "Số điện thoại là bắt buộc."
+                : "Số điện thoại phải là số di động hoặc số cố định Việt Nam hợp lệ.");
+        }
+    }
+
+    // TEST-15: Enforce the raw 20-character phone limit after requiring a valid number format.
+    /// <summary>Verifies an otherwise valid number at the maximum length passes and one extra character fails once.</summary>
+    [Theory]
+    [InlineData(19, true)]
+    [InlineData(20, true)]
+    [InlineData(21, false)]
+    public async Task ValidateAsync_WithFormattedPhoneLength_ShouldMatchLimit(int length, bool expectedValid)
+    {
+        var request = ValidRequest();
+        request.Phone = "0901234567".PadRight(length);
+
+        var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
+
+        result.IsValid.Should().Be(expectedValid);
+        if (!expectedValid)
+        {
+            result.Errors.Should().ContainSingle().Which.ErrorMessage
+                .Should().Be("Số điện thoại không được vượt quá 20 ký tự.");
+        }
+    }
+
+    // TEST-16: Reject null elements inside an otherwise optional business-hour list.
+    /// <summary>Prevents a JSON null interval from reaching aggregate mapping and causing an internal server error.</summary>
+    [Fact]
+    public async Task ValidateAsync_WithNullBusinessHour_ShouldReportIndexedField()
+    {
+        var request = ValidRequest();
+        request.BusinessHours = [null!];
+
+        var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
+
+        result.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("BusinessHours[0]");
+    }
+
+    /// <summary>Creates a valid registration baseline so each test isolates the intended boundary.</summary>
     private static RegisterRestaurantRequestDto ValidRequest(params BusinessHourDto[] businessHours) => new()
     {
         Name = "Test Restaurant",
-        Phone = "0123456789",
+        Phone = "0901234567",
         AddressLine = "1 Test Street",
         District = "Test District",
         ProvinceName = "Test Province",

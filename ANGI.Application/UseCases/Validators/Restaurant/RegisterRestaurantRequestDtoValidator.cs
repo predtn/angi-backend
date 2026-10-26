@@ -16,8 +16,13 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
         RuleFor(x => x.Description)
             .MaximumLength(2000).WithMessage("Mô tả không được vượt quá 2000 ký tự.");
         RuleFor(x => x.Phone)
-            .NotEmpty().WithMessage("Số điện thoại là bắt buộc.")
-            .MaximumLength(20).WithMessage("Số điện thoại không được vượt quá 20 ký tự.");
+            .NotEmpty().WithMessage("Số điện thoại là bắt buộc.");
+        RuleFor(x => x.Phone)
+            .Cascade(CascadeMode.Stop)
+            .MaximumLength(20).WithMessage("Số điện thoại không được vượt quá 20 ký tự.")
+            .Must(VietnamesePhoneNumberRules.IsValid)
+            .WithMessage("Số điện thoại phải là số di động hoặc số cố định Việt Nam hợp lệ.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Phone));
         RuleFor(x => x.Email)
             .Must(BeValidEmail).WithMessage("Email không đúng định dạng.")
             .When(x => !string.IsNullOrWhiteSpace(x.Email));
@@ -54,7 +59,9 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
             .WithMessage("Mã ảnh phải lớn hơn 0.")
             .Must(ids => ids is null || ids.Distinct().Count() == ids.Count)
             .WithMessage("Danh sách ảnh không được trùng nhau.");
-        RuleForEach(x => x.BusinessHours).SetValidator(new BusinessHourDtoValidator());
+        RuleForEach(x => x.BusinessHours)
+            .NotNull().WithMessage("Khung giờ mở cửa không hợp lệ.")
+            .SetValidator(new BusinessHourDtoValidator());
         RuleFor(x => x.BusinessHours)
             .Must(HaveNonOverlappingIntervals)
             .WithMessage("Các khung giờ mở cửa không được chồng lên nhau.");

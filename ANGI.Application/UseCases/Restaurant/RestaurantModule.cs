@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Interfaces.UseCases.Restaurant;
 using ANGI.Application.UseCases.Restaurant.Browse;
+using ANGI.Application.UseCases.Restaurant.CreateRestaurantReview;
 using ANGI.Application.UseCases.Restaurant.GetOwnerProfile;
 using ANGI.Application.UseCases.Restaurant.GetOwnerMenu;
 using ANGI.Application.UseCases.Restaurant.UpdateDishAvailability;
@@ -57,6 +58,7 @@ public static class RestaurantModule
         services.AddScoped<IGetRestaurantReviewsUseCase, GetRestaurantReviewsUseCase>();
         services.AddScoped<IGetOwnerReviewsUseCase, GetOwnerReviewsUseCase>();
         services.AddScoped<IReplyReviewUseCase, ReplyReviewUseCase>();
+        services.AddScoped<ICreateRestaurantReviewUseCase, CreateRestaurantReviewUseCase>();
         return services;
     }
 }
