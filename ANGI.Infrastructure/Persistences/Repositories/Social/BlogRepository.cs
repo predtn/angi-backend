@@ -88,7 +88,7 @@ public sealed class BlogRepository : IBlogRepository
                 .ThenByDescending(blog => blog.Id);
 
         var items = await query
-            .Skip((page - 1) * pageSize)
+            .Skip(PageOffset.Of(page, pageSize))
             .Take(pageSize)
             .Include(blog => blog.CoverMedia)
             .Include(blog => blog.Author)
@@ -123,7 +123,7 @@ public sealed class BlogRepository : IBlogRepository
             return (Array.Empty<Blog>(), new Dictionary<long, string?>(), totalItems);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
 
         var items = await query
             .OrderByDescending(blog => blog.PublishedAt)
@@ -312,7 +312,7 @@ public sealed class BlogRepository : IBlogRepository
             return (Array.Empty<BlogComment>(), 0L);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
         var items = await query
             .OrderBy(comment => comment.CreatedAt)
             .ThenBy(comment => comment.Id)

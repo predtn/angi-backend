@@ -42,7 +42,7 @@ public sealed class NotificationRepository : INotificationRepository
         var items = await query
             .OrderByDescending(n => n.CreatedAt)
             .ThenByDescending(n => n.Id)
-            .Skip((page - 1) * pageSize)
+            .Skip(PageOffset.Of(page, pageSize))
             .Take(pageSize)
             .ToListAsync(ct);
 
