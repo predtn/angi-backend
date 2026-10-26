@@ -212,6 +212,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Jwt` | `Issuer`, `Audience`, `SecretKey` (≥ 32 bytes, validated at startup), `AccessTokenMinutes`, `RefreshTokenDays` |
 | `Cors` | `AllowedOrigins` |
 | `RateLimit` | `GeneralPermitLimit`, `GeneralWindowSeconds`, `LoginPermitLimit`, `LoginWindowMinutes`, `SensitiveAuthPermitLimit`, `SensitiveAuthWindowSeconds` |
+| `ForwardedHeaders` | `Enabled` (`false`; `true` on Render), `ForwardLimit` (1) |
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
 | `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
 | `Google` | `ClientId` |
@@ -225,3 +226,4 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
 - Render: environment variables with `__`, e.g. `ConnectionStrings__Default`.
+- Behind Render's proxy every connection comes from the proxy, so the per-IP limits (anonymous requests, login failures per email + IP) would count all clients as one. Set `ForwardedHeaders__Enabled=true` there: the app then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Keep it off locally, where the header would let a client choose its IP. Requests the frontend relays through its own Next.js server reach the backend with that server's IP; they count per client only if the frontend passes the browser IP in `X-Forwarded-For` and `ForwardLimit` is raised to 2, which also lets a direct caller forge one hop.

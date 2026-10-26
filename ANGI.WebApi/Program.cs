@@ -14,6 +14,7 @@ builder.Services.AddWebApi(builder.Configuration);
 
 var app = builder.Build();
 
+app.UseForwardedHeadersIfEnabled();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseApiStatusCodePages();
 
