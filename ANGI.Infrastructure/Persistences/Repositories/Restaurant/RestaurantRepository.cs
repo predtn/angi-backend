@@ -283,7 +283,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             query = query.OrderByDescending(r => r.RatingAvg).ThenByDescending(r => r.RatingCount);
         }
 
-        var skip = (request.Page - 1) * request.PageSize;
+        var skip = PageOffset.Of(request.Page, request.PageSize);
         var totalPages = (int)Math.Ceiling((double)totalItems / request.PageSize);
 
         var pagedEntities = await query
@@ -523,7 +523,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             query = query.OrderByDescending(r => r.CreatedAt);
         }
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
         var items = await query
             .Skip(skip)
             .Take(pageSize)
@@ -573,7 +573,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
 
         var totalItems = await query.LongCountAsync(ct);
 
-        var skip = (page - 1) * pageSize;
+        var skip = PageOffset.Of(page, pageSize);
         var items = await query
             .OrderByDescending(r => r.CreatedAt)
             .Skip(skip)
