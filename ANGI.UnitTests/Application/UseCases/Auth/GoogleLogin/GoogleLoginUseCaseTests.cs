@@ -115,11 +115,15 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             var user = ActiveUser();
             user.Status = UserStatus.PendingVerification;
             user.EmailVerifiedAt = null;
+            user.PasswordHash = "password-chosen-by-whoever-registered";
+            var openSession = new UserSession { Id = 40, UserId = user.Id, ExpiresAt = Now.AddDays(1) };
             var harness = CreateHarness(new GoogleIdentity("google-sub", " USER@ANGI.TEST ", "Google Name"));
             harness.Repository.Setup(x => x.GetUserByEmailAsync(
                     "user@angi.test",
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
+            harness.Repository.Setup(x => x.GetActiveSessionsAsync(user.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([openSession]);
             UserExternalLogin? addedLogin = null;
             harness.Repository.Setup(x => x.AddExternalLogin(It.IsAny<UserExternalLogin>()))
                 .Callback<UserExternalLogin>(login => addedLogin = login);
@@ -131,9 +135,29 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             result.IsNewUser.Should().BeFalse();
             user.Status.Should().Be(UserStatus.Active);
             user.EmailVerifiedAt.Should().Be(Now);
+            user.PasswordHash.Should().BeNull("the password of an unverified registration is not proven to be the owner's");
+            openSession.RevokedAt.Should().Be(Now);
             addedLogin!.User.Should().BeSameAs(user);
             harness.AccountStatusCache.Verify(x => x.Invalidate(user.Id), Times.Once);
             harness.Repository.Verify(x => x.AddUser(It.IsAny<User>()), Times.Never);
+        }
+
+        // TEST-03b: A verified password account keeps its password and sessions when Google is linked.
+        /// <summary>Verifies only unverified registrations lose their password on the first Google link.</summary>
+        [Fact]
+        public async Task ExecuteAsync_WithVerifiedPasswordAccount_ShouldKeepPasswordAndSessions()
+        {
+            var user = ActiveUser();
+            user.PasswordHash = "owner-password";
+            var harness = CreateHarness();
+            harness.Repository.Setup(x => x.GetUserByEmailAsync("user@angi.test", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(user);
+
+            await harness.UseCase.ExecuteAsync(new GoogleLoginRequestDto { IdToken = "signed-token" }, CancellationToken.None);
+
+            user.PasswordHash.Should().Be("owner-password");
+            user.EmailVerifiedAt.Should().Be(Now.AddDays(-1));
+            harness.Repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         // TEST-04: Require a role only when no linked or email-matching account exists.
