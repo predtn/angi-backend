@@ -112,6 +112,14 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                     EnsureGoogleLoginAllowed(user);
                     if (user.EmailVerifiedAt is null)
                     {
+                        // Whoever registered this unverified email chose the password; Google proves the real owner,
+                        // so that password and its sessions must not survive the link.
+                        user.PasswordHash = null;
+                        foreach (var activeSession in await _authenticationRepository.GetActiveSessionsAsync(user.Id, ct))
+                        {
+                            activeSession.RevokedAt = now;
+                        }
+
                         user.EmailVerifiedAt = now;
                     }
 
