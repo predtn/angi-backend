@@ -87,7 +87,7 @@ public sealed class ReplyReviewUseCase : IReplyReviewUseCase
                 Type = "REVIEW_REPLIED",
                 Title = "Phản hồi đánh giá",
                 Body = $"{review.Restaurant.Name} đã phản hồi đánh giá của bạn",
-                Data = JsonSerializer.Serialize(new { reviewId = review.Id, restaurantId = review.RestaurantId })
+                Data = JsonSerializer.Serialize(new { review_id = review.Id, restaurant_id = review.RestaurantId })
             };
             _restaurantRepository.AddNotification(notification);
         }

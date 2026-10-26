@@ -81,6 +81,10 @@ public sealed class CreateRestaurantReviewUseCaseTests
         _repositoryMock
             .Setup(r => r.AddReview(It.IsAny<RestaurantReview>()))
             .Callback<RestaurantReview>(r => savedReview = r);
+        // The database assigns the review id on the first save.
+        _unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => { if (savedReview is { Id: 0 }) savedReview.Id = 640; })
+            .ReturnsAsync(1);
 
         Domain.Entities.Notification? savedNotification = null;
         _repositoryMock
@@ -110,8 +114,9 @@ public sealed class CreateRestaurantReviewUseCaseTests
         savedNotification.Should().NotBeNull();
         savedNotification!.RecipientId.Should().Be(99);
         savedNotification.Type.Should().Be("RESTAURANT_REVIEWED");
+        savedNotification.Data.Should().Be("{\"restaurant_id\":7,\"review_id\":640}");
 
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
         _transactionMock.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 

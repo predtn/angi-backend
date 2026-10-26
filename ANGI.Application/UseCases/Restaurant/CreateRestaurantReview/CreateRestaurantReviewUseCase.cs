@@ -119,6 +119,9 @@ public sealed class CreateRestaurantReviewUseCase : ICreateRestaurantReviewUseCa
         restaurant.RatingCount = newCount;
         restaurant.RatingAvg = newAvg;
 
+        // The review id exists only once saved, and the notification data points to it.
+        await _unitOfWork.SaveChangesAsync(ct);
+
         if (restaurant.OwnerId != userId)
         {
             _restaurantRepository.AddNotification(new Domain.Entities.Notification
@@ -127,11 +130,11 @@ public sealed class CreateRestaurantReviewUseCase : ICreateRestaurantReviewUseCa
                 Type = "RESTAURANT_REVIEWED",
                 Title = "Đánh giá mới cho nhà hàng",
                 Body = $"{user.DisplayName} đã đánh giá {request.Rating} sao cho nhà hàng {restaurant.Name}.",
-                Data = JsonSerializer.Serialize(new { restaurantId = restaurant.Id, reviewId = review.Id })
+                Data = JsonSerializer.Serialize(new { restaurant_id = restaurant.Id, review_id = review.Id })
             });
+            await _unitOfWork.SaveChangesAsync(ct);
         }
 
-        await _unitOfWork.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         return RestaurantDetailMapper.MapReview(review);

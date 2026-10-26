@@ -80,7 +80,8 @@ public sealed class ReplyReviewUseCaseTests
 
         _repositoryMock.Verify(r => r.AddNotification(It.Is<ANGI.Domain.Entities.Notification>(n =>
             n.RecipientId == travelerId &&
-            n.Type == "REVIEW_REPLIED")), Times.Once);
+            n.Type == "REVIEW_REPLIED" &&
+            n.Data!.Contains("\"review_id\"") && n.Data.Contains("\"restaurant_id\""))), Times.Once);
 
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }

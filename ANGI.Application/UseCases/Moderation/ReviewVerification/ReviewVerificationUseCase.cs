@@ -119,8 +119,8 @@ public sealed class ReviewVerificationUseCase : IReviewVerificationUseCase
             Body = body,
             Data = JsonSerializer.Serialize(new
             {
-                restaurantId = verification.RestaurantId,
-                verificationId = verification.Id
+                restaurant_id = verification.RestaurantId,
+                verification_id = verification.Id
             })
         };
     }

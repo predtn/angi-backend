@@ -65,7 +65,7 @@ public sealed class ReviewVerificationUseCaseTests
         notification.Should().NotBeNull();
         notification!.RecipientId.Should().Be(12);
         notification.Type.Should().Be(expectedNotificationType);
-        notification.Data.Should().Contain("\"verificationId\":21");
+        notification.Data.Should().Contain("\"verification_id\":21");
         audit.Should().NotBeNull();
         audit!.Action.Should().Be(expectedAuditAction);
         audit.EntityType.Should().Be("restaurant");
