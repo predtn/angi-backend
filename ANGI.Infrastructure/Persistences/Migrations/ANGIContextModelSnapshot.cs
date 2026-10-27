@@ -1147,11 +1147,6 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<string>("District")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("district");
-
                     b.Property<string>("Email")
                         .HasColumnType("citext")
                         .HasColumnName("email");
@@ -2457,17 +2452,21 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
             modelBuilder.Entity("ANGI.Domain.Entities.AuditLog", b =>
                 {
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Actor")
                         .WithMany()
                         .HasForeignKey("ActorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_audit_logs_users_actor_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "SubjectUser")
                         .WithMany()
                         .HasForeignKey("SubjectUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_audit_logs_users_subject_user_id");
+
+                    b.Navigation("Actor");
+
+                    b.Navigation("SubjectUser");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.Blog", b =>
@@ -2682,36 +2681,38 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasConstraintName("fk_menu_submissions_users_created_by");
 
                     b.HasOne("ANGI.Domain.Entities.Restaurant", "Restaurant")
-                        .WithMany()
+                        .WithMany("MenuSubmissions")
                         .HasForeignKey("RestaurantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_menu_submissions_restaurants_restaurant_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Reviewer")
                         .WithMany()
                         .HasForeignKey("ReviewedBy")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submissions_users_reviewed_by");
 
                     b.Navigation("Restaurant");
+
+                    b.Navigation("Reviewer");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.MenuSubmissionItem", b =>
                 {
-                    b.HasOne("ANGI.Domain.Entities.MediaFile", null)
+                    b.HasOne("ANGI.Domain.Entities.MediaFile", "CoverMedia")
                         .WithMany()
                         .HasForeignKey("CoverMediaId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submission_items_media_files_cover_media_id");
 
-                    b.HasOne("ANGI.Domain.Entities.Dish", null)
+                    b.HasOne("ANGI.Domain.Entities.Dish", "ResultDish")
                         .WithMany()
                         .HasForeignKey("ResultDishId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_menu_submission_items_dishes_result_dish_id");
 
-                    b.HasOne("ANGI.Domain.Entities.Dish", null)
+                    b.HasOne("ANGI.Domain.Entities.Dish", "SourceDish")
                         .WithMany()
                         .HasForeignKey("SourceDishId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2723,6 +2724,12 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_menu_submission_items_menu_submissions_submission_id");
+
+                    b.Navigation("CoverMedia");
+
+                    b.Navigation("ResultDish");
+
+                    b.Navigation("SourceDish");
 
                     b.Navigation("Submission");
                 });
@@ -2860,7 +2867,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_restaurant_verifications_restaurants_restaurant_id");
 
-                    b.HasOne("ANGI.Domain.Entities.User", null)
+                    b.HasOne("ANGI.Domain.Entities.User", "Reviewer")
                         .WithMany()
                         .HasForeignKey("ReviewedBy")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2876,6 +2883,8 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.Navigation("Previous");
 
                     b.Navigation("Restaurant");
+
+                    b.Navigation("Reviewer");
                 });
 
             modelBuilder.Entity("ANGI.Domain.Entities.RestaurantVerificationDocument", b =>
@@ -3162,6 +3171,8 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.Navigation("Dishes");
 
                     b.Navigation("Images");
+
+                    b.Navigation("MenuSubmissions");
 
                     b.Navigation("Verifications");
                 });

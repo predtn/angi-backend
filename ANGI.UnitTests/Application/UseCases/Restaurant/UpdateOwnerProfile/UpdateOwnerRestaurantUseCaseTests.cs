@@ -268,7 +268,6 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
                 Website = " https://example.com ",
                 AddressLine = " 34 Lê Lợi ",
                 Ward = " Phường 1 ",
-                District = " Quận 1 ",
                 ProvinceName = " Thành phố Hồ Chí Minh "
             },
             CancellationToken.None);
@@ -280,7 +279,6 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
         restaurant.Website.Should().Be("https://example.com");
         restaurant.AddressLine.Should().Be("34 Lê Lợi");
         restaurant.Ward.Should().Be("Phường 1");
-        restaurant.District.Should().Be("Quận 1");
         restaurant.ProvinceName.Should().Be("Thành phố Hồ Chí Minh");
     }
 
@@ -342,7 +340,6 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
             Name = "Bún Bò Bà Diệu",
             Slug = "bun-bo-ba-dieu",
             AddressLine = "12 Lê Duẩn",
-            District = "Hải Châu",
             ProvinceName = "Thành phố Đà Nẵng",
             Latitude = 16.067812m,
             Longitude = 108.220116m

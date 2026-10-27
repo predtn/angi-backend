@@ -184,7 +184,6 @@ public sealed class CreateBlogEndToEndTests : IClassFixture<PostgresApiFactory>
                 Name = "Quán snapshot",
                 Slug = $"snapshot-{Guid.NewGuid():N}",
                 AddressLine = "12 Lê Duẩn",
-                District = "Hải Châu",
                 ProvinceName = "Đà Nẵng",
                 Latitude = 16.0678m,
                 Longitude = 108.2208m

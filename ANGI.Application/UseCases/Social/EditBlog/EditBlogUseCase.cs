@@ -346,7 +346,6 @@ public sealed partial class EditBlogUseCase : IEditBlogUseCase
         {
             item.AddressLine,
             item.Ward,
-            item.District,
             item.ProvinceName
         }.Where(part => !string.IsNullOrWhiteSpace(part)));
 

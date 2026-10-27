@@ -14,8 +14,6 @@ public sealed record DishCandidateFilter
     /// <summary>Case-insensitive substring of the restaurant province.</summary>
     public string? Province { get; init; }
 
-    /// <summary>Case-insensitive substring of the restaurant district.</summary>
-    public string? District { get; init; }
 
     /// <summary>Within one tag type a dish needs one of the tags; across types it needs every type.</summary>
     public IReadOnlyList<short> TagIds { get; init; } = [];

@@ -30,6 +30,5 @@ public sealed class RoadmapSnapshotItemSource
     public string RestaurantName { get; init; } = string.Empty;
     public string AddressLine { get; init; } = string.Empty;
     public string? Ward { get; init; }
-    public string? District { get; init; }
     public string? ProvinceName { get; init; }
 }

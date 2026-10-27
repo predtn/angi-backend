@@ -32,7 +32,7 @@ internal static class ModerationMapper
     internal static RestaurantCardDto ReportRestaurant(Domain.Entities.Restaurant restaurant, TimeProvider clock) => new()
     {
         Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, CoverUrl = restaurant.CoverMedia?.Url,
-        AddressLine = restaurant.AddressLine, District = restaurant.District, ProvinceName = restaurant.ProvinceName,
+        AddressLine = restaurant.AddressLine, ProvinceName = restaurant.ProvinceName,
         Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
         RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount, OperatingStatus = Api(restaurant.OperatingStatus),
         IsOpenNow = OwnerRestaurantMapper.IsOpenNow(restaurant.BusinessHours, clock)
@@ -63,7 +63,7 @@ internal static class ModerationMapper
         {
             Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug,
             CoverUrl = restaurant.CoverMedia?.Url, AddressLine = restaurant.AddressLine,
-            District = restaurant.District, ProvinceName = restaurant.ProvinceName,
+            ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
             RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount,
             OperatingStatus = Api(restaurant.OperatingStatus),
@@ -81,7 +81,7 @@ internal static class ModerationMapper
         return new ModRestaurantDetailDto
         {
             Id = source.Id, Name = source.Name, Slug = source.Slug, CoverUrl = source.CoverUrl,
-            AddressLine = source.AddressLine, District = source.District, ProvinceName = source.ProvinceName,
+            AddressLine = source.AddressLine, ProvinceName = source.ProvinceName,
             Latitude = source.Latitude, Longitude = source.Longitude, PriceLevel = source.PriceLevel,
             RatingAvg = source.RatingAvg, RatingCount = source.RatingCount, OperatingStatus = source.OperatingStatus,
             IsOpenNow = source.IsOpenNow, DistanceKm = source.DistanceKm, Description = source.Description,

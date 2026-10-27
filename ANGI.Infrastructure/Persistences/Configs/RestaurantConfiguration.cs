@@ -20,7 +20,6 @@ namespace ANGI.Infrastructure.Persistences.Configs
             builder.Property(x => x.Email).HasColumnType("citext");
             builder.Property(x => x.AddressLine).HasMaxLength(255);
             builder.Property(x => x.Ward).HasMaxLength(100);
-            builder.Property(x => x.District).HasMaxLength(100);
             builder.Property(x => x.ProvinceName).HasMaxLength(100);
             builder.Property(x => x.Latitude).HasPrecision(9, 6);
             builder.Property(x => x.Longitude).HasPrecision(9, 6);

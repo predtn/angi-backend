@@ -59,7 +59,7 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
             .Select(restaurant => new Domain.Entities.Restaurant
             {
                 Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, AddressLine = restaurant.AddressLine,
-                District = restaurant.District, ProvinceName = restaurant.ProvinceName, Latitude = restaurant.Latitude,
+                ProvinceName = restaurant.ProvinceName, Latitude = restaurant.Latitude,
                 Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel, RatingAvg = restaurant.RatingAvg,
                 RatingCount = restaurant.RatingCount, OperatingStatus = restaurant.OperatingStatus,
                 CoverMedia = restaurant.CoverMediaId == null ? null : new MediaFile { Url = restaurant.CoverMedia!.Url },
@@ -141,7 +141,7 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
             .Select(r => new ModRestaurantListItem(new Domain.Entities.Restaurant
             {
                 Id = r.Id, Name = r.Name, Slug = r.Slug, AddressLine = r.AddressLine,
-                District = r.District, ProvinceName = r.ProvinceName, Latitude = r.Latitude, Longitude = r.Longitude,
+                ProvinceName = r.ProvinceName, Latitude = r.Latitude, Longitude = r.Longitude,
                 PriceLevel = r.PriceLevel, RatingAvg = r.RatingAvg, RatingCount = r.RatingCount,
                 CoverMedia = r.CoverMediaId == null ? null : new MediaFile { Url = r.CoverMedia!.Url },
                 OperatingStatus = r.OperatingStatus, VerificationStatus = r.VerificationStatus, ModerationStatus = r.ModerationStatus,

@@ -377,7 +377,6 @@ public sealed class RegisterRestaurantUseCaseTests
         Website = "https://restaurant.test",
         AddressLine = "12 Lê Duẩn",
         Ward = "Hải Châu 1",
-        District = "Hải Châu",
         ProvinceName = "Thành phố Đà Nẵng",
         Latitude = 16.067812m,
         Longitude = 108.220116m,

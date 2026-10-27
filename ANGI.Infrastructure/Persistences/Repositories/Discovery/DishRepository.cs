@@ -59,11 +59,6 @@ public sealed class DishRepository : IDishRepository
             query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.District))
-        {
-            var term = $"%{filter.District.Trim()}%";
-            query = query.Where(dish => dish.Restaurant.District != null && EF.Functions.ILike(dish.Restaurant.District, term));
-        }
 
         if (filter.DishForm is { } dishForm)
         {

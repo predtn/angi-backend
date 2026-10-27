@@ -31,7 +31,6 @@ public static class DiscoverySeed
             Name = "Dish Detail Restaurant",
             Phone = "0900000000",
             AddressLine = "1 Integration Street",
-            District = "District 1",
             ProvinceName = "Ho Chi Minh City",
             Latitude = 10.775m,
             Longitude = 106.700m

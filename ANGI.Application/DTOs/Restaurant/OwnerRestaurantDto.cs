@@ -8,7 +8,6 @@ public class OwnerRestaurantDto
     public string Slug { get; set; } = string.Empty;
     public string? CoverUrl { get; set; }
     public string AddressLine { get; set; } = string.Empty;
-    public string? District { get; set; }
     public string? ProvinceName { get; set; }
     public decimal Latitude { get; set; }
     public decimal Longitude { get; set; }
