@@ -5,7 +5,6 @@ public sealed class BrowseRestaurantsRequestDto
 {
     public string? Q { get; init; }
     public string? Province { get; init; }
-    public string? District { get; init; }
     public short? PriceLevel { get; init; }
     public decimal? MinRating { get; init; }
     public bool? OpenNow { get; init; }

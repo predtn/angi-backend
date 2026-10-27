@@ -190,11 +190,6 @@ public sealed class RestaurantRepository : IRestaurantRepository
             query = query.Where(r => r.ProvinceName != null && EF.Functions.ILike(r.ProvinceName, provinceTerm));
         }
 
-        if (!string.IsNullOrWhiteSpace(request.District))
-        {
-            var districtTerm = $"%{request.District.Trim()}%";
-            query = query.Where(r => r.District != null && EF.Functions.ILike(r.District, districtTerm));
-        }
 
         if (request.PriceLevel.HasValue)
         {
@@ -300,7 +295,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             Slug = r.Slug,
             CoverUrl = r.CoverMedia?.Url,
             AddressLine = r.AddressLine,
-            District = r.District,
+            Ward = r.Ward,
             ProvinceName = r.ProvinceName,
             Latitude = r.Latitude,
             Longitude = r.Longitude,

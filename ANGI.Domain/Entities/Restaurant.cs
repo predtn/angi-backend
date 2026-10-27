@@ -14,7 +14,6 @@ namespace ANGI.Domain.Entities
         public string? Website { get; set; }
         public string AddressLine { get; set; } = null!;
         public string? Ward { get; set; }
-        public string? District { get; set; }
         public string? ProvinceName { get; set; }
         public decimal Latitude { get; set; }
         public decimal Longitude { get; set; }

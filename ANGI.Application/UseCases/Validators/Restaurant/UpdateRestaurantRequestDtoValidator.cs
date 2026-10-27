@@ -38,10 +38,6 @@ public sealed class UpdateRestaurantRequestDtoValidator : AbstractValidator<Upda
         RuleFor(x => x.Ward)
             .MaximumLength(100).WithMessage("Phường/xã không được vượt quá 100 ký tự.")
             .When(x => x.WardSpecified && x.Ward is not null);
-        RuleFor(x => x.District)
-            .NotEmpty().WithMessage("Quận/huyện không được để trống.")
-            .MaximumLength(100).WithMessage("Quận/huyện không được vượt quá 100 ký tự.")
-            .When(x => x.DistrictSpecified);
         RuleFor(x => x.ProvinceName)
             .NotEmpty().WithMessage("Tỉnh/thành không được để trống.")
             .MaximumLength(100).WithMessage("Tỉnh/thành không được vượt quá 100 ký tự.")

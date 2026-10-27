@@ -241,7 +241,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         using var omittedResponse = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new
         {
             Name = "Missing Phone Restaurant", AddressLine = "1 Integration Street",
-            District = "District 1", ProvinceName = "Ho Chi Minh City", Latitude = 10m, Longitude = 106m
+            ProvinceName = "Ho Chi Minh City", Latitude = 10m, Longitude = 106m
         });
         await AssertPhoneValidationAsync(omittedResponse, "", isRegistration: true);
 
@@ -447,6 +447,37 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         });
     }
 
+    // TEST-11: Register and patch with the legacy district field: it is ignored and never comes back.
+    /// <summary>Addresses are province + ward only since the 2025 merger; older clients may still send district.</summary>
+    [PostgresEndToEndFact]
+    public async Task RegisterAndUpdateRestaurant_WithLegacyDistrict_ShouldIgnoreIt()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "legacy-district-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+
+        using var register = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new
+        {
+            Name = "Legacy District Restaurant", Phone = "0900000000", AddressLine = "12 Lê Duẩn",
+            Ward = "Phường Hải Châu", District = "Quận Hải Châu", ProvinceName = "Thành phố Đà Nẵng",
+            Latitude = 16.07m, Longitude = 108.22m, PriceLevel = 2
+        });
+        register.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await register.Content.ReadAsStringAsync()).Should().NotContain("\"district\"");
+
+        using var patch = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { District = "Quận Thanh Khê" });
+        patch.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await patch.Content.ReadAsStringAsync()).Should().NotContain("\"district\"");
+
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var stored = await context.Restaurants.SingleAsync();
+            stored.Ward.Should().Be("Phường Hải Châu");
+            stored.ProvinceName.Should().Be("Thành phố Đà Nẵng");
+        });
+    }
+
     /// <summary>Provides invalid phone regions shared by registration and update HTTP regression scenarios.</summary>
     private static string?[] InvalidPhones() =>
     [
@@ -515,7 +546,6 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             Phone = phone,
             Email = "restaurant@integration.test",
             AddressLine = "1 Integration Street",
-            District = "District 1",
             ProvinceName = "Ho Chi Minh City",
             Latitude = 10.775m,
             Longitude = 106.700m,

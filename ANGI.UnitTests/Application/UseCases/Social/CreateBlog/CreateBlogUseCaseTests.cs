@@ -84,7 +84,7 @@ public sealed class CreateBlogUseCaseTests
         result.RoadmapSnapshot.TotalCost.Should().Be(125000);
         result.RoadmapSnapshot.Days.Select(day => day.DayNumber).Should().Equal(1, 2);
         result.RoadmapSnapshot.Days[0].Items.Select(item => item.MealSlot).Should().Equal("breakfast", "dinner");
-        result.RoadmapSnapshot.Days[0].Items[0].Address.Should().Be("1 Hải Châu, Hải Châu, Đà Nẵng");
+        result.RoadmapSnapshot.Days[0].Items[0].Address.Should().Be("1 Hải Châu, Phường Hải Châu, Đà Nẵng");
         result.IsMine.Should().BeTrue();
         result.LikedByMe.Should().BeFalse();
         result.PublishedAt.Should().Be(Now);
@@ -265,7 +265,7 @@ public sealed class CreateBlogUseCaseTests
                             RestaurantId = 7,
                             RestaurantName = "Quán ngon",
                             AddressLine = "1 Hải Châu",
-                            District = "Hải Châu",
+                            Ward = "Phường Hải Châu",
                             ProvinceName = "Đà Nẵng"
                         },
                         new RoadmapSnapshotItemSource
@@ -277,7 +277,7 @@ public sealed class CreateBlogUseCaseTests
                             RestaurantId = 7,
                             RestaurantName = "Quán ngon",
                             AddressLine = "1 Hải Châu",
-                            District = "Hải Châu",
+                            Ward = "Phường Hải Châu",
                             ProvinceName = "Đà Nẵng"
                         }
                     ]

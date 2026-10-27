@@ -207,7 +207,6 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
         {
             item.AddressLine,
             item.Ward,
-            item.District,
             item.ProvinceName
         }.Where(part => !string.IsNullOrWhiteSpace(part)));
 

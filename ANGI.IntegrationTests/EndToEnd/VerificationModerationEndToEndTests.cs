@@ -210,7 +210,6 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
                 Slug = $"verification-{Guid.NewGuid():N}",
                 Phone = "0900000000",
                 AddressLine = "1 Integration Street",
-                District = "Hai Chau",
                 ProvinceName = "Da Nang",
                 Latitude = 16.067m,
                 Longitude = 108.220m,

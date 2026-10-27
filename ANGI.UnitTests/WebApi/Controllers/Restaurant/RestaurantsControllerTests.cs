@@ -47,7 +47,6 @@ public sealed class RestaurantsControllerTests
                     Name = "Phở Gia Truyền",
                     Slug = "pho-gia-truyen",
                     AddressLine = "49 Bát Đàn",
-                    District = "Hoàn Kiếm",
                     ProvinceName = "Thành phố Hà Nội",
                     RatingAvg = 4.6m,
                     RatingCount = 200,

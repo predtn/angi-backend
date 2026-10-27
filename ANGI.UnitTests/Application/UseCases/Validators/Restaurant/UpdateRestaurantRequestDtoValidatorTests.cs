@@ -158,7 +158,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     }
 
     // TEST-10: Enforce address component length boundaries.
-    /// <summary>Verifies address line, district, and province maximum lengths.</summary>
+    /// <summary>Verifies address line, ward, and province maximum lengths.</summary>
     [Theory]
     [InlineData(255, 100, 100, true)]
     [InlineData(256, 100, 100, false)]
@@ -166,14 +166,14 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData(255, 100, 101, false)]
     public async Task ValidateAsync_WithAddressLengths_ShouldMatchContract(
         int addressLength,
-        int districtLength,
+        int wardLength,
         int provinceLength,
         bool expectedValid)
     {
         var request = new UpdateRestaurantRequestDto
         {
             AddressLine = new string('a', addressLength),
-            District = new string('d', districtLength),
+            Ward = new string('w', wardLength),
             ProvinceName = new string('p', provinceLength)
         };
 

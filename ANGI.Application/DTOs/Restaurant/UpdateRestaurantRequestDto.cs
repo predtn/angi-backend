@@ -12,7 +12,6 @@ public sealed class UpdateRestaurantRequestDto
     private string? _website;
     private string? _addressLine;
     private string? _ward;
-    private string? _district;
     private string? _provinceName;
     private decimal? _latitude;
     private decimal? _longitude;
@@ -27,7 +26,6 @@ public sealed class UpdateRestaurantRequestDto
     public string? Website { get => _website; set { _website = value; WebsiteSpecified = true; } }
     public string? AddressLine { get => _addressLine; set { _addressLine = value; AddressLineSpecified = true; } }
     public string? Ward { get => _ward; set { _ward = value; WardSpecified = true; } }
-    public string? District { get => _district; set { _district = value; DistrictSpecified = true; } }
     public string? ProvinceName { get => _provinceName; set { _provinceName = value; ProvinceNameSpecified = true; } }
     public decimal? Latitude { get => _latitude; set { _latitude = value; LatitudeSpecified = true; } }
     public decimal? Longitude { get => _longitude; set { _longitude = value; LongitudeSpecified = true; } }
@@ -42,7 +40,6 @@ public sealed class UpdateRestaurantRequestDto
     [JsonIgnore] public bool WebsiteSpecified { get; private set; }
     [JsonIgnore] public bool AddressLineSpecified { get; private set; }
     [JsonIgnore] public bool WardSpecified { get; private set; }
-    [JsonIgnore] public bool DistrictSpecified { get; private set; }
     [JsonIgnore] public bool ProvinceNameSpecified { get; private set; }
     [JsonIgnore] public bool LatitudeSpecified { get; private set; }
     [JsonIgnore] public bool LongitudeSpecified { get; private set; }

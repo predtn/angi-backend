@@ -33,7 +33,6 @@ public sealed class GetRestaurantMenuUseCaseTests
         {
             Id = restaurantId,
             Name = "Bún Bò Bà Diệu",
-            District = "Quận Hải Châu",
             ProvinceName = "Thành phố Đà Nẵng",
             Latitude = 16.067812m,
             Longitude = 108.220116m,

@@ -58,7 +58,7 @@ internal static class MenuReviewMapper
     {
         Id = submission.Restaurant.Id,
         Name = submission.Restaurant.Name,
-        District = submission.Restaurant.District,
+        Ward = submission.Restaurant.Ward,
         ProvinceName = submission.Restaurant.ProvinceName,
         Latitude = submission.Restaurant.Latitude,
         Longitude = submission.Restaurant.Longitude,
