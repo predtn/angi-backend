@@ -85,6 +85,7 @@ internal static class RestaurantDetailMapper
             {
                 Id = restaurant.Id,
                 Name = restaurant.Name,
+                Ward = restaurant.Ward,
                 ProvinceName = restaurant.ProvinceName,
                 Latitude = restaurant.Latitude,
                 Longitude = restaurant.Longitude,

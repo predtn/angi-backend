@@ -48,6 +48,7 @@ internal static class DishDetailMapper
                 Slug = restaurant.Slug,
                 CoverUrl = restaurant.CoverMedia?.Url,
                 AddressLine = restaurant.AddressLine,
+                Ward = restaurant.Ward,
                 ProvinceName = restaurant.ProvinceName,
                 Latitude = restaurant.Latitude,
                 Longitude = restaurant.Longitude,

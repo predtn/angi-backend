@@ -5,6 +5,7 @@ public sealed class RestaurantMiniDto
 {
     public long Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Ward { get; set; }
     public string? ProvinceName { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }

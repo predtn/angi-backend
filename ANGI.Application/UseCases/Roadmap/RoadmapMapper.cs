@@ -131,6 +131,7 @@ internal static class RoadmapMapper
                 {
                     Id = restaurant.Id,
                     Name = restaurant.Name,
+                    Ward = restaurant.Ward,
                     ProvinceName = restaurant.ProvinceName,
                     Latitude = restaurant.Latitude,
                     Longitude = restaurant.Longitude,

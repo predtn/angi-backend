@@ -32,7 +32,7 @@ internal static class ModerationMapper
     internal static RestaurantCardDto ReportRestaurant(Domain.Entities.Restaurant restaurant, TimeProvider clock) => new()
     {
         Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, CoverUrl = restaurant.CoverMedia?.Url,
-        AddressLine = restaurant.AddressLine, ProvinceName = restaurant.ProvinceName,
+        AddressLine = restaurant.AddressLine, Ward = restaurant.Ward, ProvinceName = restaurant.ProvinceName,
         Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
         RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount, OperatingStatus = Api(restaurant.OperatingStatus),
         IsOpenNow = OwnerRestaurantMapper.IsOpenNow(restaurant.BusinessHours, clock)
@@ -63,7 +63,7 @@ internal static class ModerationMapper
         {
             Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug,
             CoverUrl = restaurant.CoverMedia?.Url, AddressLine = restaurant.AddressLine,
-            ProvinceName = restaurant.ProvinceName,
+            Ward = restaurant.Ward, ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
             RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount,
             OperatingStatus = Api(restaurant.OperatingStatus),

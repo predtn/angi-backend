@@ -8,6 +8,7 @@ public class RestaurantCardDto
     public string Slug { get; init; } = string.Empty;
     public string? CoverUrl { get; init; }
     public string AddressLine { get; init; } = string.Empty;
+    public string? Ward { get; init; }
     public string? ProvinceName { get; init; }
     public decimal? Latitude { get; init; }
     public decimal? Longitude { get; init; }

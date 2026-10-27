@@ -221,6 +221,7 @@ internal static class RestaurantMenuMapper
             {
                 Id = dish.Restaurant.Id,
                 Name = dish.Restaurant.Name,
+                Ward = dish.Restaurant.Ward,
                 ProvinceName = dish.Restaurant.ProvinceName,
                 Latitude = dish.Restaurant.Latitude,
                 Longitude = dish.Restaurant.Longitude,
