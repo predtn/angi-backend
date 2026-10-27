@@ -75,7 +75,12 @@ public sealed class AgentContext
 public sealed record AgentTranscript(string Role, string Content);
 
 /// <summary>One allowlisted provider tool call with opaque provider correlation ID.</summary>
-public sealed record AgentToolCall(string Id, string Name, JsonElement Arguments);
+public sealed record AgentToolCall(string Id, string Name, JsonElement Arguments)
+{
+    /// <summary>Opaque provider correlation metadata, retained only within the current tool round-trip.</summary>
+    [JsonIgnore]
+    public JsonElement? ProviderExtraContent { get; init; }
+}
 
 /// <summary>In-memory tool round preserving provider call/result associations.</summary>
 public sealed record AgentToolExchange(AgentToolCall[] Calls, JsonElement[] Results);

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Infrastructure.Services.Ai;
@@ -11,6 +12,11 @@ namespace ANGI.Infrastructure.Services.Agent;
 /// <summary>Adapts strict Chat Completions function calls and JSON output to Application-owned contracts.</summary>
 public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> settings, AgentLimits limits) : IAgentLlmService
 {
+    // These JSON strings are embedded in provider messages, not HTML. Keep Vietnamese readable to the model.
+    private static readonly JsonSerializerOptions PromptJson = new(AgentJson.Options)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     // Đây là system prompt áp dụng ở mọi lần gọi LLM, bao gồm quy tắc chọn action:
     // thiếu/mơ hồ -> clarify; giải thích -> answer; lịch mới -> create_proposal; sửa lịch nguồn -> patch_proposal.
     // Prompt hướng dẫn model; backend vẫn cưỡng chế schema và nghiệp vụ bằng code ở các bước phía sau.
@@ -35,7 +41,13 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         budget; retain the roadmap and its days. An empty create proposal is invalid.
         get_recommendation may propose complete enriched state, uses arrays even
         when empty, topK 1..200, and optional scalar properties as null. Route requests use only supplied IDs, max 24
-        items/day. Do not claim official changes before the separate human confirmation endpoint. A conversational
+        items/day. Recommendation scope full requires dayNumber=null and mealSlot=null; day requires dayNumber
+        and mealSlot=null; slot requires both dayNumber and mealSlot. Do not invent a radius or origin; radiusKm
+        must be null unless coordinates have been supplied. Preserve the confirmed state rather than guessing
+        values for nullable fields. When constraints are unchanged, use state=null in both tool arguments and final
+        output so the backend keeps the existing state. Never clear confirmed tagIds or excludeTagIds or rename
+        the confirmed province. Do not invent tag IDs; use only IDs already present in state or catalog results.
+        Do not claim official changes before the separate human confirmation endpoint. A conversational
         yes is not confirmation. Return clarify or answer without changes/items; proposals require resolved questions
         and pendingQuestion=null. Ready/committed decisions and versions are exclusively made by the backend.
         """;
@@ -82,7 +94,11 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
                     var name = function.GetProperty("name").GetString()!;
                     using var arguments = JsonDocument.Parse(function.GetProperty("arguments").GetString()!);
                     if (!AgentLlmSchema.Tools.TryGetValue(name, out var schema) || !AgentLlmSchema.IsValid(arguments.RootElement, schema)) return null;
-                    tools.Add(new(call.GetProperty("id").GetString()!, name, arguments.RootElement.Clone()));
+                    tools.Add(new(call.GetProperty("id").GetString()!, name, arguments.RootElement.Clone())
+                    {
+                        ProviderExtraContent = call.TryGetProperty("extra_content", out var extra) && extra.ValueKind == JsonValueKind.Object
+                            ? extra.Clone() : null
+                    });
                 }
                 return new(tools.ToArray(), null, tokens);
             }
@@ -106,16 +122,15 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         // Đặt rules ở system message; state/catalog/history/request là dữ liệu để model tham khảo.
         // Câu "sửa roadmap cho tôi" được hiểu trong Source hiện có, không tự tìm roadmap khác của user.
         var messages = new List<object> { new { role = "system", content = Instructions } };
-        messages.Add(new { role = "user", content = AgentJson.Write(new { state = context.State, source = context.Source,
+        messages.Add(new { role = "user", content = JsonSerializer.Serialize(new { state = context.State, source = context.Source,
             proposalVersion = context.ProposalVersion, history = context.History, request = context.Request,
-            limits = new { limits.MaxRanked, limits.MaxCandidates, limits.MaxToolRounds, limits.MaxToolCalls } }) });
+            limits = new { limits.MaxRanked, limits.MaxCandidates, limits.MaxToolRounds, limits.MaxToolCalls } }, PromptJson) });
         // Các vòng sau gửi lại tool call IDs cùng results để model tiếp tục với dữ liệu vừa được cấp.
         foreach (var exchange in context.Exchanges)
         {
-            messages.Add(new { role = "assistant", content = (string?)null, tool_calls = exchange.Calls.Select(call => new
-                { id = call.Id, type = "function", function = new { name = call.Name, arguments = call.Arguments.GetRawText() } }) });
+            messages.Add(new { role = "assistant", content = (string?)null, tool_calls = exchange.Calls.Select(ProviderCall) });
             for (var index = 0; index < exchange.Calls.Length; index++) messages.Add(new { role = "tool",
-                tool_call_id = exchange.Calls[index].Id, content = exchange.Results[index].GetRawText() });
+                tool_call_id = exchange.Calls[index].Id, content = JsonSerializer.Serialize(exchange.Results[index], PromptJson) });
         }
         if (repair) messages.Add(new { role = "user", content = "The previous output was invalid. Return exactly the supplied strict schema; do not invent IDs or loosen constraints." });
         // strict tools giới hạn tham số công cụ; response_format giới hạn bốn action của output cuối.
@@ -127,5 +142,17 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
                 { name = pair.Key, description = $"Read-only ANGI {pair.Key}; backend validates ownership, source and scope.", strict = true, parameters = pair.Value } }),
             response_format = new { type = "json_schema", json_schema = new { name = "angi_agent_turn", strict = true, schema = AgentLlmSchema.Output } }
         };
+    }
+
+    /// <summary>Returns tool calls unchanged with Gemini signatures while omitting absent provider extensions.</summary>
+    private static Dictionary<string, object?> ProviderCall(AgentToolCall call)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["id"] = call.Id, ["type"] = "function",
+            ["function"] = new { name = call.Name, arguments = call.Arguments.GetRawText() }
+        };
+        if (call.ProviderExtraContent is { } extra) result["extra_content"] = extra;
+        return result;
     }
 }

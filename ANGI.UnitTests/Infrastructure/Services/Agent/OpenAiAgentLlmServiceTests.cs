@@ -76,6 +76,66 @@ public sealed class OpenAiAgentLlmServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    // TEST-05: Gemini requires its opaque tool signature on the subsequent assistant message.
+    /// <summary>Checks a real parse/replay boundary and keeps provider metadata out of stored tool transcripts.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_ToolRoundTrip_PreservesOptionalProviderMetadata(bool signed)
+    {
+        var call = new Dictionary<string, object?> { ["id"] = "call-signed", ["type"] = "function",
+            ["function"] = new { name = "get_roadmap", arguments = "{\"roadmapId\":88}" } };
+        if (signed) call["extra_content"] = new { google = new { thought_signature = "opaque-provider-signature" } };
+        var handler = new Handler(async request =>
+        {
+            if (request.Content is not null)
+            {
+                using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync());
+                var messages = body.RootElement.GetProperty("messages");
+                if (messages.GetArrayLength() > 2)
+                {
+                    var replay = messages[2].GetProperty("tool_calls")[0];
+                    replay.GetProperty("id").GetString().Should().Be("call-signed");
+                    replay.TryGetProperty("extra_content", out var metadata).Should().Be(signed);
+                    if (signed) metadata.GetProperty("google").GetProperty("thought_signature").GetString().Should().Be("opaque-provider-signature");
+                    messages[3].GetProperty("tool_call_id").GetString().Should().Be("call-signed");
+                    return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+                }
+            }
+            return Response(new { choices = new[] { new { finish_reason = "tool_calls", message = new { tool_calls = new[] { call } } } } });
+        });
+        var service = Service(handler);
+        var context = AgentTestData.Context();
+        var first = await service.RunAsync(context, false, CancellationToken.None);
+        first.Should().NotBeNull();
+        first!.Tools.Single().ProviderExtraContent.HasValue.Should().Be(signed);
+        AgentJson.Write(first.Tools).Should().NotContain("opaque-provider-signature").And.NotContain("providerExtraContent");
+        context.Exchanges.Add(new(first.Tools, [JsonSerializer.SerializeToElement(new { roadmapId = 88 })]));
+        var second = await service.RunAsync(context, false, CancellationToken.None);
+        second!.Output!.Action.Should().Be("answer");
+        handler.Calls.Should().Be(2);
+    }
+
+    // TEST-06: Escaped Unicode in nested JSON can make a provider return literal escape sequences as province names.
+    /// <summary>Preserves readable Vietnamese inside both context and tool data messages without changing persisted JSON.</summary>
+    [Fact]
+    public async Task RunAsync_VietnameseContextAndToolResult_RemainReadable()
+    {
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var messages = body.RootElement.GetProperty("messages");
+            messages[1].GetProperty("content").GetString().Should().Contain("Hà Nội");
+            messages[3].GetProperty("content").GetString().Should().Contain("Phở bò Hà Nội");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+        var context = AgentTestData.Context();
+        context.State = context.State with { Province = "Hà Nội" };
+        context.Exchanges.Add(new([new("call-vi", "get_roadmap", JsonSerializer.SerializeToElement(new { roadmapId = 88 }))],
+            [JsonSerializer.SerializeToElement(new { dishName = "Phở bò Hà Nội" }, AgentJson.Options)]));
+        (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output!.Action.Should().Be("answer");
+    }
+
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
         constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>() });
