@@ -77,3 +77,7 @@ coverage*.json
 
 # Claude Code local files
 .claude/
+
+# Local development and data import tools
+/tools/
+/artifacts/
