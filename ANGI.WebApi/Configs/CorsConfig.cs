@@ -20,7 +20,8 @@ namespace ANGI.WebApi.Configs
                     {
                         policy.WithOrigins(allowedOrigins)
                             .AllowAnyHeader()
-                            .AllowAnyMethod();
+                            .AllowAnyMethod()
+                            .WithExposedHeaders("Retry-After");
                     }
                 });
             });

@@ -26,7 +26,6 @@ internal static class RestaurantDetailMapper
             Slug = restaurant.Slug,
             CoverUrl = restaurant.CoverMedia?.Url,
             AddressLine = restaurant.AddressLine,
-            District = restaurant.District,
             ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude,
             Longitude = restaurant.Longitude,
@@ -86,7 +85,7 @@ internal static class RestaurantDetailMapper
             {
                 Id = restaurant.Id,
                 Name = restaurant.Name,
-                District = restaurant.District,
+                Ward = restaurant.Ward,
                 ProvinceName = restaurant.ProvinceName,
                 Latitude = restaurant.Latitude,
                 Longitude = restaurant.Longitude,

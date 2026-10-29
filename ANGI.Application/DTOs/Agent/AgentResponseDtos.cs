@@ -12,7 +12,8 @@ public sealed record AgentProposalDto(long ProposalId, int Version, string Opera
 
 /// <summary>Represents a stored completed response or the status of an in-flight retry.</summary>
 public sealed record AgentTurnDto(string Status, string Reply, long ConversationVersion,
-    AgentProposalDto? Proposal = null, AgentValidation? Validation = null, bool Replayed = false);
+    AgentProposalDto? Proposal = null, AgentValidation? Validation = null, bool Replayed = false, AgentCommitDto? Commit = null,
+    long? ClientMessageId = null);
 
 /// <summary>Returns the original commit revision and durable proposal-to-item mapping.</summary>
 public sealed record AgentCommitDto(long RoadmapId, long RoadmapVersion, long CommittedProposalId,

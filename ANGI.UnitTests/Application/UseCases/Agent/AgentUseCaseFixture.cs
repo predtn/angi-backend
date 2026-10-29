@@ -36,7 +36,8 @@ internal sealed class AgentUseCaseFixture
         Repository.Setup(x => x.GetOwnedAsync(7, 3, It.IsAny<CancellationToken>())).ReturnsAsync(Conversation);
         Repository.Setup(x => x.GetCompletedHistoryAsync(7, It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<AgentMessage>());
         Repository.Setup(x => x.NextSequenceAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(2);
-        Repository.Setup(x => x.GetMessageAsync(7, It.IsAny<long>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Message);
+        Repository.Setup(x => x.GetMessageAsync(7, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((long _, long messageId, CancellationToken _) => Message?.ClientMessageId == messageId ? Message : null);
         Repository.Setup(x => x.AddMessage(It.IsAny<AgentMessage>())).Callback<AgentMessage>(message => { if (message.ClientMessageId.HasValue) Message = message; });
         Repository.Setup(x => x.AddConversation(It.IsAny<AgentConversation>())).Callback<AgentConversation>(conversation => conversation.Id = 7);
         UnitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Transaction.Object);
@@ -53,6 +54,10 @@ internal sealed class AgentUseCaseFixture
             new(catalog.Routes.Object), Limits, Telemetry);
         return new(Llm.Object, tools, policy, new(), catalog.Validator, Limits, Telemetry);
     }
+
+    /// <summary>Builds the deterministic proposal writer used by either confirmation transport.</summary>
+    public AgentProposalCommitter Committer() => new(Repository.Object, Roadmaps.Object, UnitOfWork.Object,
+        AgentTestData.Validator(AgentTestData.Dish()).Validator, Clock);
 
     /// <summary>Supplies a stable UTC clock for exact lease and expiry boundary assertions.</summary>
     private sealed class TestClock : TimeProvider

@@ -8,7 +8,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Agent;
 /// <summary>Verifies idempotency identity and message transport boundaries.</summary>
 public sealed class SendAgentMessageRequestDtoValidatorTests
 {
-    // TEST-01: Reject missing identity/version, null content, oversized text and invalid commands or selections.
+    // TEST-01: Reject explicit non-positive identity/version, null content, oversized text and invalid commands or selections.
     /// <summary>Checks every admission field before persistence or provider calls.</summary>
     [Theory]
     [InlineData("id")][InlineData("negative-id")][InlineData("min-id")][InlineData("version")][InlineData("null")][InlineData("empty")][InlineData("long")]
@@ -44,6 +44,21 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 
+    // TEST-04: Request-supplied state cannot forge a pending approval, source version or reset history marker.
+    /// <summary>Keeps the metadata that authorizes chat lifecycle transitions exclusively server-controlled.</summary>
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("version")]
+    [InlineData("history")]
+    public void Validate_ForgedBackendMetadata_Fails(string field)
+    {
+        var state = new AgentState();
+        var request = Valid();
+        request.ConfirmedState = field switch { "pending" => state with { PendingStateChange = state },
+            "version" => state with { SourceRoadmapVersion = 1 }, _ => state with { HistoryStartSequence = 1 } };
+        new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeFalse();
+    }
+
     /// <summary>Creates the smallest valid message envelope.</summary>
     private static SendAgentMessageRequestDto Valid() => new() { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "x" };
 
@@ -55,6 +70,18 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     public void Validate_PositiveNumericIdentity_Succeeds(long clientMessageId)
     {
         var request = Valid(); request.ClientMessageId = clientMessageId;
+        new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
+    }
+
+    // TEST-05: Prompt-only and partially explicit requests may omit transport metadata or send null.
+    /// <summary>Accepts server allocation without weakening validation of supplied positive identifiers.</summary>
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(1L, null)]
+    [InlineData(null, 1L)]
+    public void Validate_OptionalIdentityAndVersion_Succeeds(long? messageId, long? version)
+    {
+        var request = new SendAgentMessageRequestDto { Content = "Tôi muốn ăn ở Việt Nam", ClientMessageId = messageId, ExpectedConversationVersion = version };
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 }

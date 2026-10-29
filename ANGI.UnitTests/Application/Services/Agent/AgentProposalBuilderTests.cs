@@ -22,6 +22,7 @@ public sealed class AgentProposalBuilderTests
         result.Items.Single(x => x.ItemKey == "a").Should().Be(a);
         result.Items.Single(x => x.ItemKey == "c").Should().Be(source.Items[2]);
         result.Items.Single(x => x.ItemKey == "b").SourceItemId.Should().BeNull();
+        result.Items.Select(x => x.ItemKey).Should().Equal("a", "b", "c");
         source.Items.Single(x => x.ItemKey == "b").DishId.Should().Be(2);
     }
 
@@ -111,5 +112,65 @@ public sealed class AgentProposalBuilderTests
             { Price = 1, DishName = "Fake", RestaurantName = "Fake", SourceItemId = 900, RequestId = Guid.NewGuid() }] };
         var result = new AgentProposalBuilder().Build(AgentTestData.Context(), output).Items.Single();
         result.Price.Should().Be(0); result.DishName.Should().BeNull(); result.SourceItemId.Should().BeNull(); result.RequestId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Build_ConfirmedReplan_ReturnsCompleteChronologicalReplacement()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.ReplanAfterConfirmation = true;
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Updated",
+            Items = [AgentTestData.Item(3, "dinner", 2, "dinner"), AgentTestData.Item(2, "breakfast", 1, "breakfast")] });
+        result.Items.Select(item => item.ItemKey).Should().Equal("breakfast", "dinner");
+        result.Items.Should().NotContain(item => item.ItemKey == "a");
+    }
+
+    // TEST-07: The checked delta target owns the row key even when the model invents a replacement suffix.
+    /// <summary>Retains the preview identity while preserving move feedback and clearing replacement feedback identity.</summary>
+    [Theory]
+    [InlineData("replace")]
+    [InlineData("move")]
+    public void Build_ModelRenamesReplacement_UsesCheckedTargetKey(string action)
+    {
+        var item = AgentTestData.Item() with { SourceItemId = 55 };
+        var other = AgentTestData.Item(3, "other", 2, "dinner");
+        var context = AgentTestData.Context(AgentTestData.Snapshot(item, other));
+        var changed = item with { ItemKey = "a_alt", SourceItemId = 999,
+            DishId = action == "replace" ? 2 : item.DishId, DayNumber = action == "move" ? (short)2 : item.DayNumber };
+        var snapshot = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Edit",
+            Changes = [new(action, item.ItemKey, changed)] });
+        snapshot.Items.Should().NotContain(candidate => candidate.ItemKey == "a_alt");
+        snapshot.Items.Single(candidate => candidate.ItemKey == item.ItemKey).SourceItemId.Should().Be(action == "move" ? 55 : null);
+        snapshot.Items.Single(candidate => candidate.ItemKey == "other").Should().Be(other);
+    }
+
+    // TEST-08: Backend-recorded chat alternative scope permits a full replacement without a frontend alternative command.
+    /// <summary>Preserves explicit scope authorization for both patch and replacement forms of a natural-language alternative.</summary>
+    [Fact]
+    public void Build_ChatAlternative_AllowsOnlyGrantedReplacementScope()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.AlternativeScopes.Add(new(1, "lunch"));
+        var output = new AgentOutput { Action = "create_proposal", Reply = "Alternative", Scope = new(1, "lunch"),
+            Items = [AgentTestData.Item(2, "new-alternative")] };
+        new AgentProposalBuilder().Build(context, output).Items.Single().DishId.Should().Be(2);
+        var ungranted = output with { Scope = new() };
+        ((Action)(() => new AgentProposalBuilder().Build(context, ungranted))).Should().Throw<ConflictException>();
+    }
+
+    [Fact]
+    public void Build_BroadAlternativeSearch_NarrowPatchPreservesOtherMealsAndSideDish()
+    {
+        var main = AgentTestData.Item(1, "main", 2);
+        var drink = AgentTestData.Item(2, "drink", 2) with { SortOrder = 1 };
+        var outside = AgentTestData.Item(3, "outside", 1, "dinner");
+        var context = AgentTestData.Context(AgentTestData.Snapshot(outside, main, drink));
+        context.AlternativeScopes.Add(new());
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Updated",
+            Scope = new(2, "lunch"), Changes = [new("replace", "main", main with { DishId = 4 })] });
+        result.Items.Should().HaveCount(3);
+        result.Items.Single(item => item.ItemKey == "outside").Should().Be(outside);
+        result.Items.Single(item => item.ItemKey == "drink").Should().Be(drink);
+        result.Items.Single(item => item.ItemKey == "main").DishId.Should().Be(4);
     }
 }

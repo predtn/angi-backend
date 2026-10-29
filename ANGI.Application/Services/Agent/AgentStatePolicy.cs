@@ -8,21 +8,25 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Accepts validated state enrichment while preventing the model from relaxing hard constraints.</summary>
 public sealed class AgentStatePolicy
 {
-    /// <summary>Requires explicit UI-confirmed state for changes that relax an existing trip requirement.</summary>
-    public AgentState Accept(AgentState current, AgentState? proposed)
+    /// <summary>Requires a backend-staged human confirmation before relaxing an existing trip requirement.</summary>
+    public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
     {
         if (proposed is null) return current;
         new AgentStateValidator().ValidateAndThrow(proposed);
-        var relaxed = current.Province is not null && !string.Equals(current.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
-            || current.NumDays.HasValue && proposed.NumDays != current.NumDays
-            || current.BudgetAmount.HasValue && (!proposed.BudgetAmount.HasValue || proposed.BudgetAmount > current.BudgetAmount)
-            || !current.BudgetUnrestricted && proposed.BudgetUnrestricted
-            || current.MaxPricePerMeal.HasValue && (!proposed.MaxPricePerMeal.HasValue || proposed.MaxPricePerMeal > current.MaxPricePerMeal)
-            || current.ExcludeTagIds.Except(proposed.ExcludeTagIds).Any()
-            || current.TagIds.Except(proposed.TagIds).Any()
-            || current.RadiusKm.HasValue && (!proposed.RadiusKm.HasValue || proposed.RadiusKm > current.RadiusKm)
-            || current.OriginMode != "none" && (proposed.OriginMode != current.OriginMode || proposed.OriginLatitude != current.OriginLatitude || proposed.OriginLongitude != current.OriginLongitude);
-        if (relaxed) throw new ConflictException("PROPOSAL_NOT_COMMITTABLE", "Cần xác nhận rõ thay đổi ràng buộc chuyến đi qua confirmedState.");
-        return proposed;
+        var confirmed = baseline ?? current;
+        var relaxed = confirmed.Province is not null && !string.Equals(confirmed.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
+            || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
+            || confirmed.BudgetAmount.HasValue && (!proposed.BudgetAmount.HasValue || proposed.BudgetAmount > confirmed.BudgetAmount)
+            || !confirmed.BudgetUnrestricted && proposed.BudgetUnrestricted
+            || confirmed.MaxPricePerMeal.HasValue && (!proposed.MaxPricePerMeal.HasValue || proposed.MaxPricePerMeal > confirmed.MaxPricePerMeal)
+            || confirmed.ExcludeTagIds.Except(proposed.ExcludeTagIds).Any()
+            || confirmed.TagIds.Except(proposed.TagIds).Any()
+            || confirmed.RadiusKm.HasValue && (!proposed.RadiusKm.HasValue || proposed.RadiusKm > confirmed.RadiusKm)
+            || confirmed.OriginMode != "none" && (proposed.OriginMode != confirmed.OriginMode || proposed.OriginLatitude != confirmed.OriginLatitude || proposed.OriginLongitude != confirmed.OriginLongitude);
+        if (relaxed) throw new AgentStateChangeRequiredException(proposed);
+        if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapVersion == current.SourceRoadmapVersion &&
+            proposed.HistoryStartSequence == current.HistoryStartSequence) return proposed;
+        return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapVersion = current.SourceRoadmapVersion,
+            HistoryStartSequence = current.HistoryStartSequence };
     }
 }

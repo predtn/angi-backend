@@ -59,6 +59,7 @@ namespace ANGI.UnitTests.WebApi
             policy!.Origins.Should().BeEquivalentTo("https://app.angi.test");
             policy.AllowAnyHeader.Should().BeTrue();
             policy.AllowAnyMethod.Should().BeTrue();
+            policy.ExposedHeaders.Should().Contain("Retry-After");
             policy.SupportsCredentials.Should().BeFalse();
         }
 

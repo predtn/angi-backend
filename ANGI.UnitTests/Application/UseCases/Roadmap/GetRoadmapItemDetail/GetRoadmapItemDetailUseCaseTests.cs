@@ -122,7 +122,6 @@ public sealed class GetRoadmapItemDetailUseCaseTests
             Name = "Restaurant",
             Slug = "restaurant",
             AddressLine = "12 Street",
-            District = "District",
             ProvinceName = "Province",
             Latitude = 16.067812m,
             Longitude = 108.220116m,

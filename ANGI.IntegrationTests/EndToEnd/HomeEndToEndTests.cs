@@ -143,7 +143,6 @@ public sealed class HomeEndToEndTests : IClassFixture<PostgresApiFactory>
             Name = name,
             Phone = "0900000000",
             AddressLine = "1 Integration Street",
-            District = "Hải Châu",
             ProvinceName = province,
             Latitude = 16.0678m,
             Longitude = 108.2208m

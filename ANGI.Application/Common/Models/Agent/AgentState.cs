@@ -27,6 +27,15 @@ public sealed record AgentState
     public string? PendingQuestion { get; init; }
     public short? FocusDay { get; init; }
     public string? FocusMeal { get; init; }
+    /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentState? PendingStateChange { get; init; }
+    /// <summary>Last observed official roadmap revision; unchanged revisions preserve chat planning constraints.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? SourceRoadmapVersion { get; init; }
+    /// <summary>First transcript sequence eligible for context after a fresh planning reset.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? HistoryStartSequence { get; init; }
 }
 
 /// <summary>One backend-priced itinerary item with stable proposal identity.</summary>
@@ -49,6 +58,10 @@ public sealed record AgentScope(short? DayNumber = null, string? MealSlot = null
     /// <summary>Checks whether a proposed mutation belongs to this explicit scope.</summary>
     public bool Contains(AgentItem item) => (!DayNumber.HasValue || item.DayNumber == DayNumber) &&
         (MealSlot is null || item.MealSlot == MealSlot);
+
+    /// <summary>A broad candidate search can authorize a narrower edit without widening its mutation boundary.</summary>
+    public bool Covers(AgentScope other) => (!DayNumber.HasValue || DayNumber == other.DayNumber) &&
+        (MealSlot is null || MealSlot == other.MealSlot);
 }
 
 /// <summary>Deterministic validation including route uncertainty and current total cost.</summary>
@@ -64,11 +77,17 @@ public sealed class AgentContext
     public required AgentState State { get; set; }
     public AgentSnapshot? Source { get; set; }
     public int? ProposalVersion { get; set; }
+    public DTOs.Agent.AgentProposalDto? CurrentProposal { get; init; }
+    public List<AgentScope> AlternativeScopes { get; } = [];
     public Domain.Entities.Roadmap? Roadmap { get; init; }
     public required DTOs.Agent.SendAgentMessageRequestDto Request { get; init; }
     public List<AgentTranscript> History { get; init; } = [];
     public List<AgentCandidateGrant> Grants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
+    public string? RepairFeedback { get; set; }
+    public bool ReplanAfterConfirmation { get; set; }
+    public AgentState? ConstraintBaseline { get; set; }
+    public object[] CatalogTags { get; set; } = [];
 }
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
@@ -86,7 +105,12 @@ public sealed record AgentToolCall(string Id, string Name, JsonElement Arguments
 public sealed record AgentToolExchange(AgentToolCall[] Calls, JsonElement[] Results);
 
 /// <summary>Provider-neutral LLM step, containing either tool requests or one structured result.</summary>
-public sealed record AgentLlmStep(AgentToolCall[] Tools, AgentOutput? Output, int? Tokens = null);
+public sealed record AgentLlmStep(AgentToolCall[] Tools, AgentOutput? Output, int? Tokens = null, AgentLlmFailure? Failure = null)
+{
+    /// <summary>Creates a failed step that cannot be mistaken for malformed model output requiring repair.</summary>
+    public static AgentLlmStep Failed(AgentLlmFailureKind kind, int? httpStatus = null, int? retryAfterSeconds = null, int? tokens = null) =>
+        new([], null, tokens, new(kind, httpStatus, retryAfterSeconds));
+}
 
 /// <summary>Allowlisted output returned by the LLM; prices and provenance are never accepted here.</summary>
 public sealed record AgentOutput
@@ -121,6 +145,11 @@ public static class AgentJson
 
     /// <summary>Returns the documented snake-case representation of an enum.</summary>
     public static string Name<T>(T value) where T : struct, Enum => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
+
+    /// <summary>Uses the same chronological order for stored previews, restored previews and route calculation.</summary>
+    public static AgentItem[] OrderItems(IEnumerable<AgentItem> items) => items.OrderBy(item => item.DayNumber)
+        .ThenBy(item => Array.IndexOf(UseCases.Validators.Agent.AgentStateValidator.Meals, item.MealSlot))
+        .ThenBy(item => item.SortOrder).ThenBy(item => item.ItemKey, StringComparer.Ordinal).ToArray();
 
     /// <summary>Builds a proposal source from the current official aggregate while retaining item IDs.</summary>
     public static AgentSnapshot FromRoadmap(Domain.Entities.Roadmap roadmap, AgentState state) => new(state,

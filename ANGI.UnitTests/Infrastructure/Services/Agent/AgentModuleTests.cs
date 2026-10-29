@@ -1,5 +1,7 @@
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Infrastructure.Services.Agent;
+using ANGI.Infrastructure.Services.Ai;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +23,7 @@ public sealed class AgentModuleTests
     [InlineData("MaxCandidates", "0")][InlineData("MaxCandidates", "2001")]
     [InlineData("MaxRanked", "0")][InlineData("MaxRanked", "201")]
     [InlineData("TimeoutSeconds", "0")][InlineData("TimeoutSeconds", "301")]
+    [InlineData("LlmTimeoutSeconds", "0")][InlineData("LlmTimeoutSeconds", "301")]
     [InlineData("LeaseSeconds", "90")][InlineData("LeaseSeconds", "601")]
     [InlineData("MessagesPerMinute", "0")][InlineData("MessagesPerDay", "9")]
     [InlineData("ActiveDays", "0")][InlineData("RetentionDays", "6")][InlineData("RetentionDays", "366")]
@@ -42,5 +45,21 @@ public sealed class AgentModuleTests
         using var provider = services.BuildServiceProvider();
         var limits = provider.GetRequiredService<AgentLimits>(); limits.LeaseSeconds.Should().BeGreaterThan(limits.TimeoutSeconds);
         limits.MaxCandidates.Should().Be(2000); limits.MaxRanked.Should().Be(200); limits.RetentionDays.Should().Be(30);
+    }
+
+    // TEST-03: Agent's provider timeout is independent of shared roadmap AI settings and capped by the turn deadline.
+    /// <summary>Checks configured typed HTTP clients without making a provider request.</summary>
+    [Theory]
+    [InlineData(60, 90, 60)][InlineData(180, 90, 90)]
+    public void AddAgentInfrastructure_ProviderTimeout_IsIndependentAndCapped(int perCall, int perTurn, int expected)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Ai:TimeoutSeconds"] = "1", ["Agent:LlmTimeoutSeconds"] = perCall.ToString(), ["Agent:TimeoutSeconds"] = perTurn.ToString()
+        }).Build();
+        var services = new ServiceCollection(); services.AddAiInfrastructure(configuration); services.AddAgentInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(IAgentLlmService));
+        client.Timeout.Should().Be(TimeSpan.FromSeconds(expected));
     }
 }

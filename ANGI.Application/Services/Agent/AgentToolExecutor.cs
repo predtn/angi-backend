@@ -52,7 +52,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     {
         // Model có thể bổ sung state để lấy món nhưng không được tự đổi/nới yêu cầu đã chốt.
         // userId luôn lấy từ context đã xác thực, không phải tham số do model cung cấp.
-        context.State = statePolicy.Accept(context.State, input.State);
+        if (!context.ReplanAfterConfirmation)
+            context.State = statePolicy.Accept(context.State, input.State, context.ConstraintBaseline);
         var state = context.State;
         var scope = new AgentScope(input.DayNumber, input.MealSlot);
         AgentProposalBuilder.ValidateScope(context, scope);
@@ -77,7 +78,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (tagIds.Concat(excludeTags).Except(catalogTags.Select(x => x.Id)).Any()) throw Invalid("Bộ lọc chứa tag không có trong catalog.");
         // Khi thay món, tránh chọn lại món đang giữ ở ngoài scope.
         // Với command alternative, loại cả món cũ trong scope để phương án mới khác bản trước.
-        var excluded = (context.Source?.Items ?? []).Where(item => !scope.Contains(item) || context.Request.Command == "alternative")
+        var alternative = context.Request.Command == "alternative" || input.Alternative;
+        if (alternative && !context.AlternativeScopes.Contains(scope)) context.AlternativeScopes.Add(scope);
+        var excluded = (context.Source?.Items ?? []).Where(item => !scope.Contains(item) || alternative)
             .Select(x => x.DishId).Concat(input.ExcludeDishIds).Distinct().ToArray();
         // Hai giới hạn cùng tồn tại thì lấy giá trị nhỏ hơn: tool không được tăng trần giá/bán kính của state.
         var maxPrice = Min(state.MaxPricePerMeal, input.MaxPricePerMeal);
@@ -176,7 +179,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
 /// <summary>Allowlisted recommendation arguments; caller identity is deliberately absent.</summary>
 public sealed record AgentRecommendationInput(AgentState? State = null, string? Province = null, string Scope = "full",
     short? DayNumber = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null,
-    int[]? ExcludeDishIds = null, decimal? MaxPricePerMeal = null, decimal? RadiusKm = null, int TopK = 50);
+    int[]? ExcludeDishIds = null, decimal? MaxPricePerMeal = null, decimal? RadiusKm = null, int TopK = 50, bool Alternative = false);
 
 /// <summary>Ordered unsaved preview route request.</summary>
 public sealed record AgentRouteInput(short DayNumber, AgentRouteItem[] OrderedItems, string Profile = "driving");

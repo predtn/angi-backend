@@ -87,6 +87,6 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         if (snapshot.Grants.Any(x => !x.RequestId.HasValue)) warnings.Add("Một phần đề xuất dùng xếp hạng đánh giá thay cho cá nhân hóa.");
         var changes = snapshot.Changes?.Select(change => change.Item is null ? change : change with
             { Item = normalized.FirstOrDefault(item => item.ItemKey == change.Item.ItemKey) ?? change.Item }).ToArray();
-        return (snapshot with { Items = normalized.ToArray(), Changes = changes }, new(errors.Distinct().ToArray(), warnings.Distinct().ToArray(), total, routeResults.ToArray()));
+        return (snapshot with { Items = AgentJson.OrderItems(normalized), Changes = changes }, new(errors.Distinct().ToArray(), warnings.Distinct().ToArray(), total, routeResults.ToArray()));
     }
 }

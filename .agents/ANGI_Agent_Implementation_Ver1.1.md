@@ -646,3 +646,50 @@ Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folde
 Chạy `dotnet build ANGI.slnx`, toàn bộ unit/integration test trên database riêng có tên chứa test, và `dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi`. Không chấp nhận Agent/PostgreSQL test bị skip. Theo yêu cầu ngày 26/10/2026, tạm cho phép skip hai test live Brevo/Cloudinary không liên quan Agent; phải báo riêng số skip này trong chat, không ghi là toàn bộ suite 0 skip.
 
 Một migration Agent trong PR; regenerate từ model khi sửa mapping, chỉ thêm SQL trigger mà EF không biểu diễn được. Không sửa snapshot bằng tay. API/DTO/mã lỗi/DB phải khớp hai workbook. QA và review báo trực tiếp trong chat, nêu kiểm thử đã chạy và rủi ro còn lại; không tạo tài liệu QA riêng. Chưa push hoặc tạo commit nếu người dùng chưa yêu cầu thao tác đó. Điều kiện merge vẫn là CI xanh và ít nhất một reviewer theo commit guide.
+## XVII. Chat-only contract — user decision on 2026-10-27
+
+This section supersedes earlier assumptions about command buttons, confirmedState forms and saving only through a separate confirm endpoint.
+
+- The standard messages request needs only clientMessageId, expectedConversationVersion and content. Existing optional fields remain compatible.
+- The backend/LLM recognizes alternative, discard and reset from chat. Discard never deletes an official roadmap. Reset starts fresh planning context and detaches the existing roadmap without deleting it.
+- An explicit save utterance such as `lưu lịch trình này` binds to the current owned proposal and the conversation version already supplied by the client. A bare yes never saves. The LLM cannot choose a proposal ID/version to commit.
+- Chat save and AGENT-04 share deterministic catalog, price, ownership, expiry and version validation. Chat save persists roadmap/proposal, transcript and replay response in the same fenced transaction. No provider or Mapbox call runs under database locks.
+- AgentTurn adds optional commit: AgentCommit. Repeated clientMessageId replays the original commit result without writing again.
+- A model-proposed relaxation stages a validated pendingStateChange and asks for explicit chat consent. A short affirmative only accepts the current pending constraint change; keep-original rejects it. Model constraintsChangeConfirmed never grants authority.
+- AgentState adds server-managed pendingStateChange?: AgentState (not nested), sourceRoadmapVersion?: long and historyStartSequence?: long. Clients and models cannot set these fields. They use the existing JSONB state; no table/schema migration is required.
+- Context refreshes saved-roadmap metadata only when its revision changes, preserving chat constraints otherwise. Reset excludes turns before historyStartSequence from future context, while keeping the stored transcript.
+- get_recommendation adds alternative: bool; the backend excludes old scoped dishes and validates that the resulting scoped replacement uses fresh candidates.
+- Verify chat-only lifecycle, no-preview/negated/ambiguous save, pending constraint consent/rejection, stale versions, catalog changes, rollback, duplicate/concurrent delivery and preservation of official roadmaps and feedback.
+## XVIII. Prompt-only admission — user decision on 2026-10-28
+
+This section supersedes the required three-field transport contract in section XVII.
+
+- Scalar's default message body contains only content. clientMessageId and expectedConversationVersion become nullable optional fields; explicit non-positive values remain invalid.
+- Under the owned conversation lock, omitted/null clientMessageId allocates an unused positive ID starting from the next transcript sequence. Omitted/null expectedConversationVersion uses the current locked revision. Existing lease, quotas, expiry, ownership and finalization fencing remain enforced.
+- Content repetition is allowed. Each request without an ID is a new turn. Explicit same ID and same business content replays; explicit same ID with different business content remains MESSAGE_ID_REUSED, with actionable guidance. Explicit stale versions remain CONVERSATION_VERSION_CONFLICT.
+- AgentTurn adds optional clientMessageId for the admitted or replayed message. Existing persisted responses may omit it. A client can retry a known ID with the same content; it should reload history before retrying a request without an ID whose outcome is unknown.
+- Server-generated IDs obey existing user-message NOT NULL/positive/unique constraints. No database migration or error-code change is needed.
+- Verify prompt-only identical/different messages, generated-ID collision avoidance, explicit replay and conflict/version guards using isolated or scripted LLM boundaries only; never call the live Gemini provider for this fix.
+## XIX. Provider failure classification — approved 2026-10-28
+
+- Agent:LlmTimeoutSeconds defaults to 60 seconds per provider call. The existing 90-second turn cancellation caps all calls/tools together; lease remains 120 seconds. Other consumers retain Ai:TimeoutSeconds.
+- The adapter returns structured internal failure metadata instead of collapsing configuration, transport, HTTP, refusal, truncation and schema errors into null. Null/unknown results fail closed without automatic repair.
+- Do not automatically retry timeout, network, authentication, rejected requests, rate limits or upstream unavailability. Only a received malformed JSON/schema output permits one repair, within existing call/time limits. Caller cancellation always propagates without repair.
+- Preserve HTTP 503 AGENT_UNAVAILABLE and data:null. Vietnamese messages distinguish slow AI, exhausted/limited provider, configuration, network, invalid output, refusal and truncation. Retry-After may be forwarded for provider rate limits/unavailability; it does not change the application's own 429 quota contract.
+- Log correlation IDs, call number, elapsed time, tokens when available, failure kind, HTTP status and retry delay. Never log credentials, raw provider bodies or raw prompts. Preserve the existing proposal on failures.
+- Verify provider failures make one HTTP call, schema repair makes at most two, caller/turn cancellation, independent timeout configuration, safe messages/headers/logging and PostgreSQL failure recovery, using fake provider boundaries only. Do not call live Gemini.
+
+## XX. Conversation stabilization — user decision on 2026-10-28
+
+This section supersedes section XIX's no-retry and uniform HTTP 503 rules. The user explicitly requested real Gemini verification for the itinerary lifecycle fixes.
+
+- Province, duration and budget are required to plan; startDate is optional. Preserve known duration without asking for calendar dates. Supply currentDate and actual catalogTags in provider context; unsupported sweet/spicy tastes remain notes, never invented tag guarantees.
+- Return complete proposal snapshots ordered by day, meal, sortOrder and stable item key, including older proposals restored through GET. Clear navigation focus after a successful edit.
+- Candidate searches may cover a broader scope than an edit. Only new/replacement dishes must differ from previous alternatives; preserve unchanged side dishes and every item outside the edit boundary. Explicit legacy alternative commands retain full-scope exclusion.
+- A proposal-operation error permits one bounded repair with specific backend feedback. patch_proposal requires empty items and nonempty changes. Disable provider tools at the tool-round ceiling so the model finishes or clarifies instead of requesting another round. MaxLlmCalls defaults to 8.
+- Asking to review a ready itinerary before saving returns the current full preview without committing it. Save aliases include chốt lịch này and chốt lịch trình này; quoted, negated or uncertain text and generic agreement still never save.
+- On accepting pending constraints, generate the revised preview in that turn. Freeze the exact accepted state during that replan. Before consent, compare model changes with the persisted turn baseline so temporary search filters do not create spurious confirmation loops. Provider failures preserve the previous persisted state and preview.
+- Chat save must not present an earlier committed result as a newly saved revision when constraints changed without a fresh preview.
+- Retry upstream HTTP 500/502/503 at most twice with bounded backoff. Retry a classified per-minute limit only with a short retry hint and enough remaining turn time. Never retry daily quota exhaustion. All attempts count against existing call/time limits; timeout, network, authentication, refusal and truncation remain non-retryable.
+- Parse Gemini object and array error envelopes and structured RetryInfo. Provider rate/quota limits return HTTP 429 AGENT_UNAVAILABLE; other provider failures retain HTTP 503 AGENT_UNAVAILABLE. Application admission limits remain HTTP 429 AGENT_RATE_LIMITED. Preserve Retry-After and caller cancellation.
+- Logs contain fixed provider-code/reason labels, status, timing and retry counts, without raw prompts, provider errors or credentials. Test classification/retry with fake providers; real provider tests require explicit user authorization. No database migration is required for these fixes.

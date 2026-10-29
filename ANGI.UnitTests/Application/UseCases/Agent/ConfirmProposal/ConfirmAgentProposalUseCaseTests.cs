@@ -48,6 +48,6 @@ public sealed class ConfirmAgentProposalUseCaseTests
 
     /// <summary>Constructs confirmation over deterministic current-catalog validation.</summary>
     private static ConfirmAgentProposalUseCase Create(AgentUseCaseFixture fixture) => new(new ConfirmAgentProposalRequestDtoValidator(),
-        fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object,
-        AgentTestData.Validator(AgentTestData.Dish()).Validator, fixture.Clock, fixture.Limits, fixture.Telemetry);
+        fixture.Repository.Object, fixture.User.Object, fixture.UnitOfWork.Object,
+        fixture.Committer(), fixture.Clock, fixture.Limits, fixture.Telemetry);
 }

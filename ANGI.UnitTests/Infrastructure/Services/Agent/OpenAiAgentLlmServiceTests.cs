@@ -13,6 +13,20 @@ namespace ANGI.UnitTests.Infrastructure.Services.Agent;
 /// <summary>Verifies the real provider transport, strict schemas, tool associations and malformed-output handling.</summary>
 public sealed class OpenAiAgentLlmServiceTests
 {
+    [Fact]
+    public async Task RunAsync_ToolBudgetExhausted_ForcesFinalStructuredOutput()
+    {
+        var handler = new Handler(async request =>
+        {
+            using var sent = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            sent.RootElement.GetProperty("tool_choice").GetString().Should().Be("none");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+        var context = AgentTestData.Context();
+        for (var round = 0; round < 3; round++) context.Exchanges.Add(new([], []));
+        (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output!.Action.Should().Be("answer");
+    }
+
     // TEST-01: Send allowlisted strict tool schemas and parse a complete structured answer with token usage.
     /// <summary>Verifies the exact HTTP authentication and structured-output contract without a live API key.</summary>
     [Fact]
@@ -38,9 +52,11 @@ public sealed class OpenAiAgentLlmServiceTests
     // TEST-02: Reject malformed JSON, missing fields, extra fields, invalid enums, refusal and truncated responses.
     /// <summary>Validates every provider-output boundary before Application receives an actionable step.</summary>
     [Theory]
-    [InlineData("json")][InlineData("missing")][InlineData("extra")][InlineData("enum")][InlineData("duplicate")]
-    [InlineData("refusal")][InlineData("truncated")][InlineData("http")][InlineData("choices")]
-    public async Task RunAsync_InvalidProviderResponse_ReturnsControlledFailure(string area)
+    [InlineData("json", AgentLlmFailureKind.InvalidSchema)][InlineData("missing", AgentLlmFailureKind.InvalidSchema)]
+    [InlineData("extra", AgentLlmFailureKind.InvalidSchema)][InlineData("enum", AgentLlmFailureKind.InvalidSchema)][InlineData("duplicate", AgentLlmFailureKind.InvalidSchema)]
+    [InlineData("refusal", AgentLlmFailureKind.Refused)][InlineData("truncated", AgentLlmFailureKind.Truncated)]
+    [InlineData("http", AgentLlmFailureKind.ProviderUnavailable)][InlineData("choices", AgentLlmFailureKind.InvalidResponse)]
+    public async Task RunAsync_InvalidProviderResponse_ReturnsControlledFailure(string area, AgentLlmFailureKind kind)
     {
         var output = area switch { "json" => "{", "missing" => "{}", "extra" => Output().TrimEnd('}') + ",\"userId\":99}",
             "enum" => Output().Replace("answer", "delete_roadmap"), "duplicate" => Output().TrimEnd('}') + ",\"action\":\"answer\"}", _ => Output() };
@@ -49,7 +65,9 @@ public sealed class OpenAiAgentLlmServiceTests
             {
                 choices = new[] { new { finish_reason = area == "truncated" ? "length" : "stop", message = new { content = output, refusal = area == "refusal" ? "refused" : null } } }
             })));
-        (await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None)).Should().BeNull();
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(kind); result.Output.Should().BeNull(); result.Tools.Should().BeEmpty();
+        handler.Calls.Should().Be(1);
     }
 
     // TEST-03: Preserve provider tool call IDs and parse only allowlisted strictly validated arguments.
@@ -70,7 +88,7 @@ public sealed class OpenAiAgentLlmServiceTests
     {
         var handler = new Handler((_, ct) => Task.FromCanceled<HttpResponseMessage>(ct));
         var service = Service(handler, "");
-        (await service.RunAsync(AgentTestData.Context(), false, CancellationToken.None)).Should().BeNull(); handler.Calls.Should().Be(0);
+        (await service.RunAsync(AgentTestData.Context(), false, CancellationToken.None))!.Failure!.Kind.Should().Be(AgentLlmFailureKind.Configuration); handler.Calls.Should().Be(0);
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         var act = () => Service(handler).RunAsync(AgentTestData.Context(), false, cancelled.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
@@ -136,12 +154,119 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output!.Action.Should().Be("answer");
     }
 
+    // TEST-07: Preserve safe HTTP status and Retry-After without reading or exposing a provider error body.
+    /// <summary>Distinguishes quota, authentication, rejected requests and unavailable services with one transport attempt.</summary>
+    [Theory]
+    [InlineData(429, AgentLlmFailureKind.RateLimited)]
+    [InlineData(401, AgentLlmFailureKind.Authentication)][InlineData(403, AgentLlmFailureKind.Authentication)]
+    [InlineData(400, AgentLlmFailureKind.RejectedRequest)]
+    [InlineData(500, AgentLlmFailureKind.ProviderUnavailable)][InlineData(503, AgentLlmFailureKind.ProviderUnavailable)]
+    [InlineData(408, AgentLlmFailureKind.Timeout)][InlineData(504, AgentLlmFailureKind.Timeout)]
+    public async Task RunAsync_HttpFailure_PreservesOnlySafeMetadata(int status, AgentLlmFailureKind kind)
+    {
+        var handler = new Handler(_ =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent("private-key-and-prompt-must-not-leak") };
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(45)); return Task.FromResult(response);
+        });
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure.Should().Be(new AgentLlmFailure(kind, status, 45));
+        AgentJson.Write(result).Should().NotContain("private-key").And.NotContain("test-key"); handler.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RunAsync_GeminiHighDemand_PreservesSafeReasonWithoutRawMessage()
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        { Content = new StringContent("{\"error\":{\"status\":\"UNAVAILABLE\",\"message\":\"This model is experiencing high demand. private-key-must-not-leak\"}}") }));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.ProviderCode.Should().Be("UNAVAILABLE"); result.Failure.Reason.Should().Be("high_demand");
+        AgentJson.Write(result).Should().NotContain("private-key");
+    }
+
+    [Theory]
+    [InlineData("[{}]")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"private-message\"")]
+    public async Task RunAsync_UnusualErrorEnvelope_PreservesHttp429(string body)
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent(body) }));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.RateLimited);
+        result.Failure.HttpStatus.Should().Be(429);
+    }
+
+    [Fact]
+    public async Task RunAsync_GeminiArrayRateLimit_ReadsStatusAndRetryInfo()
+    {
+        var body = "[{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"Quota exceeded: GenerateRequestsPerMinutePerProject\",\"details\":[{\"retryDelay\":\"12.5s\"}]}}]";
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent(body) }));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure.Should().Be(new AgentLlmFailure(AgentLlmFailureKind.RateLimited, 429, 13, "RESOURCE_EXHAUSTED", "rate_limit"));
+    }
+
+    // TEST-08: HttpClient timeout and a transport exception remain distinct from received malformed output.
+    /// <summary>Exercises cancellation-aware fake transport without making any network request.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task RunAsync_TransportFailure_IsNotSchemaFailure(bool timeout)
+    {
+        var handler = new Handler(async (_, ct) =>
+        {
+            if (timeout) await Task.Delay(Timeout.Infinite, ct);
+            throw new HttpRequestException("sensitive internal endpoint");
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/"), Timeout = TimeSpan.FromMilliseconds(100) };
+        var service = new OpenAiAgentLlmService(http, Options.Create(new AiSettings { ApiKey = "test-key", Model = "test-model" }), new(), TimeProvider.System);
+        var result = await service.RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(timeout ? AgentLlmFailureKind.Timeout : AgentLlmFailureKind.Network);
+        AgentJson.Write(result).Should().NotContain("sensitive"); handler.Calls.Should().Be(1);
+    }
+
+    // TEST-09: Date-based retry hints use the injected clock and malformed or expired hints are ignored.
+    /// <summary>Checks deterministic retry guidance without weakening HTTP failure classification.</summary>
+    [Theory]
+    [InlineData("future", 30)][InlineData("past", null)][InlineData("invalid", null)]
+    public async Task RunAsync_RetryAfter_UsesSafeClockBasedDelay(string hint, int? expected)
+    {
+        var clock = new FixedClock();
+        var handler = new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            if (hint == "invalid") response.Headers.TryAddWithoutValidation("Retry-After", "not-a-date");
+            else response.Headers.RetryAfter = new(clock.GetUtcNow().AddSeconds(hint == "future" ? 30 : -30));
+            return Task.FromResult(response);
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") };
+        var service = new OpenAiAgentLlmService(http, Options.Create(new AiSettings { ApiKey = "test-key", Model = "test-model" }), new(), clock);
+        var result = await service.RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.RateLimited); result.Failure.RetryAfterSeconds.Should().Be(expected);
+    }
+
+    // TEST-10: An invalid provider envelope retains HTTP 200 but is not misclassified as received model content needing repair.
+    /// <summary>Distinguishes protocol corruption from malformed JSON produced inside a valid model response.</summary>
+    [Fact]
+    public async Task RunAsync_InvalidEnvelope_PreservesStatusWithoutSchemaRepair()
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("not-valid-provider-json") }));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure.Should().Be(new AgentLlmFailure(AgentLlmFailureKind.InvalidResponse, 200)); handler.Calls.Should().Be(1);
+    }
+
+    /// <summary>Supplies an exact clock for HTTP-date retry guidance.</summary>
+    private sealed class FixedClock : TimeProvider
+    {
+        /// <summary>Returns the deterministic instant used to interpret provider HTTP dates.</summary>
+        public override DateTimeOffset GetUtcNow() => new(2026, 10, 28, 0, 0, 0, TimeSpan.Zero);
+    }
+
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
         constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>() });
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
     private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key") => new(
-        new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = "configured-model" }), new AgentLimits());
+        new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = "configured-model" }), new AgentLimits(), TimeProvider.System);
     /// <summary>Encodes an OpenAI-compatible test response as JSON.</summary>
     private static HttpResponseMessage Response(object value) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
 

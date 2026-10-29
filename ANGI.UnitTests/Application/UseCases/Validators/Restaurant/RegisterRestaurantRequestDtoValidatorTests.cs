@@ -18,7 +18,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             Name = "Test Restaurant",
             Phone = "0901234567",
             AddressLine = "1 Test Street",
-            District = "Test District",
             ProvinceName = "Test Province",
             Latitude = 10m,
             Longitude = 106m,
@@ -110,7 +109,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [InlineData("name")]
     [InlineData("phone")]
     [InlineData("addressLine")]
-    [InlineData("district")]
     [InlineData("provinceName")]
     public async Task ValidateAsync_WithMissingRequiredText_ShouldBeInvalid(string field)
     {
@@ -121,7 +119,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             case "name": request.Name = " "; break;
             case "phone": request.Phone = " "; break;
             case "addressLine": request.AddressLine = " "; break;
-            case "district": request.District = " "; break;
             case "provinceName": request.ProvinceName = " "; break;
         }
 
@@ -143,8 +140,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [InlineData("addressLine", 256, false)]
     [InlineData("ward", 100, true)]
     [InlineData("ward", 101, false)]
-    [InlineData("district", 100, true)]
-    [InlineData("district", 101, false)]
     [InlineData("provinceName", 100, true)]
     [InlineData("provinceName", 101, false)]
     public async Task ValidateAsync_WithTextLengthBoundary_ShouldMatchContract(
@@ -162,7 +157,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             case "phone": request.Phone = value; break;
             case "addressLine": request.AddressLine = value; break;
             case "ward": request.Ward = value; break;
-            case "district": request.District = value; break;
             case "provinceName": request.ProvinceName = value; break;
         }
 
@@ -368,7 +362,6 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         Name = "Test Restaurant",
         Phone = "0901234567",
         AddressLine = "1 Test Street",
-        District = "Test District",
         ProvinceName = "Test Province",
         Latitude = 10m,
         Longitude = 106m,

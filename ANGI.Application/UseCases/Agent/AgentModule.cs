@@ -22,6 +22,7 @@ public static class AgentModule
         services.AddScoped<AgentContextBuilder>();
         services.AddScoped<AgentProposalBuilder>();
         services.AddScoped<AgentProposalValidator>();
+        services.AddScoped<AgentProposalCommitter>();
         services.AddScoped<AgentToolExecutor>();
         services.AddScoped<AgentRouteEstimator>();
         services.AddScoped<AgentOrchestrator>();

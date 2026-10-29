@@ -19,7 +19,8 @@ namespace ANGI.Application.UseCases.Agent.SendMessage;
 /// <summary>Implements AGENT-02 with a short claim transaction, external execution and fenced finalization.</summary>
 public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDto> validator, IAgentRepository repository,
     IRoadmapRepository roadmaps, ICurrentUserService user, IUnitOfWork unitOfWork, TimeProvider clock,
-    AgentLimits limits, AgentContextBuilder contextBuilder, AgentOrchestrator orchestrator, IAgentTelemetry telemetry) : ISendAgentMessageUseCase
+    AgentLimits limits, AgentContextBuilder contextBuilder, AgentOrchestrator orchestrator, IAgentTelemetry telemetry,
+    AgentProposalCommitter committer) : ISendAgentMessageUseCase
 {
     /// <summary>Replays completed requests before version checks and prevents late or concurrent attempts from writing state.</summary>
     public async Task<AgentTurnDto> ExecuteAsync(long id, SendAgentMessageRequestDto request, CancellationToken ct)
@@ -40,23 +41,25 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             // Khóa conversation đúng chủ để hai request không đồng thời nhận quyền sửa cùng state.
             conversation = await repository.LockOwnedAsync(id, userId, ct) ?? throw AgentConversationRules.Missing();
             var now = clock.GetUtcNow().UtcDateTime;
-            var existing = await repository.GetMessageAsync(id, request.ClientMessageId, ct);
+            var existing = request.ClientMessageId is { } suppliedId ? await repository.GetMessageAsync(id, suppliedId, ct) : null;
             // Một clientMessageId chỉ đại diện cho một nội dung nghiệp vụ trong conversation.
             // Nếu đã completed, trả nguyên response đã lưu trước kiểm tra expiry/version/quota:
             // retry do mất mạng không gọi lại LLM/Recommendation hoặc tạo proposal thứ hai.
-            if (existing is not null && existing.RequestHash != hash) throw new ConflictException("MESSAGE_ID_REUSED", "ID tin nhắn đã được dùng cho nội dung khác.");
+            if (existing is not null && existing.RequestHash != hash) throw new ConflictException("MESSAGE_ID_REUSED",
+                "clientMessageId đã được dùng cho nội dung khác. Tin nhắn mới cần ID mới, hoặc bỏ clientMessageId và expectedConversationVersion để backend tự cấp.");
             if (existing?.ProcessingStatus == AgentProcessingStatus.Completed && existing.ResponsePayload is not null)
-                return AgentJson.Read<AgentTurnDto>(existing.ResponsePayload) with { Replayed = true };
+                return AgentJson.Read<AgentTurnDto>(existing.ResponsePayload) with { Replayed = true, ClientMessageId = existing.ClientMessageId };
             AgentConversationRules.RequireActive(conversation, now);
             // Retry chính tin nhắn đang chạy nhận trạng thái processing (controller trả 202).
             // Tin nhắn khác phải chờ, tránh hai lượt chat ghi đè state/proposal của nhau.
             if (AgentConversationRules.Busy(conversation, now))
             {
-                if (existing is not null && existing.TurnId == conversation.ProcessingTurnId) return new("processing", "Tin nhắn đang được xử lý.", conversation.Version);
+                if (existing is not null && existing.TurnId == conversation.ProcessingTurnId) return new("processing", "Tin nhắn đang được xử lý.", conversation.Version, ClientMessageId: existing.ClientMessageId);
                 throw new ConflictException("CONVERSATION_BUSY", "Hội thoại đang xử lý một tin nhắn khác.");
             }
-            // Client phải gửi version đã đọc gần nhất; version cũ cần reload trước khi chạy lượt mới.
-            if (request.ExpectedConversationVersion != conversation.Version) throw new ConflictException("CONVERSATION_VERSION_CONFLICT", "Hãy tải lại hội thoại trước khi gửi tin nhắn.");
+            // Prompt-only dùng revision hiện tại dưới khóa; client gửi version vẫn được kiểm tra như trước.
+            if (request.ExpectedConversationVersion is { } expectedVersion && expectedVersion != conversation.Version)
+                throw new ConflictException("CONVERSATION_VERSION_CONFLICT", "Hãy tải lại hội thoại trước khi gửi tin nhắn.");
             // Khóa theo user vì quota dùng chung cho mọi conversation của user, kể cả retry failed.
             await repository.LockUserAsync(userId, ct);
             if (await repository.CountAttemptsAsync(userId, now.AddMinutes(-1), ct) >= limits.MessagesPerMinute) throw new AgentRateLimitedException(60);
@@ -71,8 +74,12 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             if (existing is null)
             {
                 var sequence = await repository.NextSequenceAsync(id, ct);
+                var messageId = request.ClientMessageId ?? sequence;
+                // Cấp ID dương chưa dùng dưới khóa conversation, kể cả khi client cũ đã chọn ID bằng sequence này.
+                if (request.ClientMessageId is null)
+                    while (await repository.GetMessageAsync(id, messageId, ct) is not null) messageId = checked(messageId + 1);
                 message = new AgentMessage { ConversationId = id, SequenceNo = sequence, TurnId = sequence,
-                    ClientMessageId = request.ClientMessageId, Role = AgentMessageRole.User, RequestHash = hash };
+                    ClientMessageId = messageId, Role = AgentMessageRole.User, RequestHash = hash };
             }
             else message = existing;
             // Mỗi lần thử có attemptId tăng dần, dù vẫn là cùng clientMessageId/turnId.
@@ -98,18 +105,17 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         {
             AgentPreparedTurn prepared;
             AgentContext? context = null;
-            if (request.Command is "discard" or "reset")
+            var control = request.Command is "discard" or "reset" ? request.Command : AgentChatPolicy.DraftControl(request.Content);
+            if (control is "discard" or "reset")
             {
                 // Lệnh rõ ràng từ request được xử lý trực tiếp, không cần LLM diễn giải.
-                // discard giữ yêu cầu chuyến đi; reset lấy lại state từ roadmap đã gắn hoặc state trống.
+                // discard giữ yêu cầu chuyến đi; reset bắt đầu kế hoạch mới và tách roadmap đã gắn.
                 // Cả hai chỉ bỏ proposal, không xóa hoặc sửa roadmap chính thức.
                 var state = AgentJson.Read<AgentState>(conversation.State);
-                if (request.Command == "reset")
-                {
-                    state = conversation.RoadmapId is { } roadmapId ? AgentContextBuilder.StateFromRoadmap(
-                        await roadmaps.GetOwnedDetailAsync(roadmapId, userId, ct) ?? throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.")) : new AgentState();
-                }
-                prepared = new("Đã bỏ bản đề xuất đang chỉnh sửa. Bạn có thể tiếp tục lên kế hoạch.", state with { PendingQuestion = null, FocusDay = null, FocusMeal = null }, null, null);
+                if (control == "reset") state = new AgentState { HistoryStartSequence = message.SequenceNo };
+                prepared = new(control == "reset" ? "Đã bắt đầu kế hoạch mới. Bạn muốn ăn ở đâu, trong mấy ngày và với ngân sách bao nhiêu? Lịch đã lưu vẫn được giữ nguyên."
+                    : "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu vẫn được giữ nguyên.",
+                    state with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null }, null, null, control);
             }
             else
             {
@@ -120,7 +126,42 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 context.TurnId = message.TurnId;
                 context.AttemptId = attemptId;
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
-                prepared = await orchestrator.RunAsync(context, ct);
+                if (context.State.PendingStateChange is { } stalePending && AgentChatPolicy.AcceptsChange(request.Content) &&
+                    stalePending.SourceRoadmapVersion != context.State.SourceRoadmapVersion)
+                    prepared = new("Roadmap đã thay đổi sau câu hỏi xác nhận. Hãy nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất.",
+                        context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
+                else if (context.State.PendingStateChange is { } pending && AgentChatPolicy.AcceptsChange(request.Content))
+                {
+                    context.State = pending with { PendingQuestion = null, PendingStateChange = null };
+                    context.ReplanAfterConfirmation = true;
+                    prepared = await orchestrator.RunAsync(context, ct);
+                }
+                else if (context.State.PendingStateChange is not null && AgentChatPolicy.RejectsChange(request.Content))
+                    prepared = new("Đã giữ nguyên các điều kiện trước đó.", context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
+                else if (AgentChatPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
+                    context.State.PendingQuestion is null && context.State.PendingStateChange is null &&
+                    AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
+                    prepared = new("Đây là toàn bộ đề xuất hiện tại để bạn xem lại. Nhắn ‘chốt lịch này’ để lưu thành roadmap.", context.State, null, null);
+                else if (AgentChatPolicy.IsSaveRequest(request.Content))
+                {
+                    var proposal = context.CurrentProposal;
+                    if (context.State.PendingQuestion is not null || context.State.PendingStateChange is not null)
+                        prepared = new("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.", context.State, null, null);
+                    else if (proposal is null || proposal.Status is not ("ready" or "committed"))
+                        prepared = new("Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.", context.State, null, null);
+                    else if (proposal.Status == "committed" && !AgentConversationRules.SameConstraints(context.State, proposal.Snapshot.State))
+                        prepared = new("Yêu cầu chuyến đi đã thay đổi nhưng chưa có đề xuất mới để lưu. Hãy tạo bản xem trước cập nhật trước khi chốt lịch.", context.State, null, null);
+                    else
+                    {
+                        var commit = await committer.PrepareAsync(conversation, userId,
+                            new ConfirmAgentProposalRequestDto { ProposalId = proposal.ProposalId, ProposalVersion = proposal.Version }, true, ct);
+                        prepared = new("Đã lưu lịch trình của bạn.", context.State, null, null, "confirm", commit);
+                    }
+                }
+                else prepared = await orchestrator.RunAsync(context, ct);
+                if (prepared.Action == "reset") prepared = prepared with { State = new AgentState { HistoryStartSequence = message.SequenceNo } };
+                else if (prepared.Action == "discard") prepared = prepared with
+                    { State = context.State with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null } };
             }
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
@@ -156,12 +197,20 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         }
         var previous = conversation.CurrentProposalId is { } proposalId ? await repository.GetProposalAsync(id, proposalId, ct) : null;
         AgentProposal? created = null;
-        if (request.Command is "discard" or "reset")
+        AgentCommitDto? commitResult = null;
+        if (prepared.Commit is { } commit)
+        {
+            var committed = await committer.CommitLockedAsync(conversation, commit, userId, true, ct);
+            commitResult = committed.Result;
+            prepared = prepared with { State = AgentJson.Read<AgentState>(conversation.State) };
+        }
+        if (prepared.Action is "discard" or "reset" or "state_changed")
         {
             // Bỏ bản nháp hiện hành; bản lịch chính thức không bị thay đổi.
             if (previous?.Status == AgentProposalStatus.Ready) previous.Status = AgentProposalStatus.Discarded;
             conversation.CurrentProposalId = null;
             conversation.CurrentProposal = null;
+            if (prepared.Action == "reset") conversation.RoadmapId = null;
         }
         else if (prepared.Snapshot is not null)
         {
@@ -189,7 +238,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         conversation.ExpiresAt = now.AddDays(limits.ActiveDays);
         AgentConversationRules.ClearLease(conversation);
         var result = new AgentTurnDto("completed", prepared.Reply, conversation.Version,
-            created is not null ? AgentContextBuilder.MapProposal(created) : previous is null || request.Command is "discard" or "reset" ? null : AgentContextBuilder.MapProposal(previous), prepared.Validation);
+            created is not null ? AgentContextBuilder.MapProposal(created) : previous is null || prepared.Action is "discard" or "reset" or "state_changed" ? null : AgentContextBuilder.MapProposal(previous),
+            prepared.Validation, Commit: commitResult, ClientMessageId: message.ClientMessageId);
         // Lưu response cùng logical user message để request gửi lại có thể replay chính xác kết quả này.
         message.ProcessingStatus = AgentProcessingStatus.Completed;
         message.ResponsePayload = AgentJson.Write(result);
@@ -204,10 +254,12 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         repository.AddMessage(new AgentMessage { ConversationId = id, SequenceNo = sequence, TurnId = message.TurnId,
             Role = AgentMessageRole.Assistant, Payload = AgentJson.Write(new AgentStoredMessage(prepared.Reply)) });
         // Proposal, state, transcript và response replay cùng thành công hoặc cùng rollback.
-        // Hàm này chỉ lưu dữ liệu Agent; ghi roadmap thuộc ConfirmAgentProposalUseCase.
+        // Chat-save dùng cùng writer với Confirm; roadmap và phản hồi chat nằm trong cùng transaction.
         await unitOfWork.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         telemetry.Record("completed", id, message.TurnId, attemptId, new { proposalVersion = created?.ProposalVersion });
+        if (commitResult is not null) telemetry.Record("committed", id, message.TurnId, attemptId,
+            new { commitResult.RoadmapId, commitResult.RoadmapVersion, commitResult.CommittedProposalId });
         return result;
     }
 

@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
+using ANGI.Application.Common.Interfaces.Repositories.Discovery;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Domain.Entities;
@@ -10,12 +11,15 @@ namespace ANGI.Application.Services.Agent;
 
 /// <summary>Loads trusted state and current snapshots rather than reconstructing a plan from chat text.</summary>
 public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRepository roadmaps, AgentLimits limits,
-    TimeProvider clock)
+    TimeProvider clock, ITagRepository tags)
 {
     /// <summary>Loads completed bounded history and the latest official roadmap after ownership checks.</summary>
     public async Task<AgentContext> BuildAsync(AgentConversation conversation, SendAgentMessageRequestDto request, CancellationToken ct)
     {
-        var state = request.ConfirmedState ?? AgentJson.Read<AgentState>(conversation.State);
+        var stored = AgentJson.Read<AgentState>(conversation.State);
+        var state = request.ConfirmedState is { } confirmed
+            ? confirmed with { SourceRoadmapVersion = stored.SourceRoadmapVersion, HistoryStartSequence = stored.HistoryStartSequence }
+            : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
             : null;
@@ -30,7 +34,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         }
         else if (roadmap is not null)
         {
-            if (request.ConfirmedState is null) state = RefreshRoadmapMetadata(state, roadmap);
+            if (request.ConfirmedState is null && state.SourceRoadmapVersion != roadmap.Version) state = RefreshRoadmapMetadata(state, roadmap);
             source = AgentJson.FromRoadmap(roadmap, state);
         }
         var history = await repository.GetCompletedHistoryAsync(conversation.Id, limits.MaxHistoryMessages, ct);
@@ -38,8 +42,10 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         {
             ConversationId = conversation.Id, UserId = conversation.UserId, State = state, Source = source,
             ProposalVersion = proposal?.Status == AgentProposalStatus.Ready ? proposal.ProposalVersion : null,
+            CurrentProposal = proposal is null ? null : MapProposal(proposal),
             Roadmap = roadmap, Request = request,
-            History = history.Where(x => x.Role != AgentMessageRole.Tool).Select(x => new AgentTranscript(
+            CatalogTags = (await tags.GetTagsAsync(null, ct)).Select(tag => (object)new { tag.Id, tag.Code, tag.Name, type = AgentJson.Name(tag.TagType) }).ToArray(),
+            History = history.Where(x => x.Role != AgentMessageRole.Tool && x.SequenceNo >= (state.HistoryStartSequence ?? 0)).Select(x => new AgentTranscript(
                 AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToList()
         };
     }
@@ -58,7 +64,8 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             BudgetAmount = current.BudgetAmount, BudgetUnrestricted = current.BudgetAmount is null && state.BudgetUnrestricted,
             Province = state.Province ?? current.Province, OriginMode = current.OriginMode,
             OriginLatitude = latitude, OriginLongitude = longitude, OriginLabel = current.OriginLabel,
-            RadiusKm = latitude.HasValue ? state.RadiusKm : null, FocusDay = focus, FocusMeal = focus.HasValue ? state.FocusMeal : null
+            RadiusKm = latitude.HasValue ? state.RadiusKm : null, FocusDay = focus, FocusMeal = focus.HasValue ? state.FocusMeal : null,
+            SourceRoadmapVersion = roadmap.Version
         };
     }
 
@@ -71,14 +78,21 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         {
             Province = provinces.Length == 1 ? provinces[0] : null, Title = roadmap.Title, NumDays = roadmap.NumDays,
             StartDate = roadmap.StartDate, BudgetAmount = roadmap.BudgetAmount, OriginMode = AgentJson.Name(roadmap.OriginMode),
-            OriginLatitude = roadmap.OriginLatitude, OriginLongitude = roadmap.OriginLongitude, OriginLabel = roadmap.OriginLabel
+            OriginLatitude = roadmap.OriginLatitude, OriginLongitude = roadmap.OriginLongitude, OriginLabel = roadmap.OriginLabel,
+            SourceRoadmapVersion = roadmap.Version
         };
     }
 
     /// <summary>Maps an immutable persisted snapshot into the documented preview response.</summary>
     public static AgentProposalDto MapProposal(AgentProposal proposal) => new(proposal.Id, proposal.ProposalVersion,
-        AgentJson.Name(proposal.Operation), AgentJson.Name(proposal.Status), AgentJson.Read<AgentSnapshot>(proposal.Payload),
+        AgentJson.Name(proposal.Operation), AgentJson.Name(proposal.Status), OrderedSnapshot(proposal.Payload),
         AgentJson.Read<AgentValidation>(proposal.ValidationResult), proposal.ExpiresAt);
+
+    private static AgentSnapshot OrderedSnapshot(string payload)
+    {
+        var snapshot = AgentJson.Read<AgentSnapshot>(payload);
+        return snapshot with { Items = AgentJson.OrderItems(snapshot.Items) };
+    }
 
     /// <summary>Returns the existing ownership-safe roadmap error.</summary>
     private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");

@@ -92,7 +92,6 @@ public sealed class BrowseDishesUseCase : IBrowseDishesUseCase
         {
             Query = request.Q,
             Province = request.Province,
-            District = request.District,
             TagIds = request.TagIds ?? [],
             ExcludeTagIds = request.ExcludeTagIds ?? [],
             DishForm = request.DishForm is null ? null : DishForms[request.DishForm],

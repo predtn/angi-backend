@@ -19,6 +19,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var toolRounds = 0;
         var toolCalls = 0;
         var repaired = false;
+        var transientRetries = 0;
+        var turnStarted = Stopwatch.GetTimestamp();
+        var confirmedState = context.ConstraintBaseline = context.State;
         try
         {
             for (var calls = 0; calls < limits.MaxLlmCalls; calls++)
@@ -31,15 +34,50 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // ĐÂY LÀ DÒNG GỌI LLM qua IAgentLlmService (DI nối tới OpenAiAgentLlmService).
                 // Adapter dựng system prompt + context + strict schema rồi gửi HTTP tới provider.
                 // API key được gắn vào Authorization header trong adapter, không nằm trong AgentContext.
-                var step = await llm.RunAsync(context, repaired, timeout.Token);
-                telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new { elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step?.Tokens });
-                // Một bước phải có tools HOẶC output cuối. Null/cả hai/cả hai rỗng là kết quả không hợp lệ.
-                // Cho phép một lần yêu cầu sửa output; sửa vẫn lỗi thì trả AGENT_UNAVAILABLE.
-                if (step is null || step.Tools is null || step.Tools.Length == 0 && step.Output is null || step.Tools.Length > 0 && step.Output is not null)
+                AgentLlmStep? step;
+                try { step = await llm.RunAsync(context, repaired, timeout.Token); }
+                catch (OperationCanceledException)
                 {
-                    if (repaired) throw Unavailable();
-                    repaired = true;
-                    continue;
+                    telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
+                    {
+                        elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, callNumber = calls + 1,
+                        repair = repaired, outcome = ct.IsCancellationRequested ? "caller_cancelled" : "turn_timeout"
+                    });
+                    throw;
+                }
+                if (step is null || step.Failure is null && (step.Tools is null || step.Tools.Length == 0 && step.Output is null || step.Tools.Length > 0 && step.Output is not null))
+                    step = AgentLlmStep.Failed(AgentLlmFailureKind.InvalidResponse);
+                telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
+                {
+                    elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, callNumber = calls + 1,
+                    repair = repaired, failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
+                    step.Failure?.ProviderCode, step.Failure?.Reason
+                });
+                // Repair model output once; retry only classified temporary provider failures within the same deadline.
+                if (step.Failure is { } failure)
+                {
+                    if (failure.Kind == AgentLlmFailureKind.InvalidSchema && !repaired) { repaired = true; continue; }
+                    if (failure.Kind == AgentLlmFailureKind.RateLimited && failure.Reason == "rate_limit" &&
+                        failure.RetryAfterSeconds is > 0 and <= 45 && transientRetries < 2 && calls + 1 < limits.MaxLlmCalls &&
+                        Stopwatch.GetElapsedTime(turnStarted).TotalSeconds + failure.RetryAfterSeconds.Value + 20 < limits.TimeoutSeconds)
+                    {
+                        transientRetries++;
+                        telemetry.Record("llm_retry", context.ConversationId, context.TurnId, context.AttemptId,
+                            new { retry = transientRetries, delaySeconds = failure.RetryAfterSeconds.Value, failure.HttpStatus, failure.ProviderCode, failure.Reason });
+                        await Task.Delay(TimeSpan.FromSeconds(failure.RetryAfterSeconds.Value), timeout.Token);
+                        continue;
+                    }
+                    if (failure.Kind == AgentLlmFailureKind.ProviderUnavailable && failure.HttpStatus is 500 or 502 or 503 &&
+                        transientRetries < 2 && calls + 1 < limits.MaxLlmCalls && failure.RetryAfterSeconds is not > 10)
+                    {
+                        var delay = failure.RetryAfterSeconds ?? (1 << transientRetries);
+                        transientRetries++;
+                        telemetry.Record("llm_retry", context.ConversationId, context.TurnId, context.AttemptId,
+                            new { retry = transientRetries, delaySeconds = delay, failure.HttpStatus, failure.ProviderCode, failure.Reason });
+                        await Task.Delay(TimeSpan.FromSeconds(delay), timeout.Token);
+                        continue;
+                    }
+                    throw new AgentProviderException(failure);
                 }
                 if (step.Tools.Length > 0)
                 {
@@ -55,20 +93,26 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     continue;
                 }
                 var output = step.Output!;
-                // Action do LLM chọn theo Instructions trong adapter; hợp đồng cho phép đúng bốn action
+                // Action do LLM chọn theo Instructions trong adapter; hợp đồng chỉ cho phép các action
                 // được khai báo ở AgentLlmSchema.Output, đồng thời kiểm tra lại allowlist tại đây.
                 // Đây là quy tắc xử lý của ANGI, không có điểm số confidence/threshold phân loại intent riêng.
                 if (string.IsNullOrWhiteSpace(output.Reply) || output.Reply.Length > limits.MaxMessageLength ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
-                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal"))
+                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation"))
                 {
                     if (repaired) throw Unavailable();
                     repaired = true;
                     continue;
                 }
                 // Model có thể bổ sung/siết điều kiện, nhưng không được tự nới ràng buộc đã chốt.
-                // Cờ ConstraintsChangeConfirmed của model không thay thế confirmedState từ người dùng.
-                context.State = statePolicy.Accept(context.State, output.State);
+                // Cờ ConstraintsChangeConfirmed không cấp quyền; backend giữ pending change để người dùng xác nhận.
+                if (output.Action is "discard_proposal" or "reset_conversation")
+                {
+                    if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) throw Unavailable();
+                    return new(output.Reply, context.State, null, null, output.Action == "discard_proposal" ? "discard" : "reset");
+                }
+                if (!context.ReplanAfterConfirmation)
+                    context.State = statePolicy.Accept(context.State, output.State, confirmedState);
                 if (output.Action is "clarify" or "answer")
                 {
                     // clarify: thiếu tỉnh/ngày/ngân sách, chưa rõ món hoặc nội dung cần sửa thì hỏi lại.
@@ -83,19 +127,35 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // create_proposal: lịch mới; patch_proposal: add/replace/remove/move trên lịch nguồn.
                 // Builder kiểm tra nguồn, scope và baseProposalVersion; Validator kiểm tra catalog,
                 // nguồn candidate, giá, ngân sách và tuyến. Action hợp lệ chưa có nghĩa proposal hợp lệ.
-                var snapshot = builder.Build(context, output);
+                context.State = context.State with { PendingQuestion = null };
+                telemetry.Record("proposal_output", context.ConversationId, context.TurnId, context.AttemptId,
+                    new { output.Action, output.Scope, output.BaseProposalVersion, itemCount = output.Items.Length,
+                        changeCount = output.Changes.Length, sourceItemCount = context.Source?.Items.Length });
+                AgentSnapshot snapshot;
+                try { snapshot = builder.Build(context, output); }
+                catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE" && !repaired)
+                {
+                    telemetry.Record("proposal_repair", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { output.Action, output.Scope, error.ErrorCode, reason = error.Message });
+                    context.RepairFeedback = error.Message;
+                    repaired = true;
+                    continue;
+                }
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, true, timeout.Token, context.Grants);
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 // Có lỗi thì không trả snapshot mới để lưu Ready; proposal trước được giữ lại.
                 if (validated.Validation.Errors.Length > 0) return new("Đề xuất chưa hợp lệ. Vui lòng làm rõ hoặc điều chỉnh các điều kiện.", context.State, null, validated.Validation);
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
-                // chỉ ConfirmAgentProposalUseCase mới áp dụng vào roadmap sau xác nhận riêng.
-                return new(output.Reply, context.State, validated.Snapshot, validated.Validation);
+                // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
+                var reviewedState = context.State with { FocusDay = null, FocusMeal = null };
+                return new(output.Reply, reviewedState, validated.Snapshot with { State = reviewedState }, validated.Validation);
             }
             // Đã dùng hết số lần gọi cho phép mà chưa có kết quả cuối hợp lệ.
             throw Unavailable();
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw Unavailable(); }
+        catch (AgentStateChangeRequiredException change) { return AgentChatPolicy.StageChange(confirmedState, change.Proposed); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
         catch (FluentValidation.ValidationException) { throw Unavailable(); }
     }
 
@@ -104,4 +164,5 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
 }
 
 /// <summary>Prepared turn data that must pass lease fencing before persistence.</summary>
-public sealed record AgentPreparedTurn(string Reply, AgentState State, AgentSnapshot? Snapshot, AgentValidation? Validation);
+public sealed record AgentPreparedTurn(string Reply, AgentState State, AgentSnapshot? Snapshot, AgentValidation? Validation,
+    string? Action = null, AgentCommitPreparation? Commit = null);

@@ -30,6 +30,10 @@ namespace ANGI.WebApi.Middlewares
             {
                 await next(context);
             }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception exception)
             {
                 if (context.Response.HasStarted)
@@ -49,6 +53,10 @@ namespace ANGI.WebApi.Middlewares
                 context.Response.StatusCode = statusCode;
                 if (exception is AgentRateLimitedException limited)
                     context.Response.Headers.RetryAfter = limited.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (exception is AgentProviderException { Failure.RetryAfterSeconds: > 0 } provider &&
+                    provider.Failure.Kind is ANGI.Application.Common.Models.Agent.AgentLlmFailureKind.RateLimited or
+                        ANGI.Application.Common.Models.Agent.AgentLlmFailureKind.ProviderUnavailable)
+                    context.Response.Headers.RetryAfter = provider.Failure.RetryAfterSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 await context.Response.WriteAsJsonAsync(response);
             }
         }
@@ -114,6 +122,7 @@ namespace ANGI.WebApi.Middlewares
                 ForbiddenException => StatusCodes.Status403Forbidden,
                 NotFoundException => StatusCodes.Status404NotFound,
                 ConflictException => StatusCodes.Status409Conflict,
+                AgentProviderException { Failure.Kind: ANGI.Application.Common.Models.Agent.AgentLlmFailureKind.RateLimited } => StatusCodes.Status429TooManyRequests,
                 ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
                 GoneException => StatusCodes.Status410Gone,
                 AgentRateLimitedException => StatusCodes.Status429TooManyRequests,

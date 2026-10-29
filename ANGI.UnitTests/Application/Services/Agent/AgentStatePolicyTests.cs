@@ -8,6 +8,17 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Verifies that LLM-generated consent cannot bypass hard trip constraints.</summary>
 public sealed class AgentStatePolicyTests
 {
+    [Fact]
+    public void Accept_TransientSearchFilters_CanBeRemovedWithoutRelaxingConfirmedConstraints()
+    {
+        var confirmed = AgentTestData.State() with { ExcludeTagIds = [1] };
+        var temporary = confirmed with { ExcludeTagIds = [1, 2] };
+        var policy = new AgentStatePolicy();
+        policy.Accept(temporary, confirmed, confirmed).ExcludeTagIds.Should().Equal((short)1);
+        ((Action)(() => policy.Accept(temporary, confirmed with { ExcludeTagIds = [] }, confirmed)))
+            .Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>();
+    }
+
     // TEST-01: Reject silent constraint relaxation across province, days, budget, tags, radius and origin.
     /// <summary>Protects each hard-constraint equivalence class from model-controlled relaxation.</summary>
     [Theory]

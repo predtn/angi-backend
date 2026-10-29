@@ -34,9 +34,6 @@ public sealed class RegisterRestaurantRequestDtoValidator : AbstractValidator<Re
             .MaximumLength(255).WithMessage("Địa chỉ không được vượt quá 255 ký tự.");
         RuleFor(x => x.Ward)
             .MaximumLength(100).WithMessage("Phường/xã không được vượt quá 100 ký tự.");
-        RuleFor(x => x.District)
-            .NotEmpty().WithMessage("Quận/huyện là bắt buộc.")
-            .MaximumLength(100).WithMessage("Quận/huyện không được vượt quá 100 ký tự.");
         RuleFor(x => x.ProvinceName)
             .NotEmpty().WithMessage("Tỉnh/thành là bắt buộc.")
             .MaximumLength(100).WithMessage("Tỉnh/thành không được vượt quá 100 ký tự.");

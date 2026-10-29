@@ -21,12 +21,13 @@ public static class AgentModule
         services.AddScoped<IAgentTelemetry, AgentTelemetry>();
         var ai = configuration.GetSection(AiSettings.SectionName).Get<AiSettings>() ?? new();
         // Nối IAgentLlmService mà Orchestrator sử dụng với adapter HTTP OpenAiAgentLlmService.
-        // Đoạn này đặt BaseUrl/timeout; API key lấy qua IOptions<AiSettings> (AiModule đăng ký)
+        // BaseUrl lấy từ Ai; timeout riêng từ Agent, không thay đổi timeout RM-10.
+        // API key lấy qua IOptions<AiSettings> (AiModule đăng ký)
         // và chỉ gắn header trong OpenAiAgentLlmService.RunAsync khi gửi request.
         services.AddHttpClient<IAgentLlmService, OpenAiAgentLlmService>(client =>
         {
             if (Uri.TryCreate(ai.BaseUrl, UriKind.Absolute, out var address)) client.BaseAddress = address;
-            client.Timeout = TimeSpan.FromSeconds(ai.TimeoutSeconds > 0 ? Math.Min(ai.TimeoutSeconds, limits.TimeoutSeconds) : 30);
+            client.Timeout = TimeSpan.FromSeconds(Math.Min(limits.LlmTimeoutSeconds, limits.TimeoutSeconds));
             client.MaxResponseContentBufferSize = 2_000_000;
         });
         services.AddHostedService<AgentCleanupWorker>();
@@ -38,7 +39,8 @@ public static class AgentModule
         limits.MaxLlmCalls >= 2 && limits.MaxLlmCalls <= 20 && limits.MaxMessageLength is >= 1 and <= 4000 &&
         limits.MaxContextCharacters is >= 4000 and <= 500000 && limits.MaxHistoryMessages is >= 1 and <= 100 &&
         limits.MaxCandidates is >= 1 and <= 2000 && limits.MaxRanked is >= 1 and <= 200 &&
-        limits.TimeoutSeconds is >= 1 and <= 300 && limits.LeaseSeconds > limits.TimeoutSeconds && limits.LeaseSeconds <= 600 &&
+        limits.LlmTimeoutSeconds is >= 1 and <= 300 && limits.TimeoutSeconds is >= 1 and <= 300 &&
+        limits.LeaseSeconds > limits.TimeoutSeconds && limits.LeaseSeconds <= 600 &&
         limits.MessagesPerMinute > 0 && limits.MessagesPerDay >= limits.MessagesPerMinute && limits.ActiveDays > 0 &&
         limits.RetentionDays >= limits.ActiveDays && limits.RetentionDays <= 365 && limits.CleanupSeconds is >= 1 and <= 86400 &&
         limits.MaxOutputTokens is >= 100 and <= 16000;

@@ -13,6 +13,8 @@ using ANGI.Application.Services.Agent;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using ANGI.Infrastructure.Persistences;
+using ANGI.Infrastructure.Services.Agent;
+using ANGI.Infrastructure.Services.Ai;
 using ANGI.IntegrationTests.Fixtures;
 using ANGI.WebApi.Common.Models;
 using FluentAssertions;
@@ -20,6 +22,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace ANGI.IntegrationTests.WebApi.Controllers.Agent;
 
@@ -545,6 +548,401 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         await factory.ExecuteDbAsync(async db => (await db.AgentMessages.CountAsync()).Should().Be(0));
     }
 
+    // TEST-27: Chat-only requests create a preview, explicitly save it and replay the same committed response without LLM calls.
+    /// <summary>Exercises the complete three-field request contract through real HTTP and PostgreSQL.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_PreviewSaveAndReplay_ProducesOneRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        preview.Proposal!.Status.Should().Be("ready");
+        var calls = scenario.Llm.Calls;
+        var saved = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "lưu lịch trình này", 9001);
+        saved.Commit.Should().NotBeNull(); saved.Proposal!.Status.Should().Be("committed");
+        var replay = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "lưu lịch trình này", 9001);
+        replay.Replayed.Should().BeTrue(); replay.Commit.Should().BeEquivalentTo(saved.Commit);
+        scenario.Llm.Calls.Should().Be(calls);
+        await factory.ExecuteDbAsync(async db =>
+        {
+            (await db.Roadmaps.CountAsync()).Should().Be(1);
+            (await db.AgentMessages.CountAsync(message => message.Role == AgentMessageRole.User)).Should().Be(2);
+            (await db.AgentProposals.SingleAsync()).CommitResult.Should().NotBeNull();
+        });
+    }
+
+    // TEST-28: Bare yes, negation and quoted save text cannot commit, while saving without a preview gives a natural response.
+    /// <summary>Verifies the backend save authorization boundary independently of provider interpretation.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_UnreviewedOrNegatedSave_NeverWritesRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        (await SendChatAsync(client, conversation.ConversationId, conversation.Version, "lưu lịch trình này")).Commit.Should().BeNull();
+        scenario.Llm.Calls.Should().Be(0);
+        scenario.Llm.Override = _ => new([], new AgentOutput { Action = "answer", Reply = "Chưa lưu lịch." });
+        foreach (var content in new[] { "đồng ý", "đừng lưu lịch trình này", "\"lưu lịch trình này\"" })
+        {
+            var current = await GetAsync(client, conversation.ConversationId);
+            (await SendChatAsync(client, conversation.ConversationId, current.Version, content)).Commit.Should().BeNull();
+        }
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    // TEST-29: A model relaxation is staged durably and accepted or rejected only by a separate human chat turn.
+    /// <summary>Checks chat consent across requests and blocks saving an older preview while consent is pending.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_ConstraintConsent_DoesNotTreatYesAsSave()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        scenario.Llm.Override = context => new([], new AgentOutput { Action = "answer", Reply = "Budget request",
+            ConstraintsChangeConfirmed = true, State = context.State with { BudgetAmount = 700000 } });
+        var staged = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "Tăng ngân sách lên 700000 đồng");
+        var state = (await GetAsync(client, conversation.ConversationId)).State;
+        state.BudgetAmount.Should().Be(500000); state.PendingStateChange!.BudgetAmount.Should().Be(700000);
+        var blocked = await SendChatAsync(client, conversation.ConversationId, staged.ConversationVersion, "lưu lịch trình này");
+        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("đang chờ");
+        EnableChatPlanning(scenario);
+        var accepted = await SendChatAsync(client, conversation.ConversationId, blocked.ConversationVersion, "đồng ý");
+        accepted.Commit.Should().BeNull(); accepted.Proposal.Should().NotBeNull();
+        accepted.Proposal!.Snapshot.State.BudgetAmount.Should().Be(700000);
+        accepted.Proposal.Snapshot.Items.Should().NotBeEmpty();
+        var current = await GetAsync(client, conversation.ConversationId);
+        current.State.BudgetAmount.Should().Be(700000); current.State.PendingStateChange.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+        (await factory.ExecuteDbAsync(db => db.AgentProposals.SingleAsync(proposal => proposal.Id == preview.Proposal!.ProposalId))).Status.Should().Be(AgentProposalStatus.Superseded);
+    }
+
+    // TEST-30: Rejecting a staged change keeps the earlier preview and permits its later explicit save.
+    /// <summary>Verifies chat rejection does not alter constraints or accidentally discard a still-valid preview.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_RejectConstraintChange_KeepsReviewedPreview()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        scenario.Llm.Override = context => new([], new AgentOutput { Action = "answer", Reply = "Budget request", State = context.State with { BudgetAmount = 700000 } });
+        var staged = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "Tăng ngân sách");
+        var rejected = await SendChatAsync(client, conversation.ConversationId, staged.ConversationVersion, "giữ nguyên");
+        var saved = await SendChatAsync(client, conversation.ConversationId, rejected.ConversationVersion, "lưu lịch trình này");
+        saved.Commit.Should().NotBeNull(); saved.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).BudgetAmount.Should().Be(500000);
+    }
+
+    // TEST-31: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context.
+    /// <summary>Verifies a fresh plan cannot inherit a previously attached roadmap or pre-reset user messages.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_DiscardAndReset_PreserveSavedRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Original old planning text");
+        var saved = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "lưu lịch trình này");
+        var discarded = await SendChatAsync(client, conversation.ConversationId, saved.ConversationVersion, "bỏ bản nháp");
+        discarded.Proposal.Should().BeNull();
+        var reset = await SendChatAsync(client, conversation.ConversationId, discarded.ConversationVersion, "làm lại từ đầu");
+        reset.Proposal.Should().BeNull();
+        var restored = await GetAsync(client, conversation.ConversationId);
+        restored.State.Province.Should().BeNull(); restored.State.HistoryStartSequence.Should().BeGreaterThan(0);
+        scenario.Llm.Override = context =>
+        {
+            context.Roadmap.Should().BeNull(); context.Source.Should().BeNull();
+            context.History.Should().NotContain(message => message.Content == "Original old planning text");
+            return new([], new AgentOutput { Action = "clarify", Reply = "Bạn muốn đến đâu?" });
+        };
+        await SendChatAsync(client, conversation.ConversationId, reset.ConversationVersion, "Kế hoạch mới");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync())).RoadmapId.Should().BeNull();
+    }
+
+    // TEST-32: A late transcript persistence error rolls back the official save and proposal commit together.
+    /// <summary>Proves chat acknowledgement and roadmap application share one transaction.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_FinalizeFailure_RollsBackRoadmapAndCommit()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        await factory.ExecuteDbAsync(async db => await db.Database.ExecuteSqlRawAsync("""
+            CREATE FUNCTION core.reject_chat_save_completion() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'Injected chat finalize failure'; END $$;
+            CREATE TRIGGER reject_chat_save_completion BEFORE UPDATE ON core.agent_messages
+                FOR EACH ROW WHEN (NEW.role = 'user' AND NEW.processing_status = 'completed')
+                EXECUTE FUNCTION core.reject_chat_save_completion();
+            """));
+        using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
+            { clientMessageId = 9001, expectedConversationVersion = preview.ConversationVersion, content = "lưu lịch trình này" });
+        await ErrorAsync(failed, HttpStatusCode.InternalServerError, "INTERNAL_ERROR");
+        await factory.ExecuteDbAsync(async db =>
+        {
+            (await db.Roadmaps.CountAsync()).Should().Be(0);
+            (await db.AgentProposals.SingleAsync()).Status.Should().Be(AgentProposalStatus.Ready);
+            (await db.AgentMessages.CountAsync(message => message.ProcessingStatus == AgentProcessingStatus.Failed)).Should().Be(1);
+        });
+        (await GetAsync(client, conversation.ConversationId)).Processing.Should().BeFalse();
+    }
+
+    // TEST-33: Simultaneous save messages cannot apply one preview twice and stale versions fail before saving.
+    /// <summary>Checks both turn leasing and the transactional proposal idempotency boundary.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_ConcurrentSave_ProducesOneBusinessEffect()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        var uri = $"{Path}/{conversation.ConversationId}/messages";
+        var responses = await Task.WhenAll(client.PostAsJsonAsync(uri, new { clientMessageId = 9001, expectedConversationVersion = preview.ConversationVersion, content = "lưu lịch trình này" }),
+            client.PostAsJsonAsync(uri, new { clientMessageId = 9002, expectedConversationVersion = preview.ConversationVersion, content = "lưu lịch trình này" }));
+        try
+        {
+            responses.Count(response => response.StatusCode == HttpStatusCode.OK).Should().Be(1);
+            responses.Count(response => response.StatusCode == HttpStatusCode.Conflict).Should().Be(1);
+            (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+        }
+        finally { foreach (var response in responses) response.Dispose(); }
+    }
+
+    // TEST-34: Catalog price changes invalidate a chat save just as they invalidate the explicit confirm endpoint.
+    /// <summary>Reuses deterministic confirmation validation rather than trusting an AI save decision.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_ChangedPrice_BlocksSaveWithoutRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        var dishId = preview.Proposal!.Snapshot.Items.Single().DishId;
+        await factory.ExecuteDbAsync(async db => await db.Dishes.Where(dish => dish.Id == dishId).ExecuteUpdateAsync(setters => setters.SetProperty(dish => dish.Price, dish => dish.Price + 10000)));
+        using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
+            { clientMessageId = 9001, expectedConversationVersion = preview.ConversationVersion, content = "lưu lịch trình này" });
+        await ErrorAsync(failed, HttpStatusCode.Conflict, "PROPOSAL_NOT_COMMITTABLE");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    // TEST-35: Scalar documents a content-only request without fixed identity/version values that manual users might reuse.
+    /// <summary>Checks the generated OpenAPI example consumed by the manual testing UI.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_OpenApi_PublishesMinimalRequestExample()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        using var response = await client.GetAsync("/openapi/v1.json");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var example = document.RootElement.GetProperty("paths").GetProperty(Path + "/{id}/messages")
+            .GetProperty("post").GetProperty("requestBody").GetProperty("content").GetProperty("application/json").GetProperty("example");
+        example.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo("content");
+        example.GetProperty("content").GetString().Should().Contain("Hà Nội");
+    }
+
+    // TEST-36: Chat alternatives exclude current scoped dishes before ranking without requiring a frontend command.
+    /// <summary>Verifies inferred alternative scope is enforced by backend candidate filtering and proposal validation.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_Alternative_ExcludesPreviousDish()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        var old = preview.Proposal!.Snapshot.Items.Single();
+        scenario.Llm.Override = context =>
+        {
+            if (context.Exchanges.Count == 0) return new([new("chat-alternative", "get_recommendation", JsonSerializer.SerializeToElement(
+                new AgentRecommendationInput(Scope: "slot", DayNumber: 1, MealSlot: "lunch", TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], Alternative: true), AgentJson.Options))], null);
+            var candidate = context.Exchanges[0].Results[0].GetProperty("items")[0].GetProperty("dishId").GetInt32();
+            return new([], new AgentOutput { Action = "patch_proposal", Reply = "Phương án khác", BaseProposalVersion = context.ProposalVersion,
+                Scope = new(1, "lunch"), Changes = [new("replace", old.ItemKey, old with { DishId = candidate, ItemKey = old.ItemKey + "_alt" })] });
+        };
+        var alternative = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "Cho tôi phương án bữa trưa khác");
+        alternative.Proposal!.Snapshot.Items.Single().DishId.Should().NotBe(old.DishId);
+        alternative.Proposal.Snapshot.Items.Single().ItemKey.Should().Be(old.ItemKey);
+        alternative.Proposal.Validation.Errors.Should().BeEmpty();
+    }
+
+    // TEST-37: A manual roadmap edit after a preview prevents a later chat save from overwriting that edit.
+    /// <summary>Checks source-revision fencing for the chat confirmation transport.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_ManualRoadmapEdit_BlocksStaleSave()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan lunch");
+        var saved = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "lưu lịch trình này");
+        scenario.Llm.Override = null;
+        var edit = await SendChatAsync(client, conversation.ConversationId, saved.ConversationVersion, "Đổi món trưa");
+        using var manual = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{saved.Commit!.RoadmapId}", new { title = "Keep manual title" });
+        manual.EnsureSuccessStatusCode();
+        using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
+            { clientMessageId = 9001, expectedConversationVersion = edit.ConversationVersion, content = "lưu lịch trình này" });
+        await ErrorAsync(failed, HttpStatusCode.Conflict, "ROADMAP_VERSION_CONFLICT");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).Title.Should().Be("Keep manual title");
+    }
+
+    // TEST-38: Prompt-only messages permit repeated text and skip existing explicit IDs while preserving retry/conflict semantics.
+    /// <summary>Exercises omitted/null transport metadata and replays the returned server identity with a scripted provider.</summary>
+    [PostgresEndToEndFact]
+    public async Task PromptOnly_RepeatedContent_GetsDistinctIdsAndSupportsExplicitReplay()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        scenario.Llm.Override = _ => new([], new AgentOutput { Action = "answer", Reply = "Bạn muốn ăn ở tỉnh nào?" });
+        var conversation = await OpenAsync(client);
+        await SendAsync(client, conversation.ConversationId, new() { ClientMessageId = 3, Content = "Tin cũ" });
+        const string content = "Tôi muốn ăn ở Việt Nam";
+        var first = await SendPromptAsync(client, conversation.ConversationId, content);
+        var second = await SendPromptAsync(client, conversation.ConversationId, content);
+        using var nullResponse = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages",
+            new { content = "Tôi muốn ăn ở Hà Nội", clientMessageId = (long?)null, expectedConversationVersion = (long?)null });
+        var third = await DataAsync<AgentTurnDto>(nullResponse);
+        first.ClientMessageId.Should().Be(4); // Next sequence 3 is already an explicit client ID.
+        new[] { first.ClientMessageId, second.ClientMessageId, third.ClientMessageId }.Should().OnlyHaveUniqueItems();
+        first.Replayed.Should().BeFalse(); second.Replayed.Should().BeFalse(); third.Replayed.Should().BeFalse();
+        var calls = scenario.Llm.Calls;
+        var replay = await SendAsync(client, conversation.ConversationId, new() { ClientMessageId = second.ClientMessageId,
+            ExpectedConversationVersion = 1, Content = content });
+        replay.Replayed.Should().BeTrue(); replay.ClientMessageId.Should().Be(second.ClientMessageId);
+        using var reused = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages",
+            new { clientMessageId = second.ClientMessageId, content = "Nội dung khác" });
+        await ErrorAsync(reused, HttpStatusCode.Conflict, "MESSAGE_ID_REUSED");
+        using var stale = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages",
+            new { content, expectedConversationVersion = 1 });
+        await ErrorAsync(stale, HttpStatusCode.Conflict, "CONVERSATION_VERSION_CONFLICT");
+        scenario.Llm.Calls.Should().Be(calls);
+        await factory.ExecuteDbAsync(async db =>
+        {
+            var messages = await db.AgentMessages.Where(message => message.Role == AgentMessageRole.User).ToArrayAsync();
+            messages.Should().HaveCount(4); messages.Should().OnlyContain(message => message.ClientMessageId > 0);
+            messages.Select(message => message.ClientMessageId).Should().OnlyHaveUniqueItems();
+        });
+    }
+
+    // TEST-39: Content-only planning and explicit chat save retain the same atomic, idempotent roadmap writer.
+    /// <summary>Verifies saving and retrying the returned message ID do not call the provider or create a second roadmap.</summary>
+    [PostgresEndToEndFact]
+    public async Task PromptOnly_PreviewAndSave_ProducesOneRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendPromptAsync(client, conversation.ConversationId, "Lên lịch ăn trưa");
+        preview.Proposal!.Status.Should().Be("ready");
+        var calls = scenario.Llm.Calls;
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
+        saved.Commit.Should().NotBeNull(); saved.ClientMessageId.Should().NotBe(preview.ClientMessageId);
+        var replay = await SendAsync(client, conversation.ConversationId, new() { ClientMessageId = saved.ClientMessageId, Content = "lưu lịch trình này" });
+        replay.Replayed.Should().BeTrue(); replay.Commit.Should().BeEquivalentTo(saved.Commit);
+        var again = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
+        again.ClientMessageId.Should().NotBe(saved.ClientMessageId); again.Commit.Should().BeEquivalentTo(saved.Commit);
+        scenario.Llm.Calls.Should().Be(calls);
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+    }
+
+    // TEST-40: Omitting identity/version does not admit a second concurrent message while the first owns its processing lease.
+    /// <summary>Checks prompt-only busy fencing with a blocked scripted provider, then completes the original turn.</summary>
+    [PostgresEndToEndFact]
+    public async Task PromptOnly_ConcurrentMessage_IsBusyBeforeProvider()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        scenario.Llm.Override = _ => new([], new AgentOutput { Action = "answer", Reply = "Bạn muốn ăn ở tỉnh nào?" });
+        scenario.Llm.Before = async (_, ct) => { entered.TrySetResult(); await release.Task.WaitAsync(ct); };
+        var conversation = await OpenAsync(client);
+        var first = SendPromptAsync(client, conversation.ConversationId, "Tôi muốn ăn ở Việt Nam");
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            using var busy = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "Tôi muốn ăn ở Việt Nam" });
+            await ErrorAsync(busy, HttpStatusCode.Conflict, "CONVERSATION_BUSY");
+        }
+        finally { release.TrySetResult(); }
+        (await first).Status.Should().Be("completed"); scenario.Llm.Calls.Should().Be(1);
+        (await factory.ExecuteDbAsync(db => db.AgentMessages.CountAsync(message => message.Role == AgentMessageRole.User))).Should().Be(1);
+    }
+
+    // TEST-41: Real adapter failures use one fake HTTP request and preserve the existing ready preview through failed-turn recovery.
+    /// <summary>Exercises rate limits, authentication, provider unavailability and HTTP timeout through the complete backend stack.</summary>
+    [PostgresEndToEndFact]
+    public async Task ProviderFailures_DoNotRepairOrReplacePreview()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var preview = await SendAsync(client, conversation.ConversationId, Message(1));
+        foreach (var mode in new[] { "429", "401", "503", "timeout" })
+        {
+            using var handler = new FailureProviderHandler(mode);
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/"), Timeout = TimeSpan.FromMilliseconds(100) };
+            scenario.Llm.Provider = new OpenAiAgentLlmService(http,
+                Options.Create(new AiSettings { ApiKey = "fake-test-key", Model = "fake-test-model" }), new(), TimeProvider.System);
+            using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "Đổi món trong lịch" });
+            var failureJson = await failed.Content.ReadAsStringAsync();
+            await ErrorAsync(failed, mode == "429" ? HttpStatusCode.TooManyRequests : HttpStatusCode.ServiceUnavailable, "AGENT_UNAVAILABLE");
+            var message = JsonSerializer.Deserialize<ApiResponse<object>>(failureJson, AgentJson.Options)!.Message!;
+            message.Should().Contain(mode switch { "429" => "giới hạn", "401" => "cấu hình", "503" => "không khả dụng", _ => "quá lâu" });
+            message.Should().NotContain("sensitive-provider-body"); handler.Calls.Should().Be(1); handler.RepairCalls.Should().Be(0);
+            TimeSpan? retryDelay = mode is "429" or "503" ? TimeSpan.FromSeconds(45) : null;
+            (failed.Headers.RetryAfter?.Delta).Should().Be(retryDelay);
+            var restored = await GetAsync(client, conversation.ConversationId);
+            restored.Processing.Should().BeFalse(); restored.CurrentProposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+            restored.CurrentProposal.Status.Should().Be("ready");
+        }
+        scenario.Llm.Provider = null;
+        scenario.Llm.Override = _ => new([], new AgentOutput { Action = "answer", Reply = "Bản nháp vẫn còn nguyên." });
+        (await SendPromptAsync(client, conversation.ConversationId, "Giải thích bản nháp")).Status.Should().Be("completed");
+        (await factory.ExecuteDbAsync(db => db.AgentMessages.CountAsync(message => message.ProcessingStatus == AgentProcessingStatus.Failed))).Should().Be(4);
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    // TEST-42: Only a received schema-invalid model response permits one repair through the real adapter.
+    /// <summary>Verifies bounded repair preserves the current proposal and never writes an official roadmap.</summary>
+    [PostgresEndToEndFact]
+    public async Task ProviderSchemaFailure_RepairsOnceAndPreservesPreview()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var preview = await SendAsync(client, conversation.ConversationId, Message(1));
+        using var handler = new FailureProviderHandler("schema"); using var http = new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/") };
+        scenario.Llm.Provider = new OpenAiAgentLlmService(http,
+            Options.Create(new AiSettings { ApiKey = "fake-test-key", Model = "fake-test-model" }), new(), TimeProvider.System);
+        var answered = await SendPromptAsync(client, conversation.ConversationId, "Giải thích bản nháp");
+        answered.Reply.Should().Be("Đã giải thích lịch."); answered.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        handler.Calls.Should().Be(2); handler.RepairCalls.Should().Be(1);
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>
+    private static async Task<AgentTurnDto> SendPromptAsync(HttpClient client, long id, string content)
+    {
+        using var response = await client.PostAsJsonAsync($"{Path}/{id}/messages", new { content });
+        return await DataAsync<AgentTurnDto>(response);
+    }
+
+    /// <summary>Models a normal chat plan with tool-proven candidates and no frontend-provided state or command.</summary>
+    private static void EnableChatPlanning(Scenario scenario) => scenario.Llm.Override = context =>
+    {
+        if (context.Exchanges.Count == 0)
+            return new([new("chat-candidates", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
+                State: new AgentState { Province = "Ho Chi Minh City", NumDays = 1, BudgetAmount = 500000 }, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null);
+        var candidates = context.Exchanges[0].Results[0].GetProperty("items");
+        return new([], new AgentOutput { Action = "create_proposal", Reply = "Bản xem trước bữa trưa", Items =
+            [new AgentItem("chat-lunch", null, 1, "lunch", 0, candidates[0].GetProperty("dishId").GetInt32())] });
+    };
+
+    /// <summary>Sends exactly the three fields required by the chat-only frontend contract.</summary>
+    private static async Task<AgentTurnDto> SendChatAsync(HttpClient client, long id, long version, string content, long? messageId = null)
+    {
+        using var response = await client.PostAsJsonAsync($"{Path}/{id}/messages", new
+            { clientMessageId = messageId ?? Interlocked.Increment(ref _nextClientMessageId), expectedConversationVersion = version, content });
+        return await DataAsync<AgentTurnDto>(response);
+    }
+
     /// <summary>Resets the dedicated database, seeds candidates and authenticates the real Traveler HTTP pipeline.</summary>
     private async Task<Scenario> SetupAsync()
     {
@@ -611,12 +1009,14 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         public int Calls;
         public Func<AgentContext, CancellationToken, Task>? Before { get; set; }
         public Func<AgentContext, AgentLlmStep?>? Override { get; set; }
+        public IAgentLlmService? Provider { get; set; }
 
         /// <summary>Obtains real backend-ranked candidates before selecting a deterministic scoped replacement.</summary>
         public async Task<AgentLlmStep?> RunAsync(AgentContext context, bool repair, CancellationToken ct)
         {
             Interlocked.Increment(ref Calls);
             if (Before is not null) await Before(context, ct);
+            if (Provider is not null) return await Provider.RunAsync(context, repair, ct);
             if (Override is not null) return Override(context);
             var target = context.Source?.Items.FirstOrDefault(item => context.Request.SelectedItemKey is { } selected ? item.ItemKey == selected :
                 (!context.State.FocusDay.HasValue || item.DayNumber == context.State.FocusDay) && (context.State.FocusMeal is null || item.MealSlot == context.State.FocusMeal));
@@ -637,6 +1037,31 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
                     .Select(day => new AgentItem($"d{day}", null, (short)day, "lunch", 0, candidates[(day - 1) % candidates.GetArrayLength()].GetProperty("dishId").GetInt32())).ToArray() });
             return new([], new AgentOutput { Action = "patch_proposal", Reply = "Update preview only", BaseProposalVersion = context.ProposalVersion,
                 Scope = new(target.DayNumber, target.MealSlot), Changes = [new("replace", target.ItemKey, target with { DishId = id })] });
+        }
+    }
+
+    /// <summary>Simulates provider status, timeout and malformed model output without using any network connection.</summary>
+    private sealed class FailureProviderHandler(string mode) : HttpMessageHandler
+    {
+        public int Calls;
+        public int RepairCalls;
+
+        /// <summary>Counts real adapter requests and supplies bounded deterministic provider responses.</summary>
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var last = body.RootElement.GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetString();
+            if (last?.Contains("previous output was invalid", StringComparison.Ordinal) == true) RepairCalls++;
+            if (mode == "timeout") await Task.Delay(Timeout.Infinite, ct);
+            if (mode != "schema")
+            {
+                var response = new HttpResponseMessage((HttpStatusCode)int.Parse(mode, System.Globalization.CultureInfo.InvariantCulture))
+                    { Content = new StringContent("sensitive-provider-body") };
+                response.Headers.RetryAfter = new(TimeSpan.FromSeconds(45)); return response;
+            }
+            var content = Calls == 1 ? "{}" : AgentJson.Write(new AgentOutput { Action = "answer", Reply = "Đã giải thích lịch." });
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { choices = new[] { new { finish_reason = "stop", message = new { content } } } }) };
         }
     }
 

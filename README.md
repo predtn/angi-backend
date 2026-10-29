@@ -173,3 +173,41 @@ To check the Brevo keys, send both emails to your own address (the live test is 
 ```bash
 RUN_BREVO_LIVE_TESTS=1 BREVO_LIVE_TEST_TO=you@example.com dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj --filter BrevoLiveTests
 ```
+
+## Agent chat-only frontend
+
+The Agent UI needs a chat input and a Send button. Open a conversation with `POST /api/v1/agent/conversations` and `{}` (or an owned `roadmapId` to edit a saved trip). Then send the authenticated Traveler's messages with only `content`:
+
+```http
+POST /api/v1/agent/conversations/7/messages
+Content-Type: application/json
+Authorization: Bearer <access-token>
+```
+
+```json
+{
+  "content": "Tôi muốn lên lịch ăn uống Hà Nội 1 ngày, ngân sách 500000 đồng"
+}
+```
+
+Omit `clientMessageId` and `expectedConversationVersion` (or send null) to let the backend allocate an unused positive ID and use the current conversation revision under its lock. Every request without an ID is a new message, including repeated text. The response returns `data.clientMessageId` and `data.conversationVersion`. GET conversation returns `data.version`.
+
+For retry-safe clients, supply a fresh positive `clientMessageId` per new message and reuse the same ID/content when retrying it. An explicit ID reused with different business content still returns `MESSAGE_ID_REUSED`; an explicit stale version still returns `CONVERSATION_VERSION_CONFLICT`. If a request without an ID times out, reload the conversation before sending again because automatic retries are new turns and can consume provider quota. The frontend does not classify intent or fill `command`, `selectedItemKey` or `confirmedState`; those optional fields remain compatible for existing clients.
+
+The backend interprets ordinary planning, item edits and requests for another option. `bỏ bản nháp` discards the preview while keeping the official roadmap. `làm lại từ đầu` starts a fresh planning context and detaches the previous saved roadmap without deleting it. Ambiguous item references are clarified in chat.
+
+To save a reviewed preview, send `lưu lịch trình này` or `chốt lịch này` as a new message. The backend chooses the current owned proposal, rechecks catalog prices, expiry and roadmap versions, then saves the roadmap and chat acknowledgement atomically. Success includes `data.commit` (`roadmapId`, `roadmapVersion`, `committedProposalId`, `itemIds`). Replaying a message with the same explicit ID returns its stored commit result. A bare `đồng ý`, a quoted instruction or a negated save sentence never commits a roadmap. Asking `hãy lập lịch giúp tôi để chốt lịch` returns the existing ready preview for review without saving it. The explicit `/confirm` endpoint remains available for existing clients.
+
+When a requested change relaxes existing constraints, the backend first asks a confirmation question and stores `state.pendingStateChange`. Reply `xác nhận thay đổi` (or `đồng ý`) to apply those exact pending constraints and generate an updated preview in that turn, or `giữ nguyên` to reject them. Confirmation of constraints does not save a roadmap. A validated updated preview supersedes the previous preview; provider failures preserve the previous persisted state and preview. Server-managed `pendingStateChange`, `sourceRoadmapVersion` and `historyStartSequence` are response/context metadata; clients do not send them back.
+
+Trip planning requires province, duration and budget; `startDate` is optional. Every proposal response contains the complete snapshot ordered by day, meal and sort order, including restored older proposals. Navigation focus is cleared after a successful edit. The provider receives actual catalog tags; unsupported taste preferences remain trip notes rather than invented tag guarantees.
+
+Agent provider calls use `Agent:LlmTimeoutSeconds` (60 seconds by default), capped by the remaining `Agent:TimeoutSeconds` turn budget (90 seconds). `Agent:LeaseSeconds` remains 120 seconds. Other AI consumers keep their independent `Ai:TimeoutSeconds` setting.
+
+Provider HTTP 500/502/503 permits at most two retries with backoff. A classified per-minute limit may retry using a short provider retry hint when the turn has enough remaining time; daily quota exhaustion is never retried. Timeout, network, authentication, rejected requests, refusal and truncated output do not trigger automatic retries. Schema or proposal-operation errors permit one repair within the same call/time budget. Tools are disabled after the allowed rounds so the model must finish or clarify. The default total provider-call budget is eight.
+
+Provider rate/quota limits return HTTP 429 `AGENT_UNAVAILABLE`; other provider failures return HTTP 503 with a safe Vietnamese explanation. The application's own per-user quota returns HTTP 429 `AGENT_RATE_LIMITED`. `Retry-After` uses either HTTP headers or Gemini's structured retry metadata. Gemini object and array error envelopes are both supported. Logs retain only fixed diagnostic labels, status, timings and retry hints, never API keys, raw prompts or provider error messages. Canceling the frontend request propagates cancellation without repair, and failed turns preserve the previous preview.
+
+The CORS policy exposes `Retry-After` to the configured frontend origins so browser clients can read the provider's retry guidance.
+
+`artifacts/` contains temporary build output and local diagnostic programs. It is ignored by Git and is not part of the application source to commit or push. Durable automated tests belong in `ANGI.UnitTests` or `ANGI.IntegrationTests`.

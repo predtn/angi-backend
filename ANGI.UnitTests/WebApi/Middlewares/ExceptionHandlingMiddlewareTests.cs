@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Models.Agent;
 using ANGI.WebApi.Middlewares;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -100,6 +101,39 @@ namespace ANGI.UnitTests.WebApi.Middlewares
             var errors = document.RootElement.GetProperty("errors");
             errors.EnumerateObject().Select(property => property.Name)
                 .Should().BeEquivalentTo("answers[0].scaleValue", "answers");
+        }
+
+        // TEST-05: Provider failures keep the documented 503 envelope and forward retry hints only for temporary rate/service limits.
+        /// <summary>Preserves safe Vietnamese guidance without exposing upstream bodies or confusing application quota 429 responses.</summary>
+        [Theory]
+        [InlineData(AgentLlmFailureKind.RateLimited, 45, "45")]
+        [InlineData(AgentLlmFailureKind.ProviderUnavailable, 30, "30")]
+        [InlineData(AgentLlmFailureKind.Authentication, 45, "")]
+        [InlineData(AgentLlmFailureKind.Timeout, null, "")]
+        public async Task InvokeAsync_ProviderFailure_ReturnsSafe503(AgentLlmFailureKind kind, int? retry, string expectedHeader)
+        {
+            var middleware = new ExceptionHandlingMiddleware(Mock.Of<ILogger<ExceptionHandlingMiddleware>>());
+            var context = new DefaultHttpContext(); context.Response.Body = new MemoryStream();
+            var error = new AgentProviderException(new(kind, 429, retry));
+            await middleware.InvokeAsync(context, _ => throw error);
+            context.Response.StatusCode.Should().Be(kind == AgentLlmFailureKind.RateLimited ? 429 : 503); context.Response.Headers.RetryAfter.ToString().Should().Be(expectedHeader);
+            context.Response.Body.Position = 0; using var document = await JsonDocument.ParseAsync(context.Response.Body);
+            document.RootElement.GetProperty("errorCode").GetString().Should().Be("AGENT_UNAVAILABLE");
+            document.RootElement.GetProperty("message").GetString().Should().Be(error.Message);
+            document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+            document.RootElement.TryGetProperty("failure", out _).Should().BeFalse();
+        }
+
+        // TEST-06: A disconnected caller retains cancellation rather than receiving a manufactured internal-server-error response.
+        /// <summary>Keeps the frontend Stop action outside ordinary application availability failures.</summary>
+        [Fact]
+        public async Task InvokeAsync_AbortedRequest_PropagatesCancellation()
+        {
+            using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+            var middleware = new ExceptionHandlingMiddleware(Mock.Of<ILogger<ExceptionHandlingMiddleware>>());
+            var context = new DefaultHttpContext { RequestAborted = cancellation.Token }; context.Response.Body = new MemoryStream();
+            var act = () => middleware.InvokeAsync(context, _ => throw new OperationCanceledException(cancellation.Token));
+            await act.Should().ThrowAsync<OperationCanceledException>(); context.Response.Body.Length.Should().Be(0);
         }
     }
 }

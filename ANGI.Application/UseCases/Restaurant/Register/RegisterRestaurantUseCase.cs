@@ -86,7 +86,6 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
             Website = NormalizeOptional(request.Website),
             AddressLine = request.AddressLine.Trim(),
             Ward = NormalizeOptional(request.Ward),
-            District = request.District.Trim(),
             ProvinceName = request.ProvinceName.Trim(),
             Latitude = request.Latitude!.Value,
             Longitude = request.Longitude!.Value,
@@ -253,7 +252,6 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
                 ? mediaById[restaurant.CoverMediaId.Value].Url
                 : null,
             AddressLine = restaurant.AddressLine,
-            District = restaurant.District,
             ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude,
             Longitude = restaurant.Longitude,

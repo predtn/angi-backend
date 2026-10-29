@@ -1433,11 +1433,6 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<string>("District")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("district");
-
                     b.Property<string>("Email")
                         .HasColumnType("citext")
                         .HasColumnName("email");

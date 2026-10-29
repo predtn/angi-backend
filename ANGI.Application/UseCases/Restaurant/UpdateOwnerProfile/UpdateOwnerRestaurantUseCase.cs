@@ -159,7 +159,6 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
         Apply(request.WebsiteSpecified, "website", restaurant.Website, NormalizeOptional(request.Website), value => restaurant.Website = value, oldValues, newValues);
         Apply(request.AddressLineSpecified, "address_line", restaurant.AddressLine, request.AddressLine?.Trim(), value => restaurant.AddressLine = value!, oldValues, newValues);
         Apply(request.WardSpecified, "ward", restaurant.Ward, NormalizeOptional(request.Ward), value => restaurant.Ward = value, oldValues, newValues);
-        Apply(request.DistrictSpecified, "district", restaurant.District, request.District?.Trim(), value => restaurant.District = value, oldValues, newValues);
         Apply(request.ProvinceNameSpecified, "province_name", restaurant.ProvinceName, request.ProvinceName?.Trim(), value => restaurant.ProvinceName = value, oldValues, newValues);
         Apply(request.LatitudeSpecified, "latitude", (decimal?)restaurant.Latitude, request.Latitude, value => restaurant.Latitude = value!.Value, oldValues, newValues);
         Apply(request.LongitudeSpecified, "longitude", (decimal?)restaurant.Longitude, request.Longitude, value => restaurant.Longitude = value!.Value, oldValues, newValues);

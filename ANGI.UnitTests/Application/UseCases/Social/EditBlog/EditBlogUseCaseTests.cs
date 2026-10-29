@@ -269,7 +269,6 @@ public sealed class EditBlogUseCaseTests
                         RestaurantId = 7,
                         RestaurantName = "Quán ngon",
                         AddressLine = "1 Hải Châu",
-                        District = "Hải Châu",
                         ProvinceName = "Đà Nẵng"
                     },
                     new RoadmapSnapshotItemSource
@@ -281,7 +280,6 @@ public sealed class EditBlogUseCaseTests
                         RestaurantId = 7,
                         RestaurantName = "Quán ngon",
                         AddressLine = "1 Hải Châu",
-                        District = "Hải Châu",
                         ProvinceName = "Đà Nẵng"
                     }
                 ]

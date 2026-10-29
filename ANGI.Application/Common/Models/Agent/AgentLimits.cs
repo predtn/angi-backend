@@ -6,12 +6,13 @@ public sealed class AgentLimits
     public const string SectionName = "Agent";
     public int MaxToolRounds { get; set; } = 3;
     public int MaxToolCalls { get; set; } = 6;
-    public int MaxLlmCalls { get; set; } = 5;
+    public int MaxLlmCalls { get; set; } = 8;
     public int MaxMessageLength { get; set; } = 4000;
     public int MaxContextCharacters { get; set; } = 120000;
     public int MaxHistoryMessages { get; set; } = 20;
     public int MaxCandidates { get; set; } = 2000;
     public int MaxRanked { get; set; } = 200;
+    public int LlmTimeoutSeconds { get; set; } = 60;
     public int TimeoutSeconds { get; set; } = 90;
     public int LeaseSeconds { get; set; } = 120;
     public int MessagesPerMinute { get; set; } = 10;

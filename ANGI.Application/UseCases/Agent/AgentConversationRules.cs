@@ -52,7 +52,8 @@ public static class AgentConversationRules
         Province = state.Province?.Trim().ToUpperInvariant(), Title = state.Title.Trim(),
         TagIds = state.TagIds.Order().ToArray(), ExcludeTagIds = state.ExcludeTagIds.Order().ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
-        OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm)
+        OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
+        PendingStateChange = null, SourceRoadmapVersion = null, HistoryStartSequence = null
     };
 
     /// <summary>Removes insignificant decimal scale while preserving the exact numeric value.</summary>

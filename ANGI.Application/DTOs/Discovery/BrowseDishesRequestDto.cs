@@ -7,7 +7,6 @@ public sealed class BrowseDishesRequestDto
     public string? Q { get; init; }
 
     public string? Province { get; init; }
-    public string? District { get; init; }
 
     /// <summary>OR within one tag type, AND across tag types.</summary>
     public short[]? TagIds { get; init; }

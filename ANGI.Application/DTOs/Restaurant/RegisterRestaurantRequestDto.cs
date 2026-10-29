@@ -10,7 +10,6 @@ public sealed class RegisterRestaurantRequestDto
     public string? Website { get; set; }
     public string AddressLine { get; set; } = string.Empty;
     public string? Ward { get; set; }
-    public string District { get; set; } = string.Empty;
     public string ProvinceName { get; set; } = string.Empty;
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }

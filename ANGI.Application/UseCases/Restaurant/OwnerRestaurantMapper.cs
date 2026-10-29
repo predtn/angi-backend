@@ -34,7 +34,6 @@ internal static class OwnerRestaurantMapper
             Slug = restaurant.Slug,
             CoverUrl = GetMediaUrl(restaurant.CoverMediaId, restaurant.CoverMedia, mediaUrlOverrides),
             AddressLine = restaurant.AddressLine,
-            District = restaurant.District,
             ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude,
             Longitude = restaurant.Longitude,

@@ -79,7 +79,6 @@ public sealed class GetOwnerRestaurantUseCaseTests
             Name = "Bún Bò Bà Diệu",
             Slug = "bun-bo-ba-dieu",
             AddressLine = "12 Lê Duẩn",
-            District = "Hải Châu",
             ProvinceName = "Thành phố Đà Nẵng",
             Latitude = 16.067812m,
             Longitude = 108.220116m,

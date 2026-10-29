@@ -221,7 +221,6 @@ public sealed class BlogRepository : IBlogRepository
                                 RestaurantName = item.Dish.Restaurant.Name,
                                 AddressLine = item.Dish.Restaurant.AddressLine,
                                 Ward = item.Dish.Restaurant.Ward,
-                                District = item.Dish.Restaurant.District,
                                 ProvinceName = item.Dish.Restaurant.ProvinceName
                             })
                             .ToArray()

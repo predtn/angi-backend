@@ -16,7 +16,9 @@ public sealed class AgentProposalBuilder
         var items = original.ToList();
         if (output.Action == "create_proposal")
         {
-            if (source is not null && context.Request.Command != "alternative") throw Invalid("Hãy sửa proposal bằng các thay đổi có phạm vi.");
+            if (source is not null && context.Request.Command != "alternative" && !context.AlternativeScopes.Any(scope => scope.Covers(output.Scope)) &&
+                !(context.ReplanAfterConfirmation && output.Scope == new AgentScope()))
+                throw Invalid("Hãy sửa proposal bằng các thay đổi có phạm vi.");
             if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
             if (output.Items.Any(item => !output.Scope.Contains(item))) throw Invalid("Món nằm ngoài phạm vi yêu cầu.");
             items.RemoveAll(item => output.Scope.Contains(item));
@@ -24,7 +26,9 @@ public sealed class AgentProposalBuilder
         }
         else if (output.Action == "patch_proposal")
         {
-            if (source is null || output.Changes is null || output.Changes.Length == 0 || output.Items is null || output.Items.Length != 0) throw Invalid("Không có lịch nguồn để chỉnh sửa.");
+            if (source is null) throw Invalid("Không có lịch nguồn để chỉnh sửa; dùng create_proposal cho lịch mới.");
+            if (output.Changes is null || output.Changes.Length == 0 || output.Items is null || output.Items.Length != 0)
+                throw Invalid("patch_proposal phải có changes không rỗng và items=[]; mỗi change gồm type, targetItemKey và item. Backend tự ghép thành proposal đầy đủ.");
             if (context.ProposalVersion.HasValue && output.BaseProposalVersion != context.ProposalVersion)
                 throw new ConflictException("PROPOSAL_VERSION_CONFLICT", "Phiên bản đề xuất đã thay đổi.");
             var touched = new HashSet<string>();
@@ -46,9 +50,10 @@ public sealed class AgentProposalBuilder
                     if (change.Item is not null) throw Invalid("Thao tác xóa không nhận món mới.");
                     continue;
                 }
-                if (change.Item is null || change.Item.ItemKey != target.ItemKey || !output.Scope.Contains(change.Item)) throw Invalid("Món thay thế ngoài phạm vi.");
+                if (change.Item is null || !output.Scope.Contains(change.Item)) throw Invalid("Món thay thế ngoài phạm vi.");
                 if (change.Type == "move" && change.Item.DishId != target.DishId) throw Invalid("Thao tác di chuyển không được đổi món.");
-                items.Add(Clean(change.Item, target));
+                // The checked target, rather than a redundant model field, owns identity during replacement or movement.
+                items.Add(Clean(change.Item with { ItemKey = target.ItemKey }, target));
             }
         }
         else throw Invalid("Kiểu đề xuất không hợp lệ.");
@@ -62,13 +67,22 @@ public sealed class AgentProposalBuilder
             var excluded = original.Where(output.Scope.Contains).Select(x => x.DishId).ToHashSet();
             if (items.Where(output.Scope.Contains).Any(x => excluded.Contains(x.DishId))) throw Invalid("Chưa đủ món để tạo phương án khác; cần làm rõ điều kiện.");
         }
+        foreach (var alternative in context.AlternativeScopes)
+        {
+            var excluded = original.Where(alternative.Contains).Select(item => item.DishId).ToHashSet();
+            // Candidate search scope is read-only: it must not force replacing untouched meals or side dishes.
+            var replacements = items.Where(item => alternative.Contains(item) && output.Scope.Contains(item) &&
+                original.All(old => old.ItemKey != item.ItemKey || old.DishId != item.DishId)).ToArray();
+            if (replacements.Length == 0 || replacements.Any(item => excluded.Contains(item.DishId)))
+                throw Invalid("Phương án thay thế cần có món mới khác món cũ; giữ nguyên các món không được yêu cầu sửa.");
+        }
         // Keep authorization for selected items; full issued candidate sets remain in the durable tool transcript.
         var grants = (source?.Grants ?? []).Concat(context.Grants).Select(grant => grant with
         {
             DishIds = grant.DishIds.Where(id => items.Any(item => item.DishId == id &&
                 (!grant.DayNumber.HasValue || grant.DayNumber == item.DayNumber) && (grant.MealSlot is null || grant.MealSlot == item.MealSlot))).ToArray()
         }).Where(grant => grant.DishIds.Length > 0).ToArray();
-        return new AgentSnapshot(context.State, items.ToArray(), grants,
+        return new AgentSnapshot(context.State, AgentJson.OrderItems(items), grants,
             context.Roadmap?.Id, context.Roadmap?.Version, Delta(original, items), output.Scope,
             original.Where(old => items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
     }

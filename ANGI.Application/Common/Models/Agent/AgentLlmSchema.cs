@@ -32,7 +32,7 @@ public static class AgentLlmSchema
     // Điều kiện được phép tạo/sửa và tính hợp lệ dữ liệu còn được Builder/StatePolicy/Validator kiểm tra.
     public static readonly object Output = Obj(new()
     {
-        ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal"), ["reply"] = Scalar("string"),
+        ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation"), ["reply"] = Scalar("string"),
         ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
         ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
@@ -47,7 +47,8 @@ public static class AgentLlmSchema
             ["state"] = Nullable(State), ["province"] = Nullable(Scalar("string")), ["scope"] = Choice("full", "day", "slot"),
             ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
-            ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer")
+            ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
+            ["alternative"] = Scalar("boolean")
         }),
         ["estimate_day_route"] = Obj(new()
         {

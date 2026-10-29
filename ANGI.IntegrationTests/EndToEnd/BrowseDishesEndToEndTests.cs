@@ -208,7 +208,6 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
             Name = name,
             Phone = "0900000000",
             AddressLine = "1 Integration Street",
-            District = "Hải Châu",
             ProvinceName = "Đà Nẵng",
             Latitude = lat,
             Longitude = lng
