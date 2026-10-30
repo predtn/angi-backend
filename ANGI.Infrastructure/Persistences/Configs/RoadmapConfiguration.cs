@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ANGI.Infrastructure.Persistences.Configs
 {
-    /// <summary>Maps the roadmap aggregate, origin invariant and database-managed concurrency revision.</summary>
+    /// <summary>Maps the roadmap aggregate, origin invariant and database-managed timestamp token.</summary>
     public class RoadmapConfiguration : IEntityTypeConfiguration<Roadmap>
     {
         /// <summary>Configures roadmap columns, business checks and owned-user references.</summary>
@@ -15,7 +15,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
             {
                 table.HasCheckConstraint("ck_roadmaps_num_days", "num_days BETWEEN 1 AND 30");
                 table.HasCheckConstraint("ck_roadmaps_budget_amount", "budget_amount >= 0");
-                table.HasCheckConstraint("ck_roadmaps_version", "version > 0");
+                table.HasCheckConstraint("ck_roadmaps_updated_at", "isfinite(updated_at)");
                 // Data Dictionary 1.1: the coordinates are stored if and only if origin_mode = 'pinned'
                 table.HasCheckConstraint("ck_roadmaps_origin",
                     "(origin_mode = 'pinned' AND origin_latitude IS NOT NULL AND origin_longitude IS NOT NULL) OR " +
@@ -23,10 +23,9 @@ namespace ANGI.Infrastructure.Persistences.Configs
             });
 
             builder.Property(x => x.Title).HasMaxLength(200);
-            // The database advances the revision once per aggregate and transaction, including child writes.
-            // Writers lock the parent before child mutations. An EF version predicate would conflict with a child
-            // trigger advancing this same aggregate earlier in the current SaveChanges batch (e.g. shrinking days).
-            builder.Property(x => x.Version).HasDefaultValueSql("1").ValueGeneratedOnAddOrUpdate();
+            // PostgreSQL owns the exact microsecond token, including child mutations. Writers lock the parent
+            // and compare snapshots explicitly; a concurrency predicate could conflict with our own child trigger.
+            builder.Property(x => x.UpdatedAt).HasPrecision(6).ValueGeneratedOnAddOrUpdate();
             builder.Property(x => x.BudgetAmount).HasPrecision(14, 0);
             builder.Property(x => x.OriginMode).HasMaxLength(10).HasDefaultValue(RoadmapOriginMode.None);
             builder.Property(x => x.OriginLatitude).HasPrecision(9, 6);

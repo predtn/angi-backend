@@ -693,3 +693,34 @@ This section supersedes section XIX's no-retry and uniform HTTP 503 rules. The u
 - Retry upstream HTTP 500/502/503 at most twice with bounded backoff. Retry a classified per-minute limit only with a short retry hint and enough remaining turn time. Never retry daily quota exhaustion. All attempts count against existing call/time limits; timeout, network, authentication, refusal and truncation remain non-retryable.
 - Parse Gemini object and array error envelopes and structured RetryInfo. Provider rate/quota limits return HTTP 429 AGENT_UNAVAILABLE; other provider failures retain HTTP 503 AGENT_UNAVAILABLE. Application admission limits remain HTTP 429 AGENT_RATE_LIMITED. Preserve Retry-After and caller cancellation.
 - Logs contain fixed provider-code/reason labels, status, timing and retry counts, without raw prompts, provider errors or credentials. Test classification/retry with fake providers; real provider tests require explicit user authorization. No database migration is required for these fixes.
+
+## Conversation preferences extension (2026-10-29)
+
+This section supersedes earlier Agent lifecycle, supported-taste-as-note and preview-impression rules. The API Design
+and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
+
+- A non-null roadmap_id uniquely identifies its conversation. Open returns 201 new or 200 reused/reopened.
+  Reset keeps the attached roadmap. Reopen after 7 idle days retains ID but starts fresh context/profile.
+- AgentState.tasteTargets holds only user-declared ontology targets on 0/.25/.5/.75/1. Backend-owned
+  preferences contains the inherited profile snapshot, computed request vector, ontology version,
+  profile update/read timestamps and initialization status. Missing dimensions inherit; never infer tastes from dishes.
+- Initialize lazily outside locks; unavailable profile reads stay pending, distinct from a null profile.
+  GET /users/{id}/preferences is internal/read-only. Conversation ranking passes vector_source and
+  user_vector_override to reco. Algorithms/cold-start are unchanged; chat never increments m.
+- Agent commit writes AGENT_IMPRESSION_RECORDED outbox entries in its transaction. Send all committed
+  dishes grouped by original request_id after commit, with agent_proposal_id. Never count previews.
+  Reco rejects conversation impressions without a commit reference. No synthetic feedback is created.
+- Keep attached conversation rows when pruning 30-day payloads. Prune active histories too while
+  retaining current proposal/recent replay. Sequence/proposal high-water marks survive pruning;
+  expired client-message IDs are rejected with MESSAGE_EXPIRED. Maintenance never renews activity.
+- Deploy reco migration/service before backend migration/service. Detect duplicate roadmap conversations
+  before the unique index and stop with their IDs; never automatically delete or detach them.
+## Scoped planning extension
+
+The user-authorized 2026-10-30 `Agent Scoped v2` contract in both design workbooks and
+`.docs/Agent_Scoped_Planning_Ver2.0.md` supersedes overlapping whole-conversation taste and raw reply
+rules. State carries scoped taste overrides/catalog meal requests in existing JSONB. Baseline,
+trip, day and meal inheritance is backend-owned; reco continues ranking with its current contract.
+Tools additionally allow read-only search_catalog. Named selectors cannot silently substitute;
+affected retained dishes require new scoped recommendation provenance. User-visible facts and
+clarification questions are backend-rendered from validated data and allowlisted question intents.

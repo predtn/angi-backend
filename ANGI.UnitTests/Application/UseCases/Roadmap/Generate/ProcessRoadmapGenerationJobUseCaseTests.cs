@@ -191,7 +191,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     {
         var fixture = new Fixture(new GenerateRoadmapRequestDto { Scope = "full", Province = "Huế", ReplaceExisting = true });
         fixture.Roadmaps.Setup(value => value.LockAndGetTrackedAsync(88, 12, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Domain.Entities.Roadmap { Id = 88, UserId = 12, Version = 2 });
+            .ReturnsAsync(new Domain.Entities.Roadmap { Id = 88, UserId = 12, UpdatedAt = DateTime.UnixEpoch.AddSeconds(2) });
 
         await fixture.UseCase.ExecuteAsync(77, CancellationToken.None);
 

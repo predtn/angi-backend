@@ -21,7 +21,7 @@ public sealed class AgentOrchestratorTests
         llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer() with { Action = action }));
         var result = await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None);
-        result.Snapshot.Should().BeNull(); result.Reply.Should().Be("Please clarify");
+        result.Snapshot.Should().BeNull(); result.Reply.Should().NotBeEmpty().And.NotContain("Please clarify");
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -174,7 +174,7 @@ public sealed class AgentOrchestratorTests
         llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentLlmStep.Failed(AgentLlmFailureKind.ProviderUnavailable, 503))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
-        (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Be("Recovered");
+        (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("catalog ANGI").And.NotContain("Recovered");
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -198,7 +198,7 @@ public sealed class AgentOrchestratorTests
         llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], null, Failure: new(AgentLlmFailureKind.RateLimited, 429, 1, "RESOURCE_EXHAUSTED", reason)))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
-        if (recover) (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Be("Recovered");
+        if (recover) (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("catalog ANGI").And.NotContain("Recovered");
         else await ((Func<Task>)(async () => await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None))).Should().ThrowAsync<AgentProviderException>();
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(recover ? 2 : 1));
     }

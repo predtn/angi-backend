@@ -12,7 +12,11 @@ public sealed class AgentStatePolicy
     public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
     {
         if (proposed is null) return current;
+        // Provider and client state can only change targets; trusted vectors always come from reco.
+        if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
         new AgentStateValidator().ValidateAndThrow(proposed);
+        if (proposed.Preferences?.Initialized == true)
+            proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
         var confirmed = baseline ?? current;
         var relaxed = confirmed.Province is not null && !string.Equals(confirmed.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
             || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
@@ -21,12 +25,21 @@ public sealed class AgentStatePolicy
             || confirmed.MaxPricePerMeal.HasValue && (!proposed.MaxPricePerMeal.HasValue || proposed.MaxPricePerMeal > confirmed.MaxPricePerMeal)
             || confirmed.ExcludeTagIds.Except(proposed.ExcludeTagIds).Any()
             || confirmed.TagIds.Except(proposed.TagIds).Any()
+            || AgentScopedPlanning.Slots(confirmed, new()).Any(slot =>
+            {
+                var before = AgentScopedPlanning.Request(confirmed, slot.Day, slot.Meal);
+                var after = AgentScopedPlanning.Request(proposed, slot.Day, slot.Meal);
+                return before.TagIds.Except(after.TagIds).Any() || before.DifferentFromPlan && !after.DifferentFromPlan ||
+                    before.DishName is not null && AgentScopedPlanning.Normalize(before.DishName) != AgentScopedPlanning.Normalize(after.DishName) ||
+                    before.RestaurantName is not null && (AgentScopedPlanning.Normalize(before.RestaurantName) != AgentScopedPlanning.Normalize(after.RestaurantName) ||
+                        before.RestaurantId.HasValue && before.RestaurantId != after.RestaurantId);
+            })
             || confirmed.RadiusKm.HasValue && (!proposed.RadiusKm.HasValue || proposed.RadiusKm > confirmed.RadiusKm)
             || confirmed.OriginMode != "none" && (proposed.OriginMode != confirmed.OriginMode || proposed.OriginLatitude != confirmed.OriginLatitude || proposed.OriginLongitude != confirmed.OriginLongitude);
         if (relaxed) throw new AgentStateChangeRequiredException(proposed);
-        if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapVersion == current.SourceRoadmapVersion &&
+        if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapUpdatedAt == current.SourceRoadmapUpdatedAt &&
             proposed.HistoryStartSequence == current.HistoryStartSequence) return proposed;
-        return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapVersion = current.SourceRoadmapVersion,
+        return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt,
             HistoryStartSequence = current.HistoryStartSequence };
     }
 }

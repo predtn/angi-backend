@@ -50,6 +50,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             if (existing?.ProcessingStatus == AgentProcessingStatus.Completed && existing.ResponsePayload is not null)
                 return AgentJson.Read<AgentTurnDto>(existing.ResponsePayload) with { Replayed = true, ClientMessageId = existing.ClientMessageId };
             AgentConversationRules.RequireActive(conversation, now);
+            if (existing is null && request.ClientMessageId is { } expiredId && expiredId <= conversation.PurgedClientMessageId)
+                throw new GoneException("MESSAGE_EXPIRED", "Tin nhắn đã hết thời hạn phát lại. Hãy tải lại hội thoại và gửi tin nhắn mới.");
             // Retry chính tin nhắn đang chạy nhận trạng thái processing (controller trả 202).
             // Tin nhắn khác phải chờ, tránh hai lượt chat ghi đè state/proposal của nhau.
             if (AgentConversationRules.Busy(conversation, now))
@@ -74,7 +76,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             if (existing is null)
             {
                 var sequence = await repository.NextSequenceAsync(id, ct);
-                var messageId = request.ClientMessageId ?? sequence;
+                var messageId = request.ClientMessageId ?? Math.Max(sequence, checked(conversation.PurgedClientMessageId + 1));
                 // Cấp ID dương chưa dùng dưới khóa conversation, kể cả khi client cũ đã chọn ID bằng sequence này.
                 if (request.ClientMessageId is null)
                     while (await repository.GetMessageAsync(id, messageId, ct) is not null) messageId = checked(messageId + 1);
@@ -112,7 +114,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 // discard giữ yêu cầu chuyến đi; reset bắt đầu kế hoạch mới và tách roadmap đã gắn.
                 // Cả hai chỉ bỏ proposal, không xóa hoặc sửa roadmap chính thức.
                 var state = AgentJson.Read<AgentState>(conversation.State);
-                if (control == "reset") state = new AgentState { HistoryStartSequence = message.SequenceNo };
+                if (control == "reset") state = await ResetStateAsync(conversation, message.SequenceNo, ct);
                 prepared = new(control == "reset" ? "Đã bắt đầu kế hoạch mới. Bạn muốn ăn ở đâu, trong mấy ngày và với ngân sách bao nhiêu? Lịch đã lưu vẫn được giữ nguyên."
                     : "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu vẫn được giữ nguyên.",
                     state with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null }, null, null, control);
@@ -127,7 +129,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 context.AttemptId = attemptId;
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
                 if (context.State.PendingStateChange is { } stalePending && AgentChatPolicy.AcceptsChange(request.Content) &&
-                    stalePending.SourceRoadmapVersion != context.State.SourceRoadmapVersion)
+                    stalePending.SourceRoadmapUpdatedAt != context.State.SourceRoadmapUpdatedAt)
                     prepared = new("Roadmap đã thay đổi sau câu hỏi xác nhận. Hãy nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất.",
                         context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
                 else if (context.State.PendingStateChange is { } pending && AgentChatPolicy.AcceptsChange(request.Content))
@@ -159,7 +161,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                     }
                 }
                 else prepared = await orchestrator.RunAsync(context, ct);
-                if (prepared.Action == "reset") prepared = prepared with { State = new AgentState { HistoryStartSequence = message.SequenceNo } };
+                if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with
                     { State = context.State with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null } };
             }
@@ -173,6 +175,15 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             await FailAsync(id, userId, message, attemptId);
             throw;
         }
+    }
+
+    private async Task<AgentState> ResetStateAsync(AgentConversation conversation, long sequence, CancellationToken ct)
+    {
+        var state = conversation.RoadmapId is { } id
+            ? AgentContextBuilder.StateFromRoadmap(await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct)
+                ?? throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap."))
+            : new AgentState();
+        return state with { HistoryStartSequence = sequence };
     }
 
     /// <summary>Stores a result only while the same unexpired attempt still owns the claimed conversation revision.</summary>
@@ -192,8 +203,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             // Trong lúc gọi dịch vụ ngoài, người dùng hoặc conversation khác có thể đã sửa roadmap.
             // Chặn lưu proposal dựa trên snapshot cũ thay vì âm thầm bỏ qua chỉnh sửa mới.
             var currentRoadmap = await roadmaps.LockAndGetTrackedAsync(sourceRoadmap.Id, userId, ct);
-            if (currentRoadmap is null || currentRoadmap.Version != sourceRoadmap.Version)
-                throw new ConflictException("ROADMAP_VERSION_CONFLICT", "Roadmap đã thay đổi trong lúc xử lý.");
+            if (currentRoadmap is null || currentRoadmap.UpdatedAt != sourceRoadmap.UpdatedAt)
+                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Roadmap đã thay đổi trong lúc xử lý.");
         }
         var previous = conversation.CurrentProposalId is { } proposalId ? await repository.GetProposalAsync(id, proposalId, ct) : null;
         AgentProposal? created = null;
@@ -210,7 +221,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             if (previous?.Status == AgentProposalStatus.Ready) previous.Status = AgentProposalStatus.Discarded;
             conversation.CurrentProposalId = null;
             conversation.CurrentProposal = null;
-            if (prepared.Action == "reset") conversation.RoadmapId = null;
+            // Reset clears chat context, never the attached roadmap identity.
         }
         else if (prepared.Snapshot is not null)
         {
@@ -222,7 +233,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 Id = await repository.ReserveProposalIdAsync(ct), ConversationId = id,
                 ProposalVersion = await repository.NextProposalVersionAsync(id, ct),
                 Operation = prepared.Snapshot.BaseRoadmapId.HasValue ? AgentProposalOperation.Update : AgentProposalOperation.Create,
-                BaseRoadmapId = prepared.Snapshot.BaseRoadmapId, BaseRoadmapVersion = prepared.Snapshot.BaseRoadmapVersion,
+                BaseRoadmapId = prepared.Snapshot.BaseRoadmapId, BaseRoadmapUpdatedAt = prepared.Snapshot.BaseRoadmapUpdatedAt,
                 Payload = AgentJson.Write(prepared.Snapshot), ValidationResult = AgentJson.Write(prepared.Validation),
                 Status = AgentProposalStatus.Ready, ExpiresAt = now.AddDays(limits.ActiveDays),
                 RecoRequestIds = prepared.Snapshot.Items.Where(x => x.RequestId.HasValue).Select(x => x.RequestId!.Value).Distinct().ToArray()
@@ -259,7 +270,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         await transaction.CommitAsync(ct);
         telemetry.Record("completed", id, message.TurnId, attemptId, new { proposalVersion = created?.ProposalVersion });
         if (commitResult is not null) telemetry.Record("committed", id, message.TurnId, attemptId,
-            new { commitResult.RoadmapId, commitResult.RoadmapVersion, commitResult.CommittedProposalId });
+            new { commitResult.RoadmapId, commitResult.RoadmapUpdatedAt, commitResult.CommittedProposalId });
         return result;
     }
 

@@ -46,12 +46,12 @@ public sealed class AgentChatPolicyTests
     [Fact]
     public void StageChange_Relaxation_KeepsCurrentConstraints()
     {
-        var current = AgentTestData.State() with { SourceRoadmapVersion = 4, HistoryStartSequence = 8 };
+        var current = AgentTestData.State() with { SourceRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(4), HistoryStartSequence = 8 };
         var result = AgentChatPolicy.StageChange(current, current with { BudgetAmount = 700000 });
         result.State.BudgetAmount.Should().Be(500000);
         result.State.PendingStateChange!.BudgetAmount.Should().Be(700000);
         result.State.PendingStateChange.PendingStateChange.Should().BeNull();
-        result.State.PendingStateChange.SourceRoadmapVersion.Should().Be(4);
+        result.State.PendingStateChange.SourceRoadmapUpdatedAt.Should().Be(DateTime.UnixEpoch.AddSeconds(4));
         result.State.PendingQuestion.Should().NotBeNullOrWhiteSpace();
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }

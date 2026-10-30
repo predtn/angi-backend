@@ -19,9 +19,11 @@ public sealed class AgentConversationConfiguration : IEntityTypeConfiguration<Ag
         builder.Property(x => x.Status).HasMaxLength(16);
         builder.Property(x => x.Id).UseIdentityByDefaultColumn().ValueGeneratedOnAdd();
         builder.Property(x => x.State).HasColumnType("jsonb");
+        builder.Ignore(x => x.MaintenanceWrite);
         builder.Property(x => x.Version).HasDefaultValue(1L).IsConcurrencyToken();
         builder.HasIndex(x => new { x.UserId, x.UpdatedAt }).IsDescending(false, true);
         builder.HasIndex(x => x.ExpiresAt);
+        builder.HasIndex(x => x.RoadmapId).IsUnique().HasFilter("roadmap_id IS NOT NULL");
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Roadmap>().WithMany().HasForeignKey(x => x.RoadmapId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.CurrentProposal).WithMany()

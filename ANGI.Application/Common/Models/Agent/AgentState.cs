@@ -24,15 +24,28 @@ public sealed record AgentState
     public string? OriginLabel { get; init; }
     public decimal? RadiusKm { get; init; }
     public string? Note { get; init; }
+    /// <summary>User targets only; the provider may propose these, but never the profile snapshot.</summary>
+    public AgentTasteTarget[] TasteTargets { get; init; } = [];
+    /// <summary>Day/meal overrides; omitted dimensions inherit the trip and profile.</summary>
+    public AgentTasteOverride[] TasteOverrides { get; init; } = [];
+    /// <summary>Catalog-backed selectors, separate from ontology tastes.</summary>
+    public AgentMealRequest[] MealRequests { get; init; } = [];
+    /// <summary>Reevaluate existing meals by default; future requires explicit user intent.</summary>
+    public string PreferenceApplication { get; init; } = "replan";
+    /// <summary>Declared coverage; empty preserves legacy or explicitly partial plans.</summary>
+    public string[] MealSlots { get; init; } = [];
+    /// <summary>Backend-owned snapshot initialized lazily, preserving legacy proposals until reranking.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentSessionPreferences? Preferences { get; init; }
     public string? PendingQuestion { get; init; }
     public short? FocusDay { get; init; }
     public string? FocusMeal { get; init; }
     /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentState? PendingStateChange { get; init; }
-    /// <summary>Last observed official roadmap revision; unchanged revisions preserve chat planning constraints.</summary>
+    /// <summary>Last observed exact UTC roadmap timestamp; unchanged timestamps preserve chat planning constraints.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long? SourceRoadmapVersion { get; init; }
+    public DateTime? SourceRoadmapUpdatedAt { get; init; }
     /// <summary>First transcript sequence eligible for context after a fresh planning reset.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? HistoryStartSequence { get; init; }
@@ -41,7 +54,8 @@ public sealed record AgentState
 /// <summary>One backend-priced itinerary item with stable proposal identity.</summary>
 public sealed record AgentItem(string ItemKey, long? SourceItemId, short DayNumber, string MealSlot,
     short SortOrder, int DishId, Guid? RequestId = null, decimal Price = 0, string? DishName = null,
-    string? RestaurantName = null, decimal? Latitude = null, decimal? Longitude = null);
+    string? RestaurantName = null, decimal? Latitude = null, decimal? Longitude = null,
+    string? RankingFingerprint = null);
 
 /// <summary>Backend-issued candidate provenance restricted to a day and meal.</summary>
 public sealed record AgentCandidateGrant(short? DayNumber, string? MealSlot, int[] DishIds, Guid? RequestId,
@@ -49,7 +63,7 @@ public sealed record AgentCandidateGrant(short? DayNumber, string? MealSlot, int
 
 /// <summary>Full immutable itinerary and trusted provenance, independent of any saved roadmap.</summary>
 public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCandidateGrant[] Grants,
-    long? BaseRoadmapId = null, long? BaseRoadmapVersion = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
+    long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
     AgentItem[]? RetainedItems = null);
 
 /// <summary>Explicit mutation scope; null day and meal mean the whole trip.</summary>
@@ -88,6 +102,8 @@ public sealed class AgentContext
     public bool ReplanAfterConfirmation { get; set; }
     public AgentState? ConstraintBaseline { get; set; }
     public object[] CatalogTags { get; set; } = [];
+    /// <summary>Trusted tool failures/coverage hints used to construct the user-visible reply.</summary>
+    public string? ToolNotice { get; set; }
 }
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
@@ -117,6 +133,8 @@ public sealed record AgentOutput
 {
     public required string Action { get; init; }
     public required string Reply { get; init; }
+    /// <summary>Allowlisted question intent; free provider text is never a factual response.</summary>
+    public string? Clarification { get; init; }
     public AgentState? State { get; init; }
     public bool ConstraintsChangeConfirmed { get; init; }
     public int? BaseProposalVersion { get; init; }
@@ -156,5 +174,5 @@ public static class AgentJson
         roadmap.Days.SelectMany(day => day.Items.Select(item => new AgentItem(
             $"r{item.Id}", item.Id, day.DayNumber, Name(item.MealSlot), item.SortOrder, item.DishId,
             item.RecoRequestId, item.Dish.Price, item.Dish.Name, item.Dish.Restaurant?.Name,
-            item.Dish.Restaurant?.Latitude, item.Dish.Restaurant?.Longitude))).ToArray(), [], roadmap.Id, roadmap.Version);
+            item.Dish.Restaurant?.Latitude, item.Dish.Restaurant?.Longitude))).ToArray(), [], roadmap.Id, roadmap.UpdatedAt);
 }

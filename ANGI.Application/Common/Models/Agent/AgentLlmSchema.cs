@@ -15,6 +15,24 @@ public static class AgentLlmSchema
         ["originMode"] = Choice("none", "pinned", "gps"), ["originLatitude"] = Nullable(Scalar("number")),
         ["originLongitude"] = Nullable(Scalar("number")), ["originLabel"] = Nullable(Scalar("string")),
         ["radiusKm"] = Nullable(Scalar("number")), ["note"] = Nullable(Scalar("string")),
+        ["tasteTargets"] = ArrayOf(Obj(new()
+        {
+            ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number")
+        })),
+        ["tasteOverrides"] = ArrayOf(Obj(new()
+        {
+            ["dayNumber"] = Scalar("integer"), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["targets"] = ArrayOf(Obj(new() { ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number") }))
+        })),
+        ["mealRequests"] = ArrayOf(Obj(new()
+        {
+            ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["dishName"] = Nullable(Scalar("string")), ["restaurantName"] = Nullable(Scalar("string")),
+            ["restaurantId"] = Nullable(Scalar("integer")),
+            ["tagIds"] = ArrayOf(Scalar("integer")), ["differentFromPlan"] = Scalar("boolean")
+        })),
+        ["preferenceApplication"] = Choice("replan", "future"),
+        ["mealSlots"] = ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
         ["pendingQuestion"] = Nullable(Scalar("string")), ["focusDay"] = Nullable(Scalar("integer")),
         ["focusMeal"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night"))
     });
@@ -33,6 +51,7 @@ public static class AgentLlmSchema
     public static readonly object Output = Obj(new()
     {
         ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation"), ["reply"] = Scalar("string"),
+        ["clarification"] = Nullable(Choice("trip_details", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "general")),
         ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
         ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
@@ -42,6 +61,11 @@ public static class AgentLlmSchema
     });
     public static readonly IReadOnlyDictionary<string, object> Tools = new Dictionary<string, object>
     {
+        ["search_catalog"] = Obj(new()
+        {
+            ["kind"] = Choice("dish", "restaurant"), ["name"] = Scalar("string"), ["province"] = Nullable(Scalar("string")),
+            ["selectedId"] = Nullable(Scalar("integer"))
+        }),
         ["get_recommendation"] = Obj(new()
         {
             ["state"] = Nullable(State), ["province"] = Nullable(Scalar("string")), ["scope"] = Choice("full", "day", "slot"),

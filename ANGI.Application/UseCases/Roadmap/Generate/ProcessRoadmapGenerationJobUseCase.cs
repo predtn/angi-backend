@@ -233,7 +233,7 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
             return;
         }
 
-        if (roadmap.Version != job.Roadmap.Version)
+        if (roadmap.UpdatedAt != job.Roadmap.UpdatedAt)
         {
             // Planning happens outside the transaction; never replace edits committed while providers were running.
             await _generationRepository.MarkFailedAsync(job.Id, RoadmapChangedMessage, ct);

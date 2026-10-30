@@ -55,7 +55,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
         var state = new AgentState();
         var request = Valid();
         request.ConfirmedState = field switch { "pending" => state with { PendingStateChange = state },
-            "version" => state with { SourceRoadmapVersion = 1 }, _ => state with { HistoryStartSequence = 1 } };
+            "version" => state with { SourceRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1) }, _ => state with { HistoryStartSequence = 1 } };
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeFalse();
     }
 

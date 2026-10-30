@@ -12,6 +12,11 @@ public sealed class AgentConversation : BaseEntity<long>, IHasCreatedAt, IHasUpd
     public string State { get; set; } = "{}";
     public long? CurrentProposalId { get; set; }
     public long Version { get; set; } = 1;
+    public int LastMessageSequence { get; set; }
+    public int LastProposalVersion { get; set; }
+    public long PurgedClientMessageId { get; set; }
+    /// <summary>Runtime-only marker: cleanup must not renew the last business-activity timestamp.</summary>
+    public bool MaintenanceWrite { get; set; }
     public long? ProcessingTurnId { get; set; }
     public long? ProcessingAttemptId { get; set; }
     public DateTime? ProcessingUntil { get; set; }

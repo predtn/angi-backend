@@ -97,6 +97,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // được khai báo ở AgentLlmSchema.Output, đồng thời kiểm tra lại allowlist tại đây.
                 // Đây là quy tắc xử lý của ANGI, không có điểm số confidence/threshold phân loại intent riêng.
                 if (string.IsNullOrWhiteSpace(output.Reply) || output.Reply.Length > limits.MaxMessageLength ||
+                    output.Clarification is not null && !AgentReplyBuilder.Clarifications.Contains(output.Clarification) ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
                     output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation"))
                 {
@@ -109,7 +110,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (output.Action is "discard_proposal" or "reset_conversation")
                 {
                     if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) throw Unavailable();
-                    return new(output.Reply, context.State, null, null, output.Action == "discard_proposal" ? "discard" : "reset");
+                    return new(output.Action == "discard_proposal" ? "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu được giữ nguyên."
+                        : "Đã bắt đầu lại ngữ cảnh lập lịch. Lịch đã lưu được giữ nguyên.", context.State, null, null,
+                        output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 if (!context.ReplanAfterConfirmation)
                     context.State = statePolicy.Accept(context.State, output.State, confirmedState);
@@ -120,9 +123,34 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // Với prompt "sửa roadmap cho tôi" mà chưa rõ sửa gì, Instructions hướng dẫn clarify;
                     // code ở đây kiểm tra hợp đồng output, không tự hiểu/chấm đúng sai ngữ nghĩa câu hỏi.
                     if (output.Items.Length != 0 || output.Changes.Length != 0) throw Unavailable();
+                    if (output.Action == "answer" && context.Source is { } current && current.Items.Any(item =>
+                        AgentScopedPlanning.RequiresRefresh(current.State, context.State, item)))
+                    {
+                        if (!repaired)
+                        {
+                            context.RepairFeedback = "Yêu cầu ngày/bữa đã thay đổi. Cần lấy gợi ý mới cho các bữa bị ảnh hưởng và tạo patch_proposal; không chỉ trả answer.";
+                            repaired = true;
+                            continue;
+                        }
+                        const string pending = "Yêu cầu đã thay đổi nhưng chưa có đề xuất cập nhật hợp lệ. Cần lấy lại gợi ý cho các ngày/bữa bị ảnh hưởng trước khi lưu.";
+                        return new(pending, context.State with { PendingQuestion = pending }, null, null);
+                    }
+                    if (output.Action == "answer" && context.State.PreferenceApplication == "future" && context.Source is { } futureSource &&
+                        futureSource.Items.Any(item => AgentScopedPlanning.Fingerprint(futureSource.State, item.DayNumber, item.MealSlot) !=
+                            AgentScopedPlanning.Fingerprint(context.State, item.DayNumber, item.MealSlot)))
+                    {
+                        var future = futureSource with { State = context.State with { PendingQuestion = null }, Changes = [],
+                            RetainedItems = futureSource.Items, Scope = new() };
+                        var checkedFuture = await validator.ValidateAsync(future, futureSource, false, true, timeout.Token, context.Grants);
+                        if (checkedFuture.Validation.Errors.Length > 0)
+                            return new("Chưa thể giữ nguyên đề xuất theo các điều kiện mới. Vui lòng kiểm tra lại yêu cầu.", context.State, null, checkedFuture.Validation);
+                        return new("Đã cập nhật khẩu vị cho các gợi ý tiếp theo. Các món trong bản đề xuất hiện tại được giữ nguyên; lịch chính thức chưa thay đổi.",
+                            future.State, checkedFuture.Snapshot, checkedFuture.Validation);
+                    }
+                    var reply = output.Action == "clarify" ? AgentReplyBuilder.Clarify(context, output.Clarification) : AgentReplyBuilder.Answer(context);
                     if (output.Action == "clarify") context.State = context.State with
-                        { PendingQuestion = output.Reply[..Math.Min(output.Reply.Length, 1000)] };
-                    return new(output.Reply, context.State, null, null);
+                        { PendingQuestion = reply[..Math.Min(reply.Length, 1000)] };
+                    return new(reply, context.State, null, null);
                 }
                 // create_proposal: lịch mới; patch_proposal: add/replace/remove/move trên lịch nguồn.
                 // Builder kiểm tra nguồn, scope và baseProposalVersion; Validator kiểm tra catalog,
@@ -148,7 +176,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null };
-                return new(output.Reply, reviewedState, validated.Snapshot with { State = reviewedState }, validated.Validation);
+                return new(AgentReplyBuilder.Proposal(validated.Snapshot, validated.Validation), reviewedState,
+                    validated.Snapshot with { State = reviewedState }, validated.Validation);
             }
             // Đã dùng hết số lần gọi cho phép mà chưa có kết quả cuối hợp lệ.
             throw Unavailable();

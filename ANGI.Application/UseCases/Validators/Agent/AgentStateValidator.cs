@@ -13,6 +13,25 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
     public AgentStateValidator()
     {
         RuleFor(x => x.SchemaVersion).Equal(1).WithMessage("Phiên bản state không hợp lệ.");
+        RuleFor(x => x.PreferenceApplication).Must(x => x is "replan" or "future").WithMessage("Cách áp dụng khẩu vị không hợp lệ.");
+        RuleFor(x => x.MealSlots).NotNull().Must(x => x is null || x.Length <= 5 && x.All(Meals.Contains) && x.Distinct().Count() == x.Length)
+            .WithMessage("Danh sách bữa cần có không hợp lệ.");
+        RuleFor(x => x.TasteOverrides).NotNull().Must((state, values) => values is null || values.Length <= 180 &&
+            values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidTargets(x.Targets)) &&
+            values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
+            .WithMessage("Khẩu vị theo ngày/bữa không hợp lệ hoặc trùng phạm vi.");
+        RuleFor(x => x.MealRequests).NotNull().Must((state, values) => values is null || values.Length <= 181 &&
+            values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidName(x.DishName) && ValidName(x.RestaurantName) &&
+                (!x.RestaurantId.HasValue || x.RestaurantId > 0 && x.RestaurantName is not null) &&
+                x.TagIds is not null && x.TagIds.Length <= 100 && x.TagIds.All(id => id > 0) && x.TagIds.Distinct().Count() == x.TagIds.Length) &&
+            values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
+            .WithMessage("Yêu cầu món/quán theo phạm vi không hợp lệ.");
+        RuleFor(x => x.TasteTargets).NotNull().Must(x => x is null || x.Length <= 12 &&
+            x.All(t => t is not null && AgentTasteOntology.Dimensions.Contains(t.Dimension) && AgentTasteOntology.Scale.Contains(t.Target)) &&
+            x.Select(t => t.Dimension).Distinct().Count() == x.Length).WithMessage("Mức khẩu vị phải thuộc ontology và không trùng chiều.");
+        RuleFor(x => x.Preferences).Must(x => x is null || x.OntologyVersion == 1 &&
+            AgentTasteOntology.ValidVector(x.BaselineVector) && AgentTasteOntology.ValidVector(x.EffectiveVector))
+            .WithMessage("Vector khẩu vị không hợp lệ.");
         RuleFor(x => x.Province).MaximumLength(100).WithMessage("Tên tỉnh không được vượt quá 100 ký tự.")
             .Must(x => x is null || !string.IsNullOrWhiteSpace(x)).WithMessage("Tỉnh không hợp lệ.");
         RuleFor(x => x.NumDays).InclusiveBetween((short)1, (short)30).WithMessage("Số ngày phải từ 1 đến 30.").When(x => x.NumDays.HasValue);
@@ -53,4 +72,13 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
 
     /// <summary>Accepts only database-representable nonnegative integer VND amounts.</summary>
     private static bool ValidMoney(decimal? value) => !value.HasValue || value >= 0 && value <= MaxMoney && decimal.Truncate(value.Value) == value;
+
+    private static bool ValidScope(AgentState state, short? day, string? meal) =>
+        (!day.HasValue || day >= 1 && day <= state.NumDays) && (meal is null || day.HasValue && Meals.Contains(meal));
+
+    private static bool ValidName(string? name) => name is null || !string.IsNullOrWhiteSpace(name) && name.Length <= 200;
+
+    private static bool ValidTargets(AgentTasteTarget[]? values) => values is not null && values.Length <= 12 &&
+        values.All(x => x is not null && AgentTasteOntology.Dimensions.Contains(x.Dimension) && AgentTasteOntology.Scale.Contains(x.Target)) &&
+        values.Select(x => x.Dimension).Distinct().Count() == values.Length;
 }

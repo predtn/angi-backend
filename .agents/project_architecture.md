@@ -244,3 +244,37 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 - Behind Render's proxy every connection comes from the proxy, so the per-IP limits (anonymous requests, login failures per email + IP) would count all clients as one. Set `ForwardedHeaders__Enabled=true` there: the app then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Keep it off locally, where the header would let a client choose its IP. Requests the frontend relays through its own Next.js server reach the backend with that server's IP; they count per client only if the frontend passes the browser IP in `X-Forwarded-For` and `ForwardLimit` is raised to 2, which also lets a direct caller forge one hop.
 
 Agent stabilization follows section XX of ANGI_Agent_Implementation_Ver1.1.md: return ordered full previews, regenerate after explicit constraint consent with the exact accepted state, preserve scoped edits and explicit save authorization, allow one bounded schema/operation repair, retry only temporary HTTP failures within the call/deadline budget, and report provider rate/quota limits as HTTP 429 AGENT_UNAVAILABLE. Preserve safe diagnostics, Retry-After and caller cancellation; never retry daily quota exhaustion.
+
+## Conversation preferences extension (2026-10-29)
+
+This section supersedes earlier Agent lifecycle, supported-taste-as-note and preview-impression rules. The API Design
+and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
+
+- A non-null roadmap_id uniquely identifies its conversation. Open returns 201 new or 200 reused/reopened.
+  Reset keeps the attached roadmap. Reopen after 7 idle days retains ID but starts fresh context/profile.
+- AgentState.tasteTargets holds only user-declared ontology targets on 0/.25/.5/.75/1. Backend-owned
+  preferences contains the inherited profile snapshot, computed request vector, ontology version,
+  profile update/read timestamps and initialization status. Missing dimensions inherit; never infer tastes from dishes.
+- Initialize lazily outside locks; unavailable profile reads stay pending, distinct from a null profile.
+  GET /users/{id}/preferences is internal/read-only. Conversation ranking passes vector_source and
+  user_vector_override to reco. Algorithms/cold-start are unchanged; chat never increments m.
+- Agent commit writes AGENT_IMPRESSION_RECORDED outbox entries in its transaction. Send all committed
+  dishes grouped by original request_id after commit, with agent_proposal_id. Never count previews.
+  Reco rejects conversation impressions without a commit reference. No synthetic feedback is created.
+- Keep attached conversation rows when pruning 30-day payloads. Prune active histories too while
+  retaining current proposal/recent replay. Sequence/proposal high-water marks survive pruning;
+  expired client-message IDs are rejected with MESSAGE_EXPIRED. Maintenance never renews activity.
+- Deploy reco migration/service before backend migration/service. Detect duplicate roadmap conversations
+  before the unique index and stop with their IDs; never automatically delete or detach them.
+
+## Agent scoped planning extension (2026-10-30)
+
+The `Agent Scoped v2` sheets in the API Design/Data Dictionary and
+`.docs/Agent_Scoped_Planning_Ver2.0.md` supersede whole-conversation-only taste rules.
+Keep the reco service/API, cold-start, save fencing and commit-only impressions unchanged.
+Baseline -> trip -> day -> meal inheritance is computed in Application from JSONB state;
+no entity/table/migration is added. Catalog meal requests are separate from taste dimensions.
+Use the read-only public catalog lookup for named dishes/restaurants; never substitute unresolved names.
+Changed tastes require fresh matching scoped grants even for retained dish IDs, unless the user
+explicitly requests future suggestions only. Backend constructs factual replies from checked data.
+Frontend integration is outside this change. Existing prompt-only clients and legacy states remain supported.

@@ -51,9 +51,16 @@ public static class AgentConversationRules
     {
         Province = state.Province?.Trim().ToUpperInvariant(), Title = state.Title.Trim(),
         TagIds = state.TagIds.Order().ToArray(), ExcludeTagIds = state.ExcludeTagIds.Order().ToArray(),
+        TasteTargets = state.TasteTargets.OrderBy(x => x.Dimension, StringComparer.Ordinal).ToArray(),
+        TasteOverrides = state.TasteOverrides.OrderBy(x => x.DayNumber).ThenBy(x => x.MealSlot, StringComparer.Ordinal)
+            .Select(x => x with { Targets = x.Targets.OrderBy(t => t.Dimension, StringComparer.Ordinal).ToArray() }).ToArray(),
+        MealRequests = state.MealRequests.OrderBy(x => x.DayNumber).ThenBy(x => x.MealSlot, StringComparer.Ordinal)
+            .Select(x => x with { DishName = AgentScopedPlanning.Normalize(x.DishName), RestaurantName = AgentScopedPlanning.Normalize(x.RestaurantName),
+                TagIds = x.TagIds.Order().ToArray() }).ToArray(),
+        MealSlots = state.MealSlots.Order(StringComparer.Ordinal).ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
-        PendingStateChange = null, SourceRoadmapVersion = null, HistoryStartSequence = null
+        PendingStateChange = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null
     };
 
     /// <summary>Removes insignificant decimal scale while preserving the exact numeric value.</summary>

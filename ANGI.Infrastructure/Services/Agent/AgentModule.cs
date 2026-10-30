@@ -18,6 +18,7 @@ public static class AgentModule
         if (!Valid(limits)) throw new InvalidOperationException("Invalid Agent resource or retention limits.");
         services.AddSingleton(limits);
         services.AddScoped<IAgentRepository, AgentRepository>();
+        services.AddScoped<IAgentCatalogRepository, AgentCatalogRepository>();
         services.AddScoped<IAgentTelemetry, AgentTelemetry>();
         var ai = configuration.GetSection(AiSettings.SectionName).Get<AiSettings>() ?? new();
         // Nối IAgentLlmService mà Orchestrator sử dụng với adapter HTTP OpenAiAgentLlmService.

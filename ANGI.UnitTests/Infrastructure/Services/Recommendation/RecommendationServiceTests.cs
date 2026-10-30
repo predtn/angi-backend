@@ -326,6 +326,33 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             await act.Should().ThrowAsync<OperationCanceledException>();
         }
 
+        [Fact]
+        public async Task RecommendConversationAsync_ConfirmsSourceAndSendsNullOverride()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "vector_source":"conversation","items":[{"dish_id":105,"rank":1,"recommend_score":0.5}],"ignored_dish_ids":[]}
+                """));
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105], 1,
+                new RecommendationVector("conversation", null), CancellationToken.None);
+            result.VectorSource.Should().Be("conversation");
+            using var body = JsonDocument.Parse(handler.Requests.Single().Body!);
+            body.RootElement.GetProperty("vector_source").GetString().Should().Be("conversation");
+            result.RequestId.Should().NotBeNull();
+        }
+
+        [Fact]
+        public async Task RecommendConversationAsync_OldRecoResponseUsesRatingFallback()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "items":[{"dish_id":120,"rank":1,"recommend_score":0.9}],"ignored_dish_ids":[]}
+                """));
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105,120], 1,
+                new RecommendationVector("conversation", new double[12]), CancellationToken.None);
+            result.RequestId.Should().BeNull(); result.Scores.Should().BeNull(); result.DishIds.Should().Equal(105);
+        }
+
         private static RecommendationService CreateFailingService(string failure) => failure switch
         {
             "server-error" => CreateService(new StubHttpMessageHandler(_ => Json(HttpStatusCode.ServiceUnavailable,

@@ -196,9 +196,19 @@ For retry-safe clients, supply a fresh positive `clientMessageId` per new messag
 
 The backend interprets ordinary planning, item edits and requests for another option. `bỏ bản nháp` discards the preview while keeping the official roadmap. `làm lại từ đầu` starts a fresh planning context and detaches the previous saved roadmap without deleting it. Ambiguous item references are clarified in chat.
 
-To save a reviewed preview, send `lưu lịch trình này` or `chốt lịch này` as a new message. The backend chooses the current owned proposal, rechecks catalog prices, expiry and roadmap versions, then saves the roadmap and chat acknowledgement atomically. Success includes `data.commit` (`roadmapId`, `roadmapVersion`, `committedProposalId`, `itemIds`). Replaying a message with the same explicit ID returns its stored commit result. A bare `đồng ý`, a quoted instruction or a negated save sentence never commits a roadmap. Asking `hãy lập lịch giúp tôi để chốt lịch` returns the existing ready preview for review without saving it. The explicit `/confirm` endpoint remains available for existing clients.
+To save a reviewed preview, send `lưu lịch trình này` or `chốt lịch này` as a new message. The backend chooses the current owned proposal, rechecks catalog prices, expiry and the source roadmap timestamp, then saves the roadmap and chat acknowledgement atomically. Success includes `data.commit` (`roadmapId`, `roadmapUpdatedAt`, `committedProposalId`, `itemIds`). Replaying a message with the same explicit ID returns its stored commit result. A bare `đồng ý`, a quoted instruction or a negated save sentence never commits a roadmap. Asking `hãy lập lịch giúp tôi để chốt lịch` returns the existing ready preview for review without saving it. The explicit `/confirm` endpoint remains available for existing clients.
 
-When a requested change relaxes existing constraints, the backend first asks a confirmation question and stores `state.pendingStateChange`. Reply `xác nhận thay đổi` (or `đồng ý`) to apply those exact pending constraints and generate an updated preview in that turn, or `giữ nguyên` to reject them. Confirmation of constraints does not save a roadmap. A validated updated preview supersedes the previous preview; provider failures preserve the previous persisted state and preview. Server-managed `pendingStateChange`, `sourceRoadmapVersion` and `historyStartSequence` are response/context metadata; clients do not send them back.
+When a requested change relaxes existing constraints, the backend first asks a confirmation question and stores `state.pendingStateChange`. Reply `xác nhận thay đổi` (or `đồng ý`) to apply those exact pending constraints and generate an updated preview in that turn, or `giữ nguyên` to reject them. Confirmation of constraints does not save a roadmap. A validated updated preview supersedes the previous preview; provider failures preserve the previous persisted state and preview. Server-managed `pendingStateChange`, `sourceRoadmapUpdatedAt` and `historyStartSequence` are response/context metadata; clients do not send them back.
+
+### Roadmap change detection
+
+`roadmaps.updated_at` replaces the former roadmap `version` counter. PostgreSQL generates a UTC timestamp with microsecond precision on every parent write and every insert/update/delete of a roadmap day or item. Moving a child updates both parents. Each update uses `GREATEST(clock_timestamp(), previous_updated_at + interval '1 microsecond')`, so rapid writes and backwards clock adjustments cannot reuse a token. These changes roll back with their transaction. EF reads the final parent timestamp after saving children before mapping responses.
+
+An update proposal stores `baseRoadmapUpdatedAt`; conversation state tracks `sourceRoadmapUpdatedAt`; a commit returns `roadmapUpdatedAt`. Confirmation locks the owned parent row and compares its exact `updated_at` with the snapshot inside the write transaction. A mismatch returns HTTP 409 `ROADMAP_UPDATED_AT_CONFLICT`; request a fresh preview. Background roadmap generation performs the same comparison before replacing items. Conversation and proposal versions retain their separate purposes.
+
+Treat these timestamp strings as opaque concurrency tokens. Keep the original ISO 8601 UTC value, for example `2026-10-29T02:00:00.123456Z`; do not pass it through JavaScript `Date` or formatting that drops microseconds. Agent snapshots are server-managed, so the frontend does not need to construct or echo their timestamps for confirmation.
+
+Migration `20261029020050_ReplaceRoadmapVersionWithUpdatedAt` removes the roadmap counter columns and converts nested JSON in existing proposals, conversation state and message replay responses. Existing uncommitted previews are superseded, in-flight attempts are released, and clients must reload their conversation and obtain a fresh preview. Roadmaps, messages and committed results are retained. Historical committed timestamps that cannot be recovered use the recorded `committed_at` for display; they never authorize a new write. Apply this migration with old API/worker processes stopped. Downgrading requires a pre-migration backup because the removed counters cannot be reconstructed.
 
 Trip planning requires province, duration and budget; `startDate` is optional. Every proposal response contains the complete snapshot ordered by day, meal and sort order, including restored older proposals. Navigation focus is cleared after a successful edit. The provider receives actual catalog tags; unsupported taste preferences remain trip notes rather than invented tag guarantees.
 
@@ -211,3 +221,37 @@ Provider rate/quota limits return HTTP 429 `AGENT_UNAVAILABLE`; other provider f
 The CORS policy exposes `Retry-After` to the configured frontend origins so browser clients can read the provider's retry guidance.
 
 `artifacts/` contains temporary build output and local diagnostic programs. It is ignored by Git and is not part of the application source to commit or push. Durable automated tests belong in `ANGI.UnitTests` or `ANGI.IntegrationTests`.
+
+## Conversation preferences extension (2026-10-29)
+
+Implementation contract and test setup: [Conversation preferences v1](.docs/Agent_Conversation_Preferences_Ver1.0.md).
+
+This section supersedes earlier Agent lifecycle, supported-taste-as-note and preview-impression rules. The API Design
+and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
+
+- A non-null roadmap_id uniquely identifies its conversation. Open returns 201 new or 200 reused/reopened.
+  Reset keeps the attached roadmap. Reopen after 7 idle days retains ID but starts fresh context/profile.
+- AgentState.tasteTargets holds only user-declared ontology targets on 0/.25/.5/.75/1. Backend-owned
+  preferences contains the inherited profile snapshot, computed request vector, ontology version,
+  profile update/read timestamps and initialization status. Missing dimensions inherit; never infer tastes from dishes.
+- Initialize lazily outside locks; unavailable profile reads stay pending, distinct from a null profile.
+  GET /users/{id}/preferences is internal/read-only. Conversation ranking passes vector_source and
+  user_vector_override to reco. Algorithms/cold-start are unchanged; chat never increments m.
+- Agent commit writes AGENT_IMPRESSION_RECORDED outbox entries in its transaction. Send all committed
+  dishes grouped by original request_id after commit, with agent_proposal_id. Never count previews.
+  Reco rejects conversation impressions without a commit reference. No synthetic feedback is created.
+- Keep attached conversation rows when pruning 30-day payloads. Prune active histories too while
+  retaining current proposal/recent replay. Sequence/proposal high-water marks survive pruning;
+  expired client-message IDs are rejected with MESSAGE_EXPIRED. Maintenance never renews activity.
+- Deploy reco migration/service before backend migration/service. Detect duplicate roadmap conversations
+  before the unique index and stop with their IDs; never automatically delete or detach them.
+## Agent scoped planning
+
+Backend-only contract: [Agent scoped planning v2](.docs/Agent_Scoped_Planning_Ver2.0.md), also
+included in the `Agent Scoped v2` worksheets of the API Design and Data Dictionary.
+The existing message/confirm endpoints remain compatible. Agent state now supports day/meal
+taste overrides and catalog meal requests; the backend computes per-request vectors while reco
+keeps its current scoring/cold-start. Named dishes/restaurants must resolve against the public
+catalog. Unknown/ambiguous/unavailable results ask for clarification instead of substitution.
+User-visible replies are rendered from validated snapshots and fixed clarification templates.
+No frontend or reco change, new database table, or migration is required for this extension.

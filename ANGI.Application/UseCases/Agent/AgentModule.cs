@@ -19,6 +19,7 @@ public static class AgentModule
     {
         services.TryAddSingleton<AgentLimits>();
         services.AddScoped<AgentStatePolicy>();
+        services.AddScoped<AgentPreferenceService>();
         services.AddScoped<AgentContextBuilder>();
         services.AddScoped<AgentProposalBuilder>();
         services.AddScoped<AgentProposalValidator>();

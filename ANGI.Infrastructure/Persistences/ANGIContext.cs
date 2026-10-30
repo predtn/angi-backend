@@ -96,14 +96,52 @@ namespace ANGI.Infrastructure.Persistences
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
             ApplyAuditRules();
-            return base.SaveChanges(acceptAllChangesOnSuccess);
+            var roadmaps = RoadmapsToRefresh();
+            var result = base.SaveChanges(acceptAllChangesOnSuccess);
+            if (roadmaps.Length > 0)
+            {
+                var ids = roadmaps.Select(roadmap => roadmap.Id).ToArray();
+                var timestamps = Roadmaps.IgnoreQueryFilters().AsNoTracking().Where(roadmap => ids.Contains(roadmap.Id))
+                    .Select(roadmap => new { roadmap.Id, roadmap.UpdatedAt }).ToDictionary(roadmap => roadmap.Id, roadmap => roadmap.UpdatedAt);
+                RefreshRoadmapTimestamps(roadmaps, timestamps);
+            }
+            return result;
         }
 
         /// <summary>Applies automatic timestamps before asynchronously persisting tracked changes.</summary>
-        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
         {
             ApplyAuditRules();
-            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            var roadmaps = RoadmapsToRefresh();
+            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            if (roadmaps.Length > 0)
+            {
+                var ids = roadmaps.Select(roadmap => roadmap.Id).ToArray();
+                var timestamps = await Roadmaps.IgnoreQueryFilters().AsNoTracking().Where(roadmap => ids.Contains(roadmap.Id))
+                    .Select(roadmap => new { roadmap.Id, roadmap.UpdatedAt })
+                    .ToDictionaryAsync(roadmap => roadmap.Id, roadmap => roadmap.UpdatedAt, cancellationToken);
+                RefreshRoadmapTimestamps(roadmaps, timestamps);
+            }
+            return result;
+        }
+
+        // Child triggers can run after the parent's INSERT/UPDATE RETURNING. Read the final database token
+        // before mapping responses, including when only children changed and EF left the parent unchanged.
+        private Roadmap[] RoadmapsToRefresh() => ChangeTracker.Entries().Any(entry =>
+            entry.Entity is Roadmap or RoadmapDay or RoadmapItem &&
+            entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            ? ChangeTracker.Entries<Roadmap>().Where(entry => entry.State != EntityState.Deleted).Select(entry => entry.Entity).ToArray()
+            : [];
+
+        private void RefreshRoadmapTimestamps(Roadmap[] roadmaps, Dictionary<long, DateTime> timestamps)
+        {
+            foreach (var roadmap in roadmaps)
+            {
+                if (!timestamps.TryGetValue(roadmap.Id, out var timestamp)) continue;
+                var property = Entry(roadmap).Property(value => value.UpdatedAt);
+                property.CurrentValue = timestamp;
+                property.OriginalValue = timestamp;
+            }
         }
 
         /// <summary>
@@ -121,7 +159,9 @@ namespace ANGI.Infrastructure.Persistences
                 }
 
                 if (entry.State is EntityState.Added or EntityState.Modified && entry.Entity is IHasUpdatedAt updated &&
-                    entry.Entity is not AgentConversation { Status: ANGI.Domain.Enums.AgentConversationStatus.Expired })
+                    entry.Entity is not Roadmap &&
+                    entry.Entity is not AgentConversation { Status: ANGI.Domain.Enums.AgentConversationStatus.Expired } &&
+                    entry.Entity is not AgentConversation { MaintenanceWrite: true })
                 {
                     updated.UpdatedAt = now;
                 }

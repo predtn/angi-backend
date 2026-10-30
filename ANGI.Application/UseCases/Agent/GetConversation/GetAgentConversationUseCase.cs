@@ -22,7 +22,8 @@ public sealed class GetAgentConversationUseCase(IAgentRepository repository, ICu
         var proposal = conversation.CurrentProposalId is { } proposalId ? await repository.GetProposalSnapshotAsync(id, proposalId, ct) : null;
         var history = await repository.GetCompletedHistoryAsync(id, limits.MaxHistoryMessages, ct);
         return new(id, conversation.Version, AgentJson.Name(conversation.Status), AgentJson.Read<AgentState>(conversation.State),
-            AgentConversationRules.Busy(conversation, now), history.Where(x => x.Role != AgentMessageRole.Tool)
+            AgentConversationRules.Busy(conversation, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
+                x.SequenceNo >= (AgentJson.Read<AgentState>(conversation.State).HistoryStartSequence ?? 0))
                 .Select(x => new AgentTranscript(AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToArray(),
             proposal is null ? null : AgentContextBuilder.MapProposal(proposal));
     }

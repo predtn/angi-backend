@@ -36,7 +36,7 @@ internal sealed class AgentChatSchemaTransformer : IOpenApiSchemaTransformer
         if (context.JsonPropertyInfo?.AttributeProvider is PropertyInfo property)
         {
             if (property.DeclaringType == typeof(AgentState) && property.Name is nameof(AgentState.PendingStateChange)
-                or nameof(AgentState.SourceRoadmapVersion) or nameof(AgentState.HistoryStartSequence)) schema.ReadOnly = true;
+                or nameof(AgentState.SourceRoadmapUpdatedAt) or nameof(AgentState.HistoryStartSequence)) schema.ReadOnly = true;
             if (property.DeclaringType == typeof(SendAgentMessageRequestDto) && property.Name == nameof(SendAgentMessageRequestDto.Command))
                 schema.Default = JsonValue.Create("chat");
         }

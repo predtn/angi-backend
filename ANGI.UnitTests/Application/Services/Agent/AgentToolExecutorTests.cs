@@ -68,7 +68,7 @@ public sealed class AgentToolExecutorTests
     {
         var fixture = AgentTestData.Validator(AgentTestData.Dish());
         fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
-        var valid = new RecommendationResult(Guid.NewGuid(), [1], [], [0.5]);
+        var valid = new RecommendationResult(Guid.NewGuid(), [1], [], [0.5], "conversation");
         var result = area switch
         {
             "foreign-id" => valid with { DishIds = [999] }, "foreign-ignored" => valid with { IgnoredDishIds = [999] },
@@ -77,8 +77,10 @@ public sealed class AgentToolExecutorTests
             _ => valid with { RequestId = null }
         };
         var reco = new Mock<IRecommendationService>();
-        reco.Setup(x => x.RecommendAsync(3, It.IsAny<IReadOnlyList<int>>(), 50, RecommendationContext.RoadmapAi, It.IsAny<CancellationToken>())).ReturnsAsync(result);
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), 50,
+            It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
         var context = AgentTestData.Context();
+        context.State = context.State with { Preferences = new() { Initialized = true } };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
         await ((Func<Task>)(async () => await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None))).Should().ThrowAsync<ServiceUnavailableException>();
         context.Grants.Should().BeEmpty();

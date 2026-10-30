@@ -29,7 +29,7 @@ namespace ANGI.Infrastructure.Persistences.Repositories
             {
                 if (exception.Entries.Any(entry => entry.Entity is AgentConversation))
                     throw new ConflictException("CONVERSATION_VERSION_CONFLICT", "Hội thoại đã thay đổi. Vui lòng tải lại trước khi tiếp tục.");
-                throw new ConflictException("ROADMAP_VERSION_CONFLICT", "Dữ liệu đã thay đổi. Vui lòng tải lại roadmap.");
+                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Dữ liệu đã thay đổi. Vui lòng tải lại roadmap.");
             }
             catch (DbUpdateException exception) when (
                 exception.InnerException is PostgresException

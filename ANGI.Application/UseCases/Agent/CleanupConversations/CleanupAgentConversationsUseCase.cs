@@ -17,27 +17,37 @@ public sealed class CleanupAgentConversationsUseCase(IAgentRepository repository
         var cutoff = now.AddDays(-limits.RetentionDays);
         await using var transaction = await unitOfWork.BeginTransactionAsync(ct);
         var conversations = await repository.LockCleanupBatchAsync(now, cutoff, ct);
-        var removable = conversations.Where(x => x.UpdatedAt <= cutoff).ToArray();
+        var removable = conversations.Where(x => x.UpdatedAt <= cutoff && x.RoadmapId is null).ToArray();
         foreach (var conversation in conversations)
         {
-            if (conversation.ProcessingTurnId is { } turn)
+            conversation.MaintenanceWrite = true;
+            var expired = conversation.Status != AgentConversationStatus.Active || conversation.ExpiresAt <= now;
+            if (expired && conversation.ProcessingTurnId is { } turn)
             {
                 var abandoned = await repository.GetTurnAsync(conversation.Id, turn, ct);
                 if (abandoned is not null) abandoned.ProcessingStatus = AgentProcessingStatus.Failed;
             }
-            AgentConversationRules.ClearLease(conversation);
-            conversation.Status = AgentConversationStatus.Expired;
-            conversation.Version++;
-            if (removable.Contains(conversation))
+            if (expired)
+            {
+                AgentConversationRules.ClearLease(conversation);
+                conversation.Status = AgentConversationStatus.Expired;
+                conversation.Version++;
+            }
+            if (conversation.UpdatedAt <= cutoff)
             {
                 conversation.CurrentProposal = null;
                 conversation.CurrentProposalId = null;
+                if (conversation.RoadmapId.HasValue) conversation.State = "{}";
             }
         }
         // Unlink the restrictive circular pointer before deleting proposals in the same transaction.
         await unitOfWork.SaveChangesAsync(ct);
-        foreach (var conversation in removable) await repository.RemoveConversationAsync(conversation, ct);
-        if (removable.Length > 0) await unitOfWork.SaveChangesAsync(ct);
+        foreach (var conversation in conversations)
+        {
+            if (removable.Contains(conversation)) await repository.RemoveConversationAsync(conversation, ct);
+            else await repository.PruneAsync(conversation, cutoff, ct);
+        }
+        await unitOfWork.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return conversations.Length;
     }

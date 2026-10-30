@@ -83,7 +83,7 @@ public sealed class AgentProposalBuilder
                 (!grant.DayNumber.HasValue || grant.DayNumber == item.DayNumber) && (grant.MealSlot is null || grant.MealSlot == item.MealSlot))).ToArray()
         }).Where(grant => grant.DishIds.Length > 0).ToArray();
         return new AgentSnapshot(context.State, AgentJson.OrderItems(items), grants,
-            context.Roadmap?.Id, context.Roadmap?.Version, Delta(original, items), output.Scope,
+            context.Roadmap?.Id, context.Roadmap?.UpdatedAt, Delta(original, items), output.Scope,
             original.Where(old => items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
     }
 
@@ -124,7 +124,8 @@ public sealed class AgentProposalBuilder
     /// <summary>Discards model-supplied provenance and retains feedback identity only for an unchanged dish.</summary>
     private static AgentItem Clean(AgentItem item, AgentItem? source) => new(item.ItemKey,
         source?.DishId == item.DishId ? source.SourceItemId : null, item.DayNumber, item.MealSlot, item.SortOrder,
-        item.DishId, source?.DishId == item.DishId ? source.RequestId : null);
+        item.DishId, source?.DishId == item.DishId ? source.RequestId : null,
+        RankingFingerprint: source?.DishId == item.DishId ? source.RankingFingerprint : null);
 
     /// <summary>Creates the documented deterministic rejection without changing any persisted proposal.</summary>
     private static ConflictException Invalid(string message) => new("PROPOSAL_NOT_COMMITTABLE", message);

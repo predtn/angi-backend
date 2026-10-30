@@ -62,7 +62,8 @@ namespace ANGI.Infrastructure.Persistences.Conventions
 
                 if (typeof(IHasUpdatedAt).IsAssignableFrom(entityType.ClrType))
                 {
-                    entityType.FindProperty(nameof(IHasUpdatedAt.UpdatedAt))!.SetDefaultValueSql("now()");
+                    entityType.FindProperty(nameof(IHasUpdatedAt.UpdatedAt))!.SetDefaultValueSql(
+                        entityType.ClrType == typeof(ANGI.Domain.Entities.Roadmap) ? "clock_timestamp()" : "now()");
                 }
             }
         }

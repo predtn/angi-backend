@@ -42,7 +42,7 @@ public sealed class ConfirmAgentProposalUseCase(IValidator<ConfirmAgentProposalR
             conversation.ExpiresAt = clock.GetUtcNow().UtcDateTime.AddDays(limits.ActiveDays);
             await unitOfWork.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            telemetry.Record("committed", id, null, null, new { request.ProposalVersion, committed.Result.RoadmapId, committed.Result.RoadmapVersion });
+            telemetry.Record("committed", id, null, null, new { request.ProposalVersion, committed.Result.RoadmapId, committed.Result.RoadmapUpdatedAt });
             return committed.Result;
         }
         catch (Exception error)

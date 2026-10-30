@@ -11,14 +11,15 @@ namespace ANGI.Application.Services.Agent;
 
 /// <summary>Loads trusted state and current snapshots rather than reconstructing a plan from chat text.</summary>
 public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRepository roadmaps, AgentLimits limits,
-    TimeProvider clock, ITagRepository tags)
+    TimeProvider clock, ITagRepository tags, AgentPreferenceService? preferences = null)
 {
     /// <summary>Loads completed bounded history and the latest official roadmap after ownership checks.</summary>
     public async Task<AgentContext> BuildAsync(AgentConversation conversation, SendAgentMessageRequestDto request, CancellationToken ct)
     {
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
-            ? confirmed with { SourceRoadmapVersion = stored.SourceRoadmapVersion, HistoryStartSequence = stored.HistoryStartSequence }
+            ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
+                Preferences = stored.Preferences }
             : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
@@ -29,15 +30,18 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         if (proposal?.Status == AgentProposalStatus.Ready && proposal.ExpiresAt > clock.GetUtcNow().UtcDateTime)
         {
             source = AgentJson.Read<AgentSnapshot>(proposal.Payload);
-            if (source.BaseRoadmapVersion.HasValue && source.BaseRoadmapVersion != roadmap?.Version)
-                throw new ConflictException("ROADMAP_VERSION_CONFLICT", "Roadmap đã thay đổi. Hãy bỏ bản chỉnh sửa cũ và tạo đề xuất mới.");
+            if (source.BaseRoadmapUpdatedAt.HasValue && source.BaseRoadmapUpdatedAt != roadmap?.UpdatedAt)
+                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Roadmap đã thay đổi. Hãy bỏ bản chỉnh sửa cũ và tạo đề xuất mới.");
         }
         else if (roadmap is not null)
         {
-            if (request.ConfirmedState is null && state.SourceRoadmapVersion != roadmap.Version) state = RefreshRoadmapMetadata(state, roadmap);
+            if (request.ConfirmedState is null && state.SourceRoadmapUpdatedAt != roadmap.UpdatedAt) state = RefreshRoadmapMetadata(state, roadmap);
             source = AgentJson.FromRoadmap(roadmap, state);
         }
         var history = await repository.GetCompletedHistoryAsync(conversation.Id, limits.MaxHistoryMessages, ct);
+        // A legacy ready preview can still be committed unchanged. Other turns initialize lazily.
+        if (preferences is not null && proposal?.Status != AgentProposalStatus.Ready)
+            state = await preferences.EnsureAsync(state, conversation.UserId, ct);
         return new AgentContext
         {
             ConversationId = conversation.Id, UserId = conversation.UserId, State = state, Source = source,
@@ -65,7 +69,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             Province = state.Province ?? current.Province, OriginMode = current.OriginMode,
             OriginLatitude = latitude, OriginLongitude = longitude, OriginLabel = current.OriginLabel,
             RadiusKm = latitude.HasValue ? state.RadiusKm : null, FocusDay = focus, FocusMeal = focus.HasValue ? state.FocusMeal : null,
-            SourceRoadmapVersion = roadmap.Version
+            SourceRoadmapUpdatedAt = roadmap.UpdatedAt
         };
     }
 
@@ -79,7 +83,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             Province = provinces.Length == 1 ? provinces[0] : null, Title = roadmap.Title, NumDays = roadmap.NumDays,
             StartDate = roadmap.StartDate, BudgetAmount = roadmap.BudgetAmount, OriginMode = AgentJson.Name(roadmap.OriginMode),
             OriginLatitude = roadmap.OriginLatitude, OriginLongitude = roadmap.OriginLongitude, OriginLabel = roadmap.OriginLabel,
-            SourceRoadmapVersion = roadmap.Version
+            SourceRoadmapUpdatedAt = roadmap.UpdatedAt
         };
     }
 

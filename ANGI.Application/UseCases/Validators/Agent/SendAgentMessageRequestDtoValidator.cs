@@ -24,7 +24,7 @@ public sealed class SendAgentMessageRequestDtoValidator : AbstractValidator<Send
             .When(x => !string.IsNullOrWhiteSpace(x.Command));
         RuleFor(x => x.ConfirmedState!).SetValidator(new AgentStateValidator()).When(x => x.ConfirmedState is not null);
         RuleFor(x => x.ConfirmedState).Must(state => state is null || state.PendingStateChange is null &&
-            state.SourceRoadmapVersion is null && state.HistoryStartSequence is null)
+            state.SourceRoadmapUpdatedAt is null && state.HistoryStartSequence is null)
             .WithMessage("Không được gửi metadata state do backend quản lý.");
     }
 }

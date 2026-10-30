@@ -20,7 +20,7 @@ public sealed class ConfirmAgentProposalUseCaseTests
     public async Task ExecuteAsync_CommittedReplay_ReturnsOriginalResultAfterExpiry()
     {
         var fixture = new AgentUseCaseFixture(); fixture.Conversation.ExpiresAt = AgentUseCaseFixture.Now;
-        var original = new AgentCommitDto(88, 5, 9, new Dictionary<string, long> { ["a"] = 55 });
+        var original = new AgentCommitDto(88, DateTime.UnixEpoch.AddSeconds(5), 9, new Dictionary<string, long> { ["a"] = 55 });
         var proposal = new AgentProposal { Id = 9, ConversationId = 7, ProposalVersion = 2, Status = AgentProposalStatus.Committed, CommitResult = AgentJson.Write(original) };
         fixture.Repository.Setup(x => x.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
         var result = await Create(fixture).ExecuteAsync(7, new() { ProposalId = 9, ProposalVersion = 2 }, CancellationToken.None);

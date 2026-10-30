@@ -6,7 +6,6 @@ namespace ANGI.Domain.Entities
     public class Roadmap : BaseEntity<long>, IHasCreatedAt, IHasUpdatedAt, ISoftDelete
     {
         public int UserId { get; set; }
-        public long Version { get; set; } = 1;
         public string Title { get; set; } = null!;
         public DateOnly? StartDate { get; set; }
         public short NumDays { get; set; }

@@ -32,7 +32,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             errors.Add("Cấu trúc lịch không hợp lệ hoặc vượt giới hạn.");
         if (errors.Count > 0) return (snapshot, new(errors.ToArray(), [], 0, []));
         var allTags = await tags.GetTagsAsync(null, ct);
-        if (state.TagIds.Concat(state.ExcludeTagIds).Except(allTags.Select(x => x.Id)).Any()) errors.Add("Bộ lọc chứa tag không tồn tại.");
+        if (state.TagIds.Concat(state.ExcludeTagIds).Concat(state.MealRequests.SelectMany(x => x.TagIds)).Except(allTags.Select(x => x.Id)).Any()) errors.Add("Bộ lọc chứa tag không tồn tại.");
         var catalog = (await dishes.GetCardDishesAsync(snapshot.Items.Select(x => x.DishId).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
         var original = (source?.Items ?? []).ToDictionary(x => x.ItemKey);
         var normalized = new List<AgentItem>();
@@ -45,20 +45,43 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             original.TryGetValue(item.ItemKey, out var kept);
             var retained = confirm ? snapshot.RetainedItems?.SingleOrDefault(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId) : null;
             var unchanged = kept?.DishId == item.DishId || retained is not null;
+            var refreshed = !confirm && kept?.DishId == item.DishId && source is not null &&
+                (AgentScopedPlanning.RequiresRefresh(source.State, state, item) ||
+                    (kept.DayNumber != item.DayNumber || kept.MealSlot != item.MealSlot) &&
+                    AgentScopedPlanning.Fingerprint(source.State, kept.DayNumber, kept.MealSlot) != AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot));
             var authorization = confirm || freshGrants is null ? snapshot.Grants : freshGrants;
             var grant = authorization.LastOrDefault(g => (!g.DayNumber.HasValue || g.DayNumber == item.DayNumber) &&
-                (g.MealSlot is null || g.MealSlot == item.MealSlot) && g.DishIds.Contains(item.DishId));
-            if (!unchanged && grant is null) errors.Add($"Món {item.DishId} không có nguồn ứng viên đúng phạm vi.");
+                (g.MealSlot is null || g.MealSlot == item.MealSlot) && g.DishIds.Contains(item.DishId) &&
+                (!confirm || item.RankingFingerprint is null || g.RequestId == item.RequestId &&
+                    AgentScopedPlanning.Fingerprint(g.Constraints, item.DayNumber, item.MealSlot) == item.RankingFingerprint));
+            if ((!unchanged || refreshed) && grant is null) errors.Add($"Món {item.DishId} cần nguồn ứng viên mới đúng phạm vi và khẩu vị.");
+            if (confirm && item.RankingFingerprint is not null && grant is null &&
+                !(retained?.RankingFingerprint == item.RankingFingerprint && retained.RequestId == item.RequestId))
+                errors.Add($"Nguồn xếp hạng món {item.DishId} không khớp bản đề xuất đã xem.");
             if (item.SourceItemId.HasValue && (!unchanged || item.SourceItemId != kept?.SourceItemId)) errors.Add("Không được gắn ID item nguồn cho món khác.");
             var tagSet = dish.DishTags.Select(x => x.TagId).ToHashSet();
+            var requested = AgentScopedPlanning.Request(state, item.DayNumber, item.MealSlot);
+            if (requested.DishName is not null && AgentScopedPlanning.Normalize(requested.DishName) != AgentScopedPlanning.Normalize(dish.Name) ||
+                requested.RestaurantName is not null && AgentScopedPlanning.Normalize(requested.RestaurantName) != AgentScopedPlanning.Normalize(dish.Restaurant.Name) ||
+                requested.RestaurantId.HasValue && requested.RestaurantId != dish.RestaurantId ||
+                requested.TagIds.Any(id => !tagSet.Contains(id)))
+                errors.Add($"Món {item.DishId} không đáp ứng món/quán hoặc tag được yêu cầu cho ngày/bữa.");
+            if (!confirm && requested.DifferentFromPlan && source?.Items.Any(old => old.DishId == item.DishId) == true &&
+                (!unchanged || refreshed)) errors.Add($"Món {item.DishId} đã có trong lịch nguồn; cần phương án khác.");
+            if (requested.DifferentFromPlan && snapshot.Items.Any(other => other.DishId == item.DishId &&
+                (other.DayNumber != item.DayNumber || other.MealSlot != item.MealSlot)))
+                errors.Add($"Món {item.DishId} bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.");
             if (!string.Equals(dish.Restaurant.ProvinceName?.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 state.ExcludeTagIds.Any(tagSet.Contains) || state.TagIds.Any(id => !tagSet.Contains(id)) ||
                 state.MaxPricePerMeal.HasValue && dish.Price > state.MaxPricePerMeal ||
                 state.RadiusKm is { } radius && state.OriginLatitude is { } lat && state.OriginLongitude is { } lng && !new NearbyArea(lat, lng, radius).Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                 errors.Add($"Món {item.DishId} không đáp ứng ràng buộc chuyến đi.");
-            if (grant is not null && !unchanged)
+            if (grant is not null && (!unchanged || refreshed))
             {
                 var applied = grant.Constraints;
+                if (AgentScopedPlanning.Fingerprint(applied, item.DayNumber, item.MealSlot) !=
+                    AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot))
+                    errors.Add($"Món {item.DishId} được lấy theo khẩu vị khác; cần lấy gợi ý lại.");
                 if (applied.MaxPricePerMeal.HasValue && dish.Price > applied.MaxPricePerMeal || applied.ExcludeTagIds.Any(tagSet.Contains) || applied.TagIds.Any(id => !tagSet.Contains(id)) ||
                     applied.RadiusKm is { } r && applied.OriginLatitude is { } a && applied.OriginLongitude is { } b && !new NearbyArea(a, b, r).Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                     errors.Add($"Món {item.DishId} không còn đáp ứng điều kiện lúc lấy ứng viên.");
@@ -68,8 +91,14 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (confirm && item.Price != dish.Price) errors.Add($"Giá món {item.DishId} đã thay đổi; cần xem đề xuất mới.");
             normalized.Add(item with { Price = dish.Price, DishName = dish.Name, RestaurantName = dish.Restaurant.Name,
                 Latitude = dish.Restaurant.Latitude, Longitude = dish.Restaurant.Longitude,
-                RequestId = unchanged ? kept is not null && kept.DishId == item.DishId ? kept.RequestId : retained?.RequestId : grant?.RequestId });
+                RequestId = confirm ? item.RequestId ?? grant?.RequestId : unchanged && !refreshed ? kept?.RequestId : grant?.RequestId,
+                RankingFingerprint = confirm ? item.RankingFingerprint : unchanged && !refreshed ? kept?.RankingFingerprint :
+                    grant is null ? null : AgentScopedPlanning.Fingerprint(grant.Constraints, item.DayNumber, item.MealSlot) });
         }
+        if (!emptyUpdate && state.MealSlots.Length > 0)
+            for (short day = 1; day <= state.NumDays; day++)
+                foreach (var meal in state.MealSlots)
+                    if (!normalized.Any(x => x.DayNumber == day && x.MealSlot == meal)) errors.Add($"Chưa có món cho bữa {meal} ngày {day}.");
         var total = normalized.Sum(x => x.Price);
         if (state.BudgetAmount.HasValue && total > state.BudgetAmount) errors.Add("Tổng tiền vượt ngân sách toàn chuyến cho một người.");
         var routeResults = new List<AgentDayRoute>();

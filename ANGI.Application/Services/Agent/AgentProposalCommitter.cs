@@ -26,7 +26,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         var snapshot = AgentJson.Read<AgentSnapshot>(proposal.Payload);
         var source = snapshot.BaseRoadmapId is { } sourceId
             ? await roadmaps.GetOwnedDetailAsync(sourceId, userId, ct) ?? throw RoadmapMissing() : null;
-        if (source is not null && source.Version != snapshot.BaseRoadmapVersion) throw VersionConflict();
+        if (source is not null && source.UpdatedAt != snapshot.BaseRoadmapUpdatedAt) throw RoadmapConflict();
         var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, true, ct);
         if (outside.Validation.Errors.Length > 0) throw new AgentProposalValidationException(outside.Validation);
         return new(conversation.Id, proposal.Id, proposal.ProposalVersion, snapshot);
@@ -48,7 +48,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         if (snapshot.BaseRoadmapId is { } roadmapId)
         {
             roadmap = await roadmaps.LockAndGetTrackedAsync(roadmapId, userId, ct) ?? throw RoadmapMissing();
-            if (roadmap.Version != snapshot.BaseRoadmapVersion) throw VersionConflict();
+            if (roadmap.UpdatedAt != snapshot.BaseRoadmapUpdatedAt) throw RoadmapConflict();
             source = AgentJson.FromRoadmap(roadmap, snapshot.State);
         }
         else
@@ -60,17 +60,18 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         var current = await validator.ValidateAsync(snapshot, source, true, false, ct);
         if (current.Validation.Errors.Length > 0) throw new AgentProposalValidationException(current.Validation);
         var mapping = Apply(roadmap, current.Snapshot);
+        AgentCommittedImpressionReporter.Enqueue(repository, current.Snapshot, proposal.Id, userId, now);
         await unitOfWork.SaveChangesAsync(ct);
-        var version = await repository.GetRoadmapVersionAsync(roadmap.Id, ct);
-        var result = new AgentCommitDto(roadmap.Id, version, proposal.Id, mapping.ToDictionary(pair => pair.Key, pair => pair.Value.Id));
+        var updatedAt = await repository.GetRoadmapUpdatedAtAsync(roadmap.Id, ct);
+        var result = new AgentCommitDto(roadmap.Id, updatedAt, proposal.Id, mapping.ToDictionary(pair => pair.Key, pair => pair.Value.Id));
         proposal.Status = AgentProposalStatus.Committed;
         proposal.ResultRoadmapId = roadmap.Id;
-        proposal.ResultRoadmapVersion = version;
+        proposal.ResultRoadmapUpdatedAt = updatedAt;
         proposal.CommitResult = AgentJson.Write(result);
         proposal.CommittedAt = now;
         conversation.RoadmapId = roadmap.Id;
         conversation.State = AgentJson.Write(snapshot.State with { FocusDay = null, FocusMeal = null,
-            PendingQuestion = null, PendingStateChange = null, SourceRoadmapVersion = version });
+            PendingQuestion = null, PendingStateChange = null, SourceRoadmapUpdatedAt = updatedAt });
         return (result, true);
     }
 
@@ -105,6 +106,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
             saved.RoadmapDay = day;
             saved.MealSlot = Enum.Parse<MealSlot>(item.MealSlot.Replace("_", ""), true);
             saved.SortOrder = item.SortOrder;
+            saved.RecoRequestId = item.RequestId;
             mapping.Add(item.ItemKey, saved);
         }
         return mapping;
@@ -129,7 +131,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
     }
 
     /// <summary>Reports an official roadmap change that requires a fresh reviewed proposal.</summary>
-    private static ConflictException VersionConflict() => new("ROADMAP_VERSION_CONFLICT", "Roadmap đã thay đổi. Cần tạo đề xuất mới.");
+    private static ConflictException RoadmapConflict() => new("ROADMAP_UPDATED_AT_CONFLICT", "Roadmap đã thay đổi. Cần tạo đề xuất mới.");
     /// <summary>Conceals unavailable or foreign proposal references behind the standard confirmation failure.</summary>
     private static ConflictException NotCommittable() => new("PROPOSAL_NOT_COMMITTABLE", "Đề xuất không còn sẵn sàng để xác nhận.");
     /// <summary>Reports an unavailable owned source roadmap.</summary>

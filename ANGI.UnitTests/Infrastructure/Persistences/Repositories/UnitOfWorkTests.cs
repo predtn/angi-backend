@@ -53,7 +53,7 @@ public sealed class UnitOfWorkTests
     /// <summary>Ensures clients reload the resource whose optimistic revision actually failed.</summary>
     [Theory]
     [InlineData(true, "CONVERSATION_VERSION_CONFLICT")]
-    [InlineData(false, "ROADMAP_VERSION_CONFLICT")]
+    [InlineData(false, "ROADMAP_UPDATED_AT_CONFLICT")]
     public async Task SaveChangesAsync_WithConcurrencyFailure_IdentifiesConflictingResource(bool conversation, string code)
     {
         await using var model = new ANGIContext(new DbContextOptionsBuilder<ANGIContext>()

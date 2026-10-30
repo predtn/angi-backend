@@ -48,6 +48,14 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
 
+                    b.Property<int>("LastMessageSequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_message_sequence");
+
+                    b.Property<int>("LastProposalVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_proposal_version");
+
                     b.Property<long?>("ProcessingAttemptId")
                         .HasColumnType("bigint")
                         .HasColumnName("processing_attempt_id");
@@ -59,6 +67,10 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.Property<DateTime?>("ProcessingUntil")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("processing_until");
+
+                    b.Property<long>("PurgedClientMessageId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("purged_client_message_id");
 
                     b.Property<long?>("RoadmapId")
                         .HasColumnType("bigint")
@@ -98,7 +110,9 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasDatabaseName("ix_agent_conversations_expires_at");
 
                     b.HasIndex("RoadmapId")
-                        .HasDatabaseName("ix_agent_conversations_roadmap_id");
+                        .IsUnique()
+                        .HasDatabaseName("ix_agent_conversations_roadmap_id")
+                        .HasFilter("roadmap_id IS NOT NULL");
 
                     b.HasIndex("Id", "CurrentProposalId")
                         .HasDatabaseName("ix_agent_conversations_id_current_proposal_id");
@@ -214,9 +228,10 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("base_roadmap_id");
 
-                    b.Property<long?>("BaseRoadmapVersion")
-                        .HasColumnType("bigint")
-                        .HasColumnName("base_roadmap_version");
+                    b.Property<DateTime?>("BaseRoadmapUpdatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("timestamp(6) with time zone")
+                        .HasColumnName("base_roadmap_updated_at");
 
                     b.Property<string>("CommitResult")
                         .HasColumnType("jsonb")
@@ -266,9 +281,10 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("result_roadmap_id");
 
-                    b.Property<long?>("ResultRoadmapVersion")
-                        .HasColumnType("bigint")
-                        .HasColumnName("result_roadmap_version");
+                    b.Property<DateTime?>("ResultRoadmapUpdatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("timestamp(6) with time zone")
+                        .HasColumnName("result_roadmap_updated_at");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -299,9 +315,9 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                     b.ToTable("agent_proposals", "core", t =>
                         {
-                            t.HasCheckConstraint("ck_agent_proposals_base", "(operation = 'update' AND base_roadmap_id IS NOT NULL AND base_roadmap_version IS NOT NULL AND base_roadmap_version > 0) OR (operation = 'create' AND base_roadmap_id IS NULL AND base_roadmap_version IS NULL)");
+                            t.HasCheckConstraint("ck_agent_proposals_base", "(operation = 'update' AND base_roadmap_id IS NOT NULL AND base_roadmap_updated_at IS NOT NULL AND isfinite(base_roadmap_updated_at)) OR (operation = 'create' AND base_roadmap_id IS NULL AND base_roadmap_updated_at IS NULL)");
 
-                            t.HasCheckConstraint("ck_agent_proposals_commit", "(status = 'committed' AND result_roadmap_id IS NOT NULL AND result_roadmap_version IS NOT NULL AND result_roadmap_version > 0 AND commit_result IS NOT NULL AND committed_at IS NOT NULL) OR (status <> 'committed' AND result_roadmap_id IS NULL AND result_roadmap_version IS NULL AND commit_result IS NULL AND committed_at IS NULL)");
+                            t.HasCheckConstraint("ck_agent_proposals_commit", "(status = 'committed' AND result_roadmap_id IS NOT NULL AND result_roadmap_updated_at IS NOT NULL AND isfinite(result_roadmap_updated_at) AND commit_result IS NOT NULL AND committed_at IS NOT NULL) OR (status <> 'committed' AND result_roadmap_id IS NULL AND result_roadmap_updated_at IS NULL AND commit_result IS NULL AND committed_at IS NULL)");
 
                             t.HasCheckConstraint("ck_agent_proposals_operation", "operation IN ('create', 'update')");
 
@@ -1181,7 +1197,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                     b.ToTable("outbox_messages", "core", t =>
                         {
-                            t.HasCheckConstraint("ck_outbox_messages_event_type", "event_type IN ('DISH_UPSERTED', 'DISH_DEACTIVATED', 'FEEDBACK_CREATED')");
+                            t.HasCheckConstraint("ck_outbox_messages_event_type", "event_type IN ('DISH_UPSERTED', 'DISH_DEACTIVATED', 'FEEDBACK_CREATED', 'AGENT_IMPRESSION_RECORDED')");
 
                             t.HasCheckConstraint("ck_outbox_messages_status", "status IN ('pending', 'processing', 'done', 'dead')");
                         });
@@ -1927,20 +1943,15 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnName("title");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(6)
+                        .HasColumnType("timestamp(6) with time zone")
                         .HasColumnName("updated_at")
-                        .HasDefaultValueSql("now()");
+                        .HasDefaultValueSql("clock_timestamp()");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer")
                         .HasColumnName("user_id");
-
-                    b.Property<long>("Version")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bigint")
-                        .HasColumnName("version")
-                        .HasDefaultValueSql("1");
 
                     b.HasKey("Id")
                         .HasName("pk_roadmaps");
@@ -1958,7 +1969,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                             t.HasCheckConstraint("ck_roadmaps_origin_mode", "origin_mode IN ('none', 'pinned', 'gps')");
 
-                            t.HasCheckConstraint("ck_roadmaps_version", "version > 0");
+                            t.HasCheckConstraint("ck_roadmaps_updated_at", "isfinite(updated_at)");
                         });
                 });
 

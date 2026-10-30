@@ -42,11 +42,12 @@ public static class AgentChatPolicy
             changes.Add(proposed.BudgetUnrestricted ? "ngân sách không giới hạn" : $"ngân sách: {proposed.BudgetAmount:0} đồng");
         if (current.MaxPricePerMeal != proposed.MaxPricePerMeal) changes.Add($"trần giá mỗi món: {proposed.MaxPricePerMeal?.ToString("0", CultureInfo.InvariantCulture) ?? "không giới hạn"} đồng");
         if (!current.TagIds.SequenceEqual(proposed.TagIds) || !current.ExcludeTagIds.SequenceEqual(proposed.ExcludeTagIds)) changes.Add("bộ lọc món ăn");
+        if (AgentJson.Write(current.MealRequests) != AgentJson.Write(proposed.MealRequests)) changes.Add("yêu cầu món/quán theo ngày hoặc bữa");
         if (current.RadiusKm != proposed.RadiusKm || current.OriginMode != proposed.OriginMode || current.OriginLatitude != proposed.OriginLatitude || current.OriginLongitude != proposed.OriginLongitude)
             changes.Add("điểm xuất phát hoặc bán kính tìm món");
         var reply = $"Bạn xác nhận thay đổi {string.Join("; ", changes)}? Nhắn ‘xác nhận thay đổi’ để áp dụng hoặc ‘giữ nguyên’ để hủy. Bản lịch đang lưu chưa thay đổi.";
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null,
-            SourceRoadmapVersion = current.SourceRoadmapVersion, HistoryStartSequence = current.HistoryStartSequence };
+            SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
         return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending }, null, null);
     }
 

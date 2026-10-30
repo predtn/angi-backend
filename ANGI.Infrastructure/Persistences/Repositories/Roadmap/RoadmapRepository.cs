@@ -54,7 +54,6 @@ public sealed class RoadmapRepository : IRoadmapRepository
             .Select(roadmap => new RoadmapSummaryDto
             {
                 Id = roadmap.Id,
-                Version = roadmap.Version,
                 Title = roadmap.Title,
                 StartDate = roadmap.StartDate,
                 EndDate = roadmap.StartDate.HasValue
@@ -121,6 +120,9 @@ public sealed class RoadmapRepository : IRoadmapRepository
               AND deleted_at IS NULL
             FOR UPDATE
             """, ct);
+
+        var tracked = _context.Roadmaps.Local.FirstOrDefault(roadmap => roadmap.Id == roadmapId);
+        if (tracked is not null) await _context.Entry(tracked).ReloadAsync(ct);
 
         return await _context.Roadmaps
             .IgnoreQueryFilters()

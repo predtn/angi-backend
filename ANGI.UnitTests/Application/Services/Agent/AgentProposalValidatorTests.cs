@@ -9,6 +9,16 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Exercises catalog, provenance, budget and current-price validation boundaries.</summary>
 public sealed class AgentProposalValidatorTests
 {
+    [Fact]
+    public async Task ValidateAsync_TasteChangedAfterRanking_RequiresNewCandidates()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        snapshot = snapshot with { State = snapshot.State with { TasteTargets = [new("spicy", 1)] } };
+        var result = await fixture.Validator.ValidateAsync(snapshot, null, false, false, default);
+        result.Validation.Errors.Should().NotBeEmpty();
+    }
+
     // TEST-01: Reprice an issued candidate from the backend and calculate the day route before ready.
     /// <summary>Verifies backend metadata overrides all untrusted proposal metadata.</summary>
     [Fact]
@@ -107,7 +117,7 @@ public sealed class AgentProposalValidatorTests
     public async Task ValidateAsync_EmptyItinerary_OnlyAllowsSavedRoadmapUpdate(bool update)
     {
         var state = new AgentState { NumDays = 1 };
-        var snapshot = new AgentSnapshot(state, [], [], update ? 88 : null, update ? 1 : null);
+        var snapshot = new AgentSnapshot(state, [], [], update ? 88 : null, update ? DateTime.UnixEpoch : null);
         var result = await AgentTestData.Validator().Validator.ValidateAsync(snapshot, null, false, false, CancellationToken.None);
         (result.Validation.Errors.Length == 0).Should().Be(update);
     }

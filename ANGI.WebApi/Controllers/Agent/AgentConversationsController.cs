@@ -15,8 +15,12 @@ public sealed class AgentConversationsController(ICreateAgentConversationUseCase
 {
     /// <summary>AGENT-01 opens empty state or an owned roadmap context without changing the official itinerary.</summary>
     [HttpPost]
-    public async Task<IActionResult> Create(CreateAgentConversationRequestDto request, CancellationToken ct) =>
-        StatusCode(StatusCodes.Status201Created, new ApiResponse<AgentConversationDto> { Success = true, Data = await create.ExecuteAsync(request, ct) });
+    public async Task<IActionResult> Create(CreateAgentConversationRequestDto request, CancellationToken ct)
+    {
+        var result = await create.ExecuteAsync(request, ct);
+        return StatusCode(result.Reused ? StatusCodes.Status200OK : StatusCodes.Status201Created,
+            new ApiResponse<AgentConversationDto> { Success = true, Data = result });
+    }
 
     /// <summary>AGENT-03 restores bounded completed history and the current preview without extending expiry.</summary>
     [HttpGet("{id:long}")]

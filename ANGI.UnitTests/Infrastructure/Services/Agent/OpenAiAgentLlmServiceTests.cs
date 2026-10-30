@@ -44,7 +44,7 @@ public sealed class OpenAiAgentLlmServiceTests
         var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
         result!.Output!.Action.Should().Be("answer"); result.Tokens.Should().Be(123);
         using var sent = JsonDocument.Parse(body!);
-        sent.RootElement.GetProperty("tools").GetArrayLength().Should().Be(3);
+        sent.RootElement.GetProperty("tools").GetArrayLength().Should().Be(4);
         sent.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("strict").GetBoolean().Should().BeTrue();
         body.Should().NotContain("test-key");
     }
@@ -263,6 +263,7 @@ public sealed class OpenAiAgentLlmServiceTests
 
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
+        clarification = (string?)null,
         constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>() });
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
     private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key") => new(

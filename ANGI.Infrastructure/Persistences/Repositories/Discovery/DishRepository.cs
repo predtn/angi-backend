@@ -46,6 +46,11 @@ public sealed class DishRepository : IDishRepository
         CancellationToken ct)
     {
         var query = Candidates();
+        if (filter.DishIds.Count > 0)
+        {
+            var includedDishes = filter.DishIds.ToArray();
+            query = query.Where(dish => includedDishes.Contains(dish.Id));
+        }
 
         if (!string.IsNullOrWhiteSpace(filter.Query))
         {
@@ -98,6 +103,12 @@ public sealed class DishRepository : IDishRepository
             query = query.Where(dish => dish.DishTags.Any(dishTag =>
                 dishTag.Tag.TagType == TagType.MealTime && dishTag.Tag.Code == code));
         }
+        if (!string.IsNullOrWhiteSpace(filter.CompatibleMealTimeCode))
+        {
+            var code = filter.CompatibleMealTimeCode;
+            query = query.Where(dish => !dish.DishTags.Any(tag => tag.Tag.TagType == TagType.MealTime) ||
+                dish.DishTags.Any(tag => tag.Tag.TagType == TagType.MealTime && tag.Tag.Code == code));
+        }
 
         if (filter.ExcludeDishIds.Count > 0)
         {
@@ -120,9 +131,10 @@ public sealed class DishRepository : IDishRepository
             }
 
             // OR within a tag type, AND across types: [lunch, dinner, soup] = (lunch or dinner) and soup.
-            foreach (var group in known.GroupBy(tag => tag.TagType))
+            var groups = filter.RequireAllTags ? known.Select(tag => new[] { tag.Id }) :
+                known.GroupBy(tag => tag.TagType).Select(group => group.Select(tag => tag.Id).ToArray());
+            foreach (var ids in groups)
             {
-                var ids = group.Select(tag => tag.Id).ToArray();
                 query = query.Where(dish => dish.DishTags.Any(dishTag => ids.Contains(dishTag.TagId)));
             }
         }

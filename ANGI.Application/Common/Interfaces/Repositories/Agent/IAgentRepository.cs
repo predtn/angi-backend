@@ -17,6 +17,14 @@ public interface IAgentRepository
     Task<int> CountAttemptsAsync(int userId, DateTime since, CancellationToken ct);
     /// <summary>Tracks a new conversation in the current unit of work.</summary>
     void AddConversation(AgentConversation conversation);
+    /// <summary>Reads the unique conversation attached to a roadmap after acquiring the user lock.</summary>
+    Task<AgentConversation?> GetByRoadmapAsync(long roadmapId, int userId, CancellationToken ct);
+    /// <summary>Serializes get-or-create without reversing the conversation/user lock order.</summary>
+    Task LockRoadmapConversationAsync(long roadmapId, CancellationToken ct);
+    /// <summary>Prunes expired payloads while maintaining durable identity high-water marks.</summary>
+    Task PruneAsync(AgentConversation conversation, DateTime cutoff, CancellationToken ct);
+    /// <summary>Queues a delivery in the current core transaction.</summary>
+    void AddOutboxMessage(OutboxMessage message);
     /// <summary>Finds the logical user message under an already locked conversation.</summary>
     Task<AgentMessage?> GetMessageAsync(long conversationId, long clientMessageId, CancellationToken ct);
     /// <summary>Finds a previously processing turn while revoking an expired lease.</summary>
@@ -41,8 +49,8 @@ public interface IAgentRepository
     Task<AgentConversation[]> LockCleanupBatchAsync(DateTime now, DateTime cutoff, CancellationToken ct);
     /// <summary>Removes children and the unlinked conversation without touching official roadmaps.</summary>
     Task RemoveConversationAsync(AgentConversation conversation, CancellationToken ct);
-    /// <summary>Reads the committed roadmap revision after database-managed version advancement.</summary>
-    Task<long> GetRoadmapVersionAsync(long roadmapId, CancellationToken ct);
+    /// <summary>Reads the exact roadmap timestamp after all database-managed child updates.</summary>
+    Task<DateTime> GetRoadmapUpdatedAtAsync(long roadmapId, CancellationToken ct);
     /// <summary>Locks catalog rows in stable order so confirmation prices and availability remain atomic.</summary>
     Task LockCatalogAsync(IReadOnlyCollection<int> dishIds, CancellationToken ct);
 }

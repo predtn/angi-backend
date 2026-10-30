@@ -10,13 +10,13 @@ public sealed class AgentProposal : BaseEntity<long>, IHasCreatedAt
     public int ProposalVersion { get; set; }
     public AgentProposalOperation Operation { get; set; }
     public long? BaseRoadmapId { get; set; }
-    public long? BaseRoadmapVersion { get; set; }
+    public DateTime? BaseRoadmapUpdatedAt { get; set; }
     public string Payload { get; set; } = "{}";
     public string ValidationResult { get; set; } = "{}";
     public AgentProposalStatus Status { get; set; }
     public Guid[] RecoRequestIds { get; set; } = [];
     public long? ResultRoadmapId { get; set; }
-    public long? ResultRoadmapVersion { get; set; }
+    public DateTime? ResultRoadmapUpdatedAt { get; set; }
     public string? CommitResult { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }

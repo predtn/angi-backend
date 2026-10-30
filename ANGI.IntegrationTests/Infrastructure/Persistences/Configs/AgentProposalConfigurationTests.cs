@@ -10,48 +10,48 @@ namespace ANGI.IntegrationTests.Infrastructure.Persistences.Configs;
 /// <summary>Verifies proposal invariants against PostgreSQL's nullable CHECK semantics.</summary>
 public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
-    // TEST-01: Reject missing and nonpositive source revisions for update proposals at the database boundary.
-    /// <summary>Ensures SQL NULL cannot bypass the mandatory source revision or source roadmap.</summary>
+    // TEST-01: Reject missing and infinite source timestamps for update proposals at the database boundary.
+    /// <summary>Ensures SQL NULL cannot bypass the mandatory finite timestamp or source roadmap.</summary>
     [PostgresEndToEndFact]
-    public async Task UpdateProposal_RequiresCompletePositiveSource()
+    public async Task UpdateProposal_RequiresCompleteFiniteSource()
     {
         var (conversationId, roadmapId) = await SetupAsync();
-        foreach (var version in new long?[] { null, 0, -1 })
+        foreach (var timestamp in new DateTime?[] { null, DateTime.MinValue, DateTime.MaxValue })
         {
             var proposal = Proposal(conversationId);
             proposal.Operation = AgentProposalOperation.Update;
             proposal.BaseRoadmapId = roadmapId;
-            proposal.BaseRoadmapVersion = version;
+            proposal.BaseRoadmapUpdatedAt = timestamp;
             await RejectAsync(proposal, "ck_agent_proposals_base");
         }
         var missingRoadmap = Proposal(conversationId);
         missingRoadmap.Operation = AgentProposalOperation.Update;
-        missingRoadmap.BaseRoadmapVersion = 1;
+        missingRoadmap.BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1);
         await RejectAsync(missingRoadmap, "ck_agent_proposals_base");
         await factory.ExecuteDbAsync(async db =>
         {
             var valid = Proposal(conversationId);
             valid.Operation = AgentProposalOperation.Update;
             valid.BaseRoadmapId = roadmapId;
-            valid.BaseRoadmapVersion = 1;
+            valid.BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1);
             db.AgentProposals.Add(valid);
             await db.SaveChangesAsync();
             (await db.AgentProposals.CountAsync()).Should().Be(1);
         });
     }
 
-    // TEST-02: Reject every incomplete committed result, including a NULL or nonpositive result revision.
+    // TEST-02: Reject every incomplete committed result, including a NULL or infinite result timestamp.
     /// <summary>Ensures replay metadata is complete before a proposal can enter committed state.</summary>
     [PostgresEndToEndFact]
-    public async Task CommittedProposal_RequiresCompletePositiveResult()
+    public async Task CommittedProposal_RequiresCompleteFiniteResult()
     {
         var (conversationId, roadmapId) = await SetupAsync();
-        foreach (var missing in new[] { "roadmap", "version-null", "version-zero", "version-negative", "result", "time" })
+        foreach (var missing in new[] { "roadmap", "timestamp-null", "timestamp-min", "timestamp-max", "result", "time" })
         {
             var proposal = Proposal(conversationId);
             proposal.Status = AgentProposalStatus.Committed;
             proposal.ResultRoadmapId = missing == "roadmap" ? null : roadmapId;
-            proposal.ResultRoadmapVersion = missing switch { "version-null" => null, "version-zero" => 0, "version-negative" => -1, _ => 1 };
+            proposal.ResultRoadmapUpdatedAt = missing switch { "timestamp-null" => null, "timestamp-min" => DateTime.MinValue, "timestamp-max" => DateTime.MaxValue, _ => DateTime.UnixEpoch };
             proposal.CommitResult = missing == "result" ? null : "{}";
             proposal.CommittedAt = missing == "time" ? null : DateTime.UtcNow;
             await RejectAsync(proposal, "ck_agent_proposals_commit");
@@ -61,7 +61,7 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
             var valid = Proposal(conversationId);
             valid.Status = AgentProposalStatus.Committed;
             valid.ResultRoadmapId = roadmapId;
-            valid.ResultRoadmapVersion = 1;
+            valid.ResultRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1);
             valid.CommitResult = "{}";
             valid.CommittedAt = DateTime.UtcNow;
             db.AgentProposals.Add(valid);
@@ -76,18 +76,18 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
     public async Task UncommittedCreate_RejectsSourceAndResultMetadata()
     {
         var (conversationId, roadmapId) = await SetupAsync();
-        foreach (var source in new[] { "roadmap", "version", "both" })
+        foreach (var source in new[] { "roadmap", "timestamp", "both" })
         {
             var proposal = Proposal(conversationId);
-            proposal.BaseRoadmapId = source == "version" ? null : roadmapId;
-            proposal.BaseRoadmapVersion = source == "roadmap" ? null : 1;
+            proposal.BaseRoadmapId = source == "timestamp" ? null : roadmapId;
+            proposal.BaseRoadmapUpdatedAt = source == "roadmap" ? null : DateTime.UnixEpoch;
             await RejectAsync(proposal, "ck_agent_proposals_base");
         }
-        foreach (var result in new[] { "roadmap", "version", "result", "time" })
+        foreach (var result in new[] { "roadmap", "timestamp", "result", "time" })
         {
             var proposal = Proposal(conversationId);
             proposal.ResultRoadmapId = result == "roadmap" ? roadmapId : null;
-            proposal.ResultRoadmapVersion = result == "version" ? 1 : null;
+            proposal.ResultRoadmapUpdatedAt = result == "timestamp" ? DateTime.UnixEpoch : null;
             proposal.CommitResult = result == "result" ? "{}" : null;
             proposal.CommittedAt = result == "time" ? DateTime.UtcNow : null;
             await RejectAsync(proposal, "ck_agent_proposals_commit");

@@ -4,8 +4,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.Services.Agent;
+using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Agent;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Application.DTOs.Roadmap;
@@ -15,6 +17,8 @@ using ANGI.Domain.Enums;
 using ANGI.Infrastructure.Persistences;
 using ANGI.Infrastructure.Services.Agent;
 using ANGI.Infrastructure.Services.Ai;
+using ANGI.Infrastructure.Services.Recommendation;
+using ANGI.Infrastructure.Services.Outbox;
 using ANGI.IntegrationTests.Fixtures;
 using ANGI.WebApi.Common.Models;
 using FluentAssertions;
@@ -23,6 +27,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
+using Moq;
 
 namespace ANGI.IntegrationTests.WebApi.Controllers.Agent;
 
@@ -31,6 +38,108 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
 {
     private const string Path = "/api/v1/agent/conversations";
     private static long _nextClientMessageId;
+
+    [PostgresEndToEndFact]
+    public async Task ScopedPlanning_ThreeDaysKeepSeparateVectorsAndCommitProvenance()
+    {
+        var vectors = new List<double[]?>();
+        var reco = ScopedReco(vectors);
+        var scenario = await SetupAsync(reco.Object); using var host = scenario.Host; using var client = scenario.Client;
+        var specialty = await factory.ExecuteDbAsync(async db =>
+        {
+            var tag = new Tag { Code = "scoped_specialty", Name = "Đặc sản khu vực", TagType = TagType.Category };
+            var dish = await db.Dishes.OrderByDescending(x => x.Id).FirstAsync();
+            dish.DishTags.Add(new() { Tag = tag }); await db.SaveChangesAsync(); return tag.Id;
+        });
+        var state = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, BudgetAmount = 500000,
+            MealSlots = ["lunch"], TasteOverrides = [new(1, null, [new("spicy", 1)])],
+            MealRequests = [new(2, null, null, null, [specialty]), new(3, null, null, null, [], true)] };
+        scenario.Llm.Override = context =>
+        {
+            if (context.Exchanges.Count == 0)
+                return new(Enumerable.Range(1, 3).Select(day => new AgentToolCall($"day-{day}", "get_recommendation",
+                    JsonSerializer.SerializeToElement(new AgentRecommendationInput(State: day == 1 ? state : null, Scope: "day", DayNumber: (short)day,
+                        TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12), AgentJson.Options))).ToArray(), null);
+            var items = new List<AgentItem>();
+            for (short day = 1; day <= 3; day++)
+            {
+                var choices = context.Exchanges[0].Results[day - 1].GetProperty("items").EnumerateArray();
+                var id = choices.Select(x => x.GetProperty("dishId").GetInt32()).First(id => items.All(x => x.DishId != id));
+                items.Add(new($"d{day}", null, day, "lunch", 0, id));
+            }
+            return new([], new AgentOutput { Action = "create_proposal", Reply = "Quán bịa nổi tiếng mở 24/24", Items = items.ToArray() });
+        };
+        var conversation = await OpenAsync(client);
+        var preview = await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày: ngày 1 cay, ngày 2 đặc sản, ngày 3 khác món trong lịch, chỉ bữa trưa.");
+        preview.Proposal.Should().NotBeNull(); preview.Proposal!.Snapshot.Items.Should().HaveCount(3);
+        preview.Reply.Should().NotContain("bịa").And.NotContain("24/24");
+        vectors.Should().HaveCount(3); vectors[0]![5].Should().Be(1); vectors[1]![5].Should().Be(.25); vectors[2]![5].Should().Be(.25);
+        var restored = await GetAsync(client, conversation.ConversationId);
+        restored.State.TasteOverrides.Should().ContainSingle(); restored.State.MealRequests.Should().HaveCount(2);
+        (await factory.ExecuteDbAsync(db => db.OutboxMessages.CountAsync(x => x.EventType == OutboxEventType.AgentImpressionRecorded))).Should().Be(0);
+        var commit = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = preview.Proposal.ProposalId, ProposalVersion = preview.Proposal.Version });
+        (await factory.ExecuteDbAsync(db => db.RoadmapItems.CountAsync(x => x.RoadmapDay.RoadmapId == commit.RoadmapId && x.RecoRequestId != null))).Should().Be(3);
+        (await factory.ExecuteDbAsync(db => db.OutboxMessages.CountAsync(x => x.EventType == OutboxEventType.AgentImpressionRecorded))).Should().Be(3);
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ScopedPlanning_MissingNamedDishAsksInsteadOfSubstituting()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        scenario.Llm.Override = context => context.Exchanges.Count == 0
+            ? new([new("named", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
+                State: new() { Province = "Ho Chi Minh City", NumDays = 1, BudgetAmount = 500000,
+                    MealRequests = [new(null, null, "Món tuyệt đối không có trong catalog", null, [])] },
+                TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null)
+            : new([], new AgentOutput { Action = "clarify", Reply = "Tôi đã tự thêm món vào quán nổi tiếng.", Clarification = "catalog_choice" });
+        var conversation = await OpenAsync(client);
+        var result = await SendPromptAsync(client, conversation.ConversationId, "Thêm món tuyệt đối không có trong catalog vào lịch.");
+        result.Proposal.Should().BeNull(); result.Reply.Should().Contain("Chưa tìm thấy").And.NotContain("tự thêm");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ScopedPlanning_ReevaluatedSavedDishRetainsItemAndUpdatesRecoRequest()
+    {
+        var scenario = await SetupAsync(ScopedReco([]).Object); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var initial = await SendAsync(client, conversation.ConversationId, Message(1));
+        var first = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = initial.Proposal!.ProposalId, ProposalVersion = initial.Proposal.Version });
+        var oldItem = await factory.ExecuteDbAsync(db => db.RoadmapItems.AsNoTracking().SingleAsync());
+        scenario.Llm.Override = context =>
+        {
+            var target = context.Source!.Items.Single();
+            if (context.Exchanges.Count == 0)
+                return new([new("refresh", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
+                    State: context.State with { Preferences = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+                        TasteOverrides = [new(1, null, [new("spicy", 1)])] }, Scope: "slot", DayNumber: 1, MealSlot: "lunch",
+                    TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null);
+            return new([], new AgentOutput { Action = "patch_proposal", Reply = "Đã đổi khẩu vị", BaseProposalVersion = context.ProposalVersion,
+                Scope = new(1, "lunch"), Changes = [new("replace", target.ItemKey, target)] });
+        };
+        var updated = await SendPromptAsync(client, conversation.ConversationId, "Đánh giá lại ngày 1 theo khẩu vị cay, giữ món nếu vẫn phù hợp.");
+        updated.Proposal.Should().NotBeNull(); updated.Proposal!.Snapshot.Items[0].RequestId.Should().NotBeNull();
+        updated.Proposal.Snapshot.Items[0].RequestId!.Value.Should().NotBe(oldItem.RecoRequestId!.Value);
+        var saved = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = updated.Proposal.ProposalId, ProposalVersion = updated.Proposal.Version });
+        saved.RoadmapId.Should().Be(first.RoadmapId);
+        var current = await factory.ExecuteDbAsync(db => db.RoadmapItems.AsNoTracking().SingleAsync());
+        current.Id.Should().Be(oldItem.Id); current.DishId.Should().Be(oldItem.DishId);
+        current.RecoRequestId.Should().Be(updated.Proposal.Snapshot.Items[0].RequestId);
+    }
+
+    private static Mock<IRecommendationService> ScopedReco(List<double[]?> vectors)
+    {
+        var reco = new Mock<IRecommendationService>();
+        reco.Setup(x => x.GetPreferencesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int id, CancellationToken _) => new UserPreferenceSnapshot(id, 1, Enumerable.Repeat(.25, 12).ToArray(), null));
+        reco.Setup(x => x.RecommendConversationAsync(It.IsAny<int>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyList<int> ids, int count, RecommendationVector vector, CancellationToken _) =>
+            {
+                vectors.Add(vector.UserVectorOverride?.ToArray()); var selected = ids.Take(count).ToArray();
+                return new RecommendationResult(Guid.NewGuid(), selected, [], selected.Select(_ => .8).ToArray(), "conversation");
+            });
+        return reco;
+    }
 
     // TEST-01: Create an unsaved preview, replay its message, confirm once, and replay the original commit after later edits.
     /// <summary>Verifies the complete Agent create lifecycle and both durable idempotency contracts.</summary>
@@ -49,7 +158,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         scenario.Llm.Calls.Should().Be(calls);
         var confirm = new ConfirmAgentProposalRequestDto { ProposalId = turn.Proposal.ProposalId, ProposalVersion = turn.Proposal.Version };
         var first = await ConfirmAsync(client, conversation.ConversationId, confirm);
-        first.RoadmapVersion.Should().Be(1);
+        first.RoadmapUpdatedAt.Kind.Should().Be(DateTimeKind.Utc);
         using var edit = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{first.RoadmapId}", new { title = "Manual edit" });
         edit.EnsureSuccessStatusCode();
         var second = await ConfirmAsync(client, conversation.ConversationId, confirm);
@@ -59,7 +168,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             (await db.Roadmaps.CountAsync()).Should().Be(1);
             (await db.AgentMessages.CountAsync(x => x.Role == AgentMessageRole.User)).Should().Be(1);
             (await db.AgentProposals.SingleAsync()).Status.Should().Be(AgentProposalStatus.Committed);
-            (await db.Roadmaps.SingleAsync()).Version.Should().BeGreaterThan(first.RoadmapVersion);
+            (await db.Roadmaps.SingleAsync()).UpdatedAt.Should().BeAfter(first.RoadmapUpdatedAt);
         });
     }
 
@@ -167,14 +276,14 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var conversation = await OpenAsync(client); var turn = await SendAsync(client, conversation.ConversationId, Message(1));
         var request = new ConfirmAgentProposalRequestDto { ProposalId = turn.Proposal!.ProposalId, ProposalVersion = turn.Proposal.Version };
         var responses = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => ConfirmAsync(client, conversation.ConversationId, request)));
-        responses.Should().OnlyContain(x => x.RoadmapId == responses[0].RoadmapId && x.RoadmapVersion == responses[0].RoadmapVersion);
+        responses.Should().OnlyContain(x => x.RoadmapId == responses[0].RoadmapId && x.RoadmapUpdatedAt == responses[0].RoadmapUpdatedAt);
         await factory.ExecuteDbAsync(async db => (await db.Roadmaps.CountAsync()).Should().Be(1));
     }
 
     // TEST-07: Manual roadmap metadata edits invalidate an outstanding update proposal atomically.
     /// <summary>Verifies source revision checks prevent overwriting a newer manual roadmap.</summary>
     [PostgresEndToEndFact]
-    public async Task ManualEditBeforeConfirm_ReturnsRoadmapVersionConflict()
+    public async Task ManualEditBeforeConfirm_ReturnsRoadmapUpdatedAtConflict()
     {
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
         var conversation = await OpenAsync(client); var firstTurn = await SendAsync(client, conversation.ConversationId, Message(1));
@@ -184,8 +293,26 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         using var manual = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{saved.RoadmapId}", new { title = "Keep this newer title" });
         manual.EnsureSuccessStatusCode();
         using var confirm = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm", new { proposalId = next.Proposal!.ProposalId, proposalVersion = next.Proposal.Version });
-        await ErrorAsync(confirm, HttpStatusCode.Conflict, "ROADMAP_VERSION_CONFLICT");
+        await ErrorAsync(confirm, HttpStatusCode.Conflict, "ROADMAP_UPDATED_AT_CONFLICT");
         await factory.ExecuteDbAsync(async db => (await db.Roadmaps.SingleAsync()).Title.Should().Be("Keep this newer title"));
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ItemDeletedAfterPreview_ConfirmRejectsStaleTimestamp()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var first = await SendAsync(client, conversation.ConversationId, Message(1));
+        var saved = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = first.Proposal!.ProposalId, ProposalVersion = 1 });
+        var current = await GetAsync(client, conversation.ConversationId);
+        var preview = await SendAsync(client, conversation.ConversationId, Message(current.Version));
+        preview.Proposal!.Snapshot.BaseRoadmapUpdatedAt.Should().Be(saved.RoadmapUpdatedAt);
+        using var deleted = await client.DeleteAsync($"/api/v1/roadmaps/{saved.RoadmapId}/items/{saved.ItemIds.Values.First()}");
+        deleted.EnsureSuccessStatusCode();
+        using var confirm = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm",
+            new { proposalId = preview.Proposal.ProposalId, proposalVersion = preview.Proposal.Version });
+        await ErrorAsync(confirm, HttpStatusCode.Conflict, "ROADMAP_UPDATED_AT_CONFLICT");
+        await factory.ExecuteDbAsync(async db => (await db.RoadmapItems.CountAsync()).Should().Be(0));
     }
 
     // TEST-08: Changed price and sold-out dishes block confirmation while preserving the ready proposal.
@@ -222,7 +349,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         await SendAsync(client, conversation.ConversationId, reset);
         await factory.ExecuteDbAsync(async db =>
         {
-            (await db.Roadmaps.SingleAsync()).Version.Should().Be(saved.RoadmapVersion);
+            (await db.Roadmaps.SingleAsync()).UpdatedAt.Should().Be(saved.RoadmapUpdatedAt);
             (await db.AgentProposals.SingleAsync(x => x.Id == updated.Proposal!.ProposalId)).Status.Should().Be(AgentProposalStatus.Discarded);
             (await db.AgentProposals.SingleAsync(x => x.Id == turn.Proposal!.ProposalId)).Status.Should().Be(AgentProposalStatus.Committed);
         });
@@ -273,11 +400,20 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var saved = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = turn.Proposal!.ProposalId, ProposalVersion = 1 });
         await factory.ExecuteDbAsync(async db => await db.AgentConversations.ExecuteUpdateAsync(s => s
             .SetProperty(x => x.UpdatedAt, DateTime.UtcNow.AddDays(-31)).SetProperty(x => x.ExpiresAt, DateTime.UtcNow.AddDays(-24))));
+        await factory.ExecuteDbAsync(async db =>
+        {
+            await db.AgentMessages.ExecuteUpdateAsync(s => s.SetProperty(x => x.CreatedAt, DateTime.UtcNow.AddDays(-31)));
+            await db.AgentProposals.ExecuteUpdateAsync(s => s.SetProperty(x => x.CreatedAt, DateTime.UtcNow.AddDays(-31)));
+            await db.AgentMessages.Where(x => x.Role == AgentMessageRole.User).ExecuteUpdateAsync(s => s.SetProperty(x => x.Payload, "{\"attempts\":[]}"));
+        });
         using var scope = host.Services.CreateScope();
         (await scope.ServiceProvider.GetRequiredService<ICleanupAgentConversationsUseCase>().ExecuteAsync(CancellationToken.None)).Should().Be(1);
         await factory.ExecuteDbAsync(async db =>
         {
-            (await db.AgentConversations.CountAsync()).Should().Be(0); (await db.AgentMessages.CountAsync()).Should().Be(0);
+            var retained = await db.AgentConversations.SingleAsync();
+            retained.Id.Should().Be(conversation.ConversationId); retained.RoadmapId.Should().Be(saved.RoadmapId);
+            retained.State.Should().Be("{}");
+            (await db.AgentMessages.CountAsync()).Should().Be(0);
             (await db.AgentProposals.CountAsync()).Should().Be(0); (await db.Roadmaps.SingleAsync()).Id.Should().Be(saved.RoadmapId);
             (await db.RoadmapItems.CountAsync()).Should().BeGreaterThan(0);
         });
@@ -296,7 +432,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var current = await GetAsync(client, conversation.ConversationId);
         var next = await SendAsync(client, conversation.ConversationId, Message(current.Version));
         var updated = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = next.Proposal!.ProposalId, ProposalVersion = 2 });
-        updated.RoadmapId.Should().Be(saved.RoadmapId); updated.RoadmapVersion.Should().Be(saved.RoadmapVersion + 1);
+        updated.RoadmapId.Should().Be(saved.RoadmapId); updated.RoadmapUpdatedAt.Should().BeAfter(saved.RoadmapUpdatedAt);
         updated.ItemIds[$"r{itemId}"].Should().NotBe(itemId);
         await factory.ExecuteDbAsync(async db => (await db.DishFeedbacks.SingleAsync()).RoadmapItemId.Should().BeNull());
     }
@@ -384,10 +520,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         });
     }
 
-    // TEST-19: A second conversation that commits first invalidates another outstanding update proposal for the same roadmap.
-    /// <summary>Verifies optimistic aggregate concurrency across independently owned conversations.</summary>
+    // TEST-19: Opening a saved roadmap reuses its conversation and newer previews supersede older ones.
+    /// <summary>Verifies the single-conversation contract through HTTP.</summary>
     [PostgresEndToEndFact]
-    public async Task TwoConversations_ProtectSharedRoadmapRevision()
+    public async Task OpenRoadmap_ReusesConversationAndSupersedesOldProposal()
     {
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
         var firstConversation = await OpenAsync(client); var first = await SendAsync(client, firstConversation.ConversationId, Message(1));
@@ -395,11 +531,13 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var source = await GetAsync(client, firstConversation.ConversationId);
         var a = await SendAsync(client, source.ConversationId, Message(source.Version));
         using var opening = await client.PostAsJsonAsync(Path, new { roadmapId = saved.RoadmapId });
+        opening.StatusCode.Should().Be(HttpStatusCode.OK);
         var secondConversation = await DataAsync<AgentConversationDto>(opening);
+        secondConversation.ConversationId.Should().Be(firstConversation.ConversationId);
         var b = await SendAsync(client, secondConversation.ConversationId, Message(secondConversation.Version));
-        await ConfirmAsync(client, secondConversation.ConversationId, new() { ProposalId = b.Proposal!.ProposalId, ProposalVersion = 1 });
+        await ConfirmAsync(client, secondConversation.ConversationId, new() { ProposalId = b.Proposal!.ProposalId, ProposalVersion = b.Proposal.Version });
         using var conflict = await client.PostAsJsonAsync($"{Path}/{firstConversation.ConversationId}/confirm", new { proposalId = a.Proposal!.ProposalId, proposalVersion = 2 });
-        await ErrorAsync(conflict, HttpStatusCode.Conflict, "ROADMAP_VERSION_CONFLICT");
+        await ErrorAsync(conflict, HttpStatusCode.Conflict, "PROPOSAL_NOT_COMMITTABLE");
     }
 
     // TEST-20: Proposal-insert failure rolls back superseding the old snapshot and failure recovery never reflushes staged changes.
@@ -501,7 +639,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var removal = await SendAsync(client, conversation.ConversationId, request);
         removal.Proposal!.Snapshot.Items.Should().BeEmpty();
         var updated = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = removal.Proposal.ProposalId, ProposalVersion = 2 });
-        updated.RoadmapVersion.Should().Be(saved.RoadmapVersion + 1); updated.ItemIds.Should().BeEmpty();
+        updated.RoadmapUpdatedAt.Should().BeAfter(saved.RoadmapUpdatedAt); updated.ItemIds.Should().BeEmpty();
         await factory.ExecuteDbAsync(async db => { (await db.Roadmaps.CountAsync()).Should().Be(1); (await db.RoadmapDays.CountAsync()).Should().Be(1); (await db.RoadmapItems.CountAsync()).Should().Be(0); });
     }
 
@@ -635,7 +773,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     }
 
     // TEST-31: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context.
-    /// <summary>Verifies a fresh plan cannot inherit a previously attached roadmap or pre-reset user messages.</summary>
+    /// <summary>Verifies reset preserves its roadmap and excludes pre-reset user messages.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_DiscardAndReset_PreserveSavedRoadmap()
     {
@@ -649,16 +787,16 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var reset = await SendChatAsync(client, conversation.ConversationId, discarded.ConversationVersion, "làm lại từ đầu");
         reset.Proposal.Should().BeNull();
         var restored = await GetAsync(client, conversation.ConversationId);
-        restored.State.Province.Should().BeNull(); restored.State.HistoryStartSequence.Should().BeGreaterThan(0);
+        restored.State.Province.Should().Be("Ho Chi Minh City"); restored.State.HistoryStartSequence.Should().BeGreaterThan(0);
         scenario.Llm.Override = context =>
         {
-            context.Roadmap.Should().BeNull(); context.Source.Should().BeNull();
+            context.Roadmap.Should().NotBeNull(); context.Source.Should().NotBeNull();
             context.History.Should().NotContain(message => message.Content == "Original old planning text");
             return new([], new AgentOutput { Action = "clarify", Reply = "Bạn muốn đến đâu?" });
         };
         await SendChatAsync(client, conversation.ConversationId, reset.ConversationVersion, "Kế hoạch mới");
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
-        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync())).RoadmapId.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync())).RoadmapId.Should().Be(saved.Commit!.RoadmapId);
     }
 
     // TEST-32: A late transcript persistence error rolls back the official save and proposal commit together.
@@ -782,7 +920,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         manual.EnsureSuccessStatusCode();
         using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
             { clientMessageId = 9001, expectedConversationVersion = edit.ConversationVersion, content = "lưu lịch trình này" });
-        await ErrorAsync(failed, HttpStatusCode.Conflict, "ROADMAP_VERSION_CONFLICT");
+        await ErrorAsync(failed, HttpStatusCode.Conflict, "ROADMAP_UPDATED_AT_CONFLICT");
         (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).Title.Should().Be("Keep manual title");
     }
 
@@ -912,9 +1050,179 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         scenario.Llm.Provider = new OpenAiAgentLlmService(http,
             Options.Create(new AiSettings { ApiKey = "fake-test-key", Model = "fake-test-model" }), new(), TimeProvider.System);
         var answered = await SendPromptAsync(client, conversation.ConversationId, "Giải thích bản nháp");
-        answered.Reply.Should().Be("Đã giải thích lịch."); answered.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        answered.Reply.Should().Contain("Bản đề xuất hiện tại").And.NotContain("Đã giải thích lịch."); answered.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
         handler.Calls.Should().Be(2); handler.RepairCalls.Should().Be(1);
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ConcurrentFirstOpen_CreatesOnlyOneConversation()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var roadmapId = await factory.ExecuteDbAsync(async db =>
+        {
+            var userId = await db.Users.Where(x => x.Role.Code == "TRAVELER").Select(x => x.Id).SingleAsync();
+            var roadmap = new ANGI.Domain.Entities.Roadmap { UserId = userId, Title = "Existing trip", NumDays = 1 };
+            db.Roadmaps.Add(roadmap); await db.SaveChangesAsync(); return roadmap.Id;
+        });
+        var responses = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => client.PostAsJsonAsync(Path, new { roadmapId })));
+        try
+        {
+            responses.Count(x => x.StatusCode == HttpStatusCode.Created).Should().Be(1);
+            responses.Count(x => x.StatusCode == HttpStatusCode.OK).Should().Be(3);
+            var opened = await Task.WhenAll(responses.Select(DataAsync<AgentConversationDto>));
+            opened.Select(x => x.ConversationId).Distinct().Should().ContainSingle();
+            (await factory.ExecuteDbAsync(db => db.AgentConversations.CountAsync())).Should().Be(1);
+        }
+        finally { foreach (var response in responses) response.Dispose(); }
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ConcurrentOpenAndExpiredReopen_KeepIdentityAndResetContext()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var request = Message(1); request.ConfirmedState = request.ConfirmedState! with { TasteTargets = [new("spicy", .75)] };
+        var turn = await SendAsync(client, conversation.ConversationId, request);
+        var saved = await ConfirmAsync(client, conversation.ConversationId, new() { ProposalId = turn.Proposal!.ProposalId, ProposalVersion = turn.Proposal.Version });
+        var opens = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => client.PostAsJsonAsync(Path, new { roadmapId = saved.RoadmapId })));
+        foreach (var response in opens)
+        {
+            using (response)
+            {
+                response.StatusCode.Should().Be(HttpStatusCode.OK);
+                (await DataAsync<AgentConversationDto>(response)).ConversationId.Should().Be(conversation.ConversationId);
+            }
+        }
+        var previous = await factory.ExecuteDbAsync(db => db.AgentConversations.AsNoTracking().SingleAsync());
+        await factory.ExecuteDbAsync(async db => await db.AgentConversations.ExecuteUpdateAsync(s => s.SetProperty(x => x.ExpiresAt, DateTime.UtcNow.AddSeconds(-1))));
+        using var read = await client.GetAsync($"{Path}/{conversation.ConversationId}");
+        await ErrorAsync(read, HttpStatusCode.Gone, "CONVERSATION_EXPIRED");
+        using var reopen = await client.PostAsJsonAsync(Path, new { roadmapId = saved.RoadmapId });
+        reopen.StatusCode.Should().Be(HttpStatusCode.OK);
+        var fresh = await DataAsync<AgentConversationDto>(reopen);
+        fresh.ConversationId.Should().Be(conversation.ConversationId); fresh.CurrentProposal.Should().BeNull();
+        fresh.State.TasteTargets.Should().BeEmpty(); fresh.State.Preferences.Should().BeNull();
+        fresh.State.HistoryStartSequence.Should().Be(previous.LastMessageSequence + 1); fresh.Messages.Should().BeEmpty();
+        var next = await SendAsync(client, fresh.ConversationId, Message(fresh.Version));
+        next.Proposal!.Version.Should().BeGreaterThan(turn.Proposal.Version);
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.CountAsync())).Should().Be(1);
+    }
+
+    [PostgresEndToEndFact]
+    public async Task ActiveCleanup_PreservesReplayAndCountersWithoutRenewingActivity()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var oldRequest = Message(1); var first = await SendAsync(client, conversation.ConversationId, oldRequest);
+        var recentRequest = Message(first.ConversationVersion); var second = await SendAsync(client, conversation.ConversationId, recentRequest);
+        await factory.ExecuteDbAsync(async db =>
+        {
+            await db.AgentMessages.ExecuteUpdateAsync(s => s.SetProperty(x => x.CreatedAt, DateTime.UtcNow.AddDays(-31)));
+            await db.AgentMessages.Where(x => x.ClientMessageId == oldRequest.ClientMessageId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Payload, "{\"attempts\":[]}"));
+            await db.AgentProposals.ExecuteUpdateAsync(s => s.SetProperty(x => x.CreatedAt, DateTime.UtcNow.AddDays(-31)));
+        });
+        var before = await factory.ExecuteDbAsync(db => db.AgentConversations.AsNoTracking().SingleAsync());
+        using (var scope = host.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ICleanupAgentConversationsUseCase>().ExecuteAsync(CancellationToken.None);
+        var after = await factory.ExecuteDbAsync(db => db.AgentConversations.AsNoTracking().SingleAsync());
+        after.UpdatedAt.Should().Be(before.UpdatedAt); after.LastMessageSequence.Should().Be(before.LastMessageSequence);
+        after.PurgedClientMessageId.Should().Be(oldRequest.ClientMessageId);
+        (await SendAsync(client, conversation.ConversationId, recentRequest)).Replayed.Should().BeTrue();
+        using var gone = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", oldRequest);
+        await ErrorAsync(gone, HttpStatusCode.Gone, "MESSAGE_EXPIRED");
+        var third = await SendAsync(client, conversation.ConversationId, Message(second.ConversationVersion));
+        third.Proposal!.Version.Should().BeGreaterThan(second.Proposal!.Version);
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync())).LastMessageSequence.Should().BeGreaterThan(before.LastMessageSequence);
+    }
+
+    [RecoEndToEndTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealReco_UsesConversationVectorAndCountsOnlyCommittedDishes(bool saveViaChat)
+    {
+        var settings = new RecommendationSettings { BaseUrl = Environment.GetEnvironmentVariable("ANGI_TEST_RECO_URL")!,
+            ApiKey = Environment.GetEnvironmentVariable("ANGI_TEST_RECO_API_KEY")!, TimeoutMilliseconds = 10000 };
+        using var recoHttp = new HttpClient { BaseAddress = new Uri(settings.BaseUrl), Timeout = TimeSpan.FromSeconds(15) };
+        var recommendation = new RecommendationService(recoHttp, Options.Create(settings), NullLogger<RecommendationService>.Instance);
+        var scenario = await SetupAsync(recommendation); using var host = scenario.Host; using var client = scenario.Client;
+        var userId = await factory.ExecuteDbAsync(db => db.Users.Where(x => x.Role.Code == "TRAVELER").Select(x => x.Id).SingleAsync());
+        var dishes = await factory.ExecuteDbAsync(db => db.Dishes.OrderBy(x => x.Id).Select(x => x.Id).ToArrayAsync());
+        await using var sql = new NpgsqlConnection(factory.ConnectionString); await sql.OpenAsync();
+        await using (var seed = new NpgsqlCommand("""
+            DELETE FROM recommendation.recommendation_logs WHERE user_id=@u;
+            DELETE FROM recommendation.user_dish_scores WHERE user_id=@u;
+            DELETE FROM recommendation.user_preference_vectors WHERE user_id=@u;
+            INSERT INTO recommendation.user_preference_vectors(user_id,vec,survey_answer_count) VALUES (@u,'[1,0,0,0,0,0,0,0,0,0,0,0]',6);
+            INSERT INTO recommendation.dish_vectors(dish_id,vec,source_hash,status,is_active)
+            SELECT d,'[0,0,0,0,0,1,0,0,0,0,0,0]'::vector,repeat('0',64),'ready',true FROM unnest(@d) d
+            ON CONFLICT(dish_id) DO UPDATE SET vec=EXCLUDED.vec,status='ready',is_active=true;
+            """, sql))
+        { seed.Parameters.AddWithValue("u", userId); seed.Parameters.AddWithValue("d", dishes); await seed.ExecuteNonQueryAsync(); }
+        var conversation = await OpenAsync(client);
+        var request = Message(1); request.ConfirmedState = request.ConfirmedState! with { NumDays = 2,
+            TasteTargets = [new("sweet", 0), new("spicy", 1)], Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.5, 12).ToArray() } };
+        var preview = await SendAsync(client, conversation.ConversationId, request);
+        var snapshot = preview.Proposal!.Snapshot; var requestId = snapshot.Items.First().RequestId;
+        requestId.Should().NotBeNull(); snapshot.State.Preferences!.BaselineVector![0].Should().Be(1);
+        snapshot.State.Preferences.EffectiveVector![5].Should().Be(1); snapshot.State.Preferences.EffectiveVector[0].Should().Be(0);
+        (await factory.ExecuteDbAsync(db => db.OutboxMessages.CountAsync(x => x.EventType == OutboxEventType.AgentImpressionRecorded))).Should().Be(0);
+        using var publicPreview = await client.PostAsJsonAsync("/api/v1/impressions", new { requestId, dishIds = snapshot.Items.Select(x => x.DishId).ToArray(), agentProposalId = preview.Proposal.ProposalId });
+        publicPreview.StatusCode.Should().BeOneOf(HttpStatusCode.Accepted, HttpStatusCode.BadRequest);
+        await using (var notShown = new NpgsqlCommand("SELECT count(*) FROM recommendation.recommendation_items WHERE request_id=@r AND shown_at IS NOT NULL", sql))
+        { notShown.Parameters.AddWithValue("r", requestId!.Value); Convert.ToInt64(await notShown.ExecuteScalarAsync()).Should().Be(0); }
+        await factory.ExecuteDbAsync(async db => await db.Database.ExecuteSqlRawAsync("""
+            CREATE FUNCTION core.reject_agent_commit_test() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'Injected commit failure'; END $$;
+            CREATE TRIGGER reject_agent_commit_test BEFORE UPDATE ON core.agent_proposals
+                FOR EACH ROW WHEN (NEW.status = 'committed') EXECUTE FUNCTION core.reject_agent_commit_test();
+            """));
+        using (var rolledBack = saveViaChat
+            ? await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "lưu lịch trình này" })
+            : await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm", new { proposalId = preview.Proposal.ProposalId, proposalVersion = preview.Proposal.Version }))
+            await ErrorAsync(rolledBack, HttpStatusCode.InternalServerError, "INTERNAL_ERROR");
+        await factory.ExecuteDbAsync(async db =>
+        {
+            (await db.Roadmaps.CountAsync()).Should().Be(0);
+            (await db.OutboxMessages.CountAsync(x => x.EventType == OutboxEventType.AgentImpressionRecorded)).Should().Be(0);
+            await db.Database.ExecuteSqlRawAsync("DROP TRIGGER reject_agent_commit_test ON core.agent_proposals; DROP FUNCTION core.reject_agent_commit_test()");
+        });
+        AgentCommitDto commit;
+        if (saveViaChat)
+        {
+            var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này"); commit = saved.Commit!;
+            (await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này")).Commit.Should().BeEquivalentTo(commit);
+        }
+        else
+        {
+            var confirm = new ConfirmAgentProposalRequestDto { ProposalId = preview.Proposal.ProposalId, ProposalVersion = preview.Proposal.Version };
+            commit = await ConfirmAsync(client, conversation.ConversationId, confirm);
+            (await ConfirmAsync(client, conversation.ConversationId, confirm)).Should().BeEquivalentTo(commit);
+        }
+        var outbox = await factory.ExecuteDbAsync(db => db.OutboxMessages.Where(x => x.EventType == OutboxEventType.AgentImpressionRecorded).ToArrayAsync());
+        outbox.Should().ContainSingle(); commit.RoadmapId.Should().BeGreaterThan(0);
+        using (var unavailable = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:1/"), Timeout = TimeSpan.FromSeconds(1) })
+        {
+            var failed = await new RecoOutboxSender(unavailable, Options.Create(settings)).SendAsync(outbox[0], CancellationToken.None);
+            failed.Outcome.Should().Be(OutboxDeliveryOutcome.Retry);
+            (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+        }
+        var sender = new RecoOutboxSender(recoHttp, Options.Create(settings));
+        (await sender.SendAsync(outbox[0], CancellationToken.None)).Outcome.Should().Be(OutboxDeliveryOutcome.Delivered);
+        (await sender.SendAsync(outbox[0], CancellationToken.None)).Outcome.Should().Be(OutboxDeliveryOutcome.Delivered);
+        await using var check = new NpgsqlCommand("""
+            SELECT p.total_shown,p.total_interactions,p.feedback_count,p.vec::text,
+              (SELECT count(*) FROM recommendation.recommendation_items WHERE request_id=@r AND shown_at IS NOT NULL AND agent_proposal_id=@p),
+              (SELECT vector_source FROM recommendation.recommendation_logs WHERE request_id=@r),
+              (SELECT effective_vector::text FROM recommendation.recommendation_logs WHERE request_id=@r)
+            FROM recommendation.user_preference_vectors p WHERE user_id=@u
+            """, sql);
+        check.Parameters.AddWithValue("r", requestId!.Value); check.Parameters.AddWithValue("p", preview.Proposal.ProposalId); check.Parameters.AddWithValue("u", userId);
+        await using var row = await check.ExecuteReaderAsync(); (await row.ReadAsync()).Should().BeTrue();
+        row.GetInt64(0).Should().Be(snapshot.Items.Select(x => x.DishId).Distinct().Count()); row.GetInt32(1).Should().Be(6);
+        row.GetInt32(2).Should().Be(0); row.GetString(3).Should().Be("[1,0,0,0,0,0,0,0,0,0,0,0]");
+        row.GetInt64(4).Should().Be(snapshot.Items.Select(x => x.DishId).Distinct().Count()); row.GetString(5).Should().Be("conversation");
+        JsonSerializer.Deserialize<double[]>(row.GetString(6))!.Should().Equal(snapshot.State.Preferences.EffectiveVector);
     }
 
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>
@@ -944,7 +1252,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     }
 
     /// <summary>Resets the dedicated database, seeds candidates and authenticates the real Traveler HTTP pipeline.</summary>
-    private async Task<Scenario> SetupAsync()
+    private async Task<Scenario> SetupAsync(IRecommendationService? recommendation = null)
     {
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
@@ -959,6 +1267,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         {
             services.RemoveAll<IAgentLlmService>(); services.AddSingleton<IAgentLlmService>(llm);
             services.RemoveAll<IRouteService>(); services.AddSingleton<IRouteService, EstimatedRoute>();
+            if (recommendation is not null)
+            {
+                services.RemoveAll<IRecommendationService>(); services.AddSingleton(recommendation);
+            }
         }));
         var client = host.CreateClient(); client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
         return new(host, client, llm);
