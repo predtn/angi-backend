@@ -342,6 +342,24 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         [Fact]
+        public async Task RecommendConversationAsync_AllCandidatesIgnored_ReturnsEmptyResultWithoutScores()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":null,"config_version":1,"vector_source":"conversation",
+                 "items":[],"ignored_dish_ids":[105,120]}
+                """));
+
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105, 120], 2,
+                new RecommendationVector("conversation", null), CancellationToken.None);
+
+            result.RequestId.Should().BeNull();
+            result.DishIds.Should().BeEmpty();
+            result.Scores.Should().BeNull();
+            result.IgnoredDishIds.Should().Equal(105, 120);
+            result.VectorSource.Should().Be("conversation");
+        }
+
+        [Fact]
         public async Task RecommendConversationAsync_OldRecoResponseUsesRatingFallback()
         {
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """

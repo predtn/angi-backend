@@ -86,6 +86,31 @@ public sealed class AgentToolExecutorTests
         context.Grants.Should().BeEmpty();
     }
 
+    /// <summary>Accepts an empty reco response when all catalog candidates are ignored.</summary>
+    [Fact]
+    public async Task ExecuteAsync_AllCandidatesIgnored_ReturnsNoResultsNoticeWithoutError()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000,
+            It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
+        var reco = new Mock<IRecommendationService>();
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), 50,
+            It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RecommendationResult(null, [], [1], null, "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { Preferences = new() { Initialized = true } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object,
+            new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").GetArrayLength().Should().Be(0);
+        result.GetProperty("ignoredCount").GetInt32().Should().Be(1);
+        context.ToolNotice.Should().NotBeNullOrWhiteSpace();
+        context.Grants.Single().DishIds.Should().BeEmpty();
+        context.Grants.Single().RequestId.Should().BeNull();
+    }
+
     // TEST-04: Empty candidate sets ask for clarification without calling ranking or loosening constraints.
     /// <summary>Verifies the no-candidate business boundary.</summary>
     [Fact]

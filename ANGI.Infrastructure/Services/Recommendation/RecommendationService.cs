@@ -162,7 +162,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
                     result.RequestId,
                     items.Select(item => item.DishId).ToArray(),
                     result.IgnoredDishIds ?? Array.Empty<int>(),
-                    items.Select(item => item.RecommendScore).ToArray(), result.VectorSource);
+                    items.Length == 0 && !result.RequestId.HasValue
+                        ? null
+                        : items.Select(item => item.RecommendScore).ToArray(), result.VectorSource);
             }
 
             var errorCode = await ReadErrorCodeAsync(response, ct);
