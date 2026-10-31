@@ -221,4 +221,33 @@ public sealed class ResolveReportUseCaseTests
         world.Repository.Verify(x => x.AddSanction(It.IsAny<UserSanction>()), Times.Never);
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // TEST-11: Successfully resolve a report claimed by the current moderator.
+    /// <summary>Checks that the moderator who claimed the report can successfully resolve it.</summary>
+    [Fact]
+    public async Task ResolvesReportClaimedByCurrentModerator()
+    {
+        var world = new ModerationTestContext();
+        var reports = Setup(world);
+        reports[0].Status = ReportStatus.InReview;
+        reports[0].HandledBy = 3; // Claimed by current user (3)
+        var response = await Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
+        reports[0].Status.Should().Be(ReportStatus.Resolved);
+        reports[0].HandledBy.Should().Be(3);
+        response.Status.Should().Be("resolved");
+        world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-12: Reject with 404 NOT_FOUND when reportId does not exist.
+    /// <summary>Checks Exception Path 3: 404 Not Found when reportId is invalid.</summary>
+    [Fact]
+    public async Task RejectsNonExistentReportWith404NotFound()
+    {
+        var world = new ModerationTestContext();
+        world.Repository.Setup(x => x.GetReportTargetAsync(99999, It.IsAny<CancellationToken>())).ReturnsAsync((ReportTarget?)null);
+        var action = () => Create(world).ExecuteAsync(99999, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
+        (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        world.UnitOfWork.VerifyNoOtherCalls();
+    }
 }

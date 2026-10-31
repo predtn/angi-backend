@@ -24,7 +24,7 @@ public sealed class ClaimReportUseCase(ModerationAccess access, IRestaurantModer
             ?? throw new NotFoundException("REPORT_NOT_FOUND", "Không tìm thấy báo cáo.");
         if (report.Status is ReportStatus.Resolved or ReportStatus.Dismissed)
             throw new ConflictException("REPORT_CLOSED", "Báo cáo đã được xử lý.");
-        if (report.Status == ReportStatus.InReview)
+        if (report.Status != ReportStatus.Pending || report.HandledBy.HasValue)
             throw new ConflictException("REPORT_ALREADY_CLAIMED", "Báo cáo đã được nhận xử lý.");
         report.Status = ReportStatus.InReview;
         report.HandledBy = callerId;
