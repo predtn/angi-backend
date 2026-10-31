@@ -133,4 +133,31 @@ public sealed class ClaimReportUseCaseTests
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.DisposeAsync(), Times.Once);
     }
+
+    // TEST-07: Reject claim when another moderator has already claimed the report with 409 REPORT_ALREADY_CLAIMED.
+    /// <summary>Checks Exception Path 1: 409 Conflict when claiming a report already taken by another moderator.</summary>
+    [Fact]
+    public async Task RejectsClaimWhenAlreadyClaimedByAnotherModerator()
+    {
+        var world = new ModerationTestContext();
+        var report = Setup(world);
+        report.Status = ReportStatus.InReview;
+        report.HandledBy = 999; // Claimed by another moderator
+        var action = () => Create(world).ExecuteAsync(88, default);
+        (await action.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("REPORT_ALREADY_CLAIMED");
+        world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-08: Reject claim when reportId is invalid with 404 REPORT_NOT_FOUND.
+    /// <summary>Checks Exception Path 3: 404 Not Found when claiming an invalid reportId.</summary>
+    [Fact]
+    public async Task RejectsClaimWhenReportNotFound()
+    {
+        var world = new ModerationTestContext();
+        world.Repository.Setup(x => x.GetReportTargetAsync(99999, It.IsAny<CancellationToken>())).ReturnsAsync((ReportTarget?)null);
+        var action = () => Create(world).ExecuteAsync(99999, default);
+        (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

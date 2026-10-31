@@ -16,21 +16,42 @@ public sealed class ModReportsController(IResolveReportUseCase resolve, IListRep
 {
     /// <summary>MOD-RP1: lists reports matching the authorized target type and optional filters.</summary>
     [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<Paged<ReportDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> List([FromQuery] ListReportsRequestDto request, CancellationToken ct) =>
         Ok(new ApiResponse<Paged<ReportDto>> { Success = true, Data = await list.ExecuteAsync(request, ct) });
 
     /// <summary>MOD-RP2: returns report evidence, its target and other open reports on that target.</summary>
     [HttpGet("{reportId:long}")]
+    [ProducesResponseType(typeof(ApiResponse<ReportDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(long reportId, CancellationToken ct) =>
         Ok(new ApiResponse<ReportDetailDto> { Success = true, Data = await get.ExecuteAsync(reportId, ct) });
 
     /// <summary>MOD-RP3: exclusively assigns a pending report to the authorized caller.</summary>
     [HttpPost("{reportId:long}/claim")]
+    [ProducesResponseType(typeof(ApiResponse<ReportDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Claim(long reportId, CancellationToken ct) =>
         Ok(new ApiResponse<ReportDto> { Success = true, Data = await claim.ExecuteAsync(reportId, ct) });
 
     /// <summary>MOD-RP4: resolves or dismisses a report and applies the associated moderation action.</summary>
     [HttpPost("{reportId:long}/resolve")]
+    [ProducesResponseType(typeof(ApiResponse<ReportDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Resolve(long reportId, ResolveReportRequestDto request, CancellationToken ct) =>
         Ok(new ApiResponse<ReportDto> { Success = true, Data = await resolve.ExecuteAsync(reportId, request, ct) });
 }
