@@ -222,22 +222,7 @@ public sealed class ResolveReportUseCaseTests
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-11: Reject resolving a report claimed by another moderator with 403 FORBIDDEN.
-    /// <summary>Checks Exception Path 2: 403 Forbidden when trying to resolve a report claimed by someone else.</summary>
-    [Fact]
-    public async Task RejectsResolvingReportClaimedByAnotherModerator()
-    {
-        var world = new ModerationTestContext();
-        var reports = Setup(world);
-        reports[0].Status = ReportStatus.InReview;
-        reports[0].HandledBy = 999; // Claimed by another moderator (current user is 3)
-        var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
-        (await action.Should().ThrowAsync<ForbiddenException>()).Which.ErrorCode.Should().Be("FORBIDDEN");
-        world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        world.Audit.VerifyNoOtherCalls();
-    }
-
-    // TEST-12: Successfully resolve a report claimed by the current moderator.
+    // TEST-11: Successfully resolve a report claimed by the current moderator.
     /// <summary>Checks that the moderator who claimed the report can successfully resolve it.</summary>
     [Fact]
     public async Task ResolvesReportClaimedByCurrentModerator()
@@ -254,7 +239,7 @@ public sealed class ResolveReportUseCaseTests
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-13: Reject with 404 NOT_FOUND when reportId does not exist.
+    // TEST-12: Reject with 404 NOT_FOUND when reportId does not exist.
     /// <summary>Checks Exception Path 3: 404 Not Found when reportId is invalid.</summary>
     [Fact]
     public async Task RejectsNonExistentReportWith404NotFound()

@@ -53,8 +53,6 @@ public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> val
         var report = reports.FirstOrDefault(item => item.Id == reportId)
             ?? throw new NotFoundException("REPORT_NOT_FOUND", "Không tìm thấy báo cáo.");
         if (!IsOpen(report)) throw new ConflictException("REPORT_CLOSED", "Báo cáo đã được xử lý.");
-        if (report.HandledBy.HasValue && report.HandledBy.Value != actorId)
-            throw new ForbiddenException("FORBIDDEN", "Chỉ người đã nhận xử lý mới được giải quyết báo cáo này.");
         var now = clock.GetUtcNow().UtcDateTime;
         var note = string.IsNullOrWhiteSpace(request.ResolutionNote) ? null : request.ResolutionNote.Trim();
         var invalidatedUserId = await ApplyActionAsync(action, restaurant, blog, ownerId, actorId, reportId, request, note, now, ct);
