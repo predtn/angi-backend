@@ -56,6 +56,12 @@ coverage for every day and rejects missing meals. Empty existing-roadmap updates
 ## Scoped changes and provenance
 
 Ask only for unresolved scope, taste intensity or novelty meaning; explicit day/meal wording is enough.
+Direct underspecified taste preferences are checked by a conservative backend guard before LLM/tool
+execution. A phrase such as "thích ăn cay" does not authorize any numeric target or whole-trip scope.
+Ask missing intensity and scope together, preserve the existing state/proposal, and collect partial
+answers across completed user turns. Reuse explicit human resolutions, not old model-chosen numbers.
+Constraint-change confirmation does not confirm an unresolved taste. The provider prompt gives this
+clarification priority over immediate preview generation. Other wording remains model-interpreted.
 Keep edits outside mutation scope unchanged. Changed effective taste/meal selectors within a source
 item's scope require fresh matching grants even when its dish ID is retained (except future taste-only
 updates). Future-only changes produce a reviewed revision with the same dishes so it remains savable.
@@ -74,6 +80,10 @@ Backend constructs proposal summaries, catalog failure messages, clarification q
 from validated snapshots/tool outcomes and fixed templates. Names/prices/totals/change counts are
 backend-derived. Unknown opening hours, fame, dietary certainty and ranking explanations are omitted.
 Snapshots remain authoritative for consumers; factual correctness is limited by catalog freshness.
+Fallback disclosures follow selected items' request IDs, not stale grants retained from earlier drafts.
+When a trip/day/meal taste target is present, explain that it is a soft priority rather than a guarantee
+for every dish, and that matching depends on dish data and interaction history. A reco request ID proves
+service processing, not nonzero personalization weight. Reco scoring and cold-start remain unchanged.
 
 ## Verification
 

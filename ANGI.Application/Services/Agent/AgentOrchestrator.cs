@@ -12,6 +12,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     /// <summary>Enforces one schema repair, total calls, bounded context and a backend-controlled timeout.</summary>
     public async Task<AgentPreparedTurn> RunAsync(AgentContext context, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        if (AgentTasteClarificationPolicy.Question(context) is { } tasteQuestion)
+        {
+            telemetry.Record("taste_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(tasteQuestion, context.State with { PendingQuestion = tasteQuestion }, null, null);
+        }
         // Timeout áp dụng cho toàn bộ vòng LLM/tools của lượt chat; ct vẫn giữ quyền hủy từ caller.
         // Use case đã commit bước claim trước khi vào đây nên không giữ transaction DB trong lúc chờ AI.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);

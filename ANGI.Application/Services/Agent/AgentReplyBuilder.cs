@@ -20,7 +20,9 @@ public static class AgentReplyBuilder
             lines.Add($"Ngày {item.DayNumber}, {Meal(item.MealSlot)}: {Safe(item.DishName)} — {Safe(item.RestaurantName)}, {Money(item.Price)} đồng.");
         if (snapshot.Items.Length > 6) lines.Add("Các món còn lại có trong dữ liệu đề xuất đầy đủ.");
         lines.Add($"Tổng tiền dự kiến theo đề xuất: {Money(snapshot.Items.Sum(x => x.Price))} đồng/người.");
-        if (snapshot.Grants.Any(x => !x.RequestId.HasValue)) lines.Add("Một phần đề xuất dùng thứ tự đánh giá thay cho cá nhân hóa.");
+        if (snapshot.Items.Any(x => !x.RequestId.HasValue)) lines.Add("Một phần đề xuất dùng thứ tự đánh giá thay cho cá nhân hóa.");
+        if (snapshot.State.TasteTargets.Length > 0 || snapshot.State.TasteOverrides.Length > 0)
+            lines.Add("Khẩu vị là tiêu chí ưu tiên mềm, chưa bảo đảm từng món đạt mức vị đã chọn. Mức phù hợp còn phụ thuộc dữ liệu món và lịch sử tương tác.");
         if (validation?.Warnings.Any(x => x.Contains("ước lượng", StringComparison.Ordinal)) == true)
             lines.Add("Thông tin tuyến đường có phần ước lượng.");
         lines.Add(saved ? "Đây là lịch đã lưu. Các chỉnh sửa tiếp theo cần được xem lại và xác nhận lưu."

@@ -39,6 +39,79 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     private const string Path = "/api/v1/agent/conversations";
     private static long _nextClientMessageId;
 
+    /// <summary>Replays conversation 10 prompts through HTTP and persists clarification before any planning call.</summary>
+    [PostgresEndToEndFact]
+    public async Task UnscopedTaste_Conversation10PromptsAskBeforePlanning()
+    {
+        string[] prompts = [
+            "Tôi muốn lên lịch ăn uống Hà Nội 3 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn chua",
+            "Tôi muốn lên lịch ăn uống Hà Nội 5 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn cay"
+        ];
+        foreach (var prompt in prompts)
+        {
+            var vectors = new List<double[]?>();
+            var scenario = await SetupAsync(ScopedReco(vectors).Object); using var host = scenario.Host; using var client = scenario.Client;
+            var conversation = await OpenAsync(client);
+            var result = await SendPromptAsync(client, conversation.ConversationId, prompt);
+            result.Reply.Should().Contain("Bạn muốn mức ").And.Contain("toàn chuyến");
+            result.Proposal.Should().BeNull(); result.Commit.Should().BeNull();
+            scenario.Llm.Calls.Should().Be(0); vectors.Should().BeEmpty();
+            var restored = await GetAsync(client, conversation.ConversationId);
+            restored.State.PendingQuestion.Should().Be(result.Reply);
+            restored.State.TasteTargets.Should().BeEmpty(); restored.State.TasteOverrides.Should().BeEmpty();
+            (await factory.ExecuteDbAsync(db => db.AgentProposals.CountAsync())).Should().Be(0);
+            (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+        }
+    }
+
+    /// <summary>Partial taste answers remain durable until the user supplies both intensity and scope.</summary>
+    [PostgresEndToEndFact]
+    public async Task UnscopedTaste_PartialAnswersWaitUntilScopeIsResolved()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var first = await SendPromptAsync(client, conversation.ConversationId, "Tôi thích ăn cay");
+        first.Proposal.Should().BeNull();
+        var partial = await SendPromptAsync(client, conversation.ConversationId, "Vừa");
+        partial.Reply.Should().Contain("toàn chuyến").And.NotContain("Bạn muốn mức ");
+        partial.Proposal.Should().BeNull(); scenario.Llm.Calls.Should().Be(0);
+        (await GetAsync(client, conversation.ConversationId)).State.PendingQuestion.Should().Be(partial.Reply);
+        AgentContext? resumed = null;
+        scenario.Llm.Override = context =>
+        {
+            resumed = context;
+            return new([], new AgentOutput { Action = "clarify", Reply = "Cần thông tin chuyến đi", Clarification = "trip_details" });
+        };
+        await SendPromptAsync(client, conversation.ConversationId, "Toàn chuyến");
+        scenario.Llm.Calls.Should().Be(1); resumed.Should().NotBeNull();
+        resumed!.History.Where(turn => turn.Role == "user").Select(turn => turn.Content)
+            .Should().Contain("Tôi thích ăn cay").And.Contain("Vừa");
+        resumed.Request.Content.Should().Be("Toàn chuyến");
+    }
+
+    /// <summary>An unresolved taste keeps the previous preview visible but blocks both confirmation transports.</summary>
+    [PostgresEndToEndFact]
+    public async Task UnscopedTaste_KeepsPreviousPreviewButBlocksSaving()
+    {
+        var vectors = new List<double[]?>();
+        var scenario = await SetupAsync(ScopedReco(vectors).Object); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var preview = await SendAsync(client, conversation.ConversationId, Message(1));
+        var calls = scenario.Llm.Calls; var rankingCalls = vectors.Count;
+        var result = await SendPromptAsync(client, conversation.ConversationId,
+            "Tôi muốn lên lịch ăn uống Hà Nội 5 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn cay");
+        result.Reply.Should().Contain("toàn chuyến");
+        result.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        scenario.Llm.Calls.Should().Be(calls); vectors.Should().HaveCount(rankingCalls);
+        (await factory.ExecuteDbAsync(db => db.AgentProposals.CountAsync())).Should().Be(1);
+        using var blocked = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm",
+            new { proposalId = preview.Proposal.ProposalId, proposalVersion = preview.Proposal.Version });
+        await ErrorAsync(blocked, HttpStatusCode.Conflict, "PROPOSAL_NOT_COMMITTABLE");
+        (await SendPromptAsync(client, conversation.ConversationId, "Lưu lịch trình này")).Commit.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+        (await factory.ExecuteDbAsync(db => db.OutboxMessages.CountAsync(x => x.EventType == OutboxEventType.AgentImpressionRecorded))).Should().Be(0);
+    }
+
     [PostgresEndToEndFact]
     public async Task ScopedPlanning_ThreeDaysKeepSeparateVectorsAndCommitProvenance()
     {

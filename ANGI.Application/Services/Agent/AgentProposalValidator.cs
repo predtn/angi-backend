@@ -113,7 +113,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 if (result.OriginSkipped) warnings.Add($"Bỏ điểm xuất phát ngày {day.Key} vì cách món đầu quá 30 km.");
             }
         }
-        if (snapshot.Grants.Any(x => !x.RequestId.HasValue)) warnings.Add("Một phần đề xuất dùng xếp hạng đánh giá thay cho cá nhân hóa.");
+        if (normalized.Any(x => !x.RequestId.HasValue)) warnings.Add("Một phần đề xuất dùng xếp hạng đánh giá thay cho cá nhân hóa.");
         var changes = snapshot.Changes?.Select(change => change.Item is null ? change : change with
             { Item = normalized.FirstOrDefault(item => item.ItemKey == change.Item.ItemKey) ?? change.Item }).ToArray();
         return (snapshot with { Items = AgentJson.OrderItems(normalized), Changes = changes }, new(errors.Distinct().ToArray(), warnings.Distinct().ToArray(), total, routeResults.ToArray()));
