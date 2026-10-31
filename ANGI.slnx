@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="ANGI.AiGateway/ANGI.AiGateway.csproj" />
+  <Project Path="ANGI.AiGateway.Tests/ANGI.AiGateway.Tests.csproj" />
   <Project Path="ANGI.Application/ANGI.Application.csproj" />
   <Project Path="ANGI.Domain/ANGI.Domain.csproj" />
   <Project Path="ANGI.Infrastructure/ANGI.Infrastructure.csproj" />

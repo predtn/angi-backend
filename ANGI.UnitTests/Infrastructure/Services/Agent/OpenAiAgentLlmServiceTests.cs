@@ -46,7 +46,71 @@ public sealed class OpenAiAgentLlmServiceTests
         using var sent = JsonDocument.Parse(body!);
         sent.RootElement.GetProperty("tools").GetArrayLength().Should().Be(4);
         sent.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("strict").GetBoolean().Should().BeTrue();
+        sent.RootElement.GetProperty("max_completion_tokens").GetInt32().Should().Be(16000);
+        sent.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
         body.Should().NotContain("test-key");
+    }
+
+    /// <summary>Reserves the configured completion budget after recommendation results and preserves optional provider controls.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("low")]
+    public async Task RunAsync_AfterRecommendation_UsesConfiguredCompletionBudget(string? effort)
+    {
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = body.RootElement;
+            root.GetProperty("max_completion_tokens").GetInt32().Should().Be(12000);
+            root.TryGetProperty("reasoning_effort", out var reasoning).Should().Be(effort is not null);
+            if (effort is not null) reasoning.GetString().Should().Be(effort);
+            root.GetProperty("messages")[3].GetProperty("tool_call_id").GetString().Should().Be("call-reco");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+        var context = AgentTestData.Context();
+        context.Exchanges.Add(new([new("call-reco", "get_recommendation", JsonSerializer.SerializeToElement(new { }))],
+            [JsonSerializer.SerializeToElement(new { rankingMode = "personalized", items = new[] { new { dishId = 123, name = "Món cay" } } })]));
+        var result = await Service(handler, limits: new() { MaxOutputTokens = 12000, ReasoningEffort = effort })
+            .RunAsync(context, false, CancellationToken.None);
+        result!.Output!.Action.Should().Be("answer");
+        handler.Calls.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("none")]
+    [InlineData("low")]
+    public async Task RunAsync_Gpt6Luna_DisablesReasoningForFunctionCalling(string? configuredEffort)
+    {
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            body.RootElement.GetProperty("model").GetString().Should().Be("gpt-6-luna");
+            body.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("none");
+            body.RootElement.GetProperty("tools").GetArrayLength().Should().Be(4);
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+        var result = await Service(handler, limits: new() { ReasoningEffort = configuredEffort }, model: "gpt-6-luna")
+            .RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Output!.Action.Should().Be("answer");
+        handler.Calls.Should().Be(1);
+    }
+
+    /// <summary>Never executes an apparently complete tool call when the provider reports an incomplete completion.</summary>
+    [Fact]
+    public async Task RunAsync_TruncatedToolCall_DiscardsArgumentsWithoutRetry()
+    {
+        var handler = new Handler(_ => Task.FromResult(Response(new
+        {
+            choices = new[] { new { finish_reason = "length", message = new { content = (string?)null,
+                tool_calls = new[] { new { id = "call-cut", type = "function", function = new { name = "get_roadmap", arguments = "{\"roadmapId\":88}" } } } } } },
+            usage = new { total_tokens = 17000 }
+        })));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.Truncated);
+        result.Tokens.Should().Be(17000);
+        result.Tools.Should().BeEmpty(); result.Output.Should().BeNull();
+        handler.Calls.Should().Be(1);
     }
 
     // TEST-02: Reject malformed JSON, missing fields, extra fields, invalid enums, refusal and truncated responses.
@@ -185,6 +249,24 @@ public sealed class OpenAiAgentLlmServiceTests
     }
 
     [Theory]
+    [InlineData(429, "gateway_budget_exhausted")]
+    [InlineData(503, "gateway_spending_stopped")]
+    [InlineData(503, "gateway_ledger_unavailable")]
+    [InlineData(503, "ai_budget_gateway_required")]
+    public async Task RunAsync_BudgetControlFailure_IsNotARetryableProviderOutage(int status, string code)
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status) {
+            Content = new StringContent(JsonSerializer.Serialize(new { error = new { code, message = "private diagnostic" } })) }));
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.Configuration);
+        result.Failure.Reason.Should().Be("budget_control");
+        var userError = new ANGI.Application.Common.Exceptions.AgentProviderException(result.Failure);
+        userError.Message.Should().Contain("hạn mức");
+        AgentJson.Write(result).Should().NotContain("private diagnostic");
+        handler.Calls.Should().Be(1);
+    }
+
+    [Theory]
     [InlineData("[{}]")]
     [InlineData("[]")]
     [InlineData("null")]
@@ -266,8 +348,8 @@ public sealed class OpenAiAgentLlmServiceTests
         clarification = (string?)null,
         constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>() });
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
-    private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key") => new(
-        new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = "configured-model" }), new AgentLimits(), TimeProvider.System);
+    private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key", AgentLimits? limits = null, string model = "configured-model") => new(
+        new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = model }), limits ?? new AgentLimits(), TimeProvider.System);
     /// <summary>Encodes an OpenAI-compatible test response as JSON.</summary>
     private static HttpResponseMessage Response(object value) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
 

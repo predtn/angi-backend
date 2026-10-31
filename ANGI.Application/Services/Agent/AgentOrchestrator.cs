@@ -56,7 +56,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
                 {
                     elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, callNumber = calls + 1,
-                    repair = repaired, failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
+                    repair = repaired, limits.MaxOutputTokens, limits.ReasoningEffort,
+                    failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
                     step.Failure?.ProviderCode, step.Failure?.Reason
                 });
                 // Repair model output once; retry only classified temporary provider failures within the same deadline.

@@ -214,6 +214,8 @@ Trip planning requires province, duration and budget; `startDate` is optional. E
 
 Agent provider calls use `Agent:LlmTimeoutSeconds` (60 seconds by default), capped by the remaining `Agent:TimeoutSeconds` turn budget (90 seconds). `Agent:LeaseSeconds` remains 120 seconds. Other AI consumers keep their independent `Ai:TimeoutSeconds` setting.
 
+`Agent:MaxOutputTokens` defaults to 16000 per call (validated range 100..16000). This is sent as `max_completion_tokens`, which covers reasoning and the structured response. The checked-in backend model is `gpt-6-luna` with `Agent:ReasoningEffort=none`: this model requires reasoning to be disabled for Chat Completions function calling. Its Agent adapter enforces `none` even if an older deployment still sets `low`. For other models, allowed configured values remain null, `none`, `minimal`, `low`, `medium`, `high`; null omits the field, and the model must support the chosen value. On a host, use `Ai__Model=gpt-6-luna`, `Agent__MaxOutputTokens=16000` and `Agent__ReasoningEffort=none`; update older model/effort overrides when deploying. User-secrets are local development configuration and are not published to the host. Truncated responses remain non-retryable and cannot execute tools or save partial proposals.
+
 Provider HTTP 500/502/503 permits at most two retries with backoff. A classified per-minute limit may retry using a short provider retry hint when the turn has enough remaining time; daily quota exhaustion is never retried. Timeout, network, authentication, rejected requests, refusal and truncated output do not trigger automatic retries. Schema or proposal-operation errors permit one repair within the same call/time budget. Tools are disabled after the allowed rounds so the model must finish or clarify. The default total provider-call budget is eight.
 
 Provider rate/quota limits return HTTP 429 `AGENT_UNAVAILABLE`; other provider failures return HTTP 503 with a safe Vietnamese explanation. The application's own per-user quota returns HTTP 429 `AGENT_RATE_LIMITED`. `Retry-After` uses either HTTP headers or Gemini's structured retry metadata. Gemini object and array error envelopes are both supported. Logs retain only fixed diagnostic labels, status, timings and retry hints, never API keys, raw prompts or provider error messages. Canceling the frontend request propagates cancellation without repair, and failed turns preserve the previous preview.
@@ -255,3 +257,11 @@ keeps its current scoring/cold-start. Named dishes/restaurants must resolve agai
 catalog. Unknown/ambiguous/unavailable results ask for clarification instead of substitution.
 User-visible replies are rendered from validated snapshots and fixed clarification templates.
 No frontend or reco change, new database table, or migration is required for this extension.
+
+## AI spending gateway
+
+Paid OpenAI setup for backend Agent and roadmap generation requires the [AI spending gateway](.docs/AI_Cost_Control_Ver1.0.md).
+Both backend AI clients refuse real provider keys and route through it. Default budgets are zero and spending is stopped.
+The separate PostgreSQL ledger survives restarts and checks global/chat caps atomically before every attempt.
+Reco keeps its own AI configuration and calls its provider independently; dish/user vector generation is outside this gateway.
+Follow the deployment guide when configuring backend credentials; the backend's real provider key belongs only on the gateway.

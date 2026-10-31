@@ -30,7 +30,8 @@ public static class AgentModule
             if (Uri.TryCreate(ai.BaseUrl, UriKind.Absolute, out var address)) client.BaseAddress = address;
             client.Timeout = TimeSpan.FromSeconds(Math.Min(limits.LlmTimeoutSeconds, limits.TimeoutSeconds));
             client.MaxResponseContentBufferSize = 2_000_000;
-        });
+        }).AddHttpMessageHandler<AiBudgetGatewayHandler>()
+          .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHostedService<AgentCleanupWorker>();
         return services;
     }
@@ -44,5 +45,6 @@ public static class AgentModule
         limits.LeaseSeconds > limits.TimeoutSeconds && limits.LeaseSeconds <= 600 &&
         limits.MessagesPerMinute > 0 && limits.MessagesPerDay >= limits.MessagesPerMinute && limits.ActiveDays > 0 &&
         limits.RetentionDays >= limits.ActiveDays && limits.RetentionDays <= 365 && limits.CleanupSeconds is >= 1 and <= 86400 &&
-        limits.MaxOutputTokens is >= 100 and <= 16000;
+        limits.MaxOutputTokens is >= 100 and <= 16000 &&
+        limits.ReasoningEffort is null or "none" or "minimal" or "low" or "medium" or "high";
 }

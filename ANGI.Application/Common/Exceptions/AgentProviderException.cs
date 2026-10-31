@@ -10,6 +10,7 @@ public sealed class AgentProviderException(AgentLlmFailure failure) : ServiceUna
     /// <summary>Provides user-facing guidance without returning internal provider details or credentials.</summary>
     private static string MessageFor(AgentLlmFailure failure) => failure.Kind switch
     {
+        _ when failure.Reason == "budget_control" => "AI đang tạm dừng theo hạn mức sử dụng. Vui lòng liên hệ quản trị viên.",
         AgentLlmFailureKind.Timeout => "Dịch vụ AI phản hồi quá lâu. Vui lòng thử lại sau.",
         AgentLlmFailureKind.TurnTimeout => "Agent đã hết thời gian xử lý yêu cầu. Vui lòng thử lại sau.",
         AgentLlmFailureKind.RateLimited when failure.Reason == "daily_quota_exceeded" => "Dịch vụ AI đã vượt hạn mức sử dụng trong ngày. Vui lòng thử lại sau khi hạn mức được đặt lại.",
@@ -19,7 +20,7 @@ public sealed class AgentProviderException(AgentLlmFailure failure) : ServiceUna
         AgentLlmFailureKind.Network => "Không kết nối được tới dịch vụ AI. Vui lòng thử lại sau.",
         AgentLlmFailureKind.RejectedRequest => "Không thể gửi yêu cầu hợp lệ tới dịch vụ AI. Vui lòng thử lại sau.",
         AgentLlmFailureKind.ProviderUnavailable => "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau.",
-        AgentLlmFailureKind.Truncated => "Phản hồi của AI vượt giới hạn độ dài. Vui lòng thu hẹp yêu cầu và thử lại.",
+        AgentLlmFailureKind.Truncated => "AI chưa hoàn tất phản hồi trong giới hạn xử lý. Vui lòng thử lại sau.",
         AgentLlmFailureKind.Refused => "Dịch vụ AI không thể trả lời yêu cầu này. Vui lòng điều chỉnh nội dung.",
         _ => "Dịch vụ AI trả phản hồi chưa hợp lệ. Vui lòng thử lại sau."
     };

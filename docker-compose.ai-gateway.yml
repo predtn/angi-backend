@@ -1,0 +1,54 @@
+# Backend AI spending gateway with its own budget database and volume.
+services:
+  ai-budget-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: angi_ai_budget
+      POSTGRES_USER: angi_ai_budget
+      POSTGRES_PASSWORD: ${AI_BUDGET_DB_PASSWORD:?Set a dedicated budget database password}
+    volumes:
+      - ai_budget_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U angi_ai_budget -d angi_ai_budget"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [budget-private]
+
+  ai-gateway-migrate:
+    build:
+      context: .
+      dockerfile: ANGI.AiGateway/Dockerfile
+    command: ["--migrate"]
+    environment:
+      Gateway__ConnectionString: Host=ai-budget-db;Database=angi_ai_budget;Username=angi_ai_budget;GSS Encryption Mode=Disable;Password=${AI_BUDGET_DB_PASSWORD:?Set a dedicated budget database password}
+    depends_on:
+      ai-budget-db:
+        condition: service_healthy
+    restart: "no"
+    networks: [budget-private]
+
+  ai-gateway:
+    build:
+      context: .
+      dockerfile: ANGI.AiGateway/Dockerfile
+    environment:
+      Gateway__ConnectionString: Host=ai-budget-db;Database=angi_ai_budget;Username=angi_ai_budget;GSS Encryption Mode=Disable;Password=${AI_BUDGET_DB_PASSWORD:?Set a dedicated budget database password}
+      Gateway__ProviderApiKey: ${OPENAI_GATEWAY_PROVIDER_KEY:-}
+      Gateway__ChatKey: ${AI_GATEWAY_CHAT_KEY:-}
+      Gateway__AdminKey: ${AI_GATEWAY_ADMIN_KEY:-}
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      ai-gateway-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [budget-private, default]
+
+volumes:
+  ai_budget_data:
+
+networks:
+  budget-private:
+    internal: true

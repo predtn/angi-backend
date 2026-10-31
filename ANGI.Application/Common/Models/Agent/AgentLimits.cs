@@ -20,5 +20,8 @@ public sealed class AgentLimits
     public int ActiveDays { get; set; } = 7;
     public int RetentionDays { get; set; } = 30;
     public int CleanupSeconds { get; set; } = 3600;
-    public int MaxOutputTokens { get; set; } = 8000;
+    /// <summary>Per-call completion budget, including provider reasoning tokens and structured output.</summary>
+    public int MaxOutputTokens { get; set; } = 16000;
+    /// <summary>Optional provider-supported reasoning effort; null preserves the provider default.</summary>
+    public string? ReasoningEffort { get; set; }
 }

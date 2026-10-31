@@ -65,6 +65,7 @@ jobs:
         env:
           RUN_POSTGRES_INTEGRATION_TESTS: 1
           ANGI_TEST_POSTGRES_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=angi_test;Username=angi_backend;Password=integration_test
+          ANGI_GATEWAY_TEST_CONNECTION: Host=127.0.0.1;Port=5432;Database=angi_test;Username=angi_backend;Password=integration_test
         run: >
           dotnet test ANGI.slnx --configuration Release --no-build
           --logger trx --results-directory TestResults

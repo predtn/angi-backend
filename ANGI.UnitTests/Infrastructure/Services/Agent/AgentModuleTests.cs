@@ -29,6 +29,7 @@ public sealed class AgentModuleTests
     [InlineData("ActiveDays", "0")][InlineData("RetentionDays", "6")][InlineData("RetentionDays", "366")]
     [InlineData("CleanupSeconds", "0")][InlineData("CleanupSeconds", "86401")]
     [InlineData("MaxOutputTokens", "99")][InlineData("MaxOutputTokens", "16001")]
+    [InlineData("ReasoningEffort", "unbounded")][InlineData("ReasoningEffort", "")]
     public void AddAgentInfrastructure_InvalidLimit_RejectsStartup(string property, string value)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [$"Agent:{property}"] = value }).Build();
@@ -45,6 +46,22 @@ public sealed class AgentModuleTests
         using var provider = services.BuildServiceProvider();
         var limits = provider.GetRequiredService<AgentLimits>(); limits.LeaseSeconds.Should().BeGreaterThan(limits.TimeoutSeconds);
         limits.MaxCandidates.Should().Be(2000); limits.MaxRanked.Should().Be(200); limits.RetentionDays.Should().Be(30);
+        limits.MaxOutputTokens.Should().Be(16000); limits.ReasoningEffort.Should().BeNull();
+    }
+
+    /// <summary>Binds supported reasoning controls without requiring live provider credentials.</summary>
+    [Theory]
+    [InlineData("none")][InlineData("minimal")][InlineData("low")]
+    [InlineData("medium")][InlineData("high")]
+    public void AddAgentInfrastructure_ReasoningEffort_BindsConfiguredValue(string effort)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Agent:ReasoningEffort"] = effort
+        }).Build();
+        var services = new ServiceCollection(); services.AddAgentInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<AgentLimits>().ReasoningEffort.Should().Be(effort);
     }
 
     // TEST-03: Agent's provider timeout is independent of shared roadmap AI settings and capped by the turn deadline.

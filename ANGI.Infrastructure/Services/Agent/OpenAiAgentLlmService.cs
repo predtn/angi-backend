@@ -120,7 +120,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         get_recommendation always includes alternative=false for ordinary recommendations and true for alternatives.
         Keep recommendation results compact: usually topK=30 for a three-day trip and topK=12 for a single meal.
         Do not request 200 candidates for a small edit. Reuse already issued candidates within this turn.
-        reply is only an internal draft: backend constructs factual replies from validated data. Always set nullable
+        reply is only an internal draft: backend constructs factual replies from validated data. Keep reply to one
+        or two short sentences; never repeat the itinerary, candidate lists or tool results there. Put the complete
+        itinerary only in items/changes and include every requested day and meal. Always set nullable
         clarification to trip_details, taste_scope, taste_intensity, edit_scope, novelty, catalog_choice, coverage,
         catalog_support, general, or null when not clarifying. No unsupported factual assertions in questions.
         Do not claim official changes before backend confirmation through chat saving or the confirmation endpoint. A conversational
@@ -146,9 +148,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
                 Content = JsonContent.Create(BuildBody(context, repair), options: AgentJson.Options)
             };
             // ĐÂY LÀ NƠI TRUYỀN API KEY LLM: header HTTP Authorization: Bearer <Ai:ApiKey>.
-            // Đây là key xác thực provider của backend, khác với JWT của Traveler gọi Web API.
+            // Đây là scoped key của budget gateway, khác với JWT của Traveler gọi Web API.
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Value.ApiKey);
-            // ĐÂY LÀ LỜI GỌI HTTP THẬT tới {Ai:BaseUrl}chat/completions.
+            // AiBudgetGatewayHandler bắt buộc chuyển request qua bộ kiểm soát ngân sách dùng chung.
             // AgentOrchestrator gọi method này gián tiếp qua interface IAgentLlmService.
             using var response = await http.SendAsync(request, ct);
             httpStatus = (int)response.StatusCode;
@@ -164,6 +166,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
                     _ => AgentLlmFailureKind.RejectedRequest
                 };
                 var (code, reason, retry) = await FailureMetadataAsync(response, ct);
+                if (reason == "budget_control") kind = AgentLlmFailureKind.Configuration;
                 return new([], null, Failure: new(kind, status, RetryDelay(response) ?? retry, code, reason));
             }
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
@@ -234,6 +237,12 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object) return (null, null, null);
             var code = error.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String ? status.GetString() :
                 error.TryGetProperty("code", out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+            if (code is "ai_budget_gateway_required" or "gateway_spending_stopped" or "gateway_budget_exhausted" or
+                "gateway_concurrency_limit" or "gateway_rate_limit" or
+                "gateway_pricing_review_expired" or "gateway_policy_mismatch" or "gateway_provider_not_configured" or
+                "gateway_ledger_unavailable" or "gateway_ledger_not_initialized" or "gateway_settlement_unavailable" or
+                "gateway_upstream_outcome_unknown" or "gateway_usage_missing" or "gateway_upstream_rejected")
+                return ("budget_control", "budget_control", null);
             if (code is not ("UNAVAILABLE" or "RESOURCE_EXHAUSTED" or "INTERNAL" or "INVALID_ARGUMENT" or "PERMISSION_DENIED" or
                 "UNAUTHENTICATED" or "NOT_FOUND" or "DEADLINE_EXCEEDED" or "insufficient_quota" or "rate_limit_exceeded")) code = null;
             var message = error.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String ? text.GetString() ?? "" : "";
@@ -300,14 +309,20 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         if (toolsExhausted) messages.Add(new { role = "user", content = "The tool-round budget is exhausted. Return the final proposal now using the issued candidates; if these cannot satisfy the request, return clarify with a precise explanation. Do not request more tools." });
         // Strict tools và response_format giới hạn các tham số và action trong allowlist.
         // Không đưa key vào body; key chỉ được gắn vào HTTP header trong RunAsync phía trên.
-        return new
+        var body = new Dictionary<string, object?>
         {
-            model = settings.Value.Model, messages, parallel_tool_calls = false, max_completion_tokens = limits.MaxOutputTokens,
-            tool_choice = toolsExhausted ? "none" : "auto",
-            tools = AgentLlmSchema.Tools.Select(pair => new { type = "function", function = new
+            ["model"] = settings.Value.Model, ["messages"] = messages, ["parallel_tool_calls"] = false,
+            ["max_completion_tokens"] = limits.MaxOutputTokens,
+            ["tool_choice"] = toolsExhausted ? "none" : "auto",
+            ["tools"] = AgentLlmSchema.Tools.Select(pair => new { type = "function", function = new
                 { name = pair.Key, description = $"Read-only ANGI {pair.Key}; backend validates ownership, source and scope.", strict = true, parameters = pair.Value } }),
-            response_format = new { type = "json_schema", json_schema = new { name = "angi_agent_turn", strict = true, schema = AgentLlmSchema.Output } }
+            ["response_format"] = new { type = "json_schema", json_schema = new { name = "angi_agent_turn", strict = true, schema = AgentLlmSchema.Output } }
         };
+        // GPT-6 Luna only supports Chat Completions function calling with reasoning disabled.
+        // Enforce this even when an older deployment still configures low effort.
+        if (settings.Value.Model == "gpt-6-luna") body["reasoning_effort"] = "none";
+        else if (limits.ReasoningEffort is { } effort) body["reasoning_effort"] = effort;
+        return body;
     }
 
     /// <summary>Returns tool calls unchanged with Gemini signatures while omitting absent provider extensions.</summary>
