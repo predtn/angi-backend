@@ -215,6 +215,26 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
         };
     }
 
+    /// <summary>Locks a non-deleted user account with role and avatar for moderation update.</summary>
+    public async Task<User?> LockUserAsync(int userId, CancellationToken ct) =>
+        await context.Users
+            .Include(u => u.Role)
+            .Include(u => u.AvatarMedia)
+            .FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, ct);
+
+    /// <summary>Queries active unlifted sanctions for a user.</summary>
+    public async Task<IReadOnlyList<UserSanction>> GetActiveSanctionsAsync(int userId, DateTime now, CancellationToken ct) =>
+        await context.UserSanctions
+            .Where(s => s.UserId == userId && s.LiftedAt == null &&
+                (s.Type == SanctionType.Ban || s.Type == SanctionType.Suspend))
+            .OrderByDescending(s => s.StartsAt)
+            .ThenByDescending(s => s.Id)
+            .ToListAsync(ct);
+
+    /// <summary>Adds a notification to the current unit of work.</summary>
+    public void AddNotification(Domain.Entities.Notification notification) =>
+        context.Notifications.Add(notification);
+
     private static bool TryParseStatus(string raw, out UserStatus status)
     {
         switch (raw.Trim().ToLowerInvariant())

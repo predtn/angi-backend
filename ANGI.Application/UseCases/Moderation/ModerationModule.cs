@@ -15,6 +15,7 @@ using ANGI.Application.UseCases.Moderation.ListVerifications;
 using ANGI.Application.UseCases.Moderation.RejectMenuSubmission;
 using ANGI.Application.UseCases.Moderation.ResolveReport;
 using ANGI.Application.UseCases.Moderation.ReviewVerification;
+using ANGI.Application.UseCases.Moderation.UnbanUser;
 using ANGI.Application.UseCases.Moderation.UpdateDishModerationStatus;
 using ANGI.Application.UseCases.Moderation.UpdateRestaurantModerationStatus;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,6 +47,7 @@ public static class ModerationModule
         services.AddScoped<IClaimReportUseCase, ClaimReportUseCase>();
         services.AddScoped<IGetUsersUseCase, GetUsersUseCase>();
         services.AddScoped<IGetUserDetailUseCase, GetUserDetailUseCase>();
+        services.AddScoped<IUnbanUserUseCase, UnbanUserUseCase>();
         services.AddScoped<IExpireUserSuspensionsUseCase, ExpireUserSuspensionsUseCase>();
         return services;
     }

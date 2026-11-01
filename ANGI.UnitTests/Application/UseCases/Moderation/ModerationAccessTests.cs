@@ -64,6 +64,7 @@ internal sealed class ModerationTestContext
     internal Mock<ICurrentUserService> Current { get; } = new();
     internal Mock<IAccountRepository> Accounts { get; } = new();
     internal Mock<IRestaurantModerationRepository> Repository { get; } = new();
+    internal Mock<IUserModerationRepository> UserModerationRepository { get; } = new();
     internal Mock<IUnitOfWork> UnitOfWork { get; } = new();
     internal Mock<IUnitOfWorkTransaction> Transaction { get; } = new();
     internal Mock<IAuditLogService> Audit { get; } = new();

@@ -13,7 +13,8 @@ namespace ANGI.WebApi.Controllers.Moderation;
 [Authorize(Roles = "MOD,ADMIN,MODERATOR")]
 public sealed class ModUsersController(
     IGetUsersUseCase getUsers,
-    IGetUserDetailUseCase getUserDetail) : ControllerBase
+    IGetUserDetailUseCase getUserDetail,
+    IUnbanUserUseCase unbanUser) : ControllerBase
 {
     /// <summary>MOD-U1: lists user accounts using moderator filters and pagination.</summary>
     [HttpGet]
@@ -33,4 +34,15 @@ public sealed class ModUsersController(
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(int userId, CancellationToken ct) =>
         Ok(new ApiResponse<ModUserDetailDto> { Success = true, Data = await getUserDetail.ExecuteAsync(userId, ct) });
+
+    /// <summary>MOD-U4: lifts an active ban or suspension from a user account.</summary>
+    [HttpPost("{userId:int}/unban")]
+    [ProducesResponseType(typeof(ApiResponse<AdminUserCardDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Unban(int userId, [FromBody] UnbanUserRequestDto request, CancellationToken ct) =>
+        Ok(new ApiResponse<AdminUserCardDto> { Success = true, Data = await unbanUser.ExecuteAsync(userId, request, ct) });
 }
