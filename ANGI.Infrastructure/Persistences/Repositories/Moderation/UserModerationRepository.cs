@@ -260,4 +260,32 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
                 hour.CloseTime < hour.OpenTime &&
                 currentTime < hour.CloseTime);
     }
+
+    /// <summary>Locks an account and loads its current role before applying a sanction.</summary>
+    public Task<User?> LockUserAsync(int userId, CancellationToken ct) => context.Users
+        .FromSqlInterpolated($"SELECT * FROM core.users WHERE id = {userId} FOR UPDATE")
+        .Include(u => u.Role)
+        .SingleOrDefaultAsync(ct);
+
+    /// <summary>Tracks unrevoked sessions for atomic revocation with a suspension or ban.</summary>
+    public async Task<IReadOnlyList<UserSession>> GetSessionsAsync(int userId, CancellationToken ct) =>
+        await context.UserSessions.Where(s => s.UserId == userId && s.RevokedAt == null).ToListAsync(ct);
+
+    /// <summary>Stages a sanction without saving or starting a transaction.</summary>
+    public void AddSanction(UserSanction sanction) => context.UserSanctions.Add(sanction);
+
+    /// <summary>Stages a notification without saving or starting a transaction.</summary>
+    public void AddNotification(Domain.Entities.Notification notification) => context.Notifications.Add(notification);
+
+    /// <summary>Loads the public profile summary of an issuer user.</summary>
+    public async Task<UserSummaryDto?> GetUserSummaryAsync(int userId, CancellationToken ct) =>
+        await context.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new UserSummaryDto
+            {
+                Id = u.Id,
+                DisplayName = u.DisplayName,
+                AvatarUrl = u.AvatarMedia != null ? u.AvatarMedia.Url : null
+            })
+            .FirstOrDefaultAsync(ct);
 }

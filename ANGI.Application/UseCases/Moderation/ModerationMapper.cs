@@ -55,6 +55,21 @@ internal static class ModerationMapper
     /// <summary>Converts a domain enum to its exact snake_case API representation.</summary>
     internal static string Api<T>(T value) where T : struct, Enum => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 
+    /// <summary>Maps a newly created user sanction to its API DTO.</summary>
+    internal static SanctionDto Sanction(UserSanction sanction, UserSummaryDto issuedBy) => new()
+    {
+        Id = sanction.Id,
+        Type = Api(sanction.Type),
+        Reason = sanction.Reason,
+        ReportId = sanction.ReportId,
+        IssuedBy = issuedBy,
+        StartsAt = sanction.StartsAt,
+        EndsAt = sanction.EndsAt,
+        LiftedAt = sanction.LiftedAt,
+        LiftedBy = null,
+        LiftReason = sanction.LiftReason
+    };
+
     /// <summary>Maps the projected restaurant and its open report count into a list card.</summary>
     internal static ModRestaurantCardDto Card(ModRestaurantListItem item, TimeProvider clock)
     {

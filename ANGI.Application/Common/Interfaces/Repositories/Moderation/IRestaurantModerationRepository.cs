@@ -6,7 +6,7 @@ using ANGI.Domain.Entities;
 namespace ANGI.Application.Common.Interfaces.Repositories.Moderation;
 
 /// <summary>Provides moderation reads and tracked writes without owning transactions or business rules.</summary>
-public interface IRestaurantModerationRepository
+public interface IRestaurantModerationRepository : IUserSanctionRepository
 {
     /// <summary>Lists reports with exact target, state and reason filters in deterministic newest-first order.</summary>
     Task<Paged<Report>> ListReportsAsync(ListReportsRequestDto request, CancellationToken ct);
@@ -44,14 +44,6 @@ public interface IRestaurantModerationRepository
     Task<Blog?> LockBlogAsync(long id, CancellationToken ct);
     /// <summary>Loads names, public user data, evidence metadata and the open report count.</summary>
     Task<ReportDisplayData> GetReportDisplayDataAsync(ReportTarget target, IReadOnlyList<Report> reports, CancellationToken ct);
-    /// <summary>Locks the account being sanctioned, including its current database role.</summary>
-    Task<User?> LockUserAsync(int userId, CancellationToken ct);
-    /// <summary>Loads unrevoked sessions for a sanctioned user.</summary>
-    Task<IReadOnlyList<UserSession>> GetSessionsAsync(int userId, CancellationToken ct);
     /// <summary>Locks a bounded batch of non-deleted suspended accounts whose deadline has passed.</summary>
     Task<IReadOnlyList<User>> LockExpiredSuspensionsAsync(DateTime now, CancellationToken ct);
-    /// <summary>Adds a sanction to the current unit of work.</summary>
-    void AddSanction(UserSanction sanction);
-    /// <summary>Adds a notification to the current unit of work.</summary>
-    void AddNotification(Domain.Entities.Notification notification);
 }
