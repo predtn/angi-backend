@@ -396,6 +396,29 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             result.RequestId.Should().BeNull(); result.Scores.Should().BeNull(); result.DishIds.Should().Equal(105);
         }
 
+        // TEST-22: A reco answer slower than the 100 ms list timeout but within the Agent timeout is used for a conversation ranking, while the same delay falls back for a regular ranking; covers both calls.
+        /// <summary>Ensures a brief reco pause no longer turns an Agent meal into rating fallback, without lengthening list screens.</summary>
+        [Theory]
+        [InlineData(true)][InlineData(false)]
+        public async Task Ranking_SlowRecoAnswer_UsesAgentTimeoutOnlyForConversation(bool conversation)
+        {
+            var handler = new DelayedHttpMessageHandler(TimeSpan.FromMilliseconds(400), """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "vector_source":"conversation","items":[{"dish_id":120,"rank":1,"recommend_score":0.9}],"ignored_dish_ids":[]}
+                """);
+            var service = new RecommendationService(new HttpClient(handler) { BaseAddress = new Uri("https://reco.angi.test/") },
+                Options.Create(new RecommendationSettings { BaseUrl = "https://reco.angi.test/", ApiKey = "test-api-key",
+                    TimeoutMilliseconds = 100, AgentTimeoutMilliseconds = 5000 }),
+                NullLogger<RecommendationService>.Instance);
+
+            var result = conversation
+                ? await service.RecommendConversationAsync(12, [105, 120], 1, new RecommendationVector("conversation", null), CancellationToken.None)
+                : await service.RecommendAsync(12, [105, 120], 1, RecommendationContext.RoadmapAi, CancellationToken.None);
+
+            if (conversation) { result.RequestId.Should().Be(RequestId); result.DishIds.Should().Equal(120); }
+            else { result.RequestId.Should().BeNull(); result.DishIds.Should().Equal(105); }
+        }
+
         /// <summary>Creates a service whose reco calls fail in the named way: 5xx, 4xx, timeout, network, bad body or missing config.</summary>
         private static RecommendationService CreateFailingService(string failure) => failure switch
         {
@@ -462,6 +485,17 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
                     request.Headers.TryGetValues("X-Api-Key", out var values) ? values.Single() : null,
                     request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken)));
                 return _send(request);
+            }
+        }
+
+        /// <summary>Handler that answers with a JSON body after a delay, honouring the per-call cancellation token.</summary>
+        private sealed class DelayedHttpMessageHandler(TimeSpan delay, string body) : HttpMessageHandler
+        {
+            /// <summary>Waits for the delay, or throws when the service cancels the call first, then returns 200 with the body.</summary>
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                await Task.Delay(delay, cancellationToken);
+                return Json(HttpStatusCode.OK, body);
             }
         }
     }

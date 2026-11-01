@@ -115,6 +115,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
             int topK, RecommendationVector vector, CancellationToken ct) =>
             RankAsync(userId, candidates, topK, RecommendationContext.RoadmapAi, vector, ct);
 
+        /// <summary>Uses a positive configured timeout, or the documented default when it is missing or invalid.</summary>
+        internal static int Milliseconds(int configured, int fallback) => configured > 0 ? configured : fallback;
+
         private async Task<RecommendationResult> RankAsync(int? userId, IReadOnlyList<int> candidateDishIds,
             int? topK, RecommendationContext context, RecommendationVector? vector, CancellationToken ct)
         {
@@ -140,7 +143,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
             }
 
             var body = new RecommendRequest(userId, candidates, topK, context, vector?.VectorSource, vector?.UserVectorOverride);
-            var outcome = await SendAsync(HttpMethod.Post, "recommendations", body, "RECO-05", ct);
+            // Agent ranking waits longer: a short reco pause should not silently turn a chat meal into rating fallback.
+            var outcome = await SendAsync(HttpMethod.Post, "recommendations", body, "RECO-05", ct,
+                vector is null ? null : Milliseconds(_settings.AgentTimeoutMilliseconds, 3000));
             if (outcome.Failed)
             {
                 return Fallback(candidates, topK);
@@ -258,8 +263,12 @@ namespace ANGI.Infrastructure.Services.Recommendation
             string path,
             object? body,
             string endpointId,
-            CancellationToken ct)
+            CancellationToken ct,
+            int? timeoutMilliseconds = null)
         {
+            var limit = timeoutMilliseconds ?? Milliseconds(_settings.TimeoutMilliseconds, 800);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(limit);
             using var request = new HttpRequestMessage(method, path);
             if (body is not null)
             {
@@ -273,11 +282,11 @@ namespace ANGI.Infrastructure.Services.Recommendation
 
             try
             {
-                return new SendOutcome(await _httpClient.SendAsync(request, ct));
+                return new SendOutcome(await _httpClient.SendAsync(request, timeout.Token));
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                _logger.LogWarning("{EndpointId} did not answer within {TimeoutMilliseconds} ms.", endpointId, _settings.TimeoutMilliseconds);
+                _logger.LogWarning("{EndpointId} did not answer within {TimeoutMilliseconds} ms.", endpointId, limit);
             }
             catch (HttpRequestException exception)
             {

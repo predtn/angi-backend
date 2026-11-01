@@ -23,10 +23,10 @@ namespace ANGI.Infrastructure.Services.Recommendation
                     client.BaseAddress = baseAddress;
                 }
 
-                client.Timeout = TimeSpan.FromMilliseconds(
-                    recommendationSettings.TimeoutMilliseconds > 0
-                        ? recommendationSettings.TimeoutMilliseconds
-                        : 800);
+                // The client allows the longest per-call budget; RecommendationService cancels each call at its own limit.
+                client.Timeout = TimeSpan.FromMilliseconds(Math.Max(
+                    RecommendationService.Milliseconds(recommendationSettings.TimeoutMilliseconds, 800),
+                    RecommendationService.Milliseconds(recommendationSettings.AgentTimeoutMilliseconds, 3000)));
             });
 
             return services;
