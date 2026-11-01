@@ -38,6 +38,9 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         var normalized = new List<AgentItem>();
         // Món chỉ thiếu grant đúng ngày/bữa; nếu đó là lỗi duy nhất, orchestrator có thể tự thay bằng món đã được cấp.
         var scopeRejected = new List<string>();
+        // changed: món mới hoặc được chọn lại trong lượt này; added: vị trí đổi sang món khác món nguồn.
+        var changed = new HashSet<string>(StringComparer.Ordinal);
+        var added = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in snapshot.Items)
         {
             if (!catalog.TryGetValue(item.DishId, out var dish) || !IsPublic(dish))
@@ -50,6 +53,8 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     AgentScopedPlanning.RequiresRefresh(source.State, state, item) ||
                     (kept.DayNumber != item.DayNumber || kept.MealSlot != item.MealSlot) &&
                     AgentScopedPlanning.Fingerprint(source.State, kept.DayNumber, kept.MealSlot) != AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot));
+            if (!unchanged || refreshed) changed.Add(item.ItemKey);
+            if (!unchanged) added.Add(item.ItemKey);
             var authorization = confirm || freshGrants is null ? snapshot.Grants : freshGrants;
             var grant = authorization.LastOrDefault(g => (!g.DayNumber.HasValue || g.DayNumber == item.DayNumber) &&
                 (g.MealSlot is null || g.MealSlot == item.MealSlot) && g.DishIds.Contains(item.DishId) &&
@@ -108,8 +113,18 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             for (short day = 1; day <= state.NumDays; day++)
                 foreach (var meal in state.MealSlots)
                     if (!normalized.Any(x => x.DayNumber == day && x.MealSlot == meal)) errors.Add($"Chưa có món cho bữa {meal} ngày {day}.");
+        // Bữa sáng/trưa/tối mặc định cần một món chính. Chỉ kiểm tra bữa có món mới/được chọn lại trong lượt này
+        // để lịch đã lưu trước quy tắc này vẫn sửa tiếp được; xác nhận lưu không áp lại quy tắc cho bản đã xem.
+        var mainTag = allTags.FirstOrDefault(tag => tag.TagType == TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
+        if (!confirm && mainTag is not null)
+            foreach (var (day, meal) in normalized.Where(x => changed.Contains(x.ItemKey)).Select(x => (x.DayNumber, x.MealSlot)).Distinct())
+                if (AgentScopedPlanning.RequiresMain(state, day, meal, allTags) &&
+                    !normalized.Any(x => x.DayNumber == day && x.MealSlot == meal && catalog[x.DishId].DishTags.Any(tag => tag.TagId == mainTag.Id)))
+                    errors.Add($"Bữa {meal} ngày {day} cần ít nhất một món chính; đồ uống, tráng miệng và món ăn vặt chỉ là món phụ trừ khi người dùng yêu cầu riêng cho bữa đó.");
         var total = normalized.Sum(x => x.Price);
         if (state.BudgetAmount.HasValue && total > state.BudgetAmount) errors.Add("Tổng tiền vượt ngân sách toàn chuyến cho một người.");
+        var repeats = !confirm && errors.Count == 0 && freshGrants is { Count: > 0 }
+            ? await AvoidableRepeatsAsync(normalized, added, state, freshGrants, catalog, allTags, mainTag, ct) : [];
         var routeResults = new List<AgentDayRoute>();
         if (errors.Count == 0 && calculateRoutes)
         {
@@ -127,23 +142,60 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             { Item = normalized.FirstOrDefault(item => item.ItemKey == change.Item.ItemKey) ?? change.Item }).ToArray();
         var onlyScopeErrors = scopeRejected.Count > 0 && errors.Count == scopeRejected.Count;
         return (snapshot with { Items = AgentJson.OrderItems(normalized), Changes = changes }, new(errors.Distinct().ToArray(), warnings.Distinct().ToArray(), total,
-            routeResults.ToArray(), onlyScopeErrors ? scopeRejected.ToArray() : null));
+            routeResults.ToArray(), onlyScopeErrors ? scopeRejected.ToArray() : null, repeats.Length > 0 ? repeats : null));
     }
 
     /// <summary>
-    /// Replaces only items rejected for a missing day/meal grant with the best-ranked dish already issued for that
-    /// exact position under the same effective constraints. Returns null when a safe replacement does not exist.
+    /// Finds new items whose dish name already appears earlier in the itinerary although an unused dish authorized for the
+    /// same position still satisfies its meal, requested tags, main-dish role, price cap and budget. Requested names are exempt.
+    /// </summary>
+    private async Task<string[]> AvoidableRepeatsAsync(IReadOnlyList<AgentItem> items, IReadOnlySet<string> added, AgentState state,
+        IReadOnlyList<AgentCandidateGrant> grants, IReadOnlyDictionary<int, ANGI.Domain.Entities.Dish> catalog,
+        IReadOnlyCollection<ANGI.Domain.Entities.Tag> allTags, ANGI.Domain.Entities.Tag? mainTag, CancellationToken ct)
+    {
+        var missing = grants.SelectMany(grant => grant.DishIds).Where(id => !catalog.ContainsKey(id)).Distinct().ToArray();
+        var known = missing.Length == 0 ? catalog
+            : catalog.Values.Concat(await dishes.GetCardDishesAsync(missing, ct)).DistinctBy(dish => dish.Id).ToDictionary(dish => dish.Id);
+        var used = items.Select(item => AgentScopedPlanning.Normalize(catalog[item.DishId].Name)!).ToHashSet(StringComparer.Ordinal);
+        var total = items.Sum(item => item.Price);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var repeats = new List<string>();
+        foreach (var item in AgentJson.OrderItems(items))
+        {
+            if (seen.Add(AgentScopedPlanning.Normalize(catalog[item.DishId].Name)!) || !added.Contains(item.ItemKey)) continue;
+            var requested = AgentScopedPlanning.Request(state, item.DayNumber, item.MealSlot);
+            if (requested.DishName is not null || requested.RestaurantName is not null) continue;
+            var fingerprint = AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot);
+            var main = mainTag is not null && AgentScopedPlanning.RequiresMain(state, item.DayNumber, item.MealSlot, allTags) &&
+                catalog[item.DishId].DishTags.Any(tag => tag.TagId == mainTag.Id);
+            var spare = grants.Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == item.DayNumber) &&
+                    (grant.MealSlot is null || grant.MealSlot == item.MealSlot) &&
+                    AgentScopedPlanning.Fingerprint(grant.Constraints, item.DayNumber, item.MealSlot) == fingerprint)
+                .SelectMany(grant => grant.DishIds).Any(id => known.TryGetValue(id, out var dish) && IsPublic(dish) &&
+                    FitsMeal(dish, item.MealSlot) && !used.Contains(AgentScopedPlanning.Normalize(dish.Name)!) &&
+                    requested.TagIds.All(tag => dish.DishTags.Any(x => x.TagId == tag)) &&
+                    (!main || dish.DishTags.Any(x => x.TagId == mainTag!.Id)) &&
+                    (!state.MaxPricePerMeal.HasValue || dish.Price <= state.MaxPricePerMeal) &&
+                    (state.BudgetAmount is not { } budget || total - item.Price + dish.Price <= budget));
+            if (spare) repeats.Add(item.ItemKey);
+        }
+        return repeats.ToArray();
+    }
+
+    /// <summary>
+    /// Replaces only items rejected for a missing day/meal grant, or avoidable repeats, with the best-ranked unused dish
+    /// already issued for that exact position under the same effective constraints. Returns null when a safe replacement does not exist.
     /// </summary>
     public async Task<AgentSnapshot?> RepairScopeAsync(AgentSnapshot snapshot, AgentSnapshot? source,
-        IReadOnlyList<AgentCandidateGrant> grants, IReadOnlyCollection<string> itemKeys, CancellationToken ct)
+        IReadOnlyList<AgentCandidateGrant> grants, IReadOnlyCollection<string> itemKeys, CancellationToken ct, bool repeatsOnly = false)
     {
         var state = snapshot.State;
         var scope = snapshot.Scope ?? new();
         var targets = snapshot.Items.Where(item => itemKeys.Contains(item.ItemKey)).ToArray();
         var sourceItems = source?.Items ?? [];
         // Chỉ sửa món mới trong phạm vi model được phép đổi. Nhiều vị trí sai cùng lúc cho thấy model hiểu sai yêu cầu,
-        // khi đó để model tự sửa thay vì backend thay phần lớn lịch.
-        if (targets.Length == 0 || targets.Length != itemKeys.Count || targets.Length > Math.Max(1, snapshot.Items.Length / 3) ||
+        // khi đó để model tự sửa thay vì backend thay phần lớn lịch. Món lặp đã đúng vị trí nên không cần giới hạn này.
+        if (targets.Length == 0 || targets.Length != itemKeys.Count || !repeatsOnly && targets.Length > Math.Max(1, snapshot.Items.Length / 3) ||
             targets.Any(item => !scope.Contains(item) || sourceItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId)))
             return null;
         // Grant hẹp và mới hơn đứng trước; trong mỗi grant giữ nguyên thứ tự xếp hạng của Recommendation.

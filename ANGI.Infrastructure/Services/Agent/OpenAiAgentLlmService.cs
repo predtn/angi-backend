@@ -48,6 +48,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         dimensions from the profile and ranks with the conversation vector; matching remains approximate.
         tasteTargets applies to the whole trip; tasteOverrides is an array of {dayNumber,mealSlot,targets}.
         Day overrides inherit the trip; meal overrides inherit the day. Keep other dimensions and scopes intact.
+        A taste for one meal on every day (e.g. 'bữa trưa' without a day) needs one meal override per day, never
+        tasteTargets. Each clause keeps its own scope: 'chua cho bữa trưa, bữa tối ngày 1 ăn vặt' means sour lunch
+        overrides plus a snack mealRequest for day 1 dinner only. Ask with clarification=taste_scope when unsure.
         When the user explicitly changes the taste of EVERY meal, update/remove overlapping overrides for those
         dimensions so old exceptions cannot defeat that request. Preserve unrelated dimensions. Ask whether existing
         exceptions should remain only when the user's wording is ambiguous.
@@ -65,16 +68,20 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         Regional specialties require real catalog tags. If absent, clarify with catalog_support; never invent tags.
         'Unusual'/'novel' needs clarification=novelty unless clearly resolved as different from this plan.
         differentFromPlan only means absent from the source plan/previous scoped candidates, never never-eaten.
-        A recommendation spanning different effective tastes or meal requests returns scoped_requests_required:
-        fetch each homogeneous day/meal scope separately, within the tool budget. All such calls precede one
-        complete proposal. Different requests do not imply different taste dimensions.
-        Plan the scopes BEFORE issuing tools. When the user's day-specific requests are already explicit,
-        do not first request scope=full across heterogeneous days. Use one call per homogeneous day when possible,
-        avoiding unnecessary full-trip and route calls. For example, 'ngày 1 ăn đồ ngọt vừa,
+        Write every resolved taste and meal request into state first; one get_recommendation call then covers the
+        whole requested scope even when days/meals differ. The backend splits it into homogeneous day/meal searches
+        and returns scopedResults, each with its own selectionScope and items. For a new plan issue one scope=full
+        call, then assemble the complete proposal; never repeat per-day calls for candidates already returned.
+        Different requests do not imply different taste dimensions. For example, 'ngày 1 ăn đồ ngọt vừa,
         ngày 2 chỉ có đồ uống, ngày 3 theo bạn quyết định' resolves sweet=0.5 for day 1 and the real drink
         catalog tag for day 2. Day 3 delegates dish selection within existing constraints; do not ask the user
         to specify its taste or invent another taste target. Keep unchanged meals unless a replan is requested.
-        Drinks are valid itinerary items for the requested meals when their catalog meal tags permit them.
+        By default breakfast, lunch and dinner each need at least one main dish (catalog category local_sf_main);
+        drinks, desserts, starters and snacks are side items, and default recommendations for those meals list mains.
+        A user's category, dish or restaurant request for a meal (e.g. 'bữa sáng chỉ đồ uống') replaces that default:
+        write it in mealRequests with the real category tag, one entry per requested day, because a meal needs a day.
+        To add a side item next to a main, call get_recommendation for that slot with the category in tagIds
+        (a search filter, not state). Drinks are valid itinerary items for the requested meals when their catalog meal tags permit them.
         A soft sweet target does not require every candidate to be dessert or have a verified sweetness level.
         For ordinary new plans set mealSlots=[breakfast,lunch,dinner]; use only user-requested meals for fewer meals.
         Preserve declared coverage and ask clarification=coverage if insufficient; never silently omit meals.
@@ -119,14 +126,15 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         Added/replacement dishes must come from tools issued for this scope.
         For a full/day search the backend ranks each declared meal separately and returns distinct dish names per
         meal, enough for every day in scope; one such call normally covers all meals, so assemble the proposal next.
-        Each recommendation result includes selectionScope and items[].allowedMealSlots. A non-null dayNumber
+        Each recommendation result, or each scopedResults entry, includes selectionScope and items[].allowedMealSlots. A non-null dayNumber
         authorizes only that day; a non-null mealSlot authorizes only that meal on that day, even if the dish's
         catalog tags list other meals. Null scope fields allow any corresponding requested day/meal, subject to
         allowedMealSlots. Never copy a day-1/day-2 breakfast-only candidate into day 3 or into lunch/dinner.
         For each proposed item check both the issued scope and allowedMealSlots. Prefer a different candidate
         already authorized for that position when validation reports a scope error. A full-trip result may cover
-        all three days: three breakfast-compatible candidates suffice for three breakfasts. Distinct dish names
-        or restaurants are not mandatory unless the user requests them. When all requested meals have choices,
+        all three days: three breakfast-compatible candidates suffice for three breakfasts. Avoid repeating a dish
+        name anywhere in the itinerary: for each position take the highest-ranked authorized candidate whose name
+        is still unused; repeat a name only when that position has no unused candidate. When all requested meals have choices,
         assemble the proposal instead of repeating identical recommendation requests or claiming missing data.
         Never invent IDs, prices, restaurant
         names, coordinates, opening hours or recommender explanations. Candidate items are already in recommendation

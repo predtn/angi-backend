@@ -283,6 +283,46 @@ public sealed class AgentProposalValidatorTests
         repaired.Should().BeNull(area);
     }
 
+    // TEST-14: A drink-only breakfast is rejected by default but accepted when the user asked for drinks at that breakfast or when the slot was kept unchanged from the source; covers default, drink request and retained slot.
+    /// <summary>Ensures main meals contain a main dish unless the user's explicit request or an untouched saved slot says otherwise.</summary>
+    [Theory]
+    [InlineData("default")][InlineData("drink-request")][InlineData("retained")]
+    public async Task ValidateAsync_DrinkOnlyBreakfast_NeedsMainDishUnlessRequestedOrRetained(string area)
+    {
+        var drink = new ANGI.Domain.Entities.Tag { Id = 4, Code = "local_sf_drink", Name = "Đồ uống", TagType = TagType.Category };
+        var main = new ANGI.Domain.Entities.Tag { Id = 5, Code = "local_sf_main", Name = "Món Chính", TagType = TagType.Category };
+        var dish = AgentTestData.Dish(); dish.DishTags.Add(new() { DishId = 1, TagId = 4, Tag = drink });
+        var fixture = AgentTestData.Validator(dish);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { drink, main });
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["breakfast"],
+            MealRequests = area == "drink-request" ? [new(1, "breakfast", null, null, [4])] : [] };
+        var grant = new AgentCandidateGrant(1, "breakfast", [1], Guid.NewGuid(), state);
+        var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1, "breakfast") with { Price = 50000 }], [grant]);
+
+        var result = await fixture.Validator.ValidateAsync(snapshot, area == "retained" ? snapshot : null, false, false, default, [grant]);
+
+        if (area == "default") result.Validation.Errors.Should().ContainSingle(error => error.Contains("cần ít nhất một món chính"));
+        else result.Validation.Errors.Should().BeEmpty();
+    }
+
+    // TEST-15: A new item repeating an earlier dish name is flagged for backend replacement only when an unused authorized dish fits that position; the flag never becomes an error; covers with and without a spare dish.
+    /// <summary>Lets the backend vary a multi-day plan while never blocking a plan whose catalog cannot avoid the repeat.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task ValidateAsync_RepeatedDishName_IsFlaggedOnlyWhenAnUnusedCandidateExists(bool spare)
+    {
+        var state = AgentTestData.State() with { MealSlots = ["lunch"] };
+        var grant = new AgentCandidateGrant(null, "lunch", spare ? [1, 2] : [1], Guid.NewGuid(), state);
+        var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2)], [grant]);
+
+        var result = await AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2)).Validator
+            .ValidateAsync(snapshot, null, false, false, default, [grant]);
+
+        result.Validation.Errors.Should().BeEmpty();
+        if (spare) result.Validation.AvoidableRepeatItemKeys.Should().Equal("b");
+        else result.Validation.AvoidableRepeatItemKeys.Should().BeNull();
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {

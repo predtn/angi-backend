@@ -240,6 +240,16 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         new { replaced = rejectedKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted = rejectedKeys.Length; }
                 }
+                // Món lặp tránh được (còn món chưa dùng đã cấp cho đúng vị trí): backend tự thay, không tốn thêm lượt gọi LLM.
+                // Không thay được an toàn thì giữ nguyên lịch hợp lệ; lặp chỉ là ưu tiên đa dạng, không chặn đề xuất.
+                if (validated.Validation.Errors.Length == 0 && validated.Validation.AvoidableRepeatItemKeys is { Length: > 0 } repeatKeys &&
+                    await validator.RepairScopeAsync(validated.Snapshot, context.Source, context.Grants, repeatKeys, timeout.Token, repeatsOnly: true) is { } varied)
+                {
+                    var revalidated = await validator.ValidateAsync(varied, context.Source, false, true, timeout.Token, context.Grants);
+                    telemetry.Record("repeat_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { replaced = repeatKeys.Length, revalidated.Validation.Errors });
+                    if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted += repeatKeys.Length; }
+                }
                 // Có lỗi thì không trả snapshot mới để lưu Ready; proposal trước được giữ lại.
                 if (validated.Validation.Errors.Length > 0)
                 {

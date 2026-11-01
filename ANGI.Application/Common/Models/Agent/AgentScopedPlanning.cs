@@ -56,6 +56,23 @@ public static class AgentScopedPlanning
             .Select(meal => ((short)day, meal))).Where(x => (!scope.DayNumber.HasValue || scope.DayNumber == x.Item1) &&
                 (scope.MealSlot is null || scope.MealSlot == x.meal));
 
+    /// <summary>Catalog category code of a main dish; drinks, desserts, starters and snacks are side items.</summary>
+    public const string MainTagCode = "local_sf_main";
+
+    /// <summary>
+    /// Breakfast, lunch and dinner need a main dish by default. Any category tag, dish or restaurant the user asked for
+    /// at that position (trip filters included) is an explicit choice that replaces the default, e.g. drinks-only breakfast.
+    /// </summary>
+    public static bool RequiresMain(AgentState state, short day, string meal, IEnumerable<Domain.Entities.Tag> catalogTags,
+        IEnumerable<short>? searchTagIds = null)
+    {
+        if (meal is not ("breakfast" or "lunch" or "dinner")) return false;
+        var request = Request(state, day, meal);
+        if (request.DishName is not null || request.RestaurantName is not null) return false;
+        var categories = catalogTags.Where(tag => tag.TagType == Domain.Enums.TagType.Category).Select(tag => tag.Id).ToHashSet();
+        return !state.TagIds.Concat(request.TagIds).Concat(searchTagIds ?? []).Any(categories.Contains);
+    }
+
     /// <summary>Normalizes case and spacing without treating a near name as an exact identity.</summary>
     public static string? Normalize(string? name) => name is null ? null : string.Join(' ', name.Split((char[]?)null,
         StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();

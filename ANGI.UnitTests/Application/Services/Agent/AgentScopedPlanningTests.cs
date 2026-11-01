@@ -77,18 +77,29 @@ public sealed class AgentScopedPlanningTests
         state.PreferenceApplication.Should().Be("replan");
     }
 
-    // TEST-05: A broad recommendation while days have different taste overrides returns scoped_requests_required without calling reco or the dish catalog.
-    /// <summary>Prevents one trip-wide ranking from being used when days need different taste vectors.</summary>
+    // TEST-05: A broad recommendation across days with different taste overrides ranks each day with its own vector and day-only grants in one tool call.
+    /// <summary>Ensures one model call is enough while a trip-wide ranking never mixes different taste vectors.</summary>
     [Fact]
-    public async Task BroadRecommendation_DifferentDaysRequireScopedCalls()
+    public async Task BroadRecommendation_DifferentDaysAreRankedSeparatelyInOneCall()
     {
-        var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>();
+        var fixture = AgentTestData.Validator(AgentTestData.Dish()); var reco = new Mock<IRecommendationService>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
+        var vectors = new List<double[]?>();
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .Callback<int, IReadOnlyList<int>, int, RecommendationVector, CancellationToken>((_, _, _, vector, _) => vectors.Add(vector.UserVectorOverride))
+            .ReturnsAsync(() => new RecommendationResult(Guid.NewGuid(), [1], [], [.9], "conversation"));
         var context = AgentTestData.Context();
-        context.State = context.State with { TasteOverrides = [new(1, null, [new("spicy", 1)])] };
+        context.State = context.State with { Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() },
+            TasteOverrides = [new(1, null, [new("spicy", 1)])] };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
-        var response = await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [])), default);
-        response.GetProperty("status").GetString().Should().Be("scoped_requests_required");
-        context.Grants.Should().BeEmpty(); reco.VerifyNoOtherCalls(); fixture.Dishes.VerifyNoOtherCalls();
+
+        var response = await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)), default);
+
+        vectors.Select(vector => vector![5]).Should().Equal(1, .25);
+        context.Grants.Select(grant => grant.DayNumber).Should().Equal((short)1, (short)2);
+        response.TryGetProperty("status", out _).Should().BeFalse();
+        response.GetProperty("scopedResults").EnumerateArray()
+            .Select(part => part.GetProperty("selectionScope").GetProperty("dayNumber").GetInt32()).Should().Equal(1, 2);
     }
 
     // TEST-06: A day-scoped recommendation sends the effective override vector to reco without changing the trip-wide default vector.
@@ -276,6 +287,134 @@ public sealed class AgentScopedPlanningTests
         var result = await fixture.Orchestrator().RunAsync(AgentTestData.Context(), default);
         result.Reply.Should().NotContain("Bịa").And.NotContain("24/24").And.NotContain("miễn phí");
         if (action == "clarify") result.Reply.Should().Contain("toàn chuyến").And.Contain("ngày/bữa");
+    }
+
+    // TEST-18: Snack requests for day-1 lunch and dinner split that day into meal scopes, keep day 2 whole, and the resulting grants validate a complete plan.
+    /// <summary>Reproduces conversation 16: one broad call must cover meals with different catalog requests without a second model round.</summary>
+    [Fact]
+    public async Task BroadRecommendation_HeterogeneousDaySplitsIntoMealScopesThatValidate()
+    {
+        var (tools, validator, _, context) = SnackFixture(candidatesFor: _ => [1, 2]);
+
+        var response = await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 30)), default);
+
+        response.GetProperty("scopedResults").EnumerateArray().Select(part => part.GetProperty("selectionScope"))
+            .Select(scope => $"{scope.GetProperty("dayNumber").GetInt32()}:{scope.GetProperty("mealSlot").GetString()}")
+            .Should().Equal("1:breakfast", "1:lunch", "1:dinner", "2:");
+        context.Grants.Select(grant => $"{grant.DayNumber}:{grant.MealSlot}")
+            .Should().Equal("1:breakfast", "1:lunch", "1:dinner", "2:breakfast", "2:lunch", "2:dinner");
+        context.Grants.Where(grant => grant.DayNumber == 1 && grant.MealSlot is "lunch" or "dinner")
+            .Should().OnlyContain(grant => grant.DishIds.SequenceEqual(new[] { 2 }));
+        var items = new[] { (1, "breakfast", 1), (1, "lunch", 2), (1, "dinner", 2), (2, "breakfast", 1), (2, "lunch", 1), (2, "dinner", 1) }
+            .Select((x, index) => AgentTestData.Item(x.Item3, $"k{index}", (short)x.Item1, x.Item2)).ToArray();
+        var plan = new AgentSnapshot(context.State, items, context.Grants.ToArray());
+        (await validator.ValidateAsync(plan, null, false, false, default, context.Grants)).Validation.Errors.Should().BeEmpty();
+    }
+
+    // TEST-19: A split scope with no snack candidates reports zero coverage for those meals while other meals still return; when every meal is empty the call returns no_candidates without grants.
+    /// <summary>Ensures missing choices are reported per meal from evidence and never hide the meals that do have candidates.</summary>
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public async Task BroadRecommendation_SplitScopeReportsEmptyMealsFromEvidence(bool everyMealEmpty)
+    {
+        var (tools, _, reco, context) = SnackFixture(candidatesFor: filter => everyMealEmpty || filter.TagIds.Contains((short)6) ? [] : [1]);
+
+        var response = await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 30)), default);
+
+        if (everyMealEmpty)
+        {
+            response.GetProperty("status").GetString().Should().Be("no_candidates");
+            context.Grants.Should().BeEmpty(); reco.VerifyNoOtherCalls();
+        }
+        else
+        {
+            response.GetProperty("mealCoverage").EnumerateArray()
+                .Where(meal => meal.GetProperty("dayNumber").GetInt32() == 1 && meal.GetProperty("mealSlot").GetString() is "lunch" or "dinner")
+                .Should().HaveCount(2).And.OnlyContain(meal => meal.GetProperty("availableCount").GetInt32() == 0);
+            response.GetProperty("returnedCount").GetInt32().Should().Be(1);
+            context.ToolNotice.Should().BeNull();
+        }
+    }
+
+    // TEST-20: Branches sharing a dish name (ignoring case and spacing) reach reco once, as the first branch in rating order, so reco ranks distinct dishes.
+    /// <summary>Prevents hundreds of copies of a few catalog dishes from filling every ranked slot with the same names.</summary>
+    [Fact]
+    public async Task Recommendation_SameNameBranches_AreRankedOncePerName()
+    {
+        var first = AgentTestData.Dish(1); first.Name = "Phở Bò";
+        var copy = AgentTestData.Dish(2); copy.Name = "phở  bò";
+        var other = AgentTestData.Dish(3); other.Name = "Bún Chả";
+        var fixture = AgentTestData.Validator(first, copy, other); var reco = new Mock<IRecommendationService>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 3 });
+        IReadOnlyList<int>? sent = null;
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .Callback<int, IReadOnlyList<int>, int, RecommendationVector, CancellationToken>((_, ids, _, _, _) => sent = ids)
+            .ReturnsAsync((int _, IReadOnlyList<int> ids, int _, RecommendationVector _, CancellationToken _) =>
+                new RecommendationResult(Guid.NewGuid(), ids.ToArray(), [], ids.Select(_ => .9).ToArray(), "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Recommend(new(Scope: "slot", DayNumber: 1, MealSlot: "lunch", TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)), default);
+
+        sent.Should().Equal(1, 3);
+    }
+
+    // TEST-21: Breakfast ranks only main dishes by default, while a drinks-only breakfast request or a side-item search with a category filter ranks drinks without adding the main-dish filter; covers default, drinks-only request and side search.
+    /// <summary>Answers "if I want only drinks for breakfast, does the Agent push a main dish?": the user's category request always wins.</summary>
+    [Theory]
+    [InlineData("default")][InlineData("drinks-only")][InlineData("side-search")]
+    public async Task Recommendation_BreakfastMainDefault_YieldsToExplicitCategory(string mode)
+    {
+        var drink = new ANGI.Domain.Entities.Tag { Id = 4, Code = "local_sf_drink", Name = "Đồ uống", TagType = ANGI.Domain.Enums.TagType.Category };
+        var main = new ANGI.Domain.Entities.Tag { Id = 5, Code = "local_sf_main", Name = "Món Chính", TagType = ANGI.Domain.Enums.TagType.Category };
+        var mainDish = AgentTestData.Dish(1); mainDish.DishTags.Add(new() { DishId = 1, TagId = 5, Tag = main });
+        var drinkDish = AgentTestData.Dish(2); drinkDish.DishTags.Add(new() { DishId = 2, TagId = 4, Tag = drink });
+        var fixture = AgentTestData.Validator(mainDish, drinkDish); var reco = new Mock<IRecommendationService>();
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { drink, main });
+        DishCandidateFilter? filter = null;
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((value, _, _) => filter = value).ReturnsAsync(new[] { 1, 2 });
+        IReadOnlyList<int>? sent = null;
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .Callback<int, IReadOnlyList<int>, int, RecommendationVector, CancellationToken>((_, ids, _, _, _) => sent = ids)
+            .ReturnsAsync((int _, IReadOnlyList<int> ids, int _, RecommendationVector _, CancellationToken _) =>
+                new RecommendationResult(Guid.NewGuid(), ids.ToArray(), [], ids.Select(_ => .9).ToArray(), "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["breakfast"],
+            Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() },
+            MealRequests = mode == "drinks-only" ? [new(1, "breakfast", null, null, [4])] : [] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Recommend(new(Scope: "slot", DayNumber: 1, MealSlot: "breakfast",
+            TagIds: mode == "side-search" ? [4] : [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)), default);
+
+        if (mode == "default") { filter!.TagIds.Should().Equal((short)5); sent.Should().Equal(1); }
+        else { filter!.TagIds.Should().Equal((short)4); sent.Should().Equal(2); }
+        context.Grants.Single().Constraints.TagIds.Should().Equal(filter.TagIds);
+    }
+
+    /// <summary>Builds the conversation-16 state: two days of declared meals, a real snack tag and snack requests for day-1 lunch and dinner.</summary>
+    private static (AgentToolExecutor Tools, AgentProposalValidator Validator, Mock<IRecommendationService> Reco, AgentContext Context)
+        SnackFixture(Func<DishCandidateFilter, int[]> candidatesFor)
+    {
+        var snack = new ANGI.Domain.Entities.Tag { Id = 6, TagType = ANGI.Domain.Enums.TagType.Category, Code = "local_sf_snack", Name = "Món ăn vặt" };
+        var snackDish = AgentTestData.Dish(2);
+        snackDish.DishTags.Add(new() { DishId = 2, TagId = 6, Tag = snack });
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(), snackDish);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { snack });
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => candidatesFor(filter));
+        var reco = new Mock<IRecommendationService>();
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyList<int> ids, int _, RecommendationVector _, CancellationToken _) =>
+                new RecommendationResult(Guid.NewGuid(), ids.ToArray(), [], ids.Select(_ => .9).ToArray(), "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
+            Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() },
+            TasteTargets = [new("sour", .25)], MealRequests = [new(1, "lunch", null, null, [6]), new(1, "dinner", null, null, [6])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        return (tools, fixture.Validator, reco, context);
     }
 
     /// <summary>Builds a get_recommendation tool call from the given input, serialized with the agent JSON options.</summary>

@@ -559,6 +559,28 @@ public sealed class AgentOrchestratorTests
         AgentJson.Write(captured).Should().NotContain("private-prompt");
     }
 
+    // TEST-29: A dish repeated on day 2 is swapped for an unused authorized dish without another LLM call, and a repeat with no unused alternative stays and is explained as a catalog limit; covers both cases.
+    /// <summary>Keeps multi-day plans varied for free while never blocking a plan whose catalog cannot avoid a repeat.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task RunAsync_RepeatedDish_IsReplacedOnlyWhenAnUnusedCandidateExists(bool spare)
+    {
+        var state = AgentTestData.State() with { MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        context.Grants.Add(new(null, "lunch", spare ? [1, 2] : [1], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(spare ? [1, 2] : [1, 1]);
+        if (spare) result.Reply.Should().Contain("Có 1 món được hệ thống chọn lại").And.NotContain(AgentReplyBuilder.RepeatNote);
+        else result.Reply.Should().Contain(AgentReplyBuilder.RepeatNote).And.NotContain("được hệ thống chọn lại");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null)

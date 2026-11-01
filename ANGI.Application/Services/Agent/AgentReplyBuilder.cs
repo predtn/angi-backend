@@ -10,8 +10,9 @@ public static class AgentReplyBuilder
     // Không mời gửi lại y nguyên: cùng dữ liệu và cùng yêu cầu thường lặp lại đúng kết quả nhưng vẫn tốn lượt gọi AI.
     public const string PlanningIncomplete = "Mình chưa hoàn tất việc sắp xếp lịch theo yêu cầu của bạn. " +
         "Bạn có thể nói rõ hơn hoặc điều chỉnh yêu cầu, ví dụ ngày/bữa, món muốn ăn, ngân sách hoặc khẩu vị.";
-    public const string SubstitutionNote = "món được hệ thống chọn lại từ chính danh sách gợi ý đã lấy để đúng ngày/bữa; " +
+    public const string SubstitutionNote = "món được hệ thống chọn lại từ chính danh sách gợi ý đã lấy để đúng ngày/bữa hoặc tránh lặp món; " +
         "các món này vẫn theo khẩu vị, ngân sách và điều kiện bạn đã nêu.";
+    public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì catalog hiện chưa có đủ món khác nhau đáp ứng điều kiện của các bữa đó.";
     public static readonly string[] Clarifications = ["trip_details", "taste_scope", "taste_intensity", "edit_scope",
         "novelty", "catalog_choice", "coverage", "catalog_support", "general"];
 
@@ -43,6 +44,10 @@ public static class AgentReplyBuilder
         if (validation?.Warnings.Any(x => x.Contains("ước lượng", StringComparison.Ordinal)) == true)
             lines.Add("Thông tin tuyến đường có phần ước lượng.");
         if (substituted > 0) lines.Add($"Có {substituted} {SubstitutionNote}");
+        // Lặp còn lại sau khi backend đã thay các món lặp tránh được là do catalog; món người dùng gọi tên không tính.
+        if (snapshot.Items.Where(item => AgentScopedPlanning.Request(snapshot.State, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null })
+                .GroupBy(item => AgentScopedPlanning.Normalize(item.DishName)).Any(group => group.Key is not null && group.Count() > 1))
+            lines.Add(RepeatNote);
         lines.Add(saved ? "Đây là lịch đã lưu. Các chỉnh sửa tiếp theo cần được xem lại và xác nhận lưu."
             : "Đây là bản xem trước. Chỉ lưu thành roadmap sau khi bạn xác nhận lưu.");
         return string.Join('\n', lines);

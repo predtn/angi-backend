@@ -42,13 +42,22 @@ get_recommendation resolves applicable named selectors before ranking. A missing
 selector produces a trusted clarification and no candidates. Validate final names/tags against catalog.
 No catalog import, web lookup, synthetic dish or inferred menu membership.
 
-Broad ranking calls spanning different effective tastes or meal requests return a scoped-call hint;
-the Agent must call homogeneous day/meal scopes within existing limits. Reuse identical vectors.
+Broad ranking calls spanning different effective tastes or meal requests are split by the backend
+(user decision 2026-11-01): one call ranks each homogeneous day, or each declared meal of a heterogeneous
+day, with its own vector, filters and day/meal grant, and returns `scopedResults` with per-part
+selectionScope. The LLM states intent; it does not plan ranking scopes. Homogeneous calls keep their shape.
 Backend applies all Agent tags and compatible meal filtering before the candidate limit, allowing
 untagged meals. Discovery's existing grouped-tag behavior remains the default for other modules.
 Backend rechecks every ranked ID, current catalog, scoped constraints and meal compatibility.
 Return explicit candidate/ignored/returned counts and coverage warnings; at most k is not exactly k.
 Vector pending/failed alone does not mean ignored. Never relax filters to fill a plan.
+User decision 2026-11-01: the backend reads up to 2000 filtered rows in rating order and keeps one branch
+per normalized dish name (the first, best-rated restaurant) before applying Agent:MaxCandidates, unless a
+dish was requested by name. Breakfast, lunch and dinner rank only `local_sf_main` dishes by default and the
+validator requires one main dish in each new or reselected main meal. Any category tag, dish or restaurant
+requested for that position, or a category search filter for a side item, replaces the default.
+Conversation ranking waits Recommendation:AgentTimeoutMilliseconds (default 3000 ms); other callers keep
+TimeoutMilliseconds (800 ms) and their rating fallback.
 AgentState.mealSlots defaults empty for legacy compatibility (coverage not declared); ordinary new
 plans declare breakfast/lunch/dinner unless the user requests fewer. Validator requires declared
 coverage for every day and rejects missing meals. Empty existing-roadmap updates remain valid.
@@ -92,8 +101,11 @@ or coverage recovery. Coverage recovery preserves the rejected selection and val
 if recovery still fails, the final response retains the blocking validation instead of hiding it.
 Recommendation tool results include selectionScope and per-item allowedMealSlots. Catalog meal tags
 do not widen a day/meal grant. Model context also lists the issued candidate scopes. Reuse adequate
-full-trip results rather than repeating identical searches; dish-name/restaurant uniqueness is not
-an implicit requirement. The backend never widens grants to make a misplaced selection pass.
+full-trip results rather than repeating identical searches. A dish name should not repeat across the
+itinerary while an unused authorized dish fits that position: the validator flags such new repeats without
+blocking, and the backend swaps them for the best unused grant of the same position without another LLM call.
+Remaining repeats are disclosed as a catalog limit; names the user requested are exempt.
+The backend never widens grants to make a misplaced selection pass.
 Confirm verifies stored provenance and catalog again without calling LLM/reco. Legacy retained items
 remain committable. All saved dishes still go through the existing transactional impression outbox.
 

@@ -87,8 +87,10 @@ public sealed record AgentScope(short? DayNumber = null, string? MealSlot = null
 
 /// <summary>Deterministic validation including route uncertainty and current total cost.</summary>
 /// <param name="ScopeRejectedItemKeys">Set only when every error is a missing in-scope grant; internal repair input, never serialized.</param>
+/// <param name="AvoidableRepeatItemKeys">New items repeating a dish name while an unused authorized dish fits that position; never blocking or serialized.</param>
 public sealed record AgentValidation(string[] Errors, string[] Warnings, decimal TotalCost, AgentDayRoute[] Routes,
-    [property: JsonIgnore] string[]? ScopeRejectedItemKeys = null);
+    [property: JsonIgnore] string[]? ScopeRejectedItemKeys = null,
+    [property: JsonIgnore] string[]? AvoidableRepeatItemKeys = null);
 
 /// <summary>Internal context loaded only after ownership checks.</summary>
 public sealed class AgentContext
