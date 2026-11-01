@@ -1,7 +1,7 @@
 namespace ANGI.Application.DTOs.Moderation;
 
 /// <summary>Contains the documented administrative user card without account secrets.</summary>
-public sealed class AdminUserCardDto
+public class AdminUserCardDto
 {
     public int Id { get; init; }
     public string Email { get; init; } = string.Empty;
