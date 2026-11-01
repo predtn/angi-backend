@@ -10,13 +10,16 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.GetTags;
 
+/// <summary>Verifies GetTagsUseCase filters and orders tags and rejects unknown tag types.</summary>
 public sealed class GetTagsUseCaseTests
 {
     private readonly Mock<ITagRepository> _tagRepository = new();
 
+    /// <summary>Creates the use case with the real validator and the tag repository mock.</summary>
     private GetTagsUseCase CreateUseCase() => new(new GetTagsRequestDtoValidator(), _tagRepository.Object);
 
     // TEST-01: Sort by type (meal_time, dietary, category), then name, with snake_case types.
+    /// <summary>Ensures clients receive tags in the documented type order with snake_case type names.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldSortByTypeThenName()
     {
@@ -35,6 +38,7 @@ public sealed class GetTagsUseCaseTests
     }
 
     // TEST-02: Pass the requested type to the repository.
+    /// <summary>Ensures the type filter reaches the repository query.</summary>
     [Fact]
     public async Task ExecuteAsync_WithType_ShouldFilterByIt()
     {
@@ -46,6 +50,7 @@ public sealed class GetTagsUseCaseTests
     }
 
     // TEST-03: Reject an unknown type.
+    /// <summary>Ensures an unknown tag type is rejected instead of returning an empty list.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownType_ShouldThrowValidation()
     {

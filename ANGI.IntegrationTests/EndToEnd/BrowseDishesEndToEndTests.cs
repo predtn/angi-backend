@@ -29,11 +29,13 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
         _factory = factory;
     }
 
+    /// <summary>Ids of the seeded dishes and tags, looked up by their test names.</summary>
     private sealed record World(
         Dictionary<string, int> Dish,
         Dictionary<string, short> Tag);
 
     // TEST-01: Only public candidates, ordered by restaurant rating then like_count; q matches dish or restaurant names.
+    /// <summary>Ensures DISH-01 shows only public dishes in the documented order and searches both dish and restaurant names.</summary>
     [PostgresEndToEndFact]
     public async Task Browse_ShouldReturnOnlyCandidatesInRatingThenLikeOrder()
     {
@@ -49,6 +51,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
     }
 
     // TEST-02: Tags are OR within a type and AND across types; excluded tags and price, form, restaurant filters apply.
+    /// <summary>Ensures every DISH-01 filter combines exactly as the API Design specifies.</summary>
     [PostgresEndToEndFact]
     public async Task Browse_WithFilters_ShouldApplyTheDocumentedSemantics()
     {
@@ -68,6 +71,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
     }
 
     // TEST-03: lat/lng keep restaurants within 5 km by default, or within radiusKm.
+    /// <summary>Ensures location search honours the default and requested radius in PostgreSQL.</summary>
     [PostgresEndToEndFact]
     public async Task Browse_NearAPoint_ShouldUseTheRadius()
     {
@@ -80,6 +84,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
     }
 
     // TEST-04: Page with the cursor until nextCursor is null; a bad cursor is 400 INVALID_CURSOR.
+    /// <summary>Ensures cursor paging returns every dish exactly once and rejects a bad cursor.</summary>
     [PostgresEndToEndFact]
     public async Task Browse_WithCursor_ShouldWalkEveryPageOnce()
     {
@@ -101,6 +106,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
     }
 
     // TEST-05: CAT-02 lists tags by type then name; IMP-01 accepts a Traveler and refuses guests and owners.
+    /// <summary>Ensures tag listing order and impression access rules match their contracts.</summary>
     [PostgresEndToEndFact]
     public async Task TagsAndImpressions_ShouldFollowTheirContracts()
     {
@@ -198,6 +204,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
         });
     }
 
+    /// <summary>Registers a new owner and their restaurant at the given coordinates through HTTP and returns its id.</summary>
     private async Task<long> RestaurantAsync(string name, decimal lat, decimal lng)
     {
         using var client = _factory.CreateClient();
@@ -216,6 +223,7 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
         return (await response.Content.ReadFromJsonAsync<ApiResponse<OwnerRestaurantDto>>())!.Data!.Id;
     }
 
+    /// <summary>Calls DISH-01 with the query, asserts 200 and returns the page.</summary>
     private static async Task<BrowseDishesResponseDto> PageAsync(HttpClient client, string query)
     {
         using var response = await client.GetAsync($"/api/v1/dishes{query}");
@@ -223,9 +231,11 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
         return (await response.Content.ReadFromJsonAsync<ApiResponse<BrowseDishesResponseDto>>())!.Data!;
     }
 
+    /// <summary>Returns the dish ids of the first page of up to 50 results for the query.</summary>
     private static async Task<int[]> IdsAsync(HttpClient client, string query) =>
         (await PageAsync(client, query + (query.Length == 0 ? "?" : "&") + "limit=50")).Items.Select(item => item.Id).ToArray();
 
+    /// <summary>Reads errorCode from an error response body.</summary>
     private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response)
     {
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

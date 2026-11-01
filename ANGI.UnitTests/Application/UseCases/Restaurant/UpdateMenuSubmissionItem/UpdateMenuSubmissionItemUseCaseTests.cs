@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.UpdateMenuSubmissionItem;
 
+/// <summary>Verifies UpdateMenuSubmissionItemUseCase patches an owned draft item and distinguishes omitted from cleared fields.</summary>
 public sealed class UpdateMenuSubmissionItemUseCaseTests
 {
     // TEST-01: Apply supplied fields and distinguish an explicit null cover from an omitted cover.
@@ -62,6 +63,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
     }
 
     // TEST-02: Reject updates for every non-draft submission status.
+    /// <summary>Ensures a menu already sent for review cannot be changed.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Pending)]
     [InlineData(MenuSubmissionStatus.Approved)]
@@ -80,6 +82,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
     }
 
     // TEST-03: Hide missing and unowned submissions or items behind the not-found response.
+    /// <summary>Ensures another owner's submission or item is indistinguishable from a missing one.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownSubmissionOrItem_ShouldThrowNotFound()
     {
@@ -93,6 +96,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
     }
 
     // TEST-04: Preserve every field when the PATCH body is empty.
+    /// <summary>Ensures an empty PATCH changes nothing.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyPatch_ShouldKeepAllFieldsUnchanged()
     {
@@ -108,6 +112,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
     }
 
     // TEST-05: Apply every supplied patch field and preserve the omitted cover field.
+    /// <summary>Ensures supplied fields are applied and an omitted cover is kept.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEveryPatchField_ShouldReplaceOnlySuppliedValues()
     {
@@ -141,6 +146,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
     }
 
     // TEST-06: Reject PDF and non-dish-purpose media as a replacement cover.
+    /// <summary>Ensures only a dish image can become a dish cover.</summary>
     [Theory]
     [InlineData("application/pdf", "raw/authenticated/verification_doc/file.pdf")]
     [InlineData("image/jpeg", "image/upload/verification_doc/file.jpg")]
@@ -160,6 +166,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
+    /// <summary>Creates draft item 340 of submission 14 with every field set.</summary>
     private static MenuSubmissionItem ExistingItem() => new()
     {
         Id = 340,
@@ -174,6 +181,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
         SortOrder = 1
     };
 
+    /// <summary>Creates a repository mock that returns draft submission 14 and the given tracked item for owner 12.</summary>
     private static Mock<IRestaurantMenuRepository> DraftRepository(MenuSubmissionItem? item)
     {
         var repository = new Mock<IRestaurantMenuRepository>();
@@ -185,6 +193,7 @@ public sealed class UpdateMenuSubmissionItemUseCaseTests
         return repository;
     }
 
+    /// <summary>Creates the use case for owner 12 with the real validator and the given repositories.</summary>
     private static UpdateMenuSubmissionItemUseCase CreateUseCase(
         Mock<IRestaurantMenuRepository> repository,
         Mock<IMediaRepository> mediaRepository)

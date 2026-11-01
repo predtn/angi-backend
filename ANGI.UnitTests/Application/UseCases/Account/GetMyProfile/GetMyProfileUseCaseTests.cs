@@ -11,12 +11,14 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Account.GetMyProfile;
 
+/// <summary>Verifies GetMyProfileUseCase returns the role-specific profile of the signed-in user.</summary>
 public sealed class GetMyProfileUseCaseTests
 {
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<IAccountRepository> _accountRepository = new();
     private readonly Mock<IRecommendationService> _recommendationService = new();
 
+    /// <summary>Creates the use case over the shared current-user, account repository and recommendation mocks.</summary>
     private GetMyProfileUseCase CreateUseCase() =>
         new(_currentUserService.Object, _accountRepository.Object, _recommendationService.Object);
 

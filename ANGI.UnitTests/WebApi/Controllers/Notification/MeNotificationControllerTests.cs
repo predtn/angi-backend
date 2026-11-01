@@ -10,12 +10,14 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Notification;
 
+/// <summary>Verifies MeNotificationController requires authorization and wraps notification results in ApiResponse.</summary>
 public sealed class MeNotificationControllerTests
 {
     private readonly Mock<IGetNotificationsUseCase> _getNotificationsUseCase = new();
     private readonly Mock<IGetUnreadNotificationCountUseCase> _getUnreadNotificationCountUseCase = new();
     private readonly Mock<IMarkNotificationAsReadUseCase> _markNotificationAsReadUseCase = new();
 
+    /// <summary>Creates the controller over the shared notification use case mocks.</summary>
     private MeNotificationController CreateController() =>
         new(
             _getNotificationsUseCase.Object,

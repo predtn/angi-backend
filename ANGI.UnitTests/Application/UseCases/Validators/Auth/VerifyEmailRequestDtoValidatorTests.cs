@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies VerifyEmailRequestDtoValidator requires a non-blank verification token.</summary>
     public sealed class VerifyEmailRequestDtoValidatorTests
     {
         // TEST-01: Accept a non-empty email verification token.

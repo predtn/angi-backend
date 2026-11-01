@@ -4,11 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Discovery;
 
+/// <summary>Verifies BrowseDishesRequestDtoValidator accepts the documented dish filters and rejects each invalid value on its field.</summary>
 public sealed class BrowseDishesRequestDtoValidatorTests
 {
     private readonly BrowseDishesRequestDtoValidator _validator = new();
 
     // TEST-01: Accept no filter at all and every documented filter at its limits.
+    /// <summary>Ensures valid filters at their limits are not blocked.</summary>
     [Fact]
     public void Validate_WithDocumentedFilters_ShouldPass()
     {
@@ -30,6 +32,7 @@ public sealed class BrowseDishesRequestDtoValidatorTests
     }
 
     // TEST-02: Reject each out-of-contract value on its own field.
+    /// <summary>Ensures clients learn exactly which filter is wrong.</summary>
     [Theory]
     [MemberData(nameof(InvalidRequests))]
     public void Validate_WithInvalidValue_ShouldFailOnThatField(BrowseDishesRequestDto request, string field)
@@ -37,6 +40,7 @@ public sealed class BrowseDishesRequestDtoValidatorTests
         _validator.Validate(request).Errors.Should().Contain(error => error.PropertyName == field);
     }
 
+    /// <summary>Supplies each out-of-contract filter value with the field expected to report it.</summary>
     public static TheoryData<BrowseDishesRequestDto, string> InvalidRequests() => new()
     {
         { new BrowseDishesRequestDto { Limit = 0 }, "Limit" },

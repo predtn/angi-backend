@@ -6,9 +6,11 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Generate;
 
+/// <summary>Verifies RoadmapDayPlanner clusters nearby dishes, accepts only complete AI schedules and builds a sensible fallback.</summary>
 public sealed class RoadmapDayPlannerTests
 {
     // About 0.009° of latitude per km.
+    /// <summary>Creates a dish placed the given distance north of the base point, with optional tags.</summary>
     private static Dish Dish(int id, double kmNorth, params (TagType Type, short Id, string Code)[] tags)
     {
         var dish = new Dish
@@ -26,6 +28,7 @@ public sealed class RoadmapDayPlannerTests
     }
 
     // TEST-01: Keep dishes within 3 km of the anchor, or 5 km when 3 km has fewer dishes than meals.
+    /// <summary>Ensures a day's dishes stay close together and the radius widens only when needed.</summary>
     [Fact]
     public void Cluster_ShouldUseThreeKmThenFiveKmAroundTheBestDish()
     {
@@ -37,6 +40,7 @@ public sealed class RoadmapDayPlannerTests
     }
 
     // TEST-02: Accept a schedule that fills each meal once with distinct cluster dishes, in meal order.
+    /// <summary>Ensures a complete AI schedule is accepted and returned in meal order.</summary>
     [Fact]
     public void Accept_WithValidPlan_ShouldReturnItInMealOrder()
     {
@@ -48,6 +52,7 @@ public sealed class RoadmapDayPlannerTests
     }
 
     // TEST-03: Refuse a missing meal, a repeated dish or meal, a dish outside the cluster, or no plan at all.
+    /// <summary>Ensures an incomplete or inconsistent AI schedule is rejected so the fallback is used.</summary>
     [Theory]
     [MemberData(nameof(InvalidPlans))]
     public void Accept_WithUnusablePlan_ShouldReturnNull(RoadmapPlanResult? plan)
@@ -55,6 +60,7 @@ public sealed class RoadmapDayPlannerTests
         RoadmapDayPlanner.Accept(plan, [MealSlot.Breakfast, MealSlot.Dinner], [1, 2, 3]).Should().BeNull();
     }
 
+    /// <summary>Supplies AI schedules that are missing, incomplete, repeated or outside the cluster.</summary>
     public static TheoryData<RoadmapPlanResult?> InvalidPlans() => new()
     {
         null,
@@ -66,6 +72,7 @@ public sealed class RoadmapDayPlannerTests
     };
 
     // TEST-04: A cluster smaller than the meals only needs one dish per dish available.
+    /// <summary>Ensures a small cluster does not make every AI schedule invalid.</summary>
     [Fact]
     public void Accept_WithSmallCluster_ShouldExpectOnlyAsManyMealsAsDishes()
     {
@@ -75,6 +82,7 @@ public sealed class RoadmapDayPlannerTests
     }
 
     // TEST-05: The fallback prefers the meal-time tag, then a requested tag, then the reco rank, never repeating a dish.
+    /// <summary>Ensures the fallback picks dishes in the documented priority without repeats.</summary>
     [Fact]
     public void Fallback_ShouldPreferMealTimeThenRequestedTagThenRank()
     {

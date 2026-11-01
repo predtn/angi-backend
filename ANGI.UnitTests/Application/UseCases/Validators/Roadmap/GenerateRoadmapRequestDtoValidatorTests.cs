@@ -4,11 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies GenerateRoadmapRequestDtoValidator accepts each documented scope and rejects each invalid value on its field.</summary>
 public sealed class GenerateRoadmapRequestDtoValidatorTests
 {
     private readonly GenerateRoadmapRequestDtoValidator _validator = new();
 
     // TEST-01: Accept the documented request of each scope, with every optional field at its limits.
+    /// <summary>Ensures each scope's documented request is accepted with optional fields at their limits.</summary>
     [Fact]
     public void Validate_WithDocumentedRequests_ShouldPass()
     {
@@ -39,6 +41,7 @@ public sealed class GenerateRoadmapRequestDtoValidatorTests
     }
 
     // TEST-02: Reject each out-of-contract value on its own field.
+    /// <summary>Ensures clients learn exactly which field is wrong.</summary>
     [Theory]
     [MemberData(nameof(InvalidRequests))]
     public void Validate_WithInvalidValue_ShouldFailOnThatField(GenerateRoadmapRequestDto request, string field)
@@ -46,6 +49,7 @@ public sealed class GenerateRoadmapRequestDtoValidatorTests
         _validator.Validate(request).Errors.Should().Contain(error => error.PropertyName == field);
     }
 
+    /// <summary>Supplies each out-of-contract generation request with the field expected to report it.</summary>
     public static TheoryData<GenerateRoadmapRequestDto, string> InvalidRequests() => new()
     {
         { new GenerateRoadmapRequestDto { Scope = null!, Province = "Huế" }, "Scope" },

@@ -12,6 +12,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.SubmitMenuSubmission;
 
+/// <summary>Verifies SubmitMenuSubmissionUseCase sends only a changed, non-empty draft menu for review.</summary>
 public sealed class SubmitMenuSubmissionUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 18, 9, 30, 0, DateTimeKind.Utc);

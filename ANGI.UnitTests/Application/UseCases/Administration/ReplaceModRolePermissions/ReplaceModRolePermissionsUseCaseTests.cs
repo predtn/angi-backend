@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.ReplaceModRolePermissions;
 
+/// <summary>Verifies ReplaceModRolePermissionsUseCase replaces the MOD role defaults atomically and rejects unknown or admin-only permissions.</summary>
 public sealed class ReplaceModRolePermissionsUseCaseTests
 {
     // TEST-01: Replace defaults in catalog order, audit them, save once, and commit.

@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Middlewares
 {
+    /// <summary>Verifies AccountStatusMiddleware checks the account status only on authorized endpoints for signed-in users.</summary>
     public sealed class AccountStatusMiddlewareTests
     {
         private readonly Mock<IEnsureActiveAccountUseCase> _ensureActiveAccount = new();
@@ -21,6 +22,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-01: Check the account on an [Authorize] endpoint and continue when it is active.
+        /// <summary>Ensures an active account passes through protected endpoints.</summary>
         [Fact]
         public async Task InvokeAsync_OnAuthorizedEndpoint_ShouldCheckAccountAndContinue()
         {
@@ -34,6 +36,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-02: Stop the request when the account check throws (e.g. banned account).
+        /// <summary>Ensures a blocked account cannot reach protected endpoints with an old token.</summary>
         [Fact]
         public async Task InvokeAsync_WithInactiveAccount_ShouldThrowAndNotCallNext()
         {
@@ -49,6 +52,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-03: Skip [AllowAnonymous] and public endpoints even when a token is sent.
+        /// <summary>Avoids a status lookup on endpoints that do not require sign-in.</summary>
         [Fact]
         public async Task InvokeAsync_OnAnonymousOrPublicEndpoint_ShouldNotCheckAccount()
         {
@@ -61,6 +65,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-04: Leave unauthenticated requests to the authorization middleware (401).
+        /// <summary>Leaves anonymous requests to the authorization middleware so they get 401.</summary>
         [Fact]
         public async Task InvokeAsync_WithoutAuthenticatedUser_ShouldNotCheckAccount()
         {
@@ -69,11 +74,13 @@ namespace ANGI.UnitTests.WebApi.Middlewares
             _ensureActiveAccount.Verify(x => x.ExecuteAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
+        /// <summary>Creates the middleware over the shared account check and current-user mocks.</summary>
         private AccountStatusMiddleware CreateMiddleware()
         {
             return new AccountStatusMiddleware(_ensureActiveAccount.Object, _currentUser.Object);
         }
 
+        /// <summary>Creates an HTTP context, signed in or not, whose endpoint carries the given metadata.</summary>
         private static DefaultHttpContext CreateContext(bool authenticated, params object[] endpointMetadata)
         {
             var context = new DefaultHttpContext

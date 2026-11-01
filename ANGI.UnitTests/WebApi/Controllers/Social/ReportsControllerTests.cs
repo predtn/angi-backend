@@ -14,6 +14,7 @@ public sealed class ReportsControllerTests
 {
     private readonly Mock<IReportBlogUseCase> _reportBlogUseCase = new();
 
+    /// <summary>Creates the controller over the shared blog report use case mock.</summary>
     private ReportsController CreateController() => new(_reportBlogUseCase.Object);
 
     // TEST-01: Verify Controller should require traveler role.

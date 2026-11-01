@@ -26,14 +26,18 @@ public sealed class LikeBlogUseCaseTests
         _unitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transaction.Object);
     }
 
+    /// <summary>Creates the use case over the shared repository, current-user and unit-of-work mocks and the fixed clock.</summary>
     private LikeBlogUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object, _unitOfWork.Object, _timeProvider);
 
+    /// <summary>Clock fixed at one instant so like timestamps can be asserted exactly.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => new(now);
     }
 
+    /// <summary>Creates published blog 45 of another author with five likes.</summary>
     private static Blog PublishedBlog() => new()
     {
         Id = 45,

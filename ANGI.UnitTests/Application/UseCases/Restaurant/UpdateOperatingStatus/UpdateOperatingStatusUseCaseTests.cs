@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.UpdateOperatingStatus;
 
+/// <summary>Verifies UpdateOperatingStatusUseCase changes and audits the owner's operating status without overriding MOD suspension.</summary>
 public sealed class UpdateOperatingStatusUseCaseTests
 {
     private const int OwnerId = 21;
@@ -28,6 +29,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
         _currentUserService.SetupGet(x => x.UserId).Returns(OwnerId);
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, audit and unit-of-work mocks.</summary>
     private UpdateOperatingStatusUseCase CreateUseCase() => new(
         new UpdateOperatingStatusRequestDtoValidator(),
         _restaurantRepository.Object,
@@ -35,6 +37,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
         _auditLogService.Object,
         _unitOfWork.Object);
 
+    /// <summary>Makes the repository return the owner's restaurant with the given operating and moderation status.</summary>
     private Domain.Entities.Restaurant SetupRestaurant(
         RestaurantOperatingStatus operating,
         RestaurantModerationStatus moderation = RestaurantModerationStatus.Visible)
@@ -52,6 +55,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-01: Change the status, write one audit row with the old and new values and the note, and save once.
+    /// <summary>Ensures a status change is saved once with a matching audit row.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNewStatus_ShouldSaveAndAudit()
     {
@@ -80,6 +84,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-02: The same status changes nothing: no audit row and no save.
+    /// <summary>Ensures an unchanged status writes nothing.</summary>
     [Fact]
     public async Task ExecuteAsync_WithSameStatus_ShouldNotAuditOrSave()
     {
@@ -95,6 +100,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-03: A restaurant suspended by a Mod cannot be reopened by its owner.
+    /// <summary>Ensures an owner cannot bypass a MOD suspension by reopening.</summary>
     [Fact]
     public async Task ExecuteAsync_ReopeningSuspendedRestaurant_ShouldThrowRestaurantSuspended()
     {
@@ -110,6 +116,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-04: A suspended restaurant may still close, and an already open one may "stay" open.
+    /// <summary>Ensures a suspension blocks only reopening, not other changes.</summary>
     [Theory]
     [InlineData(RestaurantOperatingStatus.Open, "temporarily_closed")]
     [InlineData(RestaurantOperatingStatus.TemporarilyClosed, "permanently_closed")]
@@ -128,6 +135,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-05: An owner without a restaurant gets RESTAURANT_NOT_FOUND.
+    /// <summary>Ensures an owner without a restaurant gets RESTAURANT_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutRestaurant_ShouldThrowRestaurantNotFound()
     {
@@ -142,6 +150,7 @@ public sealed class UpdateOperatingStatusUseCaseTests
     }
 
     // TEST-06: Validate before loading anything.
+    /// <summary>Ensures an unknown status costs no database work.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownStatus_ShouldThrowValidationBeforeLoading()
     {

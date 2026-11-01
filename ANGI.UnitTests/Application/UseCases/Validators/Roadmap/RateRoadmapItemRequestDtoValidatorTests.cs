@@ -4,11 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies RateRoadmapItemRequestDtoValidator accepts only the two documented feedback values.</summary>
 public sealed class RateRoadmapItemRequestDtoValidatorTests
 {
     private readonly RateRoadmapItemRequestDtoValidator _validator = new();
 
     // TEST-01: Accept the two documented values.
+    /// <summary>Ensures both documented feedback values are accepted.</summary>
     [Theory]
     [InlineData("like")]
     [InlineData("dislike")]
@@ -18,6 +20,7 @@ public sealed class RateRoadmapItemRequestDtoValidatorTests
     }
 
     // TEST-02: Reject a missing, empty, unknown, or differently cased value on the value field.
+    /// <summary>Ensures any other value is rejected on the value field.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]

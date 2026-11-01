@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.Register;
 
+/// <summary>Verifies RegisterRestaurantUseCase creates one restaurant per owner with owned media and valid business hours.</summary>
 public sealed class RegisterRestaurantUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 7, 3, 0, 0, DateTimeKind.Utc);
@@ -389,6 +390,7 @@ public sealed class RegisterRestaurantUseCaseTests
         ]
     };
 
+    /// <summary>Clock fixed at one instant so creation timestamps are deterministic.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;

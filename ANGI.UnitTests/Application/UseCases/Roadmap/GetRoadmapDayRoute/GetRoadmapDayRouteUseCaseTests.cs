@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.GetRoadmapDayRoute;
 
+/// <summary>Verifies GetRoadmapDayRouteUseCase picks the right origin and builds the day's route legs and totals.</summary>
 public sealed class GetRoadmapDayRouteUseCaseTests
 {
     // TEST-01: Prefer request GPS over a pinned origin and map origin-to-item plus item-to-item legs.

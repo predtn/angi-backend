@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Administration;
 
+/// <summary>Verifies CreateModRequestDtoValidator checks the MOD email, display name and permission override list.</summary>
 public sealed class CreateModRequestDtoValidatorTests
 {
     // TEST-01: Accept two and one-hundred Unicode scalar display-name boundaries and optional overrides.

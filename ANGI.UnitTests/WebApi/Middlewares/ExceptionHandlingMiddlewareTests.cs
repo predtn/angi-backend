@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Middlewares
 {
+    /// <summary>Verifies ExceptionHandlingMiddleware maps exceptions to the documented error envelope without leaking internals.</summary>
     public sealed class ExceptionHandlingMiddlewareTests
     {
         // TEST-01: Return the suspension deadline as structured error data for ACCOUNT_SUSPENDED.

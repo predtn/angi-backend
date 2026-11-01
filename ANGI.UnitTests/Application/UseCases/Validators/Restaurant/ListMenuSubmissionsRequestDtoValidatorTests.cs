@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies ListMenuSubmissionsRequestDtoValidator accepts supported statuses and enforces paging ranges.</summary>
 public sealed class ListMenuSubmissionsRequestDtoValidatorTests
 {
     // TEST-01: Reject unsupported status values and oversized pages.
@@ -22,6 +23,7 @@ public sealed class ListMenuSubmissionsRequestDtoValidatorTests
     }
 
     // TEST-02: Accept no filter and every supported status regardless of casing.
+    /// <summary>Ensures every supported status is accepted in any letter case.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("draft")]
@@ -38,6 +40,7 @@ public sealed class ListMenuSubmissionsRequestDtoValidatorTests
     }
 
     // TEST-03: Enforce page and page-size boundaries from the API contract.
+    /// <summary>Ensures paging is accepted or rejected exactly at the documented boundaries.</summary>
     [Theory]
     [InlineData(0, 20, false)]
     [InlineData(1, 0, false)]

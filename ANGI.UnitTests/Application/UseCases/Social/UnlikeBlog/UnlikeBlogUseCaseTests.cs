@@ -26,6 +26,7 @@ public sealed class UnlikeBlogUseCaseTests
             .ReturnsAsync(new Blog { Id = 45, AuthorId = 99, Title = "Blog", Status = BlogStatus.Published, LikeCount = 6 });
     }
 
+    /// <summary>Creates the use case over the shared repository, current-user and unit-of-work mocks.</summary>
     private UnlikeBlogUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 

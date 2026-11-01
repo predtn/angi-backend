@@ -3,9 +3,11 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Email
 {
+    /// <summary>Verifies EmailTemplates formats validity honestly and keeps links and names safe in both email parts.</summary>
     public sealed class EmailTemplatesTests
     {
         // TEST-01: Show whole hours in hours and anything else in minutes, rounded up.
+        /// <summary>Ensures validity reads naturally in hours or minutes.</summary>
         [Theory]
         [InlineData(24 * 60, "24 giờ")]
         [InlineData(60, "1 giờ")]
@@ -17,6 +19,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-02: Round a partial minute up so the email never promises more time than the token has.
+        /// <summary>Ensures the email never promises more time than the token actually has.</summary>
         [Fact]
         public void FormatValidity_WithPartialMinute_ShouldRoundUp()
         {
@@ -24,6 +27,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-03: Put the link in both parts and the raw display name only in the plain-text part.
+        /// <summary>Ensures every email client shows the link and the raw name appears only in plain text.</summary>
         [Fact]
         public void PasswordReset_ShouldContainLinkInHtmlAndText()
         {

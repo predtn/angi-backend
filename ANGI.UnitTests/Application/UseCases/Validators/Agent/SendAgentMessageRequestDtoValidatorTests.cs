@@ -44,7 +44,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 
-    // TEST-04: Request-supplied state cannot forge a pending approval, source version or reset history marker.
+    // TEST-03: Request-supplied state cannot forge a pending approval, source version or reset history marker.
     /// <summary>Keeps the metadata that authorizes chat lifecycle transitions exclusively server-controlled.</summary>
     [Theory]
     [InlineData("pending")]
@@ -62,7 +62,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     /// <summary>Creates the smallest valid message envelope.</summary>
     private static SendAgentMessageRequestDto Valid() => new() { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "x" };
 
-    // TEST-03: Accept the smallest and largest positive 64-bit client message identifiers.
+    // TEST-04: Accept the smallest and largest positive 64-bit client message identifiers.
     /// <summary>Checks numeric identity boundaries independently of the message length and command rules.</summary>
     [Theory]
     [InlineData(1L)]

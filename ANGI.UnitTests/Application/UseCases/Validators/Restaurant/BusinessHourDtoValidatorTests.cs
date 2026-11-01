@@ -4,9 +4,11 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies BusinessHourDtoValidator checks the day range, HH:mm format and non-empty interval of one business hour.</summary>
 public sealed class BusinessHourDtoValidatorTests
 {
     // TEST-01: Accept every day boundary and both ordinary and overnight opening intervals.
+    /// <summary>Ensures every valid day and both normal and overnight intervals are accepted.</summary>
     [Theory]
     [InlineData(0, "00:00", "23:59")]
     [InlineData(6, "22:00", "02:00")]
@@ -28,6 +30,7 @@ public sealed class BusinessHourDtoValidatorTests
     }
 
     // TEST-02: Reject day values immediately outside the Sunday-to-Saturday range.
+    /// <summary>Ensures days just outside Sunday..Saturday are rejected.</summary>
     [Theory]
     [InlineData(-1)]
     [InlineData(7)]
@@ -47,6 +50,7 @@ public sealed class BusinessHourDtoValidatorTests
     }
 
     // TEST-03: Require exact zero-padded 24-hour HH:mm values for both endpoints.
+    /// <summary>Ensures only zero-padded 24-hour times are accepted.</summary>
     [Theory]
     [InlineData("8:00", "17:00")]
     [InlineData("08:00", "17:0")]
@@ -71,6 +75,7 @@ public sealed class BusinessHourDtoValidatorTests
     }
 
     // TEST-04: Reject a zero-duration interval whose opening and closing values are identical.
+    /// <summary>Ensures an interval cannot open and close at the same time.</summary>
     [Fact]
     public async Task ValidateAsync_WithEqualOpeningAndClosingTimes_ShouldBeInvalid()
     {

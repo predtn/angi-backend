@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.ListMenuSubmissions;
 
+/// <summary>Verifies ListMenuSubmissionsUseCase filters and pages the owner's menu submissions.</summary>
 public sealed class ListMenuSubmissionsUseCaseTests
 {
     // TEST-01: Apply status and pagination while calculating total pages.
@@ -42,6 +43,7 @@ public sealed class ListMenuSubmissionsUseCaseTests
     }
 
     // TEST-02: Apply the documented default filter and pagination values.
+    /// <summary>Ensures the documented defaults apply when no filter is sent.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutFilter_ShouldUseDefaultPagination()
     {
@@ -61,6 +63,7 @@ public sealed class ListMenuSubmissionsUseCaseTests
     }
 
     // TEST-03: Parse every supported status regardless of casing.
+    /// <summary>Ensures status filters work regardless of letter case.</summary>
     [Theory]
     [InlineData("DRAFT", MenuSubmissionStatus.Draft)]
     [InlineData("Pending", MenuSubmissionStatus.Pending)]
@@ -84,6 +87,7 @@ public sealed class ListMenuSubmissionsUseCaseTests
     }
 
     // TEST-04: Return an empty page while preserving totals when page exceeds the result range.
+    /// <summary>Ensures a page past the end is empty but still reports the real totals.</summary>
     [Fact]
     public async Task ExecuteAsync_WithPageBeyondTotal_ShouldReturnEmptyPageAndStableMetadata()
     {
@@ -101,6 +105,7 @@ public sealed class ListMenuSubmissionsUseCaseTests
         result.TotalPages.Should().Be(2);
     }
 
+    /// <summary>Creates the use case for owner 12 with the real validator over the given repository.</summary>
     private static ListMenuSubmissionsUseCase CreateUseCase(
         Mock<IRestaurantMenuRepository> repository)
     {

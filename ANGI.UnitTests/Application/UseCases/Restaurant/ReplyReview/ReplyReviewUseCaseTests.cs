@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.ReplyReview;
 
+/// <summary>Verifies ReplyReviewUseCase lets an owner create or edit one reply on a visible review of their restaurant.</summary>
 public sealed class ReplyReviewUseCaseTests
 {
     private readonly Mock<IRestaurantRepository> _repositoryMock = new();
@@ -22,6 +23,7 @@ public sealed class ReplyReviewUseCaseTests
 
     private readonly Mock<IUnitOfWorkTransaction> _transactionMock = new();
 
+    /// <summary>Creates the use case with the real validator and a unit of work that opens the shared transaction mock.</summary>
     private ReplyReviewUseCase CreateUseCase()
     {
         _unitOfWorkMock.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transactionMock.Object);
@@ -29,6 +31,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-01: Happy Path - Create new reply to review and send notification to traveler
+    /// <summary>Ensures a first reply is stored and the traveler is notified.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenCreatingNewReply_ShouldAddReplyAndNotificationAndSave()
     {
@@ -92,6 +95,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-02: Happy Path - Update existing reply to review
+    /// <summary>Ensures editing a reply does not notify the traveler again.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUpdatingExistingReply_ShouldUpdateContentWithoutDuplicateNotification()
     {
@@ -156,6 +160,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-03: Exception Path 1 - Owner tries to reply to a review of another owner's restaurant (403 Forbidden)
+    /// <summary>Prevents an owner from replying on another restaurant's review.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReviewBelongsToAnotherOwner_ShouldThrowForbiddenException()
     {
@@ -200,6 +205,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-04: Exception Path 2 - ReviewId does not exist (404 Not Found)
+    /// <summary>Ensures a missing review returns not found.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReviewDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -225,6 +231,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-05: Exception Path 3 - Review is hidden by Mod (409 Conflict - REVIEW_NOT_VISIBLE)
+    /// <summary>Ensures a review hidden by a MOD cannot receive a reply.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReviewIsHidden_ShouldThrowConflictException()
     {
@@ -268,6 +275,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-06: Exception Path 4 - User not logged in (401 Unauthorized)
+    /// <summary>Ensures an anonymous caller cannot reply.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -284,6 +292,7 @@ public sealed class ReplyReviewUseCaseTests
     }
 
     // TEST-07: Validation failure - Content is empty
+    /// <summary>Ensures an empty reply is rejected.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenContentIsEmpty_ShouldThrowValidationException()
     {

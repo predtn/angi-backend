@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.DeleteItem;
 
+/// <summary>Verifies DeleteRoadmapItemUseCase deletes only an item of the caller's roadmap and hides every other target.</summary>
 public sealed class DeleteRoadmapItemUseCaseTests
 {
     // TEST-01: Delete the matching owned roadmap item and commit exactly once.
@@ -94,6 +95,7 @@ public sealed class DeleteRoadmapItemUseCaseTests
             transaction);
     }
 
+    /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
     private sealed record Fixture(
         DeleteRoadmapItemUseCase UseCase,
         Mock<IRoadmapRepository> Repository,

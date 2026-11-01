@@ -11,6 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.GetMyRoadmaps;
 
+/// <summary>Verifies GetMyRoadmapsUseCase returns a validated page of the caller's own roadmaps.</summary>
 public sealed class GetMyRoadmapsUseCaseTests
 {
     // TEST-01: Return the requested page scoped to the authenticated traveler.

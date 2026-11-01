@@ -23,6 +23,7 @@ public sealed class EditBlogUseCaseTests
     private static readonly DateTime Now = new(2026, 10, 22, 12, 0, 0, DateTimeKind.Utc);
 
     // TEST-01: Happy Path - Author successfully updates blog details, media, and refreshed roadmap snapshot.
+    /// <summary>Ensures an author's edit updates content, media and the roadmap snapshot in one response.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidUpdatesByAuthor_ShouldUpdateBlogAndReturnDetail()
     {
@@ -88,6 +89,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-02: Exception Path 1 - Throws 404 BLOG_NOT_FOUND when blog does not exist.
+    /// <summary>Ensures a missing blog returns BLOG_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -104,6 +106,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-03: Exception Path 2 - Throws 403 NOT_OWNER when user is not the author.
+    /// <summary>Prevents a user from editing another author's blog.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserIsNotAuthor_ShouldThrowForbiddenException()
     {
@@ -121,6 +124,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-04: Exception Path 3 - Throws 409 BLOG_REMOVED when blog status is Removed.
+    /// <summary>Ensures a blog removed by moderation cannot be edited back.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogStatusIsRemoved_ShouldThrowConflictException()
     {
@@ -140,6 +144,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-05: Exception Path 4 - Throws 401 UNAUTHORIZED when caller has no authenticated user ID.
+    /// <summary>Ensures an anonymous caller cannot edit blogs.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
@@ -155,6 +160,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-06: Exception Path 5 - Throws 400 ValidationException when media does not belong to the user.
+    /// <summary>Prevents attaching someone else's uploads to a blog.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenMediaNotOwned_ShouldThrowValidationException()
     {
@@ -177,6 +183,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-07: Partial Update - Setting coverMediaId to null removes the cover image without touching other fields.
+    /// <summary>Ensures an explicit null removes the cover while other fields stay unchanged.</summary>
     [Fact]
     public async Task ExecuteAsync_WithCoverMediaIdNull_ShouldRemoveCover()
     {
@@ -204,6 +211,7 @@ public sealed class EditBlogUseCaseTests
     }
 
     // TEST-08: Content sanitization security check - Rejects content whose entire body is stripped by sanitizer.
+    /// <summary>Prevents saving a blog whose content is only markup stripped by the sanitizer.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenSanitizedContentIsEmpty_ShouldThrowValidationException()
     {
@@ -223,6 +231,7 @@ public sealed class EditBlogUseCaseTests
         ex.Which.Errors.Should().ContainSingle(e => e.PropertyName == "Content");
     }
 
+    /// <summary>Creates published blog 45 of the given author, optionally linked to a roadmap.</summary>
     private static Blog CreateExistingBlog(int authorId, long? roadmapId = null) => new()
     {
         Id = 45,
@@ -240,6 +249,7 @@ public sealed class EditBlogUseCaseTests
         Images = new List<BlogImage>()
     };
 
+    /// <summary>Creates the default author with an avatar.</summary>
     private static User Author() => new()
     {
         Id = 12,
@@ -247,6 +257,7 @@ public sealed class EditBlogUseCaseTests
         AvatarMedia = new MediaFile { Id = 9, Url = "https://cdn.test/avatar.jpg" }
     };
 
+    /// <summary>Creates a two-day roadmap source used to build the blog's roadmap snapshot.</summary>
     private static RoadmapSnapshotSource RoadmapSource() => new()
     {
         RoadmapId = 88,
@@ -287,6 +298,7 @@ public sealed class EditBlogUseCaseTests
         ]
     };
 
+    /// <summary>Creates a unit of work that opens a transaction mock returned through the out parameter.</summary>
     private static Mock<IUnitOfWork> UnitOfWork(out Mock<IUnitOfWorkTransaction> transaction)
     {
         transaction = new Mock<IUnitOfWorkTransaction>();
@@ -296,6 +308,7 @@ public sealed class EditBlogUseCaseTests
         return unitOfWork;
     }
 
+    /// <summary>Creates the use case, filling any mock not supplied with a default that lets the happy path run.</summary>
     private static EditBlogUseCase CreateUseCase(
         Mock<IBlogRepository>? blogRepository = null,
         Mock<IMediaRepository>? mediaRepository = null,
@@ -327,8 +340,10 @@ public sealed class EditBlogUseCaseTests
             new FixedTimeProvider(Now));
     }
 
+    /// <summary>Clock fixed at one instant so updated_at can be asserted exactly.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => new(now);
     }
 }

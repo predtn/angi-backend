@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Administration;
 
+/// <summary>Verifies ListModsRequestDtoValidator accepts only documented statuses and paging ranges.</summary>
 public sealed class ListModsRequestDtoValidatorTests
 {
     // TEST-01: Accept absent filters and both documented statuses at paging boundaries.

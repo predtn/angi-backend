@@ -317,6 +317,7 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
         document.RootElement.GetProperty("errorCode").GetString().Should().Be(errorCode);
     }
 
+    /// <summary>Ids of the owner, MOD, restaurant and verification seeded for one scenario.</summary>
     private sealed record SeedResult(
         int OwnerId,
         int ModId,
@@ -324,6 +325,7 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
         long PreviousVerificationId,
         long VerificationId);
 
+    /// <summary>Minimal page shape used to read paged API responses in this test.</summary>
     private sealed class PagedResponse<T>
     {
         public IReadOnlyList<T> Items { get; set; } = [];

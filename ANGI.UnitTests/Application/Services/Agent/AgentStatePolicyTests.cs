@@ -8,6 +8,8 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Verifies that LLM-generated consent cannot bypass hard trip constraints.</summary>
 public sealed class AgentStatePolicyTests
 {
+    // TEST-01: Transient search filters can be removed while removing a confirmed constraint is rejected.
+    /// <summary>Ensures temporary search filters can be dropped while confirmed constraints stay enforced.</summary>
     [Fact]
     public void Accept_TransientSearchFilters_CanBeRemovedWithoutRelaxingConfirmedConstraints()
     {
@@ -19,7 +21,7 @@ public sealed class AgentStatePolicyTests
             .Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>();
     }
 
-    // TEST-01: Reject silent constraint relaxation across province, days, budget, tags, radius and origin.
+    // TEST-02: Reject silent constraint relaxation across province, days, budget, tags, radius and origin.
     /// <summary>Protects each hard-constraint equivalence class from model-controlled relaxation.</summary>
     [Theory]
     [InlineData("province")][InlineData("days")][InlineData("budget")][InlineData("budget-null")][InlineData("unrestricted")]
@@ -41,7 +43,7 @@ public sealed class AgentStatePolicyTests
         act.Should().Throw<ConflictException>().Which.ErrorCode.Should().Be("PROPOSAL_NOT_COMMITTABLE");
     }
 
-    // TEST-02: Allow initial enrichment, unchanged state and stricter monetary constraints without changing preferences globally.
+    // TEST-03: Allow initial enrichment, unchanged state and stricter monetary constraints without changing preferences globally.
     /// <summary>Verifies safe enrichment and tightening remain functional.</summary>
     [Fact]
     public void Accept_EnrichmentAndTightening_Succeeds()

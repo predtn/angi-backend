@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Notification;
 
+/// <summary>Verifies MarkNotificationAsReadRequestDtoValidator requires either valid ids or the all flag.</summary>
 public sealed class MarkNotificationAsReadRequestDtoValidatorTests
 {
     private readonly MarkNotificationAsReadRequestDtoValidator _validator = new();

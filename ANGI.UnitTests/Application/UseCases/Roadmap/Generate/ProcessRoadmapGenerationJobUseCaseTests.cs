@@ -16,6 +16,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Generate;
 
+/// <summary>Verifies ProcessRoadmapGenerationJobUseCase fills the targeted meals with ranked dishes and always finishes or fails the job.</summary>
 public sealed class ProcessRoadmapGenerationJobUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 2, 2, 20, 4, DateTimeKind.Utc);
@@ -66,6 +67,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-02: Keep a usable AI schedule and record the model that planned it.
+    /// <summary>Ensures a valid AI schedule is used as-is and attributed to its model.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUsableAiPlan_ShouldWriteItAndRecordModel()
     {
@@ -86,6 +88,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-03: Without replaceExisting, fill only the empty meals and never suggest a dish already in the roadmap.
+    /// <summary>Ensures user-chosen items are kept and never duplicated by generation.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutReplace_ShouldFillOnlyEmptyMeals()
     {
@@ -100,6 +103,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-04: With replaceExisting, replace the items of the targeted meals and allow their dishes again.
+    /// <summary>Ensures replace mode rewrites only the targeted meals.</summary>
     [Fact]
     public async Task ExecuteAsync_WithReplace_ShouldRemoveTargetedItems()
     {
@@ -116,6 +120,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-05: A slot that is already filled and not replaced finishes the job without asking reco.
+    /// <summary>Avoids a reco call when there is nothing to fill.</summary>
     [Fact]
     public async Task ExecuteAsync_WithFilledSlotAndNoReplace_ShouldSucceedWithoutItems()
     {
@@ -130,6 +135,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-06: Search the whole province when nothing is inside the radius, and record that the radius was dropped.
+    /// <summary>Ensures generation still succeeds when the radius is too small, and records that it was dropped.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNothingInsideRadius_ShouldDropRadius()
     {
@@ -150,6 +156,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-07: Fail the job with a readable message when no dish matches, the roadmap was deleted or the day is gone.
+    /// <summary>Ensures the user sees a readable reason when generation is impossible.</summary>
     [Theory]
     [InlineData("no-candidate", ProcessRoadmapGenerationJobUseCase.NoCandidateMessage)]
     [InlineData("roadmap-deleted", ProcessRoadmapGenerationJobUseCase.RoadmapGoneMessage)]
@@ -170,6 +177,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-08: Never leave the job running after an unexpected error, and let the worker log it.
+    /// <summary>Ensures an unexpected error never leaves a job stuck in running.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRecoThrows_ShouldFailJobAndRethrow()
     {
@@ -201,6 +209,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         fixture.Recommendation.Verify(value => value.RecordImpressionsAsync(It.IsAny<int>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>Wires the use case with an in-memory roadmap, job, dish catalog and planner doubles for one scenario.</summary>
     private sealed class Fixture
     {
         public Fixture(
@@ -280,6 +289,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         public List<RoadmapItem> Removed { get; } = [];
         public List<Domain.Entities.Notification> Notifications { get; } = [];
 
+        /// <summary>Creates roadmap 88 with two days, optionally an existing lunch item and a deletion time.</summary>
         private static Domain.Entities.Roadmap Roadmap(int? existingLunchDishId, DateTime? deletedAt)
         {
             var first = new RoadmapDay { Id = 301, RoadmapId = 88, DayNumber = 1 };
@@ -299,8 +309,10 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         }
     }
 
+    /// <summary>Clock fixed at one instant so job timestamps are deterministic.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => new(now);
     }
 }

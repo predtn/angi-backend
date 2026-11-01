@@ -16,6 +16,8 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Checks scoped inheritance, named selectors, provenance and grounded replies at business boundaries.</summary>
 public sealed class AgentScopedPlanningTests
 {
+    // TEST-01: A meal-level taste override wins over the day override without leaking into other days or the stored profile.
+    /// <summary>Ensures scoped taste overrides apply only where the user asked for them.</summary>
     [Fact]
     public void Vector_MealOverridesDayWithoutLeakingToOtherDaysOrProfile()
     {
@@ -29,6 +31,8 @@ public sealed class AgentScopedPlanningTests
         baseline.Should().OnlyContain(x => x == .25);
     }
 
+    // TEST-02: Specialty tags and novelty requests stay separate from taste targets for the scoped day and meal.
+    /// <summary>Ensures specialty and novelty requests filter candidates without changing the taste vector.</summary>
     [Fact]
     public void Request_SpecialtyTagsAndNoveltyRemainSeparateFromTaste()
     {
@@ -40,6 +44,8 @@ public sealed class AgentScopedPlanningTests
         AgentScopedPlanning.Request(state, 3, "lunch").DifferentFromPlan.Should().BeTrue();
     }
 
+    // TEST-03: Malformed scoped state is rejected; covers an out-of-range day, an unknown meal, duplicate overrides, an invalid intensity, null targets, null request tags, a negative tag id, null overrides and null meal requests.
+    /// <summary>Guards ranking against scoped state that is out of range, duplicated or missing collections.</summary>
     [Theory]
     [InlineData("day")][InlineData("meal")][InlineData("duplicate")][InlineData("intensity")][InlineData("null-targets")]
     [InlineData("request-null-tags")][InlineData("request-negative-id")][InlineData("null-overrides")][InlineData("null-requests")]
@@ -61,6 +67,8 @@ public sealed class AgentScopedPlanningTests
         new AgentStateValidator().Validate(state).IsValid.Should().BeFalse();
     }
 
+    // TEST-04: Legacy state JSON without scoped fields reads with empty overrides, requests and meal slots and the default replan mode.
+    /// <summary>Keeps conversations stored before scoped planning existed readable with safe defaults.</summary>
     [Fact]
     public void LegacyJson_ReadsWithNoScopedOverridesOrCoverage()
     {
@@ -69,6 +77,8 @@ public sealed class AgentScopedPlanningTests
         state.PreferenceApplication.Should().Be("replan");
     }
 
+    // TEST-05: A broad recommendation while days have different taste overrides returns scoped_requests_required without calling reco or the dish catalog.
+    /// <summary>Prevents one trip-wide ranking from being used when days need different taste vectors.</summary>
     [Fact]
     public async Task BroadRecommendation_DifferentDaysRequireScopedCalls()
     {
@@ -81,6 +91,8 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Should().BeEmpty(); reco.VerifyNoOtherCalls(); fixture.Dishes.VerifyNoOtherCalls();
     }
 
+    // TEST-06: A day-scoped recommendation sends the effective override vector to reco without changing the trip-wide default vector.
+    /// <summary>Ensures a scoped ranking uses its override vector while the trip default stays untouched.</summary>
     [Fact]
     public async Task ScopedRecommendation_SendsEffectiveVectorWithoutChangingTripDefault()
     {
@@ -100,6 +112,8 @@ public sealed class AgentScopedPlanningTests
         result.GetProperty("returnedCount").GetInt32().Should().Be(1);
     }
 
+    // TEST-07: An unresolved named restaurant never falls back to other restaurants; covers not found, ambiguous, unavailable and outside the province.
+    /// <summary>Ensures a restaurant the user named is never silently swapped for a different one.</summary>
     [Theory]
     [InlineData("not_found")][InlineData("ambiguous")][InlineData("unavailable")][InlineData("outside_province")]
     public async Task NamedRestaurant_UnresolvedLookupNeverFallsBackToOtherRestaurants(string outcome)
@@ -117,6 +131,8 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Should().BeEmpty(); reco.VerifyNoOtherCalls(); fixture.Dishes.VerifyNoOtherCalls();
     }
 
+    // TEST-08: A named dish request restricts candidate ids and the restaurant before ranking.
+    /// <summary>Ensures a named dish request only ranks the matching dish at the matching restaurant.</summary>
     [Fact]
     public async Task NamedDish_QueryRestrictsIdsAndRestaurantBeforeRanking()
     {
@@ -134,6 +150,8 @@ public sealed class AgentScopedPlanningTests
         filter!.RestaurantId.Should().Be(11); filter.DishIds.Should().Equal(7);
     }
 
+    // TEST-09: A retained dish whose taste scope changed needs a new grant, and the new grant updates the item's request identity.
+    /// <summary>Ensures a kept dish is re-authorized under the new taste and attributed to the new reco request.</summary>
     [Fact]
     public async Task RetainedDish_ChangedTasteRequiresNewGrantAndUpdatesRequestIdentity()
     {
@@ -148,6 +166,8 @@ public sealed class AgentScopedPlanningTests
         ranked.Snapshot.Items[0].RankingFingerprint.Should().NotBeNull();
     }
 
+    // TEST-10: A meal not affected by the change, or a future-only taste change, does not require reranking; covers both cases.
+    /// <summary>Avoids needless reranking for meals that a taste change does not affect.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
     public async Task UnaffectedOrFutureOnlyMeal_DoesNotRequireReranking(bool futureOnly)
@@ -159,6 +179,8 @@ public sealed class AgentScopedPlanningTests
         result.Validation.Errors.Should().BeEmpty();
     }
 
+    // TEST-11: Declared meal coverage rejects a plan missing its breakfast and dinner slots.
+    /// <summary>Ensures a plan covers every meal slot the user declared.</summary>
     [Fact]
     public async Task DeclaredMealCoverage_RejectsMissingBreakfastAndDinner()
     {
@@ -168,6 +190,8 @@ public sealed class AgentScopedPlanningTests
         result.Validation.Errors.Should().Contain(x => x.Contains("breakfast")).And.Contain(x => x.Contains("dinner"));
     }
 
+    // TEST-12: A named meal request rejects another dish even when that dish has a candidate grant.
+    /// <summary>Ensures a candidate grant cannot override an explicit dish or restaurant request.</summary>
     [Fact]
     public async Task NamedRequest_ValidatorRejectsAnotherDishEvenWithCandidateGrant()
     {
@@ -178,6 +202,8 @@ public sealed class AgentScopedPlanningTests
         result.Validation.Errors.Should().Contain(x => x.Contains("món/quán"));
     }
 
+    // TEST-13: A novelty request rejects an initial plan that repeats a dish in another meal.
+    /// <summary>Ensures a novelty request is honoured by rejecting repeated dishes.</summary>
     [Fact]
     public async Task Novelty_InitialPlanCannotRepeatTheDishInAnotherMeal()
     {
@@ -188,6 +214,8 @@ public sealed class AgentScopedPlanningTests
         result.Validation.Errors.Should().Contain(x => x.Contains("bị lặp"));
     }
 
+    // TEST-14: Confirming a re-evaluated retained dish keeps the new request id and rejects a tampered ranking fingerprint.
+    /// <summary>Ensures confirmation keeps the re-evaluated attribution and detects a forged ranking fingerprint.</summary>
     [Fact]
     public async Task Confirm_ReevaluatedRetainedDishPreservesNewRequestAndDetectsTampering()
     {
@@ -204,6 +232,8 @@ public sealed class AgentScopedPlanningTests
         (await fixture.Validator.ValidateAsync(tampered, source, true, false, default)).Validation.Errors.Should().NotBeEmpty();
     }
 
+    // TEST-15: A future-only taste answer creates a savable revision that keeps the current dishes without reranking.
+    /// <summary>Ensures a taste change for future suggestions can be saved without rebuilding the current plan.</summary>
     [Fact]
     public async Task FutureTasteOnlyAnswer_CreatesSavableRevisionWithoutReranking()
     {
@@ -219,6 +249,8 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Should().BeEmpty(); result.Reply.Should().Contain("gợi ý tiếp theo");
     }
 
+    // TEST-16: A taste-update answer cannot claim the old proposal was updated when no new proposal was built.
+    /// <summary>Prevents the reply from telling the user a plan changed when it did not.</summary>
     [Fact]
     public async Task TasteUpdateAnswer_CannotClaimOldProposalWasUpdated()
     {
@@ -232,6 +264,8 @@ public sealed class AgentScopedPlanningTests
         fixture.Llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    // TEST-17: Provider prose cannot invent user-visible catalog facts; covers answer and clarify actions.
+    /// <summary>Prevents unverified model prose from showing invented restaurant facts to the user.</summary>
     [Theory]
     [InlineData("answer")][InlineData("clarify")]
     public async Task ProviderProse_CannotInventUserVisibleCatalogFacts(string action)
@@ -244,5 +278,6 @@ public sealed class AgentScopedPlanningTests
         if (action == "clarify") result.Reply.Should().Contain("toàn chuyến").And.Contain("ngày/bữa");
     }
 
+    /// <summary>Builds a get_recommendation tool call from the given input, serialized with the agent JSON options.</summary>
     private static AgentToolCall Recommend(AgentRecommendationInput input) => new("rank", "get_recommendation", JsonSerializer.SerializeToElement(input, AgentJson.Options));
 }

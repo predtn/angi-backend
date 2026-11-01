@@ -5,6 +5,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies VerificationDocumentRequestDtoValidator accepts only documented document types and positive media ids.</summary>
 public sealed class VerificationDocumentRequestDtoValidatorTests
 {
     private readonly VerificationDocumentRequestDtoValidator _validator = new();

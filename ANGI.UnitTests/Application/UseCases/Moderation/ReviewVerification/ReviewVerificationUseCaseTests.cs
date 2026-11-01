@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Moderation.ReviewVerification;
 
+/// <summary>Verifies ReviewVerificationUseCase applies each decision atomically with notification and audit, and rejects invalid reviews.</summary>
 public sealed class ReviewVerificationUseCaseTests
 {
     private static readonly DateTime ReviewedAt = new(2026, 10, 21, 4, 30, 0, DateTimeKind.Utc);

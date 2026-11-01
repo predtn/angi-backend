@@ -19,6 +19,7 @@ public sealed class GetBlogCommentsUseCaseTests
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository and current-user mocks.</summary>
     private GetBlogCommentsUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _currentUserService.Object);
 

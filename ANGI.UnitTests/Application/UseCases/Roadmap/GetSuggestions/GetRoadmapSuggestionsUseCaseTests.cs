@@ -18,6 +18,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.GetSuggestions;
 
+/// <summary>Verifies GetRoadmapSuggestionsUseCase filters, ranks and pages dish suggestions for a roadmap.</summary>
 public sealed class GetRoadmapSuggestionsUseCaseTests
 {
     private const int TravelerId = 12;
@@ -292,6 +293,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
         Restaurant = new Domain.Entities.Restaurant { Id = 7, Name = "Restaurant" }
     };
 
+    /// <summary>Dictionary-backed ranked list cache so paging can be tested without Redis.</summary>
     private sealed class InMemoryCache : IRankedDishListCache
     {
         private readonly Dictionary<Guid, RankedDishList> _lists = [];

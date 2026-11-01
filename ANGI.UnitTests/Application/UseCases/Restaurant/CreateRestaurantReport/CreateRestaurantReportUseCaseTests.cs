@@ -34,9 +34,12 @@ public sealed class CreateRestaurantReportUseCaseTests
                 ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, media and unit-of-work mocks.</summary>
     private CreateRestaurantReportUseCase CreateUseCase() =>
         new(_validator, _restaurantRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
+    // TEST-01: A valid report for an active restaurant is created and saved for the current user.
+    /// <summary>Ensures a valid report is stored once for the reporting user.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReportSuccessfully()
     {
@@ -86,6 +89,8 @@ public sealed class CreateRestaurantReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: A missing or inactive restaurant throws NotFoundException.
+    /// <summary>Ensures reports can only target active restaurants.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -114,6 +119,8 @@ public sealed class CreateRestaurantReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-03: A user who already has a pending report for the restaurant gets ConflictException.
+    /// <summary>Prevents duplicate open reports from the same user.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserHasPendingReport_ShouldThrowConflictException()
     {
@@ -145,6 +152,8 @@ public sealed class CreateRestaurantReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-04: An unauthenticated caller gets UnauthorizedException.
+    /// <summary>Ensures an anonymous caller cannot report a restaurant.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -167,6 +176,8 @@ public sealed class CreateRestaurantReportUseCaseTests
         ex.Which.Message.Should().Be("Bạn cần đăng nhập để báo cáo nhà hàng.");
     }
 
+    // TEST-05: Every valid reason code maps to its enum value; covers wrong_info, closed, spam, offensive, hygiene, scam and other.
+    /// <summary>Ensures each documented reason code is stored as the matching enum value.</summary>
     [Theory]
     [InlineData("wrong_info", ReportReasonCode.WrongInfo)]
     [InlineData("closed", ReportReasonCode.Closed)]
@@ -208,6 +219,8 @@ public sealed class CreateRestaurantReportUseCaseTests
         addedReport!.ReasonCode.Should().Be(expectedEnum);
     }
 
+    // TEST-06: Evidence media not uploaded by the reporter throws a validation error and no report is created.
+    /// <summary>Prevents attaching someone else's uploads as report evidence.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
     {

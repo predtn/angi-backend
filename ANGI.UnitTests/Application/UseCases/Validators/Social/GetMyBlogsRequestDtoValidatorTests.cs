@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Social;
 
+/// <summary>Verifies GetMyBlogsRequestDtoValidator enforces paging ranges and documented status values.</summary>
 public sealed class GetMyBlogsRequestDtoValidatorTests
 {
     private readonly GetMyBlogsRequestDtoValidator _validator = new();

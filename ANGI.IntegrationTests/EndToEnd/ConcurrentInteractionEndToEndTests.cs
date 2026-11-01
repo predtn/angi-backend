@@ -124,8 +124,10 @@ public sealed class ConcurrentInteractionEndToEndTests : IClassFixture<PostgresA
         (await _factory.ExecuteDbAsync(context => context.Notifications.CountAsync(value => value.Type == "REVIEW_REPLIED"))).Should().Be(1);
     }
 
+    /// <summary>A registered traveler's id and access token.</summary>
     private sealed record Traveler(int UserId, string Token);
 
+    /// <summary>Registers the given number of travelers through HTTP.</summary>
     private async Task<Traveler[]> TravelersAsync(HttpClient client, int count)
     {
         var travelers = new Traveler[count];
@@ -138,6 +140,7 @@ public sealed class ConcurrentInteractionEndToEndTests : IClassFixture<PostgresA
         return travelers;
     }
 
+    /// <summary>Inserts a published blog by the given author and returns its id.</summary>
     private Task<long> SeedBlogAsync(int authorId) => _factory.ExecuteDbAsync(async context =>
     {
         var blog = new Blog
@@ -153,14 +156,17 @@ public sealed class ConcurrentInteractionEndToEndTests : IClassFixture<PostgresA
         return blog.Id;
     });
 
+    /// <summary>Returns the blog's stored like counter together with the actual number of like rows.</summary>
     private Task<(int Count, int Rows)> CountsAsync(long blogId) => _factory.ExecuteDbAsync(async context => (
         await context.Blogs.Where(blog => blog.Id == blogId).Select(blog => blog.LikeCount).SingleAsync(),
         await context.BlogLikes.CountAsync(like => like.BlogId == blogId)));
 
+    /// <summary>Returns the blog's stored comment counter together with the actual number of comment rows.</summary>
     private Task<(int Count, int Rows)> CommentCountsAsync(long blogId) => _factory.ExecuteDbAsync(async context => (
         await context.Blogs.Where(blog => blog.Id == blogId).Select(blog => blog.CommentCount).SingleAsync(),
         await context.BlogComments.CountAsync(comment => comment.BlogId == blogId)));
 
+    /// <summary>Sends an authenticated request with an optional JSON body.</summary>
     private static async Task<HttpResponseMessage> SendAsync(HttpClient client, HttpMethod method, string url, string token, object? body = null)
     {
         using var request = new HttpRequestMessage(method, url) { Content = body is null ? null : JsonContent.Create(body) };

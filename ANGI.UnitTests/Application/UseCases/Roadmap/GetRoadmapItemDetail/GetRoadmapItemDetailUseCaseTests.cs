@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.GetRoadmapItemDetail;
 
+/// <summary>Verifies GetRoadmapItemDetailUseCase returns an owned item's detail with its feedback and review state.</summary>
 public sealed class GetRoadmapItemDetailUseCaseTests
 {
     private static readonly DateTimeOffset MondayTenAm = new(2026, 10, 12, 3, 0, 0, TimeSpan.Zero);
@@ -246,6 +247,7 @@ public sealed class GetRoadmapItemDetailUseCaseTests
             new FixedTimeProvider(MondayTenAm));
     }
 
+    /// <summary>Clock fixed at one instant so opening-hour results are deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         /// <summary>Returns the fixed instant used by opening-hour test cases.</summary>

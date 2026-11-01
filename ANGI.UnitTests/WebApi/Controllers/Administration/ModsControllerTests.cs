@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Administration;
 
+/// <summary>Verifies ModsController passes route and body data to the MOD use cases and returns the documented status codes.</summary>
 public sealed class ModsControllerTests
 {
     // TEST-01: Return the ADM-M1 page in an HTTP 200 API envelope.

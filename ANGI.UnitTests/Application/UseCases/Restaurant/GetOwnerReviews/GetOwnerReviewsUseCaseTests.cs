@@ -12,16 +12,19 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetOwnerReviews;
 
+/// <summary>Verifies GetOwnerReviewsUseCase returns a validated page of reviews for the owner's restaurant.</summary>
 public sealed class GetOwnerReviewsUseCaseTests
 {
     private readonly Mock<IRestaurantRepository> _repositoryMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly GetOwnerReviewsRequestDtoValidator _validator = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository and current-user mocks.</summary>
     private GetOwnerReviewsUseCase CreateUseCase() =>
         new(_repositoryMock.Object, _currentUserServiceMock.Object, _validator);
 
     // TEST-01: Happy Path - Paginated owner reviews returned successfully
+    /// <summary>Ensures an owner sees their restaurant's reviews with page metadata.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenOwnerHasRestaurant_ShouldReturnPagedReviews()
     {
@@ -101,6 +104,7 @@ public sealed class GetOwnerReviewsUseCaseTests
     }
 
     // TEST-02: Exception Path - Owner not authenticated
+    /// <summary>Ensures an anonymous caller cannot read owner reviews.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -117,6 +121,7 @@ public sealed class GetOwnerReviewsUseCaseTests
     }
 
     // TEST-03: Exception Path - Owner has no restaurant
+    /// <summary>Ensures an owner without a restaurant gets RESTAURANT_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenOwnerHasNoRestaurant_ShouldThrowNotFoundException()
     {
@@ -138,6 +143,7 @@ public sealed class GetOwnerReviewsUseCaseTests
     }
 
     // TEST-04: Validation failure - Invalid rating
+    /// <summary>Ensures an invalid rating filter is rejected before querying.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenInvalidRating_ShouldThrowValidationException()
     {

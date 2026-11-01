@@ -3,6 +3,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.WebApi.Common
 {
+    /// <summary>Verifies ValidationErrorKeys converts property paths to the camelCase keys clients see.</summary>
     public sealed class ValidationErrorKeysTests
     {
         // TEST-01: Camel-case every segment of a property path, keeping indexes and JSON-path markers.

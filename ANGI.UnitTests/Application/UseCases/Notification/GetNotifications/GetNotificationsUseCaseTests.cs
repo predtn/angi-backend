@@ -11,12 +11,14 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Notification.GetNotifications;
 
+/// <summary>Verifies GetNotificationsUseCase returns the caller's paginated notifications with the unread count.</summary>
 public sealed class GetNotificationsUseCaseTests
 {
     private readonly IValidator<GetNotificationsRequestDto> _validator = new GetNotificationsRequestDtoValidator();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<INotificationRepository> _notificationRepository = new();
 
+    /// <summary>Creates the use case with the real validator and the shared current-user and repository mocks.</summary>
     private GetNotificationsUseCase CreateUseCase() =>
         new(_validator, _currentUserService.Object, _notificationRepository.Object);
 

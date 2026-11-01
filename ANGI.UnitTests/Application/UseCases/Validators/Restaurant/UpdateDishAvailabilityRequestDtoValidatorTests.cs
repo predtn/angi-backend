@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies UpdateDishAvailabilityRequestDtoValidator requires an explicit availability value.</summary>
 public sealed class UpdateDishAvailabilityRequestDtoValidatorTests
 {
     // TEST-01: Reject an omitted availability value.

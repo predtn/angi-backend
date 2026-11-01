@@ -32,6 +32,7 @@ public sealed class CreateBlogCommentUseCaseTests
             .Returns<string>(input => input);
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, sanitizer and unit-of-work mocks.</summary>
     private CreateBlogCommentUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _contentSanitizer.Object, _currentUserService.Object, _unitOfWork.Object);
 

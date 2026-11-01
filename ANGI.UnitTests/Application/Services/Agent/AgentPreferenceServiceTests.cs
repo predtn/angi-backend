@@ -11,6 +11,8 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Checks profile inheritance, transient failures and ownership of computed vectors.</summary>
 public sealed class AgentPreferenceServiceTests
 {
+    // TEST-01: The reco profile is inherited once as the baseline and later turns change only the dimensions the user stated explicitly.
+    /// <summary>Ensures the reco profile seeds preferences once and only dimensions the user stated are overridden.</summary>
     [Fact]
     public async Task EnsureAsync_InheritsOnceAndOnlyChangesExplicitDimensions()
     {
@@ -31,6 +33,8 @@ public sealed class AgentPreferenceServiceTests
         reco.Verify(x => x.GetPreferencesAsync(3, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: An unavailable reco profile keeps the taste targets pending and is retried on the next turn.
+    /// <summary>Ensures a temporary reco outage neither loses taste targets nor permanently skips profile inheritance.</summary>
     [Fact]
     public async Task EnsureAsync_UnavailableRetainsTargetsAndRetries()
     {
@@ -47,6 +51,8 @@ public sealed class AgentPreferenceServiceTests
         state.Preferences.EffectiveVector![5].Should().Be(.75);
     }
 
+    // TEST-03: A forged baseline vector from the model is rejected and the effective vector is recomputed from the trusted snapshot.
+    /// <summary>Prevents model output from replacing the trusted baseline vector used for ranking.</summary>
     [Fact]
     public void Accept_RejectsForgedBaselineAndRecomputesFromTrustedSnapshot()
     {
@@ -60,6 +66,8 @@ public sealed class AgentPreferenceServiceTests
         accepted.Preferences.BaselineVector.Should().BeSameAs(baseline);
     }
 
+    // TEST-04: An incompatible reco profile leaves preferences uninitialized; covers a wrong ontology version, another user, a wrong vector length, NaN and infinity.
+    /// <summary>Ensures a profile that cannot be trusted is never used as the preference baseline.</summary>
     [Theory]
     [InlineData("wrong-ontology")]
     [InlineData("wrong-user")]
@@ -78,6 +86,8 @@ public sealed class AgentPreferenceServiceTests
         state.TasteTargets.Should().ContainSingle();
     }
 
+    // TEST-05: An empty reco profile initializes preferences with a null effective vector and records when the profile was read.
+    /// <summary>Ensures a user without a profile is marked initialized without inventing a vector.</summary>
     [Fact]
     public async Task EnsureAsync_EmptyProfileProducesNullEffectiveVectorAndRecordsReadTime()
     {
@@ -91,6 +101,8 @@ public sealed class AgentPreferenceServiceTests
         state.Preferences!.EffectiveVector.Should().BeNull();
     }
 
+    // TEST-06: The state validator rejects unknown taste dimensions and unsupported target values; covers an unknown dimension, an off-step target (0.4) and a target above 1.
+    /// <summary>Ensures only known taste dimensions and supported intensity steps reach ranking.</summary>
     [Theory]
     [InlineData("unknown", .5)]
     [InlineData("spicy", .4)]

@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies ResetPasswordRequestDtoValidator requires a token and a password that meets the policy.</summary>
     public sealed class ResetPasswordRequestDtoValidatorTests
     {
         // TEST-01: Accept passwords at both documented length boundaries when they contain a letter and digit.

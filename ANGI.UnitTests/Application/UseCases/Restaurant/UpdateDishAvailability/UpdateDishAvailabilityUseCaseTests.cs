@@ -11,6 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.UpdateDishAvailability;
 
+/// <summary>Verifies UpdateDishAvailabilityUseCase toggles availability only for dishes the caller owns.</summary>
 public sealed class UpdateDishAvailabilityUseCaseTests
 {
     // TEST-01: Persist the requested availability only for a dish owned by the caller.
@@ -37,6 +38,7 @@ public sealed class UpdateDishAvailabilityUseCaseTests
     }
 
     // TEST-02: Switch availability in both true-to-false and false-to-true directions.
+    /// <summary>Ensures availability can be turned both off and on.</summary>
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -58,6 +60,7 @@ public sealed class UpdateDishAvailabilityUseCaseTests
     }
 
     // TEST-03: Reject removed or other-owner dishes without persisting.
+    /// <summary>Ensures removed or foreign dishes are never changed.</summary>
     [Fact]
     public async Task ExecuteAsync_WithRemovedOrOtherOwnerDish_ShouldNotPersist()
     {

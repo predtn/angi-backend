@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Administration;
 
+/// <summary>Verifies ReplaceModPermissionsRequestDtoValidator checks the override list shape and effect values.</summary>
 public sealed class ReplaceModPermissionsRequestDtoValidatorTests
 {
     private readonly ReplaceModPermissionsRequestDtoValidator _validator = new();

@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies AddMenuSubmissionItemRequestDtoValidator enforces the dish proposal limits, price precision and tag rules.</summary>
 public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
 {
     // TEST-01: Accept a complete dish proposal matching OWN-14 bounds.
@@ -40,6 +41,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-03: Match the numeric(12,0) lower, upper, overflow, fraction, and negative boundaries.
+    /// <summary>Ensures accepted prices always fit the numeric(12,0) column.</summary>
     [Theory]
     [InlineData("0", true)]
     [InlineData("999999999999", true)]
@@ -59,6 +61,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-04: Measure description length after trimming surrounding whitespace.
+    /// <summary>Ensures padding cannot satisfy the minimum description length.</summary>
     [Theory]
     [InlineData(29, false)]
     [InlineData(30, true)]
@@ -75,6 +78,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-05: Allow omitted tags and reject duplicate or negative tag identifiers.
+    /// <summary>Ensures tags are optional but never duplicated or negative.</summary>
     [Theory]
     [InlineData(null, null)]
     [InlineData("1", "1,1")]
@@ -91,6 +95,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
         result.IsValid.Should().Be(first is null);
     }
 
+    /// <summary>Creates a valid add-item request without tags or cover.</summary>
     private static AddMenuSubmissionItemRequestDto ValidRequest() => new()
     {
         Name = "Valid dish",

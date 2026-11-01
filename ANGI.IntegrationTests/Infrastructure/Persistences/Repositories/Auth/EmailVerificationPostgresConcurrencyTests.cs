@@ -207,8 +207,10 @@ public sealed class EmailVerificationPostgresConcurrencyTests
     private static string RequiredConnectionString() =>
         Environment.GetEnvironmentVariable(PostgresIntegrationFactAttribute.ConnectionStringVariable)!;
 
+    /// <summary>Ids of the user and verification token seeded for one concurrency scenario.</summary>
     private sealed record SeedResult(int UserId, string Email, long TokenId, string TokenHash);
 
+    /// <summary>Clock fixed at one instant so token expiry and stored timestamps are deterministic.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;

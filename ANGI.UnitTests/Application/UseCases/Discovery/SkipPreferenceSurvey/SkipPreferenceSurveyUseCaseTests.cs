@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.SkipPreferenceSurvey;
 
+/// <summary>Verifies SkipPreferenceSurveyUseCase records a skip in reco for the signed-in user.</summary>
 public sealed class SkipPreferenceSurveyUseCaseTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 2, 30, 0, TimeSpan.Zero);
@@ -22,12 +23,14 @@ public sealed class SkipPreferenceSurveyUseCaseTests
         _currentUserService.SetupGet(x => x.UserId).Returns(TravelerId);
     }
 
+    /// <summary>Creates the use case with a fixed clock and the shared current-user and reco mocks.</summary>
     private SkipPreferenceSurveyUseCase CreateUseCase() => new(
         _currentUserService.Object,
         _recommendationService.Object,
         new FixedTimeProvider(Now));
 
     // TEST-01: Skip by sending RECO-03 an empty answer list for the caller.
+    /// <summary>Ensures a skip is stored as an empty survey so the user is not asked again.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldSendNoAnswersToRecoAndReturnSkipped()
     {
@@ -46,6 +49,7 @@ public sealed class SkipPreferenceSurveyUseCaseTests
     }
 
     // TEST-02: Return 503 when reco cannot store the skip, so the app can try again.
+    /// <summary>Ensures the app learns the skip was not stored and can retry.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRecoIsUnavailable_ShouldPropagateServiceUnavailable()
     {
@@ -63,6 +67,7 @@ public sealed class SkipPreferenceSurveyUseCaseTests
     }
 
     // TEST-03: Refuse a request without a user id in the token.
+    /// <summary>Ensures a skip cannot be recorded without a signed-in user.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
@@ -74,8 +79,10 @@ public sealed class SkipPreferenceSurveyUseCaseTests
         _recommendationService.VerifyNoOtherCalls();
     }
 
+    /// <summary>Clock fixed at one instant so the submitted time is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

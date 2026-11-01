@@ -49,6 +49,7 @@ public sealed class AgentModuleTests
         limits.MaxOutputTokens.Should().Be(16000); limits.ReasoningEffort.Should().BeNull();
     }
 
+    // TEST-03: Every supported reasoning effort binds from configuration; covers none, minimal, low, medium and high.
     /// <summary>Binds supported reasoning controls without requiring live provider credentials.</summary>
     [Theory]
     [InlineData("none")][InlineData("minimal")][InlineData("low")]
@@ -64,7 +65,7 @@ public sealed class AgentModuleTests
         provider.GetRequiredService<AgentLimits>().ReasoningEffort.Should().Be(effort);
     }
 
-    // TEST-03: Agent's provider timeout is independent of shared roadmap AI settings and capped by the turn deadline.
+    // TEST-04: Agent's provider timeout is independent of shared roadmap AI settings and capped by the turn deadline.
     /// <summary>Checks configured typed HTTP clients without making a provider request.</summary>
     [Theory]
     [InlineData(60, 90, 60)][InlineData(180, 90, 90)]

@@ -5,6 +5,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies GetMyRoadmapsRequestDtoValidator enforces the paging ranges.</summary>
 public sealed class GetMyRoadmapsRequestDtoValidatorTests
 {
     private readonly GetMyRoadmapsRequestDtoValidator _validator = new();

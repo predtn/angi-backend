@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies GetRoadmapSuggestionsRequestDtoValidator enforces the RM-06 filter boundaries.</summary>
 public sealed class GetRoadmapSuggestionsRequestDtoValidatorTests
 {
     private readonly GetRoadmapSuggestionsRequestDtoValidator _validator = new();

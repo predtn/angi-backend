@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies ResendVerificationEmailRequestDtoValidator accepts only well-formed emails within the length limit.</summary>
     public sealed class ResendVerificationEmailRequestDtoValidatorTests
     {
         // TEST-01: Accept a valid email address for a verification resend.

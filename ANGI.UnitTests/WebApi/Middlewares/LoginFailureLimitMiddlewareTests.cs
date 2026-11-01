@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.WebApi.Middlewares
 {
+    /// <summary>Verifies LoginFailureLimitMiddleware limits repeated failed logins per email and IP and lifts the limit on time.</summary>
     public class LoginFailureLimitMiddlewareTests
     {
         private const int PermitLimit = 3;
@@ -34,6 +35,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-01: Verify that the login after the configured number of failures is rejected with 429 and Retry-After.
+        /// <summary>Ensures brute-force attempts are stopped with 429 and a retry time.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldRejectWithTooManyRequests_AfterConfiguredFailures()
         {
@@ -53,6 +55,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-02: Verify that a failed login is still rethrown so the exception middleware returns 401.
+        /// <summary>Ensures a failed login still produces the normal 401 response.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldRethrowInvalidCredentials()
         {
@@ -62,6 +65,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-03: Verify that a successful login clears the failure counter.
+        /// <summary>Ensures a successful login resets the user's failure count.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldClearFailures_AfterSuccessfulLogin()
         {
@@ -82,6 +86,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-04: Verify that only INVALID_CREDENTIALS counts as a failure.
+        /// <summary>Ensures only wrong credentials count toward the limit.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldNotCount_OtherErrors()
         {
@@ -108,6 +113,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-05: Verify that Retry-After counts down and the limit lifts when the window ends.
+        /// <summary>Ensures the limit is temporary and Retry-After stays accurate.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldAllowLoginAgain_WhenWindowEnds()
         {
@@ -129,6 +135,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-06: Verify that failures are counted per email and per IP address.
+        /// <summary>Ensures one account or address cannot exhaust another's attempts.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldCountPerEmailAndIp()
         {
@@ -147,6 +154,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         }
 
         // TEST-07: Verify that requests other than POST /api/v1/auth/login are never limited.
+        /// <summary>Ensures the limit applies only to the login endpoint.</summary>
         [Fact]
         public async Task InvokeAsync_ShouldIgnoreOtherRequests()
         {
@@ -166,23 +174,27 @@ namespace ANGI.UnitTests.WebApi.Middlewares
             getLogin.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
+        /// <summary>Runs one login request that fails with invalid credentials and asserts the 401 is rethrown.</summary>
         private async Task FailLoginAsync()
         {
             var act = () => _middleware.InvokeAsync(CreateLoginContext(), _ => throw InvalidCredentials());
             await act.Should().ThrowAsync<UnauthorizedException>();
         }
 
+        /// <summary>Pipeline step that completes the login with 200.</summary>
         private static Task SucceedAsync(HttpContext context)
         {
             context.Response.StatusCode = StatusCodes.Status200OK;
             return Task.CompletedTask;
         }
 
+        /// <summary>Creates the INVALID_CREDENTIALS exception the login use case throws.</summary>
         private static UnauthorizedException InvalidCredentials()
         {
             return new UnauthorizedException("INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng.");
         }
 
+        /// <summary>Creates a POST login request for the given email and IP address.</summary>
         private static DefaultHttpContext CreateLoginContext(string email = "user@angi.test", IPAddress? ip = null)
         {
             var context = new DefaultHttpContext
@@ -197,6 +209,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
             return context;
         }
 
+        /// <summary>Reads errorCode from the JSON response body.</summary>
         private static string? ReadErrorCode(HttpContext context)
         {
             context.Response.Body.Position = 0;
@@ -204,14 +217,17 @@ namespace ANGI.UnitTests.WebApi.Middlewares
             return document.RootElement.GetProperty("errorCode").GetString();
         }
 
+        /// <summary>Clock that only moves when the test advances it, so window expiry can be tested without waiting.</summary>
         private sealed class ManualTimeProvider : TimeProvider
         {
             private DateTimeOffset _now;
 
             public ManualTimeProvider(DateTimeOffset now) => _now = now;
 
+            /// <summary>Returns the current manual instant.</summary>
             public override DateTimeOffset GetUtcNow() => _now;
 
+            /// <summary>Moves the manual clock forward by the given duration.</summary>
             public void Advance(TimeSpan duration) => _now = _now.Add(duration);
         }
     }

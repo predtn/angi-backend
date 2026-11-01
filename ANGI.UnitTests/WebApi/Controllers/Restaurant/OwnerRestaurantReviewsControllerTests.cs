@@ -10,15 +10,18 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies OwnerRestaurantReviewsController wraps review listing and replies in 200 envelopes.</summary>
 public sealed class OwnerRestaurantReviewsControllerTests
 {
     private readonly Mock<IGetOwnerReviewsUseCase> _getOwnerReviewsMock = new();
     private readonly Mock<IReplyReviewUseCase> _replyReviewMock = new();
 
+    /// <summary>Creates the controller over the shared review listing and reply use case mocks.</summary>
     private OwnerRestaurantReviewsController CreateController() =>
         new(_getOwnerReviewsMock.Object, _replyReviewMock.Object);
 
     // TEST-01: GetReviews (OWN-19) returns 200 OK with Paged<ReviewDto> wrapped in ApiResponse
+    /// <summary>Ensures the owner's review page is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetReviews_WithValidQuery_ShouldReturnOkWithPagedReviews()
     {
@@ -57,6 +60,7 @@ public sealed class OwnerRestaurantReviewsControllerTests
     }
 
     // TEST-02: Reply (OWN-20) returns 200 OK with ReviewReplyDto wrapped in ApiResponse
+    /// <summary>Ensures the saved reply is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task Reply_WithValidRequest_ShouldReturnOkWithReviewReply()
     {

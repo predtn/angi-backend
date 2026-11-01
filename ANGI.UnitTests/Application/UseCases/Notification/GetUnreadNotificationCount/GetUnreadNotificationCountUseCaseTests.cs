@@ -7,11 +7,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Notification.GetUnreadNotificationCount;
 
+/// <summary>Verifies GetUnreadNotificationCountUseCase returns the caller's unread count and requires authentication.</summary>
 public sealed class GetUnreadNotificationCountUseCaseTests
 {
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly Mock<INotificationRepository> _notificationRepository = new();
 
+    /// <summary>Creates the use case over the shared current-user and repository mocks.</summary>
     private GetUnreadNotificationCountUseCase CreateUseCase() =>
         new(_currentUserService.Object, _notificationRepository.Object);
 

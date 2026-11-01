@@ -8,9 +8,11 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
 {
+    /// <summary>Verifies EnsureActiveAccountUseCase lets only active accounts through and maps every other status to its AUTH-04 error.</summary>
     public sealed class EnsureActiveAccountUseCaseTests
     {
         // TEST-01: Let an active account through.
+        /// <summary>Ensures an active account is not blocked by the status guard.</summary>
         [Fact]
         public async Task ExecuteAsync_WithActiveAccount_ShouldReturn()
         {
@@ -22,6 +24,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         }
 
         // TEST-02: Reject a suspended account with its suspension end, like AUTH-04.
+        /// <summary>Ensures a suspended user learns when the suspension ends.</summary>
         [Fact]
         public async Task ExecuteAsync_WithSuspendedAccount_ShouldThrowAccountSuspended()
         {
@@ -35,6 +38,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         }
 
         // TEST-03: Reject banned, deactivated and unverified accounts with the AUTH-04 codes.
+        /// <summary>Ensures every blocked status is rejected with the error code clients rely on.</summary>
         [Theory]
         [InlineData(UserStatus.Banned, "ACCOUNT_BANNED")]
         [InlineData(UserStatus.Deactivated, "ACCOUNT_DEACTIVATED")]
@@ -49,6 +53,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         }
 
         // TEST-04: Treat a deleted or unknown user as not signed in.
+        /// <summary>Ensures a token for a removed account is treated as signed out rather than forbidden.</summary>
         [Fact]
         public async Task ExecuteAsync_WithUnknownUser_ShouldThrowUnauthorized()
         {
@@ -59,6 +64,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
             (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
         }
 
+        /// <summary>Creates the use case over a status cache that returns the given snapshot for user 12.</summary>
         private static EnsureActiveAccountUseCase CreateUseCase(AccountStatusSnapshot? account)
         {
             var cache = new Mock<IAccountStatusCache>();

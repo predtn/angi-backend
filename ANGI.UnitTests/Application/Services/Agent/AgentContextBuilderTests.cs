@@ -14,6 +14,8 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Verifies context uses authoritative snapshots rather than stale or failed chat output.</summary>
 public sealed class AgentContextBuilderTests
 {
+    // TEST-01: A legacy proposal snapshot stored out of order is mapped back in chronological day and meal order.
+    /// <summary>Keeps proposals saved before ordering was enforced readable in the order users expect.</summary>
     [Fact]
     public void MapProposal_LegacyUnsortedSnapshot_ReturnsChronologicalItems()
     {
@@ -23,7 +25,7 @@ public sealed class AgentContextBuilderTests
         AgentContextBuilder.MapProposal(proposal).Snapshot.Items.Select(item => item.ItemKey).Should().Equal("a", "b", "c");
     }
 
-    // TEST-01: After commit, context reloads the latest official roadmap revision and preserves the source item ID.
+    // TEST-02: After commit, context reloads the latest official roadmap revision and preserves the source item ID.
     /// <summary>Verifies future edits start from the latest saved aggregate.</summary>
     [Fact]
     public async Task BuildAsync_CommittedSource_LoadsLatestRoadmap()
@@ -40,7 +42,7 @@ public sealed class AgentContextBuilderTests
         result.State.Title.Should().Be("Latest"); result.State.NumDays.Should().Be(1);
     }
 
-    // TEST-02: A pending proposal based on an old roadmap revision is rejected rather than silently rebased.
+    // TEST-03: A pending proposal based on an old roadmap revision is rejected rather than silently rebased.
     /// <summary>Checks context loading detects a stale edit before any LLM or tools.</summary>
     [Fact]
     public async Task BuildAsync_StaleReadyProposal_Rejects()
@@ -74,7 +76,7 @@ public sealed class AgentContextBuilderTests
         result.State.BudgetAmount.Should().Be(700000); result.History.Should().ContainSingle().Which.Content.Should().Be("Fresh context");
     }
 
-    // TEST-03: A roadmap with items from multiple provinces leaves the destination unknown instead of guessing.
+    // TEST-05: A roadmap with items from multiple provinces leaves the destination unknown instead of guessing.
     /// <summary>Verifies initial context records only unambiguous catalog facts.</summary>
     [Fact]
     public void StateFromRoadmap_AmbiguousProvince_RemainsUnknown()

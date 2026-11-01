@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.GetRoadmapDetail;
 
+/// <summary>Verifies GetRoadmapDetailUseCase maps the full roadmap detail for its owner from current data.</summary>
 public sealed class GetRoadmapDetailUseCaseTests
 {
     // TEST-01: Map every RM-03 section from current aggregate data, including a removed dish and item feedback.

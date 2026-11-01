@@ -3,6 +3,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Auth;
 
+/// <summary>Verifies PasswordService hashes with salted BCrypt and verifies only the matching password.</summary>
 public sealed class PasswordServiceTests
 {
     // TEST-01: Hash a password with a non-deterministic BCrypt salt and never return the plaintext.

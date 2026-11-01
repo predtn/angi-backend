@@ -10,12 +10,14 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Account;
 
+/// <summary>Verifies MeController requires authorization and wraps the profile use case results in ApiResponse.</summary>
 public sealed class MeControllerTests
 {
     private readonly Mock<IGetMyProfileUseCase> _getMyProfileUseCase = new();
     private readonly Mock<IUpdateMyProfileUseCase> _updateMyProfileUseCase = new();
     private readonly Mock<IChangePasswordUseCase> _changePasswordUseCase = new();
 
+    /// <summary>Creates the controller over the shared profile and password use case mocks.</summary>
     private MeController CreateController() =>
         new(_getMyProfileUseCase.Object, _updateMyProfileUseCase.Object, _changePasswordUseCase.Object);
 

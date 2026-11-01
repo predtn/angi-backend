@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Generate;
 
+/// <summary>Verifies GenerateRoadmapUseCase queues one generation job per roadmap with the scope, constraints and origin it will use.</summary>
 public sealed class GenerateRoadmapUseCaseTests
 {
     // TEST-01: Queue the job with the scope and the constraints, commit once and answer queued.
@@ -101,6 +102,7 @@ public sealed class GenerateRoadmapUseCaseTests
     }
 
     // TEST-04: Reject an invalid body before opening a transaction.
+    /// <summary>Ensures an invalid request never opens a transaction.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidBody_ShouldThrowValidation()
     {
@@ -112,8 +114,10 @@ public sealed class GenerateRoadmapUseCaseTests
         fixture.UnitOfWork.Verify(unitOfWork => unitOfWork.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>Creates a full-scope generation request for Huế.</summary>
     private static GenerateRoadmapRequestDto Full() => new() { Scope = "full", Province = "Huế" };
 
+    /// <summary>Creates roadmap 88 of user 12 with the given origin mode and a pinned point when pinned.</summary>
     private static Domain.Entities.Roadmap Roadmap(RoadmapOriginMode mode) => new()
     {
         Id = 88,
@@ -124,6 +128,7 @@ public sealed class GenerateRoadmapUseCaseTests
         Days = { new RoadmapDay { Id = 301, DayNumber = 1 } }
     };
 
+    /// <summary>Wires the use case over the given roadmap, an optional active job and a transaction that records added jobs.</summary>
     private static Fixture CreateFixture(Domain.Entities.Roadmap? roadmap, bool activeJob = false)
     {
         var added = new List<RoadmapGenerationJob>();
@@ -149,6 +154,7 @@ public sealed class GenerateRoadmapUseCaseTests
             added);
     }
 
+    /// <summary>Groups the use case under test with the mocks and captured jobs each scenario verifies.</summary>
     private sealed record Fixture(
         GenerateRoadmapUseCase UseCase,
         Mock<IUnitOfWork> UnitOfWork,

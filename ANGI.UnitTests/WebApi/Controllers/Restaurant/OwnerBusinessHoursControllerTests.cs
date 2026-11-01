@@ -10,9 +10,11 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies OwnerBusinessHoursController is owner-only and returns the updated hours in a 200 envelope.</summary>
 public sealed class OwnerBusinessHoursControllerTests
 {
     // TEST-01: Allow only restaurant owners, as column "Auth / Role" of OWN-04 says.
+    /// <summary>Ensures only restaurant owners can change business hours.</summary>
     [Fact]
     public void Controller_ShouldAllowOnlyRestaurantOwners()
     {
@@ -25,6 +27,7 @@ public sealed class OwnerBusinessHoursControllerTests
     }
 
     // TEST-02: Wrap the OWN-04 result in a 200 ApiResponse.
+    /// <summary>Ensures the updated schedule is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task Update_ShouldReturnOkWithUseCaseResult()
     {

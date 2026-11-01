@@ -14,8 +14,11 @@ public sealed class RestaurantReportsControllerTests
 {
     private readonly Mock<ICreateRestaurantReportUseCase> _createRestaurantReportUseCase = new();
 
+    /// <summary>Creates the controller over the shared report use case mock.</summary>
     private RestaurantReportsController CreateController() => new(_createRestaurantReportUseCase.Object);
 
+    // TEST-01: The controller requires the TRAVELER role.
+    /// <summary>Ensures only travelers can report restaurants.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -27,6 +30,8 @@ public sealed class RestaurantReportsControllerTests
         authorize.Roles.Should().Contain("TRAVELER");
     }
 
+    // TEST-02: Create delegates to the use case and returns 201 Created with the report response.
+    /// <summary>Ensures a created report returns 201 with the use case result.</summary>
     [Fact]
     public async Task Create_ShouldReturnCreatedWithReportResponse()
     {

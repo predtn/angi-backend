@@ -19,6 +19,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Moderation;
 /// <summary>Exercises all ANGI-191 endpoints through the production HTTP pipeline and PostgreSQL persistence.</summary>
 public sealed class RestaurantModerationHttpTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
+    /// <summary>Ids of the users, restaurants, dishes, reports and evidence seeded for the restaurant moderation scenarios.</summary>
     private sealed record World(long RestaurantId, long HiddenRestaurantId, long DeletedRestaurantId,
         int DishId, int RemovedDishId, long ReportId, long RelatedReportId, long BlogReportId,
         int OwnerId, int ModId, int AdminId, int TravelerId, long EvidenceId);

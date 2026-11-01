@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Account;
 
+/// <summary>Verifies UpdateProfileRequestDtoValidator enforces the profile field length limits.</summary>
 public sealed class UpdateProfileRequestDtoValidatorTests
 {
     private readonly UpdateProfileRequestDtoValidator _validator = new();

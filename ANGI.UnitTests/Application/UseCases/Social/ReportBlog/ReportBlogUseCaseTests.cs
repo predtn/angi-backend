@@ -33,6 +33,7 @@ public sealed class ReportBlogUseCaseTests
                 ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, media and unit-of-work mocks.</summary>
     private ReportBlogUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
@@ -196,6 +197,8 @@ public sealed class ReportBlogUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
+    // TEST-06: Evidence media not uploaded by the reporter throws a validation error and no report is created.
+    /// <summary>Prevents attaching someone else's uploads as report evidence.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
     {

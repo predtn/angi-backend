@@ -73,6 +73,7 @@ public sealed class DeleteBlogCommentUseCaseTests
     }
 
     // TEST-03: Comment not found or does not belong to blog should throw NotFoundException (404 COMMENT_NOT_FOUND).
+    /// <summary>Ensures a comment of another blog cannot be deleted through this blog.</summary>
     [Fact]
     public async Task ExecuteAsync_CommentNotFound_ShouldThrowNotFoundException()
     {
@@ -102,6 +103,7 @@ public sealed class DeleteBlogCommentUseCaseTests
     }
 
     // TEST-04: Unauthenticated user should throw UnauthorizedException (401 UNAUTHORIZED).
+    /// <summary>Ensures an anonymous caller cannot delete comments.</summary>
     [Fact]
     public async Task ExecuteAsync_UnauthenticatedUser_ShouldThrowUnauthorizedException()
     {
@@ -124,6 +126,7 @@ public sealed class DeleteBlogCommentUseCaseTests
     }
 
     // TEST-05: When a concurrent delete wins, this call still succeeds and decrements nothing (the repository skips it).
+    /// <summary>Ensures a concurrent double delete keeps the comment counter correct.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenConcurrentDeleteWins_ShouldSucceedWithoutSecondDecrement()
     {
@@ -134,6 +137,7 @@ public sealed class DeleteBlogCommentUseCaseTests
         harness.Transaction.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>Wires the use case over comment 302 of blog 45 with the given owner, caller and soft-delete outcome.</summary>
     private static Harness CreateHarness(int commentOwnerId, int currentUserId, bool deleted)
     {
         var comments = new Mock<IBlogCommentRepository>();
@@ -151,13 +155,16 @@ public sealed class DeleteBlogCommentUseCaseTests
             transaction);
     }
 
+    /// <summary>Groups the use case under test with the comment repository and transaction mocks each scenario verifies.</summary>
     private sealed record Harness(
         DeleteBlogCommentUseCase UseCase,
         Mock<IBlogCommentRepository> Comments,
         Mock<IUnitOfWorkTransaction> Transaction);
 
+    /// <summary>Clock fixed at one instant so the deletion timestamp can be matched exactly.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => new(now);
     }
 }

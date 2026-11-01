@@ -8,6 +8,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.GetModPermissions;
 
+/// <summary>Verifies GetModPermissionsUseCase computes a MOD's effective permissions from role defaults and overrides.</summary>
 public sealed class GetModPermissionsUseCaseTests
 {
     // TEST-01: Calculate role defaults plus allows minus denies without duplicates.

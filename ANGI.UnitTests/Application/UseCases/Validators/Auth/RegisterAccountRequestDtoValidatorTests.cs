@@ -4,6 +4,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth;
 
+/// <summary>Verifies RegisterAccountRequestDtoValidator enforces roles, email, password and safe display-name rules.</summary>
 public sealed class RegisterAccountRequestDtoValidatorTests
 {
     private readonly RegisterAccountRequestDtoValidator _validator = new();
@@ -66,6 +67,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-05: Reject null, empty, and whitespace-only values for every required field.
+    /// <summary>Ensures every missing field is reported, not just the first one.</summary>
     [Fact]
     public void Validate_WithMissingRequiredFields_ShouldFailOnEveryField()
     {
@@ -86,6 +88,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-06: Exercise both sides of the documented email maximum length.
+    /// <summary>Ensures the email limit is applied exactly at max and max + 1.</summary>
     [Theory]
     [InlineData(255, false)]
     [InlineData(256, true)]
@@ -108,6 +111,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-07: Exercise the minimum and maximum password boundaries.
+    /// <summary>Ensures the password limits are applied exactly at their boundaries.</summary>
     [Theory]
     [InlineData(7, true)]
     [InlineData(8, false)]
@@ -131,6 +135,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-08: Count display-name length after trimming, including both accepted boundaries.
+    /// <summary>Ensures surrounding spaces do not count toward the display-name length.</summary>
     [Theory]
     [InlineData(1, true)]
     [InlineData(2, false)]
@@ -154,6 +159,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-09: Block invisible controls, bidi formatting, private-use, replacement, and malformed UTF-16.
+    /// <summary>Prevents display names that hide or reorder text with invisible characters.</summary>
     [Theory]
     [InlineData("Nguyễn\nAn")]
     [InlineData("Nguyễn\u200BAn")]
@@ -173,6 +179,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-10: Preserve normal international names and valid supplementary Unicode.
+    /// <summary>Ensures real international names are not rejected by the Unicode filter.</summary>
     [Theory]
     [InlineData("Nguyễn An")]
     [InlineData("O'Connor-Smith")]
@@ -188,6 +195,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     }
 
     // TEST-11: Supplementary Unicode counts as one database character, not two UTF-16 code units.
+    /// <summary>Ensures the length limit matches how PostgreSQL counts characters.</summary>
     [Theory]
     [InlineData(100, false)]
     [InlineData(101, true)]

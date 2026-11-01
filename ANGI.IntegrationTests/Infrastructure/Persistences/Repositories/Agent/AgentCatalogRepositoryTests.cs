@@ -12,6 +12,8 @@ namespace ANGI.IntegrationTests.Infrastructure.Persistences.Repositories.Agent;
 /// <summary>Runs actual PostgreSQL catalog lookup and Agent-only filtering against a dedicated database.</summary>
 public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
+    // TEST-01: Catalog lookup escapes LIKE wildcards and reports unavailable dishes and restaurants separately from missing ones.
+    /// <summary>Ensures user text cannot act as a LIKE pattern and unavailable items are reported distinctly.</summary>
     [PostgresEndToEndFact]
     public async Task Lookup_EscapesWildcardsAndSeparatesUnavailableFromMissing()
     {
@@ -36,6 +38,8 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
         });
     }
 
+    // TEST-02: The candidate limit is applied after requiring all agent tags and meal compatibility.
+    /// <summary>Ensures the candidate limit never cuts off dishes that match every requested tag.</summary>
     [PostgresEndToEndFact]
     public async Task CandidateLimit_ComesAfterAllAgentTagsAndMealCompatibility()
     {

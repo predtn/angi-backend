@@ -47,7 +47,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             });
         }
 
-        // TEST-05: Truncated JSON is reported where the reader stopped, still only with the Vietnamese messages.
+        // TEST-03: Truncated JSON is reported where the reader stopped, still only with the Vietnamese messages.
         /// <summary>Verifies no serializer message leaks whichever key the error lands on.</summary>
         [Fact]
         public async Task Login_WithTruncatedJson_ShouldUseOnlyVietnameseMessages()
@@ -59,7 +59,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
                 message == ModelBindingErrors.InvalidValueMessage);
         }
 
-        // TEST-03: A value of the wrong JSON type is reported on its field, in Vietnamese.
+        // TEST-04: A value of the wrong JSON type is reported on its field, in Vietnamese.
         /// <summary>Verifies a type error keeps the API field name.</summary>
         [Fact]
         public async Task Login_WithWrongValueType_ShouldReportTheField()
@@ -70,7 +70,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
                 .WhoseValue.Should().Equal(ModelBindingErrors.InvalidValueMessage);
         }
 
-        // TEST-04: An explicit null field reaches the validator: one Vietnamese message per field.
+        // TEST-05: An explicit null field reaches the validator: one Vietnamese message per field.
         /// <summary>Verifies implicit [Required] no longer answers before FluentValidation.</summary>
         [Fact]
         public async Task Login_WithNullFields_ShouldUseValidatorMessages()
@@ -84,6 +84,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             });
         }
 
+        /// <summary>Posts the raw JSON body, asserts a VALIDATION_FAILED 400 and returns its field errors.</summary>
         private async Task<Dictionary<string, string[]>> PostAndReadErrors(string path, string body)
         {
             using var content = new StringContent(body, Encoding.UTF8, "application/json");

@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.UpdateOwnerProfile;
 
+/// <summary>Verifies UpdateOwnerRestaurantUseCase updates the owner's restaurant profile and gallery and audits real changes only.</summary>
 public sealed class UpdateOwnerRestaurantUseCaseTests
 {
     // TEST-01: Update supplied fields, replace the gallery, and audit only changed values.

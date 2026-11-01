@@ -12,13 +12,15 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Notification.MarkNotificationAsRead;
 
+/// <summary>Verifies MarkNotificationAsReadUseCase marks only the caller's notifications as read and validates the id list.</summary>
 public sealed class MarkNotificationAsReadUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
     private const int TestUserId = 100;
     private const int OtherUserId = 200;
 
-    // TEST-01: Happy Path - Đánh dấu một hoặc nhiều thông báo cụ thể thành đã đọc
+    // TEST-01: Happy Path - Mark one or more specific notifications as read and return the updated count.
+    /// <summary>Ensures selected notifications are marked read and the updated count is reported.</summary>
     [Fact]
     public async Task ExecuteAsync_WithSpecificIds_ShouldMarkNotificationsAsReadAndReturnUpdatedCount()
     {
@@ -80,7 +82,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-02: Happy Path - Đánh dấu tất cả thông báo của người dùng là đã đọc (All = true)
+    // TEST-02: Happy Path - Mark every unread notification of the user as read (All = true).
+    /// <summary>Ensures the all flag marks every unread notification of the caller.</summary>
     [Fact]
     public async Task ExecuteAsync_WithAllTrue_ShouldMarkAllUnreadNotificationsAsRead()
     {
@@ -128,7 +131,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-03: Exception Path 1 - Truyền danh sách ID trống và All = false
+    // TEST-03: Exception Path 1 - An empty id list with All = false fails validation.
+    /// <summary>Ensures a request that targets nothing is rejected.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyIdsAndAllFalse_ShouldThrowValidationException()
     {
@@ -153,7 +157,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
-    // TEST-04: Exception Path 1b - Truyền Ids null và All null
+    // TEST-04: Exception Path 1b - Null Ids with null All fails validation.
+    /// <summary>Ensures a request with neither ids nor the all flag is rejected.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNullIdsAndNullAll_ShouldThrowValidationException()
     {
@@ -178,7 +183,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
-    // TEST-05: Exception Path 1c - Truyền quá 100 ID (> MaxIds)
+    // TEST-05: Exception Path 1c - More than 100 ids (> MaxIds) fails validation.
+    /// <summary>Ensures the id list cannot exceed the documented maximum.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMoreThan100Ids_ShouldThrowValidationException()
     {
@@ -203,7 +209,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
-    // TEST-06: Exception Path 1d - Truyền ID không hợp lệ (<= 0)
+    // TEST-06: Exception Path 1d - A non-positive id (<= 0) fails validation.
+    /// <summary>Ensures only positive notification ids are accepted.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNonPositiveId_ShouldThrowValidationException()
     {
@@ -228,8 +235,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
-    // TEST-07: Exception Path 2 - Thông báo không tồn tại hoặc không thuộc sở hữu của user
-    // Nghiệp vụ quy định: "Bỏ qua id không thuộc người dùng", không ném lỗi 403/404, trả về updated = 0
+    // TEST-07: Exception Path 2 - Ids that do not exist or belong to another user are ignored: no 403/404, updated = 0.
+    /// <summary>Ensures foreign or missing ids are ignored without revealing whether they exist.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenIdsDoNotBelongToUserOrDoNotExist_ShouldIgnoreThemAndReturnUpdatedZero()
     {
@@ -273,7 +280,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-08: Exception Path 2b - Hỗn hợp ID: Một phần thuộc user, một phần không thuộc user
+    // TEST-08: Exception Path 2b - With mixed ids, only the notifications owned by the user are updated.
+    /// <summary>Prevents a user from marking another user's notifications as read.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMixedOwnershipIds_ShouldOnlyUpdateNotificationsBelongingToUser()
     {
@@ -326,7 +334,8 @@ public sealed class MarkNotificationAsReadUseCaseTests
         unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-09: Exception Path 3 - Chưa đăng nhập (UserId is null) -> ném UnauthorizedException
+    // TEST-09: Exception Path 3 - Not signed in (UserId is null) throws UnauthorizedException.
+    /// <summary>Ensures an anonymous caller cannot mark notifications.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -355,6 +364,7 @@ public sealed class MarkNotificationAsReadUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
+    /// <summary>Clock fixed at one instant so read_at timestamps can be asserted exactly.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;
@@ -364,6 +374,7 @@ public sealed class MarkNotificationAsReadUseCaseTests
             _now = new DateTimeOffset(now);
         }
 
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => _now;
     }
 }

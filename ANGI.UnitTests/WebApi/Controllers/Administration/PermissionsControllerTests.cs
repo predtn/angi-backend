@@ -8,6 +8,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Administration;
 
+/// <summary>Verifies PermissionsController passes route and body data to the permission use cases and returns 200 envelopes.</summary>
 public sealed class PermissionsControllerTests
 {
     // TEST-01: Return the ADM-P1 payload in an HTTP 200 API envelope.

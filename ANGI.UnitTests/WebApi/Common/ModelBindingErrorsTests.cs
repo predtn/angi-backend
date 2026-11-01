@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ANGI.UnitTests.WebApi.Common
 {
+    /// <summary>Verifies ModelBindingErrors turns MVC binding errors into Vietnamese messages keyed by API field names.</summary>
     public sealed class ModelBindingErrorsTests
     {
         private static readonly string[] BodyParameters = ["request"];

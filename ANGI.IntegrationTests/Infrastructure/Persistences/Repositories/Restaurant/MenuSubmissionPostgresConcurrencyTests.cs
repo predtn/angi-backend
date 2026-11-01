@@ -425,6 +425,7 @@ public sealed class MenuSubmissionPostgresConcurrencyTests
     private static string RequiredConnectionString() =>
         Environment.GetEnvironmentVariable(PostgresIntegrationFactAttribute.ConnectionStringVariable)!;
 
+    /// <summary>Ids of the owner, restaurant and submission seeded for one concurrency scenario.</summary>
     private sealed record SeedResult(
         int OwnerId,
         long RestaurantId,

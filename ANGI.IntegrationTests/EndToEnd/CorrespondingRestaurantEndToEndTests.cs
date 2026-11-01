@@ -93,6 +93,7 @@ public sealed class CorrespondingRestaurantEndToEndTests : IClassFixture<Postgre
         }
     }
 
+    /// <summary>Asserts a successful 200 envelope and returns its data.</summary>
     private static async Task<T> DataAsync<T>(HttpResponseMessage response)
     {
         using (response)
@@ -104,6 +105,7 @@ public sealed class CorrespondingRestaurantEndToEndTests : IClassFixture<Postgre
         }
     }
 
+    /// <summary>Calls the path, asserts 404 and returns the errorCode.</summary>
     private static async Task<string?> ErrorCodeAsync(HttpClient client, string path)
     {
         using var response = await client.GetAsync(path);

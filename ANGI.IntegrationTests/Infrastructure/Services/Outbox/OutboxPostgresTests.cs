@@ -19,6 +19,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
     private readonly string _connectionString =
         Environment.GetEnvironmentVariable(PostgresIntegrationFactAttribute.ConnectionStringVariable) ?? string.Empty;
 
+    /// <summary>Prepares a clean outbox table when a PostgreSQL test database is configured.</summary>
     public async Task InitializeAsync()
     {
         if (_connectionString.Length == 0)
@@ -31,9 +32,11 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
         await context.Database.ExecuteSqlRawAsync("DELETE FROM core.outbox_messages");
     }
 
+    /// <summary>Nothing to clean up; each test starts from InitializeAsync.</summary>
     public Task DisposeAsync() => Task.CompletedTask;
 
     // TEST-01: The triggers write the RECO payloads: insert and rename → DISH_UPSERTED, hide → DISH_DEACTIVATED.
+    /// <summary>Ensures dish changes reach reco through trigger-written events in the right order.</summary>
     [PostgresIntegrationFact]
     public async Task Triggers_ShouldWriteDishEventsInOrder()
     {
@@ -58,6 +61,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
     }
 
     // TEST-02: Only the oldest unfinished event of a key is claimed; other keys go in the same batch.
+    /// <summary>Ensures events of one key are delivered in order while other keys proceed in parallel.</summary>
     [PostgresIntegrationFact]
     public async Task Claim_ShouldTakeOnlyTheHeadOfEachKey()
     {
@@ -79,6 +83,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
     }
 
     // TEST-03: Delivered → done; a retry blocks the key's next event until it is due; 4xx → dead and the key moves on.
+    /// <summary>Ensures each delivery outcome settles the row correctly without reordering a key.</summary>
     [PostgresIntegrationFact]
     public async Task Dispatch_ShouldSettleRowsAndKeepKeyOrder()
     {
@@ -112,6 +117,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
     }
 
     // TEST-04: The last allowed attempt turns a retry into dead; Retry-After is used as the delay.
+    /// <summary>Ensures retries are bounded and follow reco's Retry-After.</summary>
     [PostgresIntegrationFact]
     public async Task Dispatch_ShouldStopRetryingAtMaxAttemptsAndHonourRetryAfter()
     {
@@ -136,6 +142,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
     }
 
     // TEST-05: A row left processing by a crashed worker is claimed again once its lock expires.
+    /// <summary>Ensures events are not stuck forever after a worker crash.</summary>
     [PostgresIntegrationFact]
     public async Task Claim_ShouldReclaimExpiredLocks()
     {
@@ -152,8 +159,10 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
             .Should().ContainSingle(row => row.AggregateKey == $"dish:{dishId}");
     }
 
+    /// <summary>Creates a context on the PostgreSQL test database.</summary>
     private ANGIContext Context() => PostgresTestDatabase.CreateContext(_connectionString, TimeProvider.System);
 
+    /// <summary>Runs one dispatcher batch with the given sender and returns how many rows it handled.</summary>
     private async Task<int> DispatchAsync(IOutboxSender sender)
     {
         await using var context = Context();
@@ -193,6 +202,7 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
         return dish.Id;
     }
 
+    /// <summary>Hides the dish directly in the database so the trigger fires.</summary>
     private async Task HideAsync(int dishId)
     {
         await using var context = Context();
@@ -200,19 +210,23 @@ public sealed class OutboxPostgresTests : IAsyncLifetime
             .ExecuteUpdateAsync(set => set.SetProperty(dish => dish.Status, DishStatus.Hidden));
     }
 
+    /// <summary>Reads every outbox row in insertion order.</summary>
     private async Task<List<OutboxMessage>> RowsAsync()
     {
         await using var context = Context();
         return await context.OutboxMessages.AsNoTracking().OrderBy(row => row.Id).ToListAsync();
     }
 
+    /// <summary>Finds the single row for the dish and event type.</summary>
     private static OutboxMessage Row(IEnumerable<OutboxMessage> rows, int dishId, OutboxEventType type) =>
         rows.Single(row => row.AggregateKey == $"dish:{dishId}" && row.EventType == type);
 
+    /// <summary>Sender double whose delivery outcome for each message comes from a script.</summary>
     private sealed class ScriptedSender(Func<OutboxMessage, OutboxDeliveryResult> script) : IOutboxSender
     {
         public bool IsConfigured => true;
 
+        /// <summary>Returns the scripted outcome for the message.</summary>
         public Task<OutboxDeliveryResult> SendAsync(OutboxMessage message, CancellationToken ct) =>
             Task.FromResult(script(message));
     }

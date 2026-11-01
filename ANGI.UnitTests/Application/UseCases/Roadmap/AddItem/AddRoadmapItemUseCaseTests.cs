@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.AddItem;
 
+/// <summary>Verifies AddRoadmapItemUseCase adds an available dish to an owned day with the right sort order.</summary>
 public sealed class AddRoadmapItemUseCaseTests
 {
     private const int TravelerId = 12;
@@ -241,6 +242,7 @@ public sealed class AddRoadmapItemUseCaseTests
         return new Fixture(useCase, roadmapRepository, dishRepository, unitOfWork, transaction);
     }
 
+    /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
     private sealed record Fixture(
         AddRoadmapItemUseCase UseCase,
         Mock<IRoadmapRepository> RoadmapRepository,

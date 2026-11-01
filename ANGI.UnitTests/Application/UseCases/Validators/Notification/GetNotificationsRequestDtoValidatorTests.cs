@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Notification;
 
+/// <summary>Verifies GetNotificationsRequestDtoValidator enforces paging ranges and the type length limit.</summary>
 public sealed class GetNotificationsRequestDtoValidatorTests
 {
     private readonly GetNotificationsRequestDtoValidator _validator = new();

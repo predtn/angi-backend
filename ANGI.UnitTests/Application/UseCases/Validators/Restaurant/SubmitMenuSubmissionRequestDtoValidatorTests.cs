@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies SubmitMenuSubmissionRequestDtoValidator keeps the optional owner note within its limit.</summary>
 public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
 {
     private readonly SubmitMenuSubmissionRequestDtoValidator _validator = new();

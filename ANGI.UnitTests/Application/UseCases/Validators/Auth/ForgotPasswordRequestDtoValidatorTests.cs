@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies ForgotPasswordRequestDtoValidator accepts only well-formed emails within the length limit.</summary>
     public sealed class ForgotPasswordRequestDtoValidatorTests
     {
         // TEST-01: Accept a valid password-reset email address.

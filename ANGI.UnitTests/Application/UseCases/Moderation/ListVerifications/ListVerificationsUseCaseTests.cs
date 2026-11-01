@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Moderation.ListVerifications;
 
+/// <summary>Verifies ListVerificationsUseCase validates input, enforces the MOD permission and maps the verification page.</summary>
 public sealed class ListVerificationsUseCaseTests
 {
     // TEST-01: Return a mapped page, signed document URL, trimmed province, and exact pagination metadata.

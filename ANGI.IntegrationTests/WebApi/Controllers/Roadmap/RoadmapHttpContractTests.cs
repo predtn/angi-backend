@@ -26,6 +26,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ANGI.IntegrationTests.WebApi.Controllers.Roadmap;
 
+/// <summary>Verifies the roadmap endpoints' auth, binding and serialization through the real HTTP pipeline.</summary>
 public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
 {
     private readonly RoadmapApiFactory _factory;
@@ -668,6 +669,7 @@ public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
     }
 }
 
+/// <summary>Test host with JWT settings and recording stubs for every roadmap endpoint.</summary>
 public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
 {
     public const string Issuer = "ANGI.RoadmapHttpTests";
@@ -801,12 +803,14 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         });
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     private sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows contract tests to bypass database-backed account checks.</summary>
         public Task ExecuteAsync(int userId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>RM-01 stub that returns a roadmap with empty days.</summary>
     private sealed class StubCreateRoadmapUseCase : ICreateRoadmapUseCase
     {
         /// <summary>Returns deterministic empty days for RM-01 serialization tests.</summary>
@@ -814,6 +818,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
             Task.FromResult(Detail(request.NumDays));
     }
 
+    /// <summary>RM-02 stub that records the query and returns a sample page.</summary>
     public sealed class StubGetMyRoadmapsUseCase : IGetMyRoadmapsUseCase
     {
         public GetMyRoadmapsRequestDto? LastRequest { get; private set; }
@@ -846,6 +851,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-04 stub that records the PATCH body and returns a sample detail.</summary>
     public sealed class StubUpdateRoadmapUseCase : IUpdateRoadmapUseCase
     {
         public UpdateRoadmapRequestDto? LastRequest { get; private set; }
@@ -858,6 +864,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-03 stub that records the route id and returns a sample detail or the not-found error.</summary>
     public sealed class StubGetRoadmapDetailUseCase : IGetRoadmapDetailUseCase
     {
         public long? LastRoadmapId { get; private set; }
@@ -876,6 +883,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-14 stub that validates and records the input and returns sample route metrics.</summary>
     public sealed class StubGetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
     {
         public RouteCall? LastCall { get; private set; }
@@ -918,6 +926,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-12 stub that records both route ids and returns a sample item or the not-found error.</summary>
     public sealed class StubGetRoadmapItemDetailUseCase : IGetRoadmapItemDetailUseCase
     {
         public ItemDetailCall? LastCall { get; private set; }
@@ -990,6 +999,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-05 stub that records the route id or emits the not-found error.</summary>
     public sealed class StubDeleteRoadmapUseCase : IDeleteRoadmapUseCase
     {
         public long? LastRoadmapId { get; private set; }
@@ -1008,6 +1018,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-09 stub that records both route ids or emits the not-found error.</summary>
     public sealed class StubDeleteRoadmapItemUseCase : IDeleteRoadmapItemUseCase
     {
         public ItemDetailCall? LastCall { get; private set; }
@@ -1026,8 +1037,10 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>Route and body values recorded by the RM-13 stub.</summary>
     public sealed record RateItemCall(long RoadmapId, long ItemId, string Value);
 
+    /// <summary>RM-13 stub that records the call or emits the feedback conflict for item 409.</summary>
     public sealed class StubRateRoadmapItemUseCase : IRateRoadmapItemUseCase
     {
         public RateItemCall? LastCall { get; private set; }
@@ -1058,8 +1071,10 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>Route and body values recorded by the RM-10 stub.</summary>
     public sealed record GenerateCall(long RoadmapId, GenerateRoadmapRequestDto Request);
 
+    /// <summary>RM-10 stub that records the call or emits the documented errors for roadmaps 409 and 404.</summary>
     public sealed class StubGenerateRoadmapUseCase : IGenerateRoadmapUseCase
     {
         public GenerateCall? LastCall { get; private set; }
@@ -1082,6 +1097,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-11 stub that records both route ids and returns the sample job or JOB_NOT_FOUND.</summary>
     public sealed class StubGetRoadmapGenerationJobUseCase : IGetRoadmapGenerationJobUseCase
     {
         public ItemDetailCall? LastCall { get; private set; }
@@ -1108,6 +1124,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-06 stub that records every query value and returns a sample ranked dish.</summary>
     public sealed class StubGetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
     {
         public SuggestionCall? LastCall { get; private set; }
@@ -1144,6 +1161,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-07 stub that records every route and body value and returns a sample item.</summary>
     public sealed class StubAddRoadmapItemUseCase : IAddRoadmapItemUseCase
     {
         public AddItemCall? LastCall { get; private set; }
@@ -1177,6 +1195,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>RM-08 stub that records every route and body value and returns a sample replacement item.</summary>
     public sealed class StubUpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
     {
         public UpdateItemCall? LastCall { get; private set; }
@@ -1216,6 +1235,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>Route and query values recorded by the RM-14 stub.</summary>
     public sealed record RouteCall(
         long RoadmapId,
         long DayId,
@@ -1223,6 +1243,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         decimal? OriginLng,
         string? Profile);
 
+    /// <summary>Route and query values recorded by the RM-06 stub.</summary>
     public sealed record SuggestionCall(
         long RoadmapId,
         string Province,
@@ -1230,6 +1251,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         string? MealSlot,
         int? Limit);
 
+    /// <summary>Route and body values recorded by the RM-07 stub.</summary>
     public sealed record AddItemCall(
         long RoadmapId,
         long DayId,
@@ -1238,6 +1260,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         short? SortOrder,
         Guid? RecoRequestId);
 
+    /// <summary>Route and body values recorded by the RM-08 stub.</summary>
     public sealed record UpdateItemCall(
         long RoadmapId,
         long ItemId,
@@ -1247,6 +1270,7 @@ public sealed class RoadmapApiFactory : WebApplicationFactory<Program>
         string? MealSlot,
         short? SortOrder);
 
+    /// <summary>Roadmap and item ids recorded by the stubs of item-level endpoints.</summary>
     public sealed record ItemDetailCall(long RoadmapId, long ItemId);
 
     /// <summary>Builds a deterministic empty-roadmap response for HTTP serialization.</summary>

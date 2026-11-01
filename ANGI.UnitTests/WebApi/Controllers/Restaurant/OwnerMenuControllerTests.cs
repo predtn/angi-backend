@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies OwnerMenuController returns the documented status for each menu workflow action.</summary>
 public sealed class OwnerMenuControllerTests
 {
     // TEST-01: Return the newly cloned OWN-11 draft in an HTTP 201 ApiResponse.

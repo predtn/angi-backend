@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Administration;
 
+/// <summary>Verifies UpdateModRequestDtoValidator requires a non-empty patch with a valid status and display name.</summary>
 public sealed class UpdateModRequestDtoValidatorTests
 {
     // TEST-01: Reject an empty ADM-M4 patch and invalid status values.

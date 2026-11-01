@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Update;
 
+/// <summary>Verifies UpdateRoadmapUseCase resizes days safely and keeps origin data consistent with the origin mode.</summary>
 public sealed class UpdateRoadmapUseCaseTests
 {
     // TEST-01: Add consecutive empty trailing days when numDays increases.
@@ -244,6 +245,7 @@ public sealed class UpdateRoadmapUseCaseTests
         return new Fixture(useCase, unitOfWork, transaction);
     }
 
+    /// <summary>Groups the use case under test with the unit-of-work and transaction mocks each scenario verifies.</summary>
     private sealed record Fixture(
         UpdateRoadmapUseCase UseCase,
         Mock<IUnitOfWork> UnitOfWork,

@@ -43,6 +43,7 @@ public sealed class ForwardedHeadersHttpTests
         spoofed[0].Should().Be(HttpStatusCode.TooManyRequests);
     }
 
+    /// <summary>Sends the given number of anonymous requests with the X-Forwarded-For value and returns their statuses.</summary>
     private static async Task<HttpStatusCode[]> StatusesAsync(HttpClient client, string forwardedFor, int count)
     {
         var statuses = new HttpStatusCode[count];
@@ -60,6 +61,7 @@ public sealed class ForwardedHeadersHttpTests
     /// <summary>A host whose anonymous limit is 2 requests a minute; the database is unreachable, which these checks ignore.</summary>
     private sealed class ForwardedHeadersApiFactory(bool enabled) : WebApplicationFactory<Program>
     {
+        /// <summary>Sets the environment variables Program reads during service registration, then builds the host.</summary>
         protected override IHost CreateHost(IHostBuilder builder)
         {
             // Program reads these while registering services, before in-memory overrides apply.
@@ -92,6 +94,7 @@ public sealed class ForwardedHeadersHttpTests
             }
         }
 
+        /// <summary>Runs the host as Production without log output.</summary>
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Production");

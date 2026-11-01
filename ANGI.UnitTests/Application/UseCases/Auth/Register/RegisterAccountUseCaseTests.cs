@@ -16,6 +16,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.Register;
 
+/// <summary>Verifies RegisterAccountUseCase creates pending accounts with a verification token and sends email only after commit.</summary>
 public sealed class RegisterAccountUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 9, 4, 0, 0, DateTimeKind.Utc);
@@ -115,6 +116,7 @@ public sealed class RegisterAccountUseCaseTests
     }
 
     // TEST-02: Support the second self-registration role through the complete use-case path.
+    /// <summary>Ensures restaurant owners can self-register and receive the owner role.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidRestaurantOwner_ShouldAssignOwnerRole()
     {
@@ -186,6 +188,7 @@ public sealed class RegisterAccountUseCaseTests
     }
 
     // TEST-04: Map the database constraint race to the documented conflict response.
+    /// <summary>Ensures a lost registration race returns the documented conflict and sends no email.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenConcurrentInsertWins_ShouldThrowEmailAlreadyExistsWithoutEmail()
     {
@@ -225,6 +228,7 @@ public sealed class RegisterAccountUseCaseTests
     }
 
     // TEST-05: A failed commit must never leak a verification link for data that was not committed.
+    /// <summary>Prevents a verification link from being sent for an account that was never saved.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenCommitFails_ShouldNotSendVerificationEmail()
     {
@@ -256,6 +260,7 @@ public sealed class RegisterAccountUseCaseTests
     }
 
     // TEST-06: Email delivery failure happens only after the account and token are durable.
+    /// <summary>Ensures an email failure surfaces only after the account and token are durable.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenEmailFails_ShouldHaveCommittedBeforePropagatingFailure()
     {
@@ -335,6 +340,7 @@ public sealed class RegisterAccountUseCaseTests
         Role = "TRAVELER"
     };
 
+    /// <summary>Creates a repository mock where the email is free and the TRAVELER role exists.</summary>
     private static Mock<IAuthenticationRepository> SuccessfulRepository()
     {
         var repository = new Mock<IAuthenticationRepository>();
@@ -345,6 +351,7 @@ public sealed class RegisterAccountUseCaseTests
         return repository;
     }
 
+    /// <summary>Creates a password service mock that returns a fixed hash.</summary>
     private static Mock<IPasswordService> SuccessfulPasswordService()
     {
         var service = new Mock<IPasswordService>();
@@ -352,6 +359,7 @@ public sealed class RegisterAccountUseCaseTests
         return service;
     }
 
+    /// <summary>Creates a token service mock that returns a fixed raw token and hash pair.</summary>
     private static Mock<IAuthenticationTokenService> SuccessfulTokenService()
     {
         var service = new Mock<IAuthenticationTokenService>();
@@ -369,6 +377,7 @@ public sealed class RegisterAccountUseCaseTests
         return transaction;
     }
 
+    /// <summary>Clock fixed at one instant so token expiry can be asserted exactly.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;

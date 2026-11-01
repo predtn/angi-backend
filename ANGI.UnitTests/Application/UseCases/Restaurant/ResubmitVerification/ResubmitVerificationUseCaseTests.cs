@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.ResubmitVerification;
 
+/// <summary>Verifies ResubmitVerificationUseCase resubmits only the latest rejected verification of the owner's restaurant.</summary>
 public sealed class ResubmitVerificationUseCaseTests
 {
     private const int OwnerId = 12;
@@ -127,10 +128,9 @@ public sealed class ResubmitVerificationUseCaseTests
         fixture.VerifyNothingWritten();
     }
 
-    // TEST-05 (Exception Path 1): A verification id that does not exist, or belongs to another owner's restaurant,
+    // TEST-05: Exception Path 1 - A verification id that does not exist, or belongs to another owner's restaurant,
     // looks the same to the caller: 404 VERIFICATION_NOT_FOUND, never a leak of the other record.
     /// <summary>Verifies the lookup is scoped to the caller's restaurant and writes nothing.</summary>
-    // TEST-05: Verify ExecuteAsync with verification not of callers restaurant; should throw not found.
     [Fact]
     public async Task ExecuteAsync_WithVerificationNotOfCallersRestaurant_ShouldThrowNotFound()
     {
@@ -147,9 +147,8 @@ public sealed class ResubmitVerificationUseCaseTests
         fixture.VerifyNothingWritten();
     }
 
-    // TEST-06 (Exception Path 2): Only rejected / needs_more_info can be resubmitted.
+    // TEST-06: Exception Path 2 - Only rejected / needs_more_info can be resubmitted.
     /// <summary>Verifies pending, approved and cancelled submissions raise 409 VERIFICATION_NOT_RESUBMITTABLE.</summary>
-    // TEST-06: Verify ExecuteAsync with non resubmittable status; should throw conflict.
     [Theory]
     [InlineData(VerificationStatus.Pending)]
     [InlineData(VerificationStatus.Approved)]
@@ -165,9 +164,8 @@ public sealed class ResubmitVerificationUseCaseTests
         fixture.VerifyNothingWritten();
     }
 
-    // TEST-07 (Exception Path 2): A newer submission exists, so the older rejected one can no longer be resubmitted.
+    // TEST-07: Exception Path 2 - A newer submission exists, so the older rejected one can no longer be resubmitted.
     /// <summary>Verifies only the latest submission is resubmittable.</summary>
-    // TEST-07: Verify ExecuteAsync with verification that is not the latest; should throw conflict.
     [Fact]
     public async Task ExecuteAsync_WithVerificationThatIsNotTheLatest_ShouldThrowConflict()
     {
@@ -180,9 +178,8 @@ public sealed class ResubmitVerificationUseCaseTests
         fixture.VerifyNothingWritten();
     }
 
-    // TEST-08 (Exception Path 2): The restaurant itself must not already be pending or verified.
+    // TEST-08: Exception Path 2 - The restaurant itself must not already be pending or verified.
     /// <summary>Verifies the restaurant-level guard even when the previous submission looks resubmittable.</summary>
-    // TEST-08: Verify ExecuteAsync with pending or verified restaurant; should throw conflict.
     [Theory]
     [InlineData(RestaurantVerificationStatus.Pending)]
     [InlineData(RestaurantVerificationStatus.Verified)]

@@ -17,6 +17,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Account.UpdateMyProfile;
 
+/// <summary>Verifies UpdateMyProfileUseCase applies profile and avatar changes for the signed-in user and audits them.</summary>
 public sealed class UpdateMyProfileUseCaseTests
 {
     private readonly IValidator<UpdateProfileRequestDto> _validator = new UpdateProfileRequestDtoValidator();
@@ -27,6 +28,7 @@ public sealed class UpdateMyProfileUseCaseTests
     private readonly Mock<IRecommendationService> _recommendationService = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository, audit and unit-of-work mocks.</summary>
     private UpdateMyProfileUseCase CreateUseCase() =>
         new(
             _validator,

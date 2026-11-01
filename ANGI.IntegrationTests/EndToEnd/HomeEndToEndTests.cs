@@ -24,6 +24,7 @@ public sealed class HomeEndToEndTests : IClassFixture<PostgresApiFactory>
 
     // TEST-01: Trending puts recent likes first and completes with like_count; top restaurants follow rating;
     // province filters dishes and restaurants; blogs of the last 30 days come first; recommended is ranked.
+    /// <summary>Ensures every HOME-01 block is built from real data with the documented ordering and province filter.</summary>
     [PostgresEndToEndFact]
     public async Task Home_ShouldBuildEveryBlockFromTheDatabase()
     {
@@ -47,6 +48,7 @@ public sealed class HomeEndToEndTests : IClassFixture<PostgresApiFactory>
     }
 
     // TEST-02: Without province every public dish competes; an invalid limit is 400.
+    /// <summary>Ensures the province filter is optional and an invalid limit returns 400.</summary>
     [PostgresEndToEndFact]
     public async Task Home_WithoutProvinceAndWithBadLimit_ShouldFollowTheContract()
     {
@@ -61,6 +63,7 @@ public sealed class HomeEndToEndTests : IClassFixture<PostgresApiFactory>
         bad.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    /// <summary>Seeds restaurants in two provinces with dishes, likes and blogs, returning dish ids by name.</summary>
     private async Task<Dictionary<string, int>> SeedAsync()
     {
         var a = await RestaurantAsync("Quán A", "Đà Nẵng");
@@ -133,6 +136,7 @@ public sealed class HomeEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
+    /// <summary>Registers a new owner and their restaurant in the given province through HTTP and returns its id.</summary>
     private async Task<long> RestaurantAsync(string name, string province)
     {
         using var client = _factory.CreateClient();

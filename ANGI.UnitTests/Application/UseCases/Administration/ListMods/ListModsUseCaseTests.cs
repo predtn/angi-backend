@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.ListMods;
 
+/// <summary>Verifies ListModsUseCase normalizes filters, validates paging and maps MOD cards with page metadata.</summary>
 public sealed class ListModsUseCaseTests
 {
     // TEST-01: Trim the search term, map the status, and preserve page metadata and card fields.

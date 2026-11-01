@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
 {
+    /// <summary>Verifies MapboxRouteService builds one Directions request per day, maps legs and handles limits and failures.</summary>
     public sealed class MapboxRouteServiceTests
     {
         // TEST-01: Map a successful Mapbox response, round leg metrics, and send one request for the whole day.
@@ -435,8 +436,10 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         private static HttpResponseMessage Json(HttpStatusCode statusCode, string body) =>
             new(statusCode) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+        /// <summary>Snapshot of an outgoing request so method and URL can be asserted.</summary>
         private sealed record CapturedRequest(HttpMethod Method, Uri? Uri);
 
+        /// <summary>Controllable clock for the memory cache so expiry can be tested without waiting.</summary>
         private sealed class TestSystemClock : ISystemClock
         {
             /// <summary>Creates a controllable cache clock at the supplied UTC instant.</summary>
@@ -451,6 +454,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
             public void Advance(TimeSpan duration) => UtcNow += duration;
         }
 
+        /// <summary>Handler that records each request and answers with the supplied function.</summary>
         private sealed class StubHttpMessageHandler : HttpMessageHandler
         {
             private readonly Func<HttpRequestMessage, HttpResponseMessage> _send;

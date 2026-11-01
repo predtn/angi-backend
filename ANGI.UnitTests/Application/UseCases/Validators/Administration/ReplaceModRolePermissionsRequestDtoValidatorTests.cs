@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Administration;
 
+/// <summary>Verifies ReplaceModRolePermissionsRequestDtoValidator checks the role default list for nulls, blanks and duplicates.</summary>
 public sealed class ReplaceModRolePermissionsRequestDtoValidatorTests
 {
     private readonly ReplaceModRolePermissionsRequestDtoValidator _validator = new();

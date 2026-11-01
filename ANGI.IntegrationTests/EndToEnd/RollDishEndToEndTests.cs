@@ -29,9 +29,11 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
         _factory = factory;
     }
 
+    /// <summary>Ids of the seeded dishes and tags, looked up by their test names.</summary>
     private sealed record World(Dictionary<string, int> Dish, Dictionary<string, short> Tag);
 
     // TEST-01: mealTime, tagIds (any), excludeTagIds, maxPrice and excludeDishIds narrow the candidates; the roll is stored.
+    /// <summary>Ensures every roll filter narrows candidates in PostgreSQL and the roll is persisted.</summary>
     [PostgresEndToEndFact]
     public async Task Roll_WithFilters_ShouldRollAMatchingDishAndStoreIt()
     {
@@ -61,6 +63,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
     }
 
     // TEST-02: Coordinates keep restaurants within 3 km by default, or radiusKm; distanceKm is returned.
+    /// <summary>Ensures location rolls honour the default and requested radius and report the distance.</summary>
     [PostgresEndToEndFact]
     public async Task Roll_NearAPoint_ShouldUseTheRadius()
     {
@@ -91,6 +94,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
     }
 
     // TEST-03: Hidden, sold-out, closed and unverified dishes are never rolled; no match is 404 without a stored roll.
+    /// <summary>Ensures non-public dishes are never rolled and no roll is stored without a match.</summary>
     [PostgresEndToEndFact]
     public async Task Roll_WithoutCandidate_ShouldReturnNoCandidate()
     {
@@ -109,6 +113,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
     }
 
     // TEST-04: Guests get 401, other roles 403, and an out-of-contract body 400.
+    /// <summary>Ensures the full pipeline returns 401, 403 and 400 as documented.</summary>
     [PostgresEndToEndFact]
     public async Task Roll_ShouldFollowTheAccessAndValidationContract()
     {
@@ -195,6 +200,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
+    /// <summary>Registers a new owner and their restaurant at the given coordinates through HTTP and returns its id.</summary>
     private async Task<long> RestaurantAsync(string name, decimal lat, decimal lng)
     {
         using var client = _factory.CreateClient();
@@ -213,6 +219,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
         return (await response.Content.ReadFromJsonAsync<ApiResponse<OwnerRestaurantDto>>())!.Data!.Id;
     }
 
+    /// <summary>Creates an HTTP client signed in as a new traveler.</summary>
     private async Task<HttpClient> TravelerClientAsync()
     {
         var client = _factory.CreateClient();
@@ -221,9 +228,11 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
         return client;
     }
 
+    /// <summary>Posts the body to the roll endpoint.</summary>
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, object body) =>
         client.PostAsJsonAsync("/api/v1/dishes/roll", body);
 
+    /// <summary>Rolls with the body, asserts 200 and returns the roll.</summary>
     private static async Task<RollDishResponseDto> RollAsync(HttpClient client, object body)
     {
         using var response = await PostAsync(client, body);
@@ -231,6 +240,7 @@ public sealed class RollDishEndToEndTests : IClassFixture<PostgresApiFactory>
         return (await response.Content.ReadFromJsonAsync<ApiResponse<RollDishResponseDto>>())!.Data!;
     }
 
+    /// <summary>Reads errorCode from an error response body.</summary>
     private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response)
     {
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

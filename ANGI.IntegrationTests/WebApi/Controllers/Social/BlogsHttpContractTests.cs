@@ -273,6 +273,7 @@ public sealed class BlogsApiFactory : WebApplicationFactory<Program>
         };
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     private sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows authenticated HTTP contract requests without a database account lookup.</summary>

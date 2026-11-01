@@ -94,6 +94,7 @@ public sealed class DishDetailEndToEndTests : IClassFixture<PostgresApiFactory>
         items.Should().ContainSingle(item => item.Id == dishId).Which.Restaurant.Ward.Should().Be("Phường Bến Thành");
     }
 
+    /// <summary>Requests the dish detail, asserts 404 and returns the errorCode.</summary>
     private static async Task<string?> ErrorCodeAsync(HttpClient client, int dishId)
     {
         using var response = await client.GetAsync($"/api/v1/dishes/{dishId}");

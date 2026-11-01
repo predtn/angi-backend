@@ -8,8 +8,11 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.Services.Agent;
 
+/// <summary>Verifies AgentCommittedImpressionReporter queues impression events only for dishes that reco actually ranked.</summary>
 public sealed class AgentCommittedImpressionReporterTests
 {
+    // TEST-01: Committed items are grouped into one impression event per recommendation request with distinct dishes, and fallback items without a request id are skipped.
+    /// <summary>Ensures reco receives one deduplicated impression per request and never an impression for a fallback dish it did not rank.</summary>
     [Fact]
     public void Enqueue_GroupsDistinctDishesByRequestAndSkipsFallback()
     {

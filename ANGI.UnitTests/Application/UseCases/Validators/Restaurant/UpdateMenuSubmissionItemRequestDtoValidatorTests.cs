@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies UpdateMenuSubmissionItemRequestDtoValidator distinguishes omitted from null patch fields and enforces item limits.</summary>
 public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
 {
     // TEST-01: Accept an explicit null cover because OWN-15 uses it to remove the image.
@@ -31,6 +32,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-03: Accept an empty PATCH because every field is optional.
+    /// <summary>Ensures an empty PATCH is accepted since every field is optional.</summary>
     [Fact]
     public async Task ValidateAsync_WithEmptyPatch_ShouldBeValid()
     {
@@ -41,6 +43,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-04: Reject explicit null for every non-nullable patch field.
+    /// <summary>Ensures null cannot clear a field that must always have a value.</summary>
     [Theory]
     [InlineData("name")]
     [InlineData("description")]
@@ -67,6 +70,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-05: Match the numeric(12,0) price boundaries for PATCH.
+    /// <summary>Ensures patched prices always fit the numeric(12,0) column.</summary>
     [Theory]
     [InlineData("0", true)]
     [InlineData("999999999999", true)]
@@ -87,6 +91,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     }
 
     // TEST-06: Measure patched description length after trimming whitespace.
+    /// <summary>Ensures padding cannot satisfy the minimum description length.</summary>
     [Theory]
     [InlineData(29, false)]
     [InlineData(30, true)]

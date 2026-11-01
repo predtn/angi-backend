@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.GetDishDetail;
 
+/// <summary>Verifies GetDishDetailUseCase maps the documented DishDetail shape and hides non-public dishes.</summary>
 public sealed class GetDishDetailUseCaseTests
 {
     // Monday 2026-10-12 10:00 in Vietnam (03:00 UTC).
@@ -16,8 +17,10 @@ public sealed class GetDishDetailUseCaseTests
 
     private readonly Mock<IDishRepository> _dishRepository = new();
 
+    /// <summary>Creates the use case with the dish repository mock and a clock fixed on Monday 10:00.</summary>
     private GetDishDetailUseCase CreateUseCase() => new(_dishRepository.Object, new FixedTimeProvider(MondayTenAm));
 
+    /// <summary>Creates a public dish with a full restaurant, opening hours, ordered images and tags.</summary>
     private static Dish PublicDish()
     {
         var restaurant = new Domain.Entities.Restaurant
@@ -70,6 +73,7 @@ public sealed class GetDishDetailUseCaseTests
     }
 
     // TEST-01: Map every DishDetail field of the API Design, with the full RestaurantCard and ordered images and tags.
+    /// <summary>Ensures every DishDetail field matches the API Design.</summary>
     [Fact]
     public async Task ExecuteAsync_WithPublicDish_ShouldReturnDocumentedDishDetail()
     {
@@ -115,6 +119,7 @@ public sealed class GetDishDetailUseCaseTests
     }
 
     // TEST-02: Report a closed restaurant and a dish without media as the API Design allows (null cover, no images).
+    /// <summary>Ensures missing media and a closed restaurant are reported in the documented way instead of failing.</summary>
     [Fact]
     public async Task ExecuteAsync_WithClosedRestaurantAndNoMedia_ShouldReturnFalseOpenAndEmptyImages()
     {
@@ -134,6 +139,7 @@ public sealed class GetDishDetailUseCaseTests
     }
 
     // TEST-03: A dish the repository does not return (missing, hidden, removed or of a non-public restaurant) is 404.
+    /// <summary>Ensures every kind of non-public dish looks the same to the caller: 404.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutPublicDish_ShouldThrowDishNotFound()
     {
@@ -145,8 +151,10 @@ public sealed class GetDishDetailUseCaseTests
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("DISH_NOT_FOUND");
     }
 
+    /// <summary>Clock fixed at one instant so the open-now flag is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

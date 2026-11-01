@@ -11,6 +11,8 @@ namespace ANGI.IntegrationTests.Infrastructure.Persistences.Configs;
 /// <summary>Exercises the timestamp token against PostgreSQL, including raw SQL that bypasses EF auditing.</summary>
 public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
+    // TEST-01: Writes to the roadmap and its children advance updated_at, and a rollback restores the previous value.
+    /// <summary>Ensures the concurrency token changes with every roadmap edit and is restored on rollback.</summary>
     [PostgresEndToEndFact]
     public async Task ParentAndChildWrites_AdvanceTimestamp_AndRollbackRestoresIt()
     {
@@ -50,6 +52,8 @@ public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFi
         });
     }
 
+    // TEST-02: EF child writes refresh the tracked parent with the final database timestamp.
+    /// <summary>Ensures EF sees the timestamp the database actually stored.</summary>
     [PostgresEndToEndFact]
     public async Task EfChildWrites_RefreshTrackedParent_WithFinalDatabaseTimestamp()
     {
@@ -73,6 +77,8 @@ public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFi
         });
     }
 
+    // TEST-03: When the clock is behind the stored timestamp, updated_at advances by one microsecond and JSON keeps the exact token.
+    /// <summary>Ensures the token still advances when the clock is behind and survives JSON exactly.</summary>
     [PostgresEndToEndFact]
     public async Task ClockBehindStoredTimestamp_AdvancesByMicrosecond_AndJsonPreservesExactToken()
     {
@@ -101,6 +107,8 @@ public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFi
         });
     }
 
+    // TEST-04: Moving children to another roadmap updates the timestamps of both parents.
+    /// <summary>Ensures moving children invalidates the tokens of both roadmaps.</summary>
     [PostgresEndToEndFact]
     public async Task MovingChildren_UpdatesBothParents()
     {
@@ -125,6 +133,7 @@ public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFi
         });
     }
 
+    /// <summary>Resets the database and seeds a traveler roadmap with one day and one item.</summary>
     private async Task<(long RoadmapId, int UserId, int DishId)> SeedAsync()
     {
         await factory.ResetDatabaseAsync();

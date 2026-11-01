@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetOwnerMenu;
 
+/// <summary>Verifies GetOwnerMenuUseCase returns the owner's full menu in order with the open submission summary.</summary>
 public sealed class GetOwnerMenuUseCaseTests
 {
     // TEST-01: Return owner dishes in menu order with the open submission summary.
@@ -52,6 +53,7 @@ public sealed class GetOwnerMenuUseCaseTests
     }
 
     // TEST-03: Return an empty dish list and no workflow summary for an empty menu.
+    /// <summary>Ensures an empty menu returns an empty list instead of an error.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyMenuAndNoOpenSubmission_ShouldReturnEmptyResponse()
     {
@@ -66,6 +68,7 @@ public sealed class GetOwnerMenuUseCaseTests
     }
 
     // TEST-04: Map both draft and pending as the currently open submission.
+    /// <summary>Ensures both draft and pending submissions are reported as open.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Draft, "draft")]
     [InlineData(MenuSubmissionStatus.Pending, "pending")]
@@ -85,6 +88,7 @@ public sealed class GetOwnerMenuUseCaseTests
     }
 
     // TEST-05: Order dishes by sort order then id while retaining hidden dishes.
+    /// <summary>Ensures a stable order and that owners still see their hidden dishes.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEqualSortOrder_ShouldThenOrderByDishIdAndIncludeHidden()
     {

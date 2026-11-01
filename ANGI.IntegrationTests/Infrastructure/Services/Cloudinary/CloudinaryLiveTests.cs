@@ -9,7 +9,7 @@ namespace ANGI.IntegrationTests.Infrastructure.Services.Cloudinary;
 /// <summary>Exercises media upload and cleanup against a real Cloudinary account.</summary>
 public class CloudinaryLiveTests
 {
-    // TEST-19: Upload a public image and private PDF to a real account, then delete both assets. Area: Cloudinary live integration.
+    // TEST-01: Upload a public image and private PDF to a real account, then delete both assets. Area: Cloudinary live integration.
     /// <summary>Verifies real Cloudinary image and document uploads and cleans up the uploaded assets.</summary>
     [CloudinaryLiveFact]
     public async Task UploadsImageAndPrivatePdfToRealCloudinary()

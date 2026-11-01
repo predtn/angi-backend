@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Moderation.GetVerificationReview;
 
+/// <summary>Verifies GetVerificationReviewUseCase returns full review details only to MODs with the verify permission.</summary>
 public sealed class GetVerificationReviewUseCaseTests
 {
     // TEST-01: Return flattened verification details, complete restaurant data, previous submission, and signed documents.

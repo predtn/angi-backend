@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetMenuSubmission;
 
+/// <summary>Verifies GetMenuSubmissionUseCase shows an owned submission with every change against the live menu.</summary>
 public sealed class GetMenuSubmissionUseCaseTests
 {
     // TEST-01: Mark changed source items as edited and current omitted dishes as removed.
@@ -54,6 +55,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     }
 
     // TEST-02: Hide missing and unowned submissions behind the not-found response.
+    /// <summary>Ensures another owner's submission is indistinguishable from a missing one.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownOrOtherOwnerSubmission_ShouldThrowNotFound()
     {
@@ -68,6 +70,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     }
 
     // TEST-03: Classify new, unchanged, and each independently edited field.
+    /// <summary>Ensures reviewers see exactly which fields of each dish changed.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldMapNewUnchangedAndEveryEditableDifference()
     {
@@ -108,6 +111,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     }
 
     // TEST-04: Map reviewer details and deterministically order items and removed dishes.
+    /// <summary>Ensures reviewer details are shown and lists come back in a stable order.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldMapReviewerAvatarAndOrderItemsAndRemovedDishes()
     {
@@ -143,6 +147,7 @@ public sealed class GetMenuSubmissionUseCaseTests
         result.RemovedDishes.Select(item => item.Id).Should().Equal(11, 12);
     }
 
+    /// <summary>Creates a submission item copied from the given live dish, optionally changed by the callback.</summary>
     private static MenuSubmissionItem Clone(
         Dish source,
         long id,
@@ -165,6 +170,7 @@ public sealed class GetMenuSubmissionUseCaseTests
         return item;
     }
 
+    /// <summary>Creates the use case for owner 12 over the given repository.</summary>
     private static GetMenuSubmissionUseCase CreateUseCase(Mock<IRestaurantMenuRepository> repository)
     {
         var currentUser = new Mock<ICurrentUserService>();

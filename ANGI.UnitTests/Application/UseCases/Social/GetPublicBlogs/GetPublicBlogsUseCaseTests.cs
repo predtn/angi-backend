@@ -16,6 +16,7 @@ public sealed class GetPublicBlogsUseCaseTests
     private readonly IValidator<GetPublicBlogsRequestDto> _validator = new GetPublicBlogsRequestDtoValidator();
     private readonly Mock<IBlogRepository> _blogRepository = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository mock.</summary>
     private GetPublicBlogsUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object);
 

@@ -16,6 +16,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.CreateMod;
 
+/// <summary>Verifies CreateModUseCase creates an invited MOD account with valid permission overrides and rejects conflicts.</summary>
 public sealed class CreateModUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 21, 8, 0, 0, DateTimeKind.Utc);
@@ -267,6 +268,7 @@ public sealed class CreateModUseCaseTests
         return unitOfWork;
     }
 
+    /// <summary>Clock fixed at one instant so creation and invitation expiry timestamps are deterministic.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
         /// <summary>Returns the deterministic creation and expiration timestamp.</summary>

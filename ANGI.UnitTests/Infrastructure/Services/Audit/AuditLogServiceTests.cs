@@ -12,11 +12,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Audit
 {
+    /// <summary>Verifies AuditLogService records the right actor, request metadata and snake_case values for each audit entry.</summary>
     public sealed class AuditLogServiceTests
     {
         private static readonly IPAddress _ipAddress = IPAddress.Parse("113.161.4.20");
 
         // TEST-01: Take the actor from the token and the IP address and User-Agent from the request.
+        /// <summary>Ensures audits identify the signed-in actor and the request origin.</summary>
         [Fact]
         public void Add_WithAuthenticatedRequest_ShouldUseTokenActorAndRequestMetadata()
         {
@@ -43,6 +45,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-02: Use the explicit actor when the request has no token yet (login, register).
+        /// <summary>Ensures login and registration audits name the account even before a token exists.</summary>
         [Fact]
         public void Add_WithExplicitActor_ShouldPreferItOverTheToken()
         {
@@ -65,6 +68,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-03: Leave the actor null when there is neither a token nor an explicit actor (system).
+        /// <summary>Ensures background actions are recorded as system actions.</summary>
         [Fact]
         public void Add_WithoutTokenOrExplicitActor_ShouldWriteSystemActor()
         {
@@ -81,6 +85,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-04: Write old and new values as JSON with snake_case keys and snake_case enum values.
+        /// <summary>Ensures audit values use the same snake_case format as the API.</summary>
         [Fact]
         public void Add_WithValues_ShouldSerializeSnakeCaseJson()
         {
@@ -110,6 +115,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-05: Store null old and new values as SQL NULL, not as the JSON literal null.
+        /// <summary>Ensures absent values are stored as SQL NULL so queries can rely on IS NULL.</summary>
         [Fact]
         public void Add_WithoutValues_ShouldLeaveColumnsNull()
         {
@@ -124,6 +130,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-06: Reject an action or entity type outside the catalog and add nothing.
+        /// <summary>Ensures only catalogued actions and entity types can be audited.</summary>
         [Theory]
         [InlineData("USER_SANCTIONED", "user")]
         [InlineData("user_login", "user")]
@@ -141,6 +148,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // TEST-07: Cut a User-Agent longer than audit_logs.user_agent (500) and store a blank one as null.
+        /// <summary>Ensures a long or blank User-Agent never breaks the insert.</summary>
         [Theory]
         [InlineData(600, 500)]
         [InlineData(500, 500)]
@@ -194,6 +202,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
             auditLog.ActorRole.Should().Be("TRAVELER");
         }
 
+        /// <summary>Returns the only audit log tracked as Added, failing if there is not exactly one.</summary>
         private static AuditLog SingleAdded(ANGIContext context)
         {
             var entry = context.ChangeTracker.Entries<AuditLog>().Should().ContainSingle().Subject;
@@ -201,6 +210,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
             return entry.Entity;
         }
 
+        /// <summary>Creates the service with a fake HTTP context for the given user, role and User-Agent.</summary>
         private static AuditLogService CreateService(
             ANGIContext context,
             int? userId = 3,
@@ -217,6 +227,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Audit
         }
 
         // Add() only touches the change tracker, so the context never opens a connection.
+        /// <summary>Creates a context with the production naming convention that never opens a connection.</summary>
         private static ANGIContext CreateContext() =>
             new(
                 new DbContextOptionsBuilder<ANGIContext>()

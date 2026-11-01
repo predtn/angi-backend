@@ -5,11 +5,13 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies BrowseRestaurantsRequestDtoValidator enforces the REST-01 filter, sort and paging rules.</summary>
 public sealed class BrowseRestaurantsRequestDtoValidatorTests
 {
     private readonly BrowseRestaurantsRequestDtoValidator _validator = new();
 
     // TEST-01: Valid default request passes validation
+    /// <summary>Ensures a request with only defaults is accepted.</summary>
     [Fact]
     public void Validate_WithValidDefaultRequest_ShouldBeValid()
     {
@@ -25,6 +27,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-02: Sort=distance without Lat/Lng fails validation (matching REST-01 spec)
+    /// <summary>Ensures distance sorting requires a location.</summary>
     [Theory]
     [InlineData(null, null)]
     [InlineData(10.5, null)]
@@ -54,6 +57,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-03: RadiusKm without Lat/Lng fails validation
+    /// <summary>Ensures a radius filter requires a location.</summary>
     [Fact]
     public void Validate_WithRadiusKmMissingCoordinates_ShouldHaveValidationError()
     {
@@ -72,6 +76,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-04: RadiusKm exceeding 50 or non-positive fails validation
+    /// <summary>Ensures the radius stays positive and within 50 km.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
@@ -93,6 +98,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-05: PriceLevel out of range 1..4 fails validation
+    /// <summary>Ensures the price level stays within 1..4.</summary>
     [Theory]
     [InlineData((short)0)]
     [InlineData((short)5)]
@@ -110,6 +116,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-06: MinRating out of range 1..5 fails validation
+    /// <summary>Ensures the minimum rating stays within 1..5.</summary>
     [Theory]
     [InlineData(0.5)]
     [InlineData(5.5)]
@@ -127,6 +134,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-07: Pagination parameters out of valid bounds fail validation
+    /// <summary>Ensures page and page size stay within their ranges.</summary>
     [Theory]
     [InlineData(0, 20)]
     [InlineData(1, 0)]
@@ -145,6 +153,7 @@ public sealed class BrowseRestaurantsRequestDtoValidatorTests
     }
 
     // TEST-08: Invalid sort enum value fails validation
+    /// <summary>Ensures only documented sort values are accepted.</summary>
     [Fact]
     public void Validate_WithInvalidSort_ShouldHaveValidationError()
     {

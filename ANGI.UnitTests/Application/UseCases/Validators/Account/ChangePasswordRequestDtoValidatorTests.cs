@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Account;
 
+/// <summary>Verifies ChangePasswordRequestDtoValidator enforces the password length and composition rules.</summary>
 public sealed class ChangePasswordRequestDtoValidatorTests
 {
     private readonly ChangePasswordRequestDtoValidator _validator = new();

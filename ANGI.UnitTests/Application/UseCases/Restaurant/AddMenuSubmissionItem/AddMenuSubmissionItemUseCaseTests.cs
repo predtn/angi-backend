@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.AddMenuSubmissionItem;
 
+/// <summary>Verifies AddMenuSubmissionItemUseCase adds a valid dish to an owned draft menu with a safe sort order and cover.</summary>
 public sealed class AddMenuSubmissionItemUseCaseTests
 {
     // TEST-01: Add a normalized new dish at the end of an editable draft.
@@ -60,6 +61,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-02: Reject adding an item when the submission is no longer a draft.
+    /// <summary>Ensures a menu already sent for review cannot be changed.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Pending)]
     [InlineData(MenuSubmissionStatus.Approved)]
@@ -79,6 +81,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-03: Hide missing and unowned submissions behind the not-found response.
+    /// <summary>Ensures another owner's submission is indistinguishable from a missing one.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownSubmission_ShouldThrowNotFound()
     {
@@ -93,6 +96,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-04: Reject a tag identifier that does not exist in the catalog.
+    /// <summary>Ensures a dish can only reference tags from the catalog.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNonexistentTag_ShouldRejectBeforeAdding()
     {
@@ -111,6 +115,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-05: Reject PDFs and images uploaded for a non-dish purpose.
+    /// <summary>Ensures only a dish image can become a dish cover.</summary>
     [Theory]
     [InlineData("application/pdf", "raw/authenticated/verification_doc/file.pdf")]
     [InlineData("image/jpeg", "image/upload/verification_doc/file.jpg")]
@@ -138,6 +143,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-06: Keep an existing cover media entity detached from the new EF graph.
+    /// <summary>Prevents EF from inserting a duplicate of an existing media row.</summary>
     [Fact]
     public async Task ExecuteAsync_WithOwnedDishImage_ShouldKeepMediaDetachedFromAddedGraph()
     {
@@ -167,6 +173,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-07: Assign sort order zero when the draft menu has no items.
+    /// <summary>Ensures the first dish of an empty draft starts the sort order at zero.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyMenu_ShouldAutoAssignZeroSortOrder()
     {
@@ -179,6 +186,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     }
 
     // TEST-08: Avoid smallint overflow when the current menu already uses the maximum sort order.
+    /// <summary>Guards against smallint overflow when appending to a full sort order range.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMaximumExistingSortOrder_ShouldKeepMaximumSortOrder()
     {
@@ -194,6 +202,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         result.SortOrder.Should().Be(short.MaxValue);
     }
 
+    /// <summary>Creates a repository mock that returns draft submission 14 for owner 12.</summary>
     private static Mock<IRestaurantMenuRepository> DraftRepository()
     {
         var repository = new Mock<IRestaurantMenuRepository>();
@@ -202,6 +211,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         return repository;
     }
 
+    /// <summary>Creates a valid add-item request without tags or cover.</summary>
     private static AddMenuSubmissionItemRequestDto ValidRequest() => new()
     {
         Name = "Dish",
@@ -211,6 +221,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         TagIds = []
     };
 
+    /// <summary>Creates the use case for owner 12 with the real validator and the given repositories.</summary>
     private static AddMenuSubmissionItemUseCase CreateUseCase(
         Mock<IRestaurantMenuRepository> repository,
         Mock<IMediaRepository> mediaRepository)

@@ -12,6 +12,8 @@ namespace ANGI.IntegrationTests.Infrastructure.Persistences.Configs;
 /// <summary>Verifies upgrade of existing counters and nested JSON, rather than only an empty-schema migration.</summary>
 public sealed class RoadmapTimestampMigrationTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
+    // TEST-01: Upgrading from roadmap versions to timestamps keeps history and the committed replay, supersedes legacy previews and drops the old version columns.
+    /// <summary>Ensures the move to timestamp tokens keeps saved history replayable and cannot apply stale previews.</summary>
     [PostgresEndToEndFact]
     public async Task Upgrade_PreservesHistoryAndCommittedReplay_AndInvalidatesLegacyPreviews()
     {

@@ -34,6 +34,8 @@ public sealed class AgentChatPolicyTests
     [InlineData("hãy lập lịch giúp tôi để chốt lịch")]
     public void IsSaveRequest_UncertainText_DoesNotAuthorize(string text) => AgentChatPolicy.IsSaveRequest(text).Should().BeFalse();
 
+    // TEST-03: A request to preview before saving counts as a review request, while its negated form does not, so neither authorizes a commit.
+    /// <summary>Ensures a preview request is routed to review instead of being treated as permission to save.</summary>
     [Fact]
     public void IsReviewRequest_PreviewBeforeSaving_DoesNotAuthorizeCommit()
     {
@@ -41,7 +43,7 @@ public sealed class AgentChatPolicyTests
         AgentChatPolicy.IsReviewRequest("đừng lập lịch giúp tôi để chốt lịch").Should().BeFalse();
     }
 
-    // TEST-03: Constraint consent stages a detached proposal without changing the current hard limit.
+    // TEST-04: Constraint consent stages a detached proposal without changing the current hard limit.
     /// <summary>Ensures an explicit next-turn answer is required even when the model claims consent.</summary>
     [Fact]
     public void StageChange_Relaxation_KeepsCurrentConstraints()

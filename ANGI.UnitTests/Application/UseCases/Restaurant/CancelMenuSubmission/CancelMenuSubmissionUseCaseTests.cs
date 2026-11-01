@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.CancelMenuSubmission;
 
+/// <summary>Verifies CancelMenuSubmissionUseCase cancels only owned draft or pending submissions.</summary>
 public sealed class CancelMenuSubmissionUseCaseTests
 {
     // TEST-01: Cancel a pending submission and persist the state transition.
@@ -63,6 +64,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     }
 
     // TEST-03: Allow both draft cancellation and pending withdrawal.
+    /// <summary>Ensures an owner can discard a draft or withdraw a pending submission.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Draft)]
     [InlineData(MenuSubmissionStatus.Pending)]
@@ -83,6 +85,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     }
 
     // TEST-04: Reject cancellation for every final workflow status.
+    /// <summary>Ensures a reviewed or finished submission cannot be cancelled.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Approved)]
     [InlineData(MenuSubmissionStatus.Rejected)]
@@ -103,6 +106,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     }
 
     // TEST-05: Hide missing and unowned submissions behind the not-found response.
+    /// <summary>Ensures another owner's submission is indistinguishable from a missing one.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownOrOtherOwnerSubmission_ShouldThrowNotFound()
     {
@@ -119,6 +123,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
         await act.Should().ThrowAsync<NotFoundException>();
     }
 
+    /// <summary>Creates the use case for owner 12 over the given repository and unit of work.</summary>
     private static CancelMenuSubmissionUseCase CreateUseCase(
         Mock<IRestaurantMenuRepository> repository,
         Mock<IUnitOfWork> unitOfWork)

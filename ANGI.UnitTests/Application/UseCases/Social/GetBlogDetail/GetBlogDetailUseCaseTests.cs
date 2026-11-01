@@ -17,6 +17,7 @@ public sealed class GetBlogDetailUseCaseTests
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
 
+    /// <summary>Creates the use case over the shared repository and current-user mocks.</summary>
     private GetBlogDetailUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object);
 

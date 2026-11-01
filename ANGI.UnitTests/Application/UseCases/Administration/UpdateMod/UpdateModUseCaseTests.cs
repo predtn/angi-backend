@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.UpdateMod;
 
+/// <summary>Verifies UpdateModUseCase changes a MOD's status, revokes sessions on suspension and stays idempotent for unchanged input.</summary>
 public sealed class UpdateModUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 21, 8, 0, 0, DateTimeKind.Utc);
@@ -209,6 +210,7 @@ public sealed class UpdateModUseCaseTests
         return unitOfWork;
     }
 
+    /// <summary>Clock fixed at one instant so session revocation timestamps are deterministic.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
         /// <summary>Returns the deterministic session-revocation timestamp.</summary>

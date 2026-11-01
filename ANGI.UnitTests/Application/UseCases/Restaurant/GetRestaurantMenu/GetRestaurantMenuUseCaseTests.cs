@@ -10,15 +10,18 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetRestaurantMenu;
 
+/// <summary>Verifies GetRestaurantMenuUseCase returns the public menu of an existing restaurant.</summary>
 public sealed class GetRestaurantMenuUseCaseTests
 {
     private readonly Mock<IRestaurantRepository> _repositoryMock = new();
     private readonly GetRestaurantMenuRequestDtoValidator _validator = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository mock.</summary>
     private GetRestaurantMenuUseCase CreateUseCase() =>
         new(_repositoryMock.Object, _validator);
 
     // TEST-01: Happy Path - Active menu dishes returned for existing restaurant
+    /// <summary>Ensures the active dishes of an existing restaurant are returned.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantExists_ShouldReturnRestaurantMenu()
     {
@@ -94,6 +97,7 @@ public sealed class GetRestaurantMenuUseCaseTests
     }
 
     // TEST-02: Exception Path - Restaurant does not exist, throw 404 RESTAURANT_NOT_FOUND
+    /// <summary>Ensures a missing restaurant returns RESTAURANT_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantNotFound_ShouldThrowNotFoundException()
     {

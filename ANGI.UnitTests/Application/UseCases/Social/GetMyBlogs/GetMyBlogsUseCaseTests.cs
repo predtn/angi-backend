@@ -12,11 +12,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Social.GetMyBlogs;
 
+/// <summary>Verifies GetMyBlogsUseCase returns a validated, filterable page of the caller's own blogs.</summary>
 public sealed class GetMyBlogsUseCaseTests
 {
     private static readonly DateTime PublishedDate = new(2026, 10, 13, 10, 0, 0, DateTimeKind.Utc);
 
     // TEST-01: Happy Path - Return personal blogs with mapped properties, excerpt, and moderation note.
+    /// <summary>Ensures authors see their blogs with excerpt and moderation note.</summary>
     [Fact]
     public async Task ExecuteAsync_WithExistingBlogs_ShouldReturnPagedMyBlogs()
     {
@@ -111,6 +113,7 @@ public sealed class GetMyBlogsUseCaseTests
     }
 
     // TEST-02: Happy Path - Return empty page when user has no blogs.
+    /// <summary>Ensures an author without blogs gets an empty page instead of an error.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNoBlogs_ShouldReturnEmptyPage()
     {
@@ -132,6 +135,7 @@ public sealed class GetMyBlogsUseCaseTests
     }
 
     // TEST-03: Happy Path - Filter by status (published, hidden, removed).
+    /// <summary>Ensures each status filter value reaches the repository as the matching enum.</summary>
     [Theory]
     [InlineData("published", BlogStatus.Published)]
     [InlineData("hidden", BlogStatus.Hidden)]
@@ -152,6 +156,7 @@ public sealed class GetMyBlogsUseCaseTests
     }
 
     // TEST-04: Exception Path - Invalid Request DTO parameters throw ValidationException.
+    /// <summary>Ensures invalid paging or status is rejected before querying.</summary>
     [Theory]
     [InlineData(0, 20, null)]
     [InlineData(1, 0, null)]
@@ -172,6 +177,7 @@ public sealed class GetMyBlogsUseCaseTests
     }
 
     // TEST-05: Exception Path - Unauthenticated request throws UnauthorizedException.
+    /// <summary>Ensures an anonymous caller cannot list personal blogs.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutAuthenticatedUser_ShouldThrowUnauthorizedException()
     {
@@ -188,6 +194,7 @@ public sealed class GetMyBlogsUseCaseTests
             Times.Never);
     }
 
+    /// <summary>Creates the use case with the real validator over the given repository and user id.</summary>
     private static GetMyBlogsUseCase CreateUseCase(Mock<IBlogRepository> repository, int? userId)
     {
         var currentUser = new Mock<ICurrentUserService>();

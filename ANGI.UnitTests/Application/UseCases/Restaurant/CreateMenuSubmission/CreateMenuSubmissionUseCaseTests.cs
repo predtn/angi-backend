@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.CreateMenuSubmission;
 
+/// <summary>Verifies CreateMenuSubmissionUseCase opens one menu draft per verified restaurant, cloned from the live menu.</summary>
 public sealed class CreateMenuSubmissionUseCaseTests
 {
     // TEST-01: Clone every non-removed current dish into a new editable menu draft.
@@ -119,6 +120,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
     }
 
     // TEST-04: Return RESTAURANT_NOT_FOUND when the authenticated owner has no restaurant.
+    /// <summary>Ensures an owner without a restaurant cannot open a menu draft.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutRestaurant_ShouldThrowNotFound()
     {
@@ -136,6 +138,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
     }
 
     // TEST-05: Create a valid draft with no items when the active menu is empty.
+    /// <summary>Ensures a restaurant with no dishes can still start a menu draft.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyMenu_ShouldCreateEmptyDraft()
     {
@@ -155,6 +158,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
     }
 
     // TEST-06: Clone media and tags by value without attaching existing entities to the new graph.
+    /// <summary>Prevents EF from inserting duplicates of the live menu's media and tags.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenCloningMediaAndTags_ShouldKeepOnlyForeignKeysInNewGraph()
     {
@@ -186,6 +190,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
     }
 
     // TEST-07: Leave the transaction uncommitted when persistence fails.
+    /// <summary>Ensures a failed save never commits a partial draft.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenSaveFails_ShouldNotCommitTransaction()
     {
@@ -206,6 +211,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
     }
 
     // TEST-08: Reject an unauthenticated request before opening a transaction.
+    /// <summary>Ensures an anonymous call never opens a transaction.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutAuthenticatedUser_ShouldThrowUnauthorizedBeforeTransaction()
     {
@@ -223,6 +229,7 @@ public sealed class CreateMenuSubmissionUseCaseTests
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>Creates a repository mock that returns verified restaurant 7 for owner 12.</summary>
     private static Mock<IRestaurantMenuRepository> VerifiedRestaurantRepository()
     {
         var repository = new Mock<IRestaurantMenuRepository>();

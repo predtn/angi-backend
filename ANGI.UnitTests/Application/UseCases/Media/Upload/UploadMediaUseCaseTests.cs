@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Media.Upload;
 
+/// <summary>Verifies UploadMediaUseCase validates file type, size and purpose before storing and persisting media.</summary>
 public sealed class UploadMediaUseCaseTests
 {
     private static readonly DateTime CreatedAt = new(2026, 10, 7, 8, 0, 0, DateTimeKind.Utc);

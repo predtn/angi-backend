@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetOwnerProfile;
 
+/// <summary>Verifies GetOwnerRestaurantUseCase returns the owner's restaurant with its latest workflow summaries.</summary>
 public sealed class GetOwnerRestaurantUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 9, 3, 0, 0, DateTimeKind.Utc);
@@ -122,6 +123,7 @@ public sealed class GetOwnerRestaurantUseCaseTests
         return restaurant;
     }
 
+    /// <summary>Clock fixed at one instant so the open-now flag is deterministic.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;
