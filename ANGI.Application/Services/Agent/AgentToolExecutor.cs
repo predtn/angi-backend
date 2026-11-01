@@ -119,7 +119,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // lập lịch mà model không cần thêm vòng tool cho từng bữa. Phạm vi slot hoặc lịch cũ không khai báo bữa giữ một lần xếp hạng.
         var perMealSearch = scope.MealSlot is null && state.MealSlots.Length > 0;
         string?[] meals = perMealSearch
-            ? AgentStateValidator.Meals.Where(slot => state.MealSlots.Contains(slot) && slots.Any(x => x.Meal == slot)).ToArray()
+            ? AgentStateValidator.Meals.Where(slot => state.MealSlots.Contains(slot) && slots.Any(x => x.Meal == slot)).ToArray<string?>()
             : [scope.MealSlot];
         var mealQuota = perMealSearch ? Math.Min(input.TopK, slots.Select(x => x.Day).Distinct().Count() + 2) : input.TopK;
         // Món được yêu cầu theo tên có thể có ở nhiều chi nhánh: giữ tất cả để model hỏi chọn chi nhánh khi cần.
