@@ -394,6 +394,29 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Single().Constraints.TagIds.Should().Equal(filter.TagIds);
     }
 
+    // TEST-22: When a trip search is split (day-1 lunch has its own taste), a later part with the same ranking lists names the earlier
+    // part already offered first at the end, and an earlier one-meal part only reserves its top dish rather than its whole list.
+    /// <summary>Keeps days 2..N from receiving the exact candidates of day 1 when their ranking inputs are identical.</summary>
+    [Fact]
+    public async Task Recommendation_SplitScope_LaterPartsPreferNamesNotYetOffered()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3)); var reco = new Mock<IRecommendationService>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 3 });
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyList<int> ids, int _, RecommendationVector _, CancellationToken _) =>
+                new RecommendationResult(Guid.NewGuid(), ids.ToArray(), [], ids.Select(_ => .9).ToArray(), "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 2, MealSlots = ["lunch"],
+            Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() },
+            TasteOverrides = [new(1, "lunch", [new("spicy", 1)])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)), default);
+
+        context.Grants.Single(grant => grant.DayNumber == 1).DishIds.Should().Equal(1, 2, 3);
+        context.Grants.Single(grant => grant.DayNumber == 2).DishIds.Should().Equal(2, 3, 1);
+    }
+
     /// <summary>Builds the conversation-16 state: two days of declared meals, a real snack tag and snack requests for day-1 lunch and dinner.</summary>
     private static (AgentToolExecutor Tools, AgentProposalValidator Validator, Mock<IRecommendationService> Reco, AgentContext Context)
         SnackFixture(Func<DishCandidateFilter, int[]> candidatesFor)

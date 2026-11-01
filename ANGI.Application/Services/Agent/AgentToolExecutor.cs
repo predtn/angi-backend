@@ -201,6 +201,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             ? AgentStateValidator.Meals.Where(slot => state.MealSlots.Contains(slot) && slots.Any(x => x.Meal == slot)).ToArray<string?>()
             : [scope.MealSlot];
         var mealQuota = perMealSearch ? Math.Min(input.TopK, slots.Select(x => x.Day).Distinct().Count() + 2) : input.TopK;
+        // Phạm vi đã bị tách thành nhiều phần (ví dụ ngày 2 và ngày 4 cùng khẩu vị) thì mỗi phần có cùng vector và ứng viên,
+        // nên ranking giống hệt nhau. Các phần sau ưu tiên tên chưa dùng ở phần trước để các ngày không lặp lại cùng món.
+        var diversify = perMealSearch || requested != scope;
         // Món được yêu cầu theo tên có thể có ở nhiều chi nhánh: giữ tất cả để model hỏi chọn chi nhánh khi cần.
         var distinctNames = namedDishIds.Length == 0;
         var mainTag = catalogTags.FirstOrDefault(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
@@ -241,7 +244,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 context.State = state = await (preferences ?? new AgentPreferenceService(recommendation)).EnsureAsync(context.State, context.UserId, ct);
             var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
             // Xin dư để còn đủ món sau khi bỏ trùng tên; reco chỉ tính lượt hiển thị qua /impressions khi lịch được lưu.
+            // Khi đa dạng hóa, xin thêm đúng số tên đã dùng: sau khi đẩy các tên đó xuống cuối vẫn còn đủ món mới cho suất của bữa.
             var topK = perMealSearch ? Math.Min(limits.MaxRanked, mealQuota * 3) : input.TopK;
+            if (diversify) topK = Math.Min(limits.MaxRanked, topK + usedNames.Count);
             // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
             // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
             var ranked = state.Preferences?.Initialized == true
@@ -270,9 +275,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
             // của mỗi tên. Khi chia theo bữa, ưu tiên tên chưa dùng ở bữa trước (OrderBy ổn định nên vẫn giữ thứ tự ranking).
             var chosen = distinctNames ? actual.DistinctBy(d => AgentScopedPlanning.Normalize(d.Name)).ToArray() : actual;
-            if (perMealSearch)
-                chosen = chosen.OrderBy(d => usedNames.Contains(AgentScopedPlanning.Normalize(d.Name)!) ? 1 : 0).Take(mealQuota).ToArray();
-            usedNames.UnionWith(chosen.Select(d => AgentScopedPlanning.Normalize(d.Name)!));
+            if (diversify)
+                chosen = chosen.OrderBy(d => usedNames.Contains(AgentScopedPlanning.Normalize(d.Name)!) ? 1 : 0)
+                    .Take(perMealSearch ? mealQuota : input.TopK).ToArray();
+            // Chỉ ghi nhận các món đầu, mỗi vị trí (ngày) của bữa một món, vì đó là món gần như chắc được chọn;
+            // ghi cả danh sách thì phần sau bị đẩy xuống món xếp hạng thấp hoặc hết món mới.
+            var likelyPicks = mealSlot is null ? chosen : chosen.Take(slots.Count(x => x.Meal == mealSlot));
+            usedNames.UnionWith(likelyPicks.Select(d => AgentScopedPlanning.Normalize(d.Name)!));
             if (mealSlot is not null) chosenByMeal[mealSlot] = chosen;
             picked.AddRange(chosen.Where(d => picked.All(x => x.Id != d.Id)));
             // Grant là bằng chứng backend đã cấp các món này cho đúng ngày/bữa và điều kiện lọc.
