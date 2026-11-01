@@ -11,7 +11,15 @@ public sealed class AgentStatePolicy
     /// <summary>Requires a backend-staged human confirmation before relaxing an existing trip requirement.</summary>
     public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
     {
-        if (proposed is null) return current;
+        if (proposed is null && current.PendingPlanningRequest is null) return current;
+        proposed ??= current;
+        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest)
+            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest };
+        // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
+        if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
+            proposed = proposed with { FocusDay = current.FocusDay, FocusMeal = current.FocusMeal };
+        if (current.PendingPlanningRequest is { } pendingRequest)
+            proposed = AgentPendingPlanningPolicy.Apply(proposed, pendingRequest);
         // Provider and client state can only change targets; trusted vectors always come from reco.
         if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
         new AgentStateValidator().ValidateAndThrow(proposed);

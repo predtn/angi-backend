@@ -46,9 +46,10 @@ public static class AgentChatPolicy
         if (current.RadiusKm != proposed.RadiusKm || current.OriginMode != proposed.OriginMode || current.OriginLatitude != proposed.OriginLatitude || current.OriginLongitude != proposed.OriginLongitude)
             changes.Add("điểm xuất phát hoặc bán kính tìm món");
         var reply = $"Bạn xác nhận thay đổi {string.Join("; ", changes)}? Nhắn ‘xác nhận thay đổi’ để áp dụng hoặc ‘giữ nguyên’ để hủy. Bản lịch đang lưu chưa thay đổi.";
-        var pending = proposed with { PendingStateChange = null, PendingQuestion = null,
+        var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
+            FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,
             SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
-        return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending }, null, null);
+        return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending, PendingPlanningRequest = null }, null, null);
     }
 
     /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>

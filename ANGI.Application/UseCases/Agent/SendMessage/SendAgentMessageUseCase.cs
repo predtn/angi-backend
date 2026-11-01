@@ -117,7 +117,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 if (control == "reset") state = await ResetStateAsync(conversation, message.SequenceNo, ct);
                 prepared = new(control == "reset" ? "Đã bắt đầu kế hoạch mới. Bạn muốn ăn ở đâu, trong mấy ngày và với ngân sách bao nhiêu? Lịch đã lưu vẫn được giữ nguyên."
                     : "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu vẫn được giữ nguyên.",
-                    state with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null }, null, null, control);
+                    state with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null }, null, null, control);
             }
             else
             {
@@ -134,20 +134,21 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                         context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
                 else if (context.State.PendingStateChange is { } pending && AgentChatPolicy.AcceptsChange(request.Content))
                 {
-                    context.State = pending with { PendingQuestion = null, PendingStateChange = null };
+                    context.State = pending with { PendingQuestion = null, PendingStateChange = null,
+                        FocusDay = context.State.FocusDay, FocusMeal = context.State.FocusMeal };
                     context.ReplanAfterConfirmation = true;
                     prepared = await orchestrator.RunAsync(context, ct);
                 }
                 else if (context.State.PendingStateChange is not null && AgentChatPolicy.RejectsChange(request.Content))
                     prepared = new("Đã giữ nguyên các điều kiện trước đó.", context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
                 else if (AgentChatPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
-                    context.State.PendingQuestion is null && context.State.PendingStateChange is null &&
+                    context.State.PendingQuestion is null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
                     AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
                     prepared = new("Đây là toàn bộ đề xuất hiện tại để bạn xem lại. Nhắn ‘chốt lịch này’ để lưu thành roadmap.", context.State, null, null);
                 else if (AgentChatPolicy.IsSaveRequest(request.Content))
                 {
                     var proposal = context.CurrentProposal;
-                    if (context.State.PendingQuestion is not null || context.State.PendingStateChange is not null)
+                    if (context.State.PendingQuestion is not null || context.State.PendingStateChange is not null || context.State.PendingPlanningRequest is not null)
                         prepared = new("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.", context.State, null, null);
                     else if (proposal is null || proposal.Status is not ("ready" or "committed"))
                         prepared = new("Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.", context.State, null, null);
@@ -163,7 +164,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 else prepared = await orchestrator.RunAsync(context, ct);
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with
-                    { State = context.State with { PendingQuestion = null, PendingStateChange = null, FocusDay = null, FocusMeal = null } };
+                    { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null } };
             }
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
@@ -244,12 +245,19 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         }
         // clarify/answer hoặc validation có lỗi không tạo snapshot mới: giữ proposal cũ để xem lại.
         // State mới vẫn được lưu; Confirm sẽ kiểm tra nó có còn khớp proposal trước khi cho commit.
+        if (previous is not null && prepared.Snapshot is null && prepared.Commit is null &&
+            prepared.Action is null && prepared.State.PendingQuestion is not null)
+            prepared = prepared with { Reply = prepared.Reply + "\nBản đề xuất trước đó được giữ lại; chưa có lịch cập nhật cho yêu cầu này." };
         conversation.State = AgentJson.Write(prepared.State);
         conversation.Version++;
         conversation.ExpiresAt = now.AddDays(limits.ActiveDays);
         AgentConversationRules.ClearLease(conversation);
+        var previousStillApplies = previous is not null && prepared.Action is not ("discard" or "reset" or "state_changed") &&
+            prepared.State.PendingQuestion is null && prepared.State.PendingStateChange is null && prepared.State.PendingPlanningRequest is null &&
+            prepared.Validation?.Errors.Length is not > 0 &&
+            AgentConversationRules.SameConstraints(prepared.State, AgentJson.Read<AgentSnapshot>(previous.Payload).State);
         var result = new AgentTurnDto("completed", prepared.Reply, conversation.Version,
-            created is not null ? AgentContextBuilder.MapProposal(created) : previous is null || prepared.Action is "discard" or "reset" or "state_changed" ? null : AgentContextBuilder.MapProposal(previous),
+            created is not null ? AgentContextBuilder.MapProposal(created) : previousStillApplies ? AgentContextBuilder.MapProposal(previous!) : null,
             prepared.Validation, Commit: commitResult, ClientMessageId: message.ClientMessageId);
         // Lưu response cùng logical user message để request gửi lại có thể replay chính xác kết quả này.
         message.ProcessingStatus = AgentProcessingStatus.Completed;

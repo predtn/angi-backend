@@ -19,7 +19,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
-                Preferences = stored.Preferences }
+                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest }
             : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()

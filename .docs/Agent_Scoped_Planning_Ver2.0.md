@@ -60,6 +60,16 @@ Direct underspecified taste preferences are checked by a conservative backend gu
 execution. A phrase such as "thích ăn cay" does not authorize any numeric target or whole-trip scope.
 Ask missing intensity and scope together, preserve the existing state/proposal, and collect partial
 answers across completed user turns. Reuse explicit human resolutions, not old model-chosen numbers.
+Taste clarification retains a backend-owned `pendingPlanningRequest`: the original request, bounded
+recent partial answers, and explicitly stated duration/total or daily budget. The active trip and draft
+stay unchanged while taste is unresolved. When resolved, those explicit facts override stale model
+copies of trip values before state acceptance or ranking. Daily budgets use the requested duration.
+The existing constraint-confirmation policy still applies; a complete proposed change, including taste,
+is transferred to `pendingStateChange` and applied only on confirmation. Successful previews and
+discard/reset clear pending clarification memory. Clients and model output cannot forge this metadata.
+Model-chosen taste scopes cannot set/clear navigation `focusDay/focusMeal`; only the current client-owned
+focus is retained, including when staging and accepting a change. This keeps a day-2 taste exception
+from blocking recommendation requests for a newly added day 4, while preserving explicit UI scope pins.
 Constraint-change confirmation does not confirm an unresolved taste. The provider prompt gives this
 clarification priority over immediate preview generation. Other wording remains model-interpreted.
 Keep edits outside mutation scope unchanged. Changed effective taste/meal selectors within a source
@@ -68,6 +78,22 @@ updates). Future-only changes produce a reviewed revision with the same dishes s
 Fingerprints use effective targets/vector and applicable meal selectors, not unrelated days.
 Backend derives rankingFingerprint on validated items, never accepts it from model output.
 Reevaluated retained dishes keep item identity/feedback but receive their new recommendation request ID.
+`create_proposal` is a complete selection payload for its scope, accepted for both initial planning and
+updates. The backend chooses creation/revision from the owned source, merges unaffected rows, and
+derives changes. Supplied stale base versions are rejected. Snapshot row keys are reconciled with
+source keys by exact key or day/meal/sort position; selected-item edits cannot replace other rows.
+`patch_proposal` remains available for explicit deltas with an exact base version. Reselected rows,
+including unchanged dish IDs, require fresh scoped grants and use their new request IDs; retained
+rows outside an edit keep their provenance. Business-validation repair receives the rejected draft
+and its concrete errors, including the rejected day/meal and issued candidate scopes. Schema repair,
+proposal repair and unsupported-coverage repair each have one independent attempt, all within the
+existing LLM-call, tool, context and total-time limits. A repaired schema does not consume proposal
+or coverage recovery. Coverage recovery preserves the rejected selection and validation feedback;
+if recovery still fails, the final response retains the blocking validation instead of hiding it.
+Recommendation tool results include selectionScope and per-item allowedMealSlots. Catalog meal tags
+do not widen a day/meal grant. Model context also lists the issued candidate scopes. Reuse adequate
+full-trip results rather than repeating identical searches; dish-name/restaurant uniqueness is not
+an implicit requirement. The backend never widens grants to make a misplaced selection pass.
 Confirm verifies stored provenance and catalog again without calling LLM/reco. Legacy retained items
 remain committable. All saved dishes still go through the existing transactional impression outbox.
 
@@ -77,10 +103,21 @@ LLM reply text is an internal draft and is not forwarded as factual user-visible
 AgentOutput.clarification is nullable and allowlisted: trip_details, taste_scope, taste_intensity,
 edit_scope, novelty, catalog_choice, coverage, catalog_support, general.
 Backend constructs proposal summaries, catalog failure messages, clarification questions and answers
-from validated snapshots/tool outcomes and fixed templates. Names/prices/totals/change counts are
+from validated snapshots/tool outcomes and fixed templates. Names/prices/totals are
 backend-derived. Unknown opening hours, fame, dietary certainty and ranking explanations are omitted.
 Snapshots remain authoritative for consumers; factual correctness is limited by catalog freshness.
+Itinerary replies start with “Đây sẽ là roadmap khám phá ẩm thực của bạn trong {numDays} ngày.”
+and list every day with breakfast, lunch and dinner headings and one bullet per selected snapshot item,
+ordered by day, meal and sort order. Item counts follow the validated recommendation selection; no
+fixed three-item count or six-item truncation applies. Empty meals are explicitly marked without
+inventing dishes. Snack/late-night headings also appear when selected or requested. Restaurant names,
+prices, totals and preview/saved status remain backend-derived. Replies omit the change summary
+(added/replaced/removed/moved counts); structured snapshot changes remain available to consumers.
 Fallback disclosures follow selected items' request IDs, not stale grants retained from earlier drafts.
+Profile/ranking transport, configuration or contract failures may use rating fallback. A proposal
+assembly/action failure never substitutes an old fallback plan as the current result: the turn returns
+`proposal=null` while the previous draft remains available through GET conversation. Successful
+reselection replaces old fallback provenance with current reco request IDs.
 When a trip/day/meal taste target is present, explain that it is a soft priority rather than a guarantee
 for every dish, and that matching depends on dish data and interaction history. A reco request ID proves
 service processing, not nonzero personalization weight. Reco scoring and cold-start remain unchanged.

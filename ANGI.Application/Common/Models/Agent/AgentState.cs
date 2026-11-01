@@ -43,6 +43,9 @@ public sealed record AgentState
     /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentState? PendingStateChange { get; init; }
+    /// <summary>Backend-owned request retained while taste questions are unresolved; not yet confirmed trip state.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentPendingPlanningRequest? PendingPlanningRequest { get; init; }
     /// <summary>Last observed exact UTC roadmap timestamp; unchanged timestamps preserve chat planning constraints.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? SourceRoadmapUpdatedAt { get; init; }
@@ -50,6 +53,10 @@ public sealed record AgentState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? HistoryStartSequence { get; init; }
 }
+
+/// <summary>Bounded user messages plus explicit duration/budget values collected across clarification turns.</summary>
+public sealed record AgentPendingPlanningRequest(string[] Messages, short? NumDays = null,
+    decimal? TotalBudget = null, decimal? DailyBudget = null);
 
 /// <summary>One backend-priced itinerary item with stable proposal identity.</summary>
 public sealed record AgentItem(string ItemKey, long? SourceItemId, short DayNumber, string MealSlot,
@@ -79,7 +86,9 @@ public sealed record AgentScope(short? DayNumber = null, string? MealSlot = null
 }
 
 /// <summary>Deterministic validation including route uncertainty and current total cost.</summary>
-public sealed record AgentValidation(string[] Errors, string[] Warnings, decimal TotalCost, AgentDayRoute[] Routes);
+/// <param name="ScopeRejectedItemKeys">Set only when every error is a missing in-scope grant; internal repair input, never serialized.</param>
+public sealed record AgentValidation(string[] Errors, string[] Warnings, decimal TotalCost, AgentDayRoute[] Routes,
+    [property: JsonIgnore] string[]? ScopeRejectedItemKeys = null);
 
 /// <summary>Internal context loaded only after ownership checks.</summary>
 public sealed class AgentContext
@@ -98,13 +107,23 @@ public sealed class AgentContext
     public List<AgentTranscript> History { get; init; } = [];
     public List<AgentCandidateGrant> Grants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
+    /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
+    public List<AgentMealCoverage> MealCoverage { get; } = [];
     public string? RepairFeedback { get; set; }
+    /// <summary>Valid JSON proposal rejected by business validation, retained for a bounded model correction.</summary>
+    public AgentOutput? RejectedOutput { get; set; }
     public bool ReplanAfterConfirmation { get; set; }
     public AgentState? ConstraintBaseline { get; set; }
     public object[] CatalogTags { get; set; } = [];
     /// <summary>Trusted tool failures/coverage hints used to construct the user-visible reply.</summary>
     public string? ToolNotice { get; set; }
+    /// <summary>Set after a repeated identical tool request; the next provider call must return a final output.</summary>
+    public bool ToolsClosed { get; set; }
 }
+
+/// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>
+public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int AvailableCount,
+    string Fingerprint, string[] RequiredTags);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);

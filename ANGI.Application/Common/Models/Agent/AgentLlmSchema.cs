@@ -45,8 +45,8 @@ public static class AgentLlmSchema
         ["itemKey"] = Scalar("string"), ["sourceItemId"] = Nullable(Scalar("integer")), ["dayNumber"] = Scalar("integer"),
         ["mealSlot"] = Choice("breakfast", "lunch", "dinner", "snack", "late_night"), ["sortOrder"] = Scalar("integer"), ["dishId"] = Scalar("integer")
     });
-    // Hợp đồng action của ANGI: clarify hỏi lại; answer trả lời; create_proposal dựng lịch mới;
-    // patch_proposal sửa lịch nguồn. Model chọn theo Instructions và context, schema chỉ giới hạn dạng output.
+    // create_proposal supplies a complete scoped selection; backend decides create/update from the source.
+    // patch_proposal supplies explicit changes to an existing source. Other actions remain conversational.
     // Điều kiện được phép tạo/sửa và tính hợp lệ dữ liệu còn được Builder/StatePolicy/Validator kiểm tra.
     public static readonly object Output = Obj(new()
     {
@@ -95,6 +95,45 @@ public static class AgentLlmSchema
 
     /// <summary>Checks the strict schema again in backend code rather than trusting an upstream 200 response.</summary>
     public static bool IsValid(JsonElement value, object schema) => Match(value, JsonSerializer.SerializeToElement(schema));
+
+    /// <summary>Returns the first mismatching path for diagnostics; model-invented field names are masked.</summary>
+    public static string? FindMismatch(JsonElement value, object schema) => Mismatch(value, JsonSerializer.SerializeToElement(schema), "$");
+
+    /// <summary>Walks objects and arrays to the first failing node; leaf types reuse <see cref="Match"/>.</summary>
+    private static string? Mismatch(JsonElement value, JsonElement schema, string path)
+    {
+        if (Match(value, schema)) return null;
+        if (schema.TryGetProperty("anyOf", out var options))
+        {
+            // Nullable object: report inside the non-null branch, otherwise the value has the wrong type.
+            var branch = options.EnumerateArray().FirstOrDefault(option => option.TryGetProperty("type", out var type) && type.GetString() != "null");
+            return value.ValueKind == JsonValueKind.Null || branch.ValueKind != JsonValueKind.Object ? path : Mismatch(value, branch, path);
+        }
+        var kind = schema.GetProperty("type").GetString();
+        if (kind == "array" && value.ValueKind == JsonValueKind.Array && value.GetArrayLength() <= 2000)
+        {
+            var index = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                if (Mismatch(item, schema.GetProperty("items"), $"{path}[{index}]") is { } inner) return inner;
+                index++;
+            }
+            return path;
+        }
+        if (kind != "object" || value.ValueKind != JsonValueKind.Object) return path;
+        var properties = schema.GetProperty("properties");
+        foreach (var field in value.EnumerateObject())
+            if (!properties.TryGetProperty(field.Name, out _)) return $"{path}.{SafeName(field.Name)}(unexpected)";
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (!value.TryGetProperty(property.Name, out var child)) return $"{path}.{property.Name}(missing)";
+            if (Mismatch(child, property.Value, $"{path}.{property.Name}") is { } inner) return inner;
+        }
+        return $"{path}(duplicate)";
+    }
+
+    /// <summary>Keeps only short identifier-like names so provider text cannot enter logs through a field name.</summary>
+    private static string SafeName(string name) => name.Length is > 0 and <= 40 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? name : "?";
 
     /// <summary>Recursively checks required fields, primitive types, arrays and enum membership.</summary>
     private static bool Match(JsonElement value, JsonElement schema)

@@ -14,15 +14,55 @@ public sealed class AgentProposalBuilder
         var source = context.Source;
         var original = source?.Items ?? [];
         var items = original.ToList();
+        var retainedKeys = original.Select(item => item.ItemKey).ToHashSet(StringComparer.Ordinal);
+        if (source is not null && output.BaseProposalVersion.HasValue && context.ProposalVersion.HasValue &&
+            output.BaseProposalVersion != context.ProposalVersion)
+            throw new ConflictException("PROPOSAL_VERSION_CONFLICT", "Phiên bản đề xuất đã thay đổi.");
         if (output.Action == "create_proposal")
         {
-            if (source is not null && context.Request.Command != "alternative" && !context.AlternativeScopes.Any(scope => scope.Covers(output.Scope)) &&
-                !(context.ReplanAfterConfirmation && output.Scope == new AgentScope()))
-                throw Invalid("Hãy sửa proposal bằng các thay đổi có phạm vi.");
+            // A complete scoped selection is a payload shape, not permission to discard the current trip.
+            // The backend merges it into the owned source and derives the actual delta below.
+            if (context.AlternativeScopes.Count > 0 && context.Request.Command != "alternative" &&
+                !context.AlternativeScopes.Any(scope => scope.Covers(output.Scope)))
+                throw Invalid("Phạm vi đề xuất rộng hơn phạm vi tìm phương án thay thế.");
             if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
             if (output.Items.Any(item => !output.Scope.Contains(item))) throw Invalid("Món nằm ngoài phạm vi yêu cầu.");
-            items.RemoveAll(item => output.Scope.Contains(item));
-            items.AddRange(output.Items.Select(item => Clean(item, null)));
+            if (output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
+                throw Invalid("Khóa món bị trùng trong đề xuất.");
+            var replaced = original.Where(output.Scope.Contains).ToArray();
+            if (context.Request.SelectedItemKey is { } selected)
+            {
+                replaced = original.Where(item => item.ItemKey == selected).ToArray();
+                if (output.Items.Length != 1 || output.Items[0].DayNumber != replaced[0].DayNumber ||
+                    output.Items[0].MealSlot != replaced[0].MealSlot)
+                    throw Invalid("Đề xuất phải chỉ thay món đã chọn trong đúng ngày/bữa.");
+            }
+            var replacedKeys = replaced.Select(item => item.ItemKey).ToHashSet(StringComparer.Ordinal);
+            items.RemoveAll(item => replacedKeys.Contains(item.ItemKey));
+            retainedKeys.ExceptWith(replacedKeys);
+            var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in output.Items)
+            {
+                var previous = replaced.FirstOrDefault(old => old.ItemKey == item.ItemKey && !usedKeys.Contains(old.ItemKey))
+                    ?? replaced.FirstOrDefault(old => !usedKeys.Contains(old.ItemKey) && old.DayNumber == item.DayNumber &&
+                        old.MealSlot == item.MealSlot && old.SortOrder == item.SortOrder);
+                if (previous is not null) usedKeys.Add(previous.ItemKey);
+                // A full snapshot may copy unaffected rows along with edited days. Only fresh selections
+                // consume new ranking provenance; an exact, unaffected copy keeps its original metadata.
+                if (previous is not null && source is not null && previous.DishId == item.DishId &&
+                    previous.DayNumber == item.DayNumber && previous.MealSlot == item.MealSlot && previous.SortOrder == item.SortOrder &&
+                    !AgentScopedPlanning.RequiresRefresh(source.State, context.State, previous) &&
+                    !context.Grants.Any(grant => (!grant.DayNumber.HasValue || grant.DayNumber == item.DayNumber) &&
+                        (grant.MealSlot is null || grant.MealSlot == item.MealSlot) && grant.DishIds.Contains(item.DishId) &&
+                        AgentScopedPlanning.Fingerprint(grant.Constraints, item.DayNumber, item.MealSlot) ==
+                        AgentScopedPlanning.Fingerprint(context.State, item.DayNumber, item.MealSlot)))
+                {
+                    retainedKeys.Add(previous.ItemKey);
+                    items.Add(previous);
+                    continue;
+                }
+                items.Add(Clean(previous is null ? item : item with { ItemKey = previous.ItemKey }, previous));
+            }
         }
         else if (output.Action == "patch_proposal")
         {
@@ -45,6 +85,7 @@ public sealed class AgentProposalBuilder
                 if (target is null || !output.Scope.Contains(target) || !touched.Add(target.ItemKey)) throw Invalid("Tham chiếu món không rõ hoặc ngoài phạm vi.");
                 if (context.Request.SelectedItemKey is { } selected && selected != target.ItemKey) throw Invalid("Món sửa khác lựa chọn đang xác nhận.");
                 items.Remove(target);
+                if (change.Type is "remove" or "replace") retainedKeys.Remove(target.ItemKey);
                 if (change.Type == "remove")
                 {
                     if (change.Item is not null) throw Invalid("Thao tác xóa không nhận món mới.");
@@ -84,7 +125,8 @@ public sealed class AgentProposalBuilder
         }).Where(grant => grant.DishIds.Length > 0).ToArray();
         return new AgentSnapshot(context.State, AgentJson.OrderItems(items), grants,
             context.Roadmap?.Id, context.Roadmap?.UpdatedAt, Delta(original, items), output.Scope,
-            original.Where(old => items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
+            original.Where(old => retainedKeys.Contains(old.ItemKey) &&
+                items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
     }
 
     /// <summary>Builds a backend-derived delta from validated source identity instead of storing untrusted model metadata.</summary>

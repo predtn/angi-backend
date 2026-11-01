@@ -113,64 +113,139 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var maxPrice = Min(state.MaxPricePerMeal, input.MaxPricePerMeal);
         var radius = Min(state.RadiusKm, input.RadiusKm);
         var area = radius is { } km && state.OriginLatitude is { } lat && state.OriginLongitude is { } lng ? new NearbyArea(lat, lng, km) : null;
-        var filter = new DishCandidateFilter { Province = state.Province, TagIds = tagIds, ExcludeTagIds = excludeTags,
-            ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = area, RestaurantId = restaurantId, DishIds = namedDishIds,
-            RequireAllTags = true, CompatibleMealTimeCode = scope.MealSlot };
-        // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
-        // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
-        var candidates = await dishes.GetCandidateIdsAsync(filter, limits.MaxCandidates, ct);
-        if ((tagIds.Length > 0 || scope.MealSlot is not null) && candidates.Count > 0)
+        var requiredTags = catalogTags.Where(tag => tagIds.Contains(tag.Id)).Select(tag => tag.Name).ToArray();
+        // Tìm cả chuyến/cả ngày với các bữa đã khai báo: xếp hạng RIÊNG từng bữa để bữa sáng không bị món trưa/tối
+        // có điểm cao chiếm hết topK. Mỗi bữa có suất (số ngày trong phạm vi + 2) món khác tên, đủ cho một lượt
+        // lập lịch mà model không cần thêm vòng tool cho từng bữa. Phạm vi slot hoặc lịch cũ không khai báo bữa giữ một lần xếp hạng.
+        var perMealSearch = scope.MealSlot is null && state.MealSlots.Length > 0;
+        string?[] meals = perMealSearch
+            ? AgentStateValidator.Meals.Where(slot => state.MealSlots.Contains(slot) && slots.Any(x => x.Meal == slot)).ToArray()
+            : [scope.MealSlot];
+        var mealQuota = perMealSearch ? Math.Min(input.TopK, slots.Select(x => x.Day).Distinct().Count() + 2) : input.TopK;
+        // Món được yêu cầu theo tên có thể có ở nhiều chi nhánh: giữ tất cả để model hỏi chọn chi nhánh khi cần.
+        var distinctNames = namedDishIds.Length == 0;
+        var chosenByMeal = new Dictionary<string, ANGI.Domain.Entities.Dish[]>();
+        var picked = new List<ANGI.Domain.Entities.Dish>();
+        var usedNames = new HashSet<string>(StringComparer.Ordinal);
+        var requestIds = new List<Guid?>();
+        int candidateTotal = 0, ignoredTotal = 0;
+        foreach (var mealSlot in meals)
         {
-            // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
-            var qualified = (await dishes.GetCardDishesAsync(candidates.ToArray(), ct))
-                .Where(dish => tagIds.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, scope.MealSlot))
-                .Select(dish => dish.Id).ToHashSet();
-            candidates = candidates.Where(qualified.Contains).ToArray();
+            var filter = new DishCandidateFilter { Province = state.Province, TagIds = tagIds, ExcludeTagIds = excludeTags,
+                ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = area, RestaurantId = restaurantId, DishIds = namedDishIds,
+                RequireAllTags = true, CompatibleMealTimeCode = mealSlot };
+            // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
+            // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
+            var candidates = await dishes.GetCandidateIdsAsync(filter, limits.MaxCandidates, ct);
+            if ((tagIds.Length > 0 || mealSlot is not null) && candidates.Count > 0)
+            {
+                // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
+                var qualified = (await dishes.GetCardDishesAsync(candidates.ToArray(), ct))
+                    .Where(dish => tagIds.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot))
+                    .Select(dish => dish.Id).ToHashSet();
+                candidates = candidates.Where(qualified.Contains).ToArray();
+            }
+            candidateTotal += candidates.Count;
+            // Bữa không có món phù hợp được ghi nhận qua mealCoverage = 0; không tự nới điều kiện.
+            if (candidates.Count == 0)
+            {
+                if (mealSlot is not null) chosenByMeal[mealSlot] = [];
+                continue;
+            }
+            if (requestIds.Count == 0)
+                context.State = state = await (preferences ?? new AgentPreferenceService(recommendation)).EnsureAsync(context.State, context.UserId, ct);
+            var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
+            // Xin dư để còn đủ món sau khi bỏ trùng tên; reco chỉ tính lượt hiển thị qua /impressions khi lịch được lưu.
+            var requested = perMealSearch ? Math.Min(limits.MaxRanked, mealQuota * 3) : input.TopK;
+            // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
+            // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
+            var ranked = state.Preferences?.Initialized == true
+                ? await recommendation.RecommendConversationAsync(context.UserId, candidates, requested,
+                    new RecommendationVector("conversation", AgentScopedPlanning.Vector(state, vectorSlot.Day, vectorSlot.Meal)), ct)
+                : new RecommendationResult(null, candidates.Take(requested).ToArray(), []);
+            if (ranked.RequestId.HasValue && ranked.VectorSource != "conversation")
+                ranked = new RecommendationResult(null, candidates.Take(requested).ToArray(), []);
+            var allowed = candidates.ToHashSet();
+            // Không tin ID/score chỉ vì request thành công: IDs phải thuộc input, số lượng không vượt topK,
+            // score phải hữu hạn và khớp số món. Personalized có requestId; rating fallback không có score/requestId.
+            if (ranked.DishIds.Count > requested || ranked.DishIds.Any(id => !allowed.Contains(id)) ||
+                ranked.IgnoredDishIds.Any(id => !allowed.Contains(id)) || ranked.RequestId == Guid.Empty ||
+                ranked.RequestId.HasValue && (ranked.Scores is null || ranked.Scores.Count != ranked.DishIds.Count || ranked.Scores.Any(x => !double.IsFinite(x))) ||
+                !ranked.RequestId.HasValue && ranked.Scores is not null)
+                throw Invalid("Dịch vụ gợi ý trả kết quả không hợp lệ.");
+            requestIds.Add(ranked.RequestId);
+            ignoredTotal += ranked.IgnoredDishIds.Count;
+            // Loại ID trùng nhưng giữ thứ tự ranking; lấy metadata từ catalog backend thay vì để LLM tự bịa.
+            var rankedIds = ranked.DishIds.Distinct().ToArray();
+            var catalog = (await dishes.GetCardDishesAsync(rankedIds, ct)).ToDictionary(x => x.Id);
+            var actual = rankedIds.Where(catalog.ContainsKey).Select(id => catalog[id])
+                .Where(d => string.Equals(d.Restaurant.ProvinceName?.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                    FitsMeal(d, mealSlot) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
+                    (namedDishIds.Length == 0 || namedDishIds.Contains(d.Id)) && tagIds.All(id => d.DishTags.Any(t => t.TagId == id))).ToArray();
+            // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
+            // của mỗi tên. Khi chia theo bữa, ưu tiên tên chưa dùng ở bữa trước (OrderBy ổn định nên vẫn giữ thứ tự ranking).
+            var chosen = distinctNames ? actual.DistinctBy(d => AgentScopedPlanning.Normalize(d.Name)).ToArray() : actual;
+            if (perMealSearch)
+                chosen = chosen.OrderBy(d => usedNames.Contains(AgentScopedPlanning.Normalize(d.Name)!) ? 1 : 0).Take(mealQuota).ToArray();
+            usedNames.UnionWith(chosen.Select(d => AgentScopedPlanning.Normalize(d.Name)!));
+            if (mealSlot is not null) chosenByMeal[mealSlot] = chosen;
+            picked.AddRange(chosen.Where(d => picked.All(x => x.Id != d.Id)));
+            // Grant là bằng chứng backend đã cấp các món này cho đúng ngày/bữa và điều kiện lọc.
+            // Validator dựa vào grant để chặn model thêm/thay bằng ID chưa được cấp hoặc sai scope.
+            context.Grants.Add(new(scope.DayNumber, mealSlot, chosen.Select(x => x.Id).ToArray(), ranked.RequestId,
+                state with { TagIds = tagIds, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = radius }));
+            telemetry.Record("ranking", context.ConversationId, context.TurnId, context.AttemptId, new { mode = ranked.RequestId.HasValue ? "personalized" : "rating_fallback",
+                candidateCount = candidates.Count, ranked.RequestId, mealSlot, returnedCount = chosen.Length });
         }
-        // Không có món phù hợp: trả danh sách rỗng/cảnh báo để model hỏi lại, không tự nới điều kiện.
-        if (candidates.Count == 0) return Notice(context,
-            "Chưa tìm thấy món khả dụng đáp ứng các điều kiện hiện tại. Bạn có muốn điều chỉnh điều kiện hoặc chọn bữa khác không?", "no_candidates");
-        context.State = state = await (preferences ?? new AgentPreferenceService(recommendation)).EnsureAsync(context.State, context.UserId, ct);
-        // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
-        // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
-        var ranked = state.Preferences?.Initialized == true
-            ? await recommendation.RecommendConversationAsync(context.UserId, candidates, input.TopK,
-                new RecommendationVector("conversation", AgentScopedPlanning.Vector(state, day, meal)), ct)
-            : new RecommendationResult(null, candidates.Take(input.TopK).ToArray(), []);
-        if (ranked.RequestId.HasValue && ranked.VectorSource != "conversation")
-            ranked = new RecommendationResult(null, candidates.Take(input.TopK).ToArray(), []);
-        var allowed = candidates.ToHashSet();
-        // Không tin ID/score chỉ vì request thành công: IDs phải thuộc input, số lượng không vượt topK,
-        // score phải hữu hạn và khớp số món. Personalized có requestId; rating fallback không có score/requestId.
-        if (ranked.DishIds.Count > input.TopK || ranked.DishIds.Any(id => !allowed.Contains(id)) ||
-            ranked.IgnoredDishIds.Any(id => !allowed.Contains(id)) || ranked.RequestId == Guid.Empty ||
-            ranked.RequestId.HasValue && (ranked.Scores is null || ranked.Scores.Count != ranked.DishIds.Count || ranked.Scores.Any(x => !double.IsFinite(x))) ||
-            !ranked.RequestId.HasValue && ranked.Scores is not null)
-            throw Invalid("Dịch vụ gợi ý trả kết quả không hợp lệ.");
-        // Loại ID trùng nhưng giữ thứ tự ranking; lấy metadata từ catalog backend thay vì để LLM tự bịa.
-        var rankedIds = ranked.DishIds.Distinct().ToArray();
-        var catalog = (await dishes.GetCardDishesAsync(rankedIds, ct)).ToDictionary(x => x.Id);
-        var actual = rankedIds.Where(catalog.ContainsKey).Select(id => catalog[id])
-            .Where(d => string.Equals(d.Restaurant.ProvinceName?.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) &&
-                FitsMeal(d, scope.MealSlot) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
-                (namedDishIds.Length == 0 || namedDishIds.Contains(d.Id)) && tagIds.All(id => d.DishTags.Any(t => t.TagId == id))).ToArray();
-        // Grant là bằng chứng backend đã cấp các món này cho đúng ngày/bữa và điều kiện lọc.
-        // Validator dựa vào grant để chặn model thêm/thay bằng ID chưa được cấp hoặc sai scope.
-        context.Grants.Add(new(scope.DayNumber, scope.MealSlot, actual.Select(x => x.Id).ToArray(), ranked.RequestId,
-            state with { TagIds = tagIds, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = radius }));
-        telemetry.Record("ranking", context.ConversationId, context.TurnId, context.AttemptId, new { mode = ranked.RequestId.HasValue ? "personalized" : "rating_fallback", candidateCount = candidates.Count, ranked.RequestId });
+        // Không có món phù hợp ở mọi bữa: trả danh sách rỗng/cảnh báo để model hỏi lại, không tự nới điều kiện.
+        if (requestIds.Count == 0)
+        {
+            var emptyCoverage = RecordCoverage(context, state, scope, _ => 0, requiredTags);
+            return Notice(context, emptyCoverage.Length > 0 ? AgentReplyBuilder.Coverage(context)
+                : "Chưa tìm thấy món khả dụng đáp ứng các điều kiện hiện tại. Bạn có muốn điều chỉnh điều kiện hoặc chọn bữa khác không?", "no_candidates");
+        }
         var expectedMeals = slots.Count(x => state.MealSlots.Contains(x.Meal));
-        context.ToolNotice = actual.Length == 0 ? "Chưa có kết quả gợi ý khả dụng cho phạm vi này. Bạn có muốn điều chỉnh điều kiện không?" : null;
+        var coverage = RecordCoverage(context, state, scope, slot => perMealSearch
+            ? chosenByMeal.GetValueOrDefault(slot)?.Length ?? 0 : picked.Count(dish => FitsMeal(dish, slot)), requiredTags);
+        context.ToolNotice = picked.Count == 0
+            ? (coverage.Length > 0 ? AgentReplyBuilder.Coverage(context)
+                : "Chưa có kết quả gợi ý khả dụng cho phạm vi này. Bạn có muốn điều chỉnh điều kiện không?")
+            : null;
+        var personalized = requestIds.All(id => id.HasValue);
+        // Payload gọn cho LLM: tọa độ do backend tự tra khi tính tuyến, bữa ăn nằm ở allowedMealSlots nên tags chỉ giữ mã loại món.
         // Giữ thông báo fallback để model không mô tả thứ tự theo đánh giá là ranking cá nhân hóa.
         return new
         {
-            rankingMode = ranked.RequestId.HasValue ? "personalized" : "rating_fallback", ranked.RequestId,
-            candidateCount = candidates.Count, ignoredCount = ranked.IgnoredDishIds.Count, returnedCount = actual.Length,
-            coverageWarning = expectedMeals > actual.Length ? "Có thể chưa đủ lựa chọn cho các bữa; cần lấy thêm gợi ý hoặc hỏi người dùng, không tự nới điều kiện." : null,
-            warnings = ranked.RequestId.HasValue ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."],
-            items = actual.Select(x => new { dishId = x.Id, x.Name, x.Price, restaurantName = x.Restaurant.Name,
-                x.Restaurant.Latitude, x.Restaurant.Longitude, tags = x.DishTags.Select(t => new { t.TagId, t.Tag.Code, t.Tag.Name }) })
+            rankingMode = personalized ? "personalized" : "rating_fallback",
+            selectionScope = new { scope.DayNumber, scope.MealSlot },
+            candidateCount = candidateTotal, ignoredCount = ignoredTotal, returnedCount = picked.Count,
+            mealCoverage = coverage.Select(x => new { x.DayNumber, x.MealSlot, x.AvailableCount, x.RequiredTags }),
+            coverageWarning = coverage.Any(meal => meal.AvailableCount == 0)
+                ? "Có bữa chưa có ứng viên phù hợp trong kết quả này. Kiểm tra mealCoverage và lấy gợi ý riêng cho bữa đó trước khi kết luận thiếu món."
+                : !perMealSearch && expectedMeals > picked.Count ? "Có thể chưa đủ lựa chọn cho các bữa; cần lấy thêm gợi ý hoặc hỏi người dùng, không tự nới điều kiện." : null,
+            warnings = personalized ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."],
+            items = picked.Select(x => new { dishId = x.Id, x.Name, x.Price, restaurantName = x.Restaurant.Name,
+                allowedMealSlots = perMealSearch
+                    ? AgentStateValidator.Meals.Where(slot => chosenByMeal.GetValueOrDefault(slot)?.Any(d => d.Id == x.Id) == true)
+                    : AgentStateValidator.Meals.Where(slot => (scope.MealSlot is null || scope.MealSlot == slot) && FitsMeal(x, slot)),
+                tags = x.DishTags.Where(t => t.Tag.TagType != ANGI.Domain.Enums.TagType.MealTime).Select(t => t.Tag.Code) })
         };
+    }
+
+    /// <summary>Counts candidates compatible with each requested meal and replaces earlier observations for that slot.</summary>
+    private static AgentMealCoverage[] RecordCoverage(AgentContext context, AgentState state, AgentScope scope,
+        Func<string, int> available, string[] requiredTags)
+    {
+        var coverage = AgentScopedPlanning.Slots(state, scope)
+            .Where(slot => state.MealSlots.Contains(slot.Meal) || scope.MealSlot == slot.Meal)
+            .Select(slot => new AgentMealCoverage(slot.Day, slot.Meal, available(slot.Meal),
+                AgentScopedPlanning.Fingerprint(state, slot.Day, slot.Meal), requiredTags)).ToArray();
+        foreach (var meal in coverage)
+        {
+            context.MealCoverage.RemoveAll(previous => previous.DayNumber == meal.DayNumber && previous.MealSlot == meal.MealSlot);
+            context.MealCoverage.Add(meal);
+        }
+        return coverage;
     }
 
     private async Task<object> SearchAsync(AgentContext context, AgentCatalogInput input, CancellationToken ct)

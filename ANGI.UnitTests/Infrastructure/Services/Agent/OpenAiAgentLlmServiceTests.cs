@@ -13,6 +13,38 @@ namespace ANGI.UnitTests.Infrastructure.Services.Agent;
 /// <summary>Verifies the real provider transport, strict schemas, tool associations and malformed-output handling.</summary>
 public sealed class OpenAiAgentLlmServiceTests
 {
+    // TEST-01: A business repair resends the rejected selection, validation feedback, proposal mode/version and issued candidate scopes.
+    /// <summary>Gives the single proposal repair the exact data needed to correct the previous draft.</summary>
+    [Fact]
+    public async Task RunAsync_BusinessRepair_PreservesRejectedSelectionAndBackendMode()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.ProposalVersion = 3;
+        context.Grants.Add(new(1, "breakfast", [221], Guid.NewGuid(), context.State));
+        context.RejectedOutput = new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(999)] };
+        context.RepairFeedback = "Món 999 cần nguồn ứng viên mới đúng phạm vi và khẩu vị.";
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var messages = body.RootElement.GetProperty("messages");
+            using var state = JsonDocument.Parse(messages[1].GetProperty("content").GetString()!);
+            state.RootElement.GetProperty("proposalMode").GetString().Should().Be("update");
+            state.RootElement.GetProperty("proposalVersion").GetInt32().Should().Be(3);
+            var issued = state.RootElement.GetProperty("issuedCandidateScopes")[0];
+            issued.GetProperty("dayNumber").GetInt32().Should().Be(1);
+            issued.GetProperty("mealSlot").GetString().Should().Be("breakfast");
+            issued.GetProperty("dishIds")[0].GetInt32().Should().Be(221);
+            var rejected = messages.EnumerateArray().Single(message => message.GetProperty("role").GetString() == "assistant");
+            AgentJson.Read<AgentOutput>(rejected.GetProperty("content").GetString()!).Items.Single().DishId.Should().Be(999);
+            messages[messages.GetArrayLength() - 1].GetProperty("content").GetString().Should().Contain("Món 999");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+
+        (await Service(handler).RunAsync(context, true, CancellationToken.None))!.Output.Should().NotBeNull();
+    }
+
+    // TEST-02: After the tool-round budget is spent, the request sets tool_choice=none and accepts a structured final output.
+    /// <summary>Prevents another tool round once the configured round budget is exhausted.</summary>
     [Fact]
     public async Task RunAsync_ToolBudgetExhausted_ForcesFinalStructuredOutput()
     {
@@ -27,7 +59,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output!.Action.Should().Be("answer");
     }
 
-    // TEST-01: Send allowlisted strict tool schemas and parse a complete structured answer with token usage.
+    // TEST-03: Send allowlisted strict tool schemas and parse a complete structured answer with token usage.
     /// <summary>Verifies the exact HTTP authentication and structured-output contract without a live API key.</summary>
     [Fact]
     public async Task RunAsync_StrictAnswer_UsesExpectedProviderContract()
@@ -51,6 +83,7 @@ public sealed class OpenAiAgentLlmServiceTests
         body.Should().NotContain("test-key");
     }
 
+    // TEST-04: Requests after recommendation results use the configured completion budget and optional reasoning effort; covers no configured effort and low effort.
     /// <summary>Reserves the configured completion budget after recommendation results and preserves optional provider controls.</summary>
     [Theory]
     [InlineData(null)]
@@ -76,6 +109,8 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(1);
     }
 
+    // TEST-05: gpt-6-luna always sends reasoning_effort=none with the four allowlisted tools; covers null, none and low configured effort.
+    /// <summary>Enforces the model's function-calling constraint regardless of deployment configuration.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("none")]
@@ -96,6 +131,7 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(1);
     }
 
+    // TEST-06: A tool call whose completion was truncated is discarded as Truncated without executing its arguments or retrying.
     /// <summary>Never executes an apparently complete tool call when the provider reports an incomplete completion.</summary>
     [Fact]
     public async Task RunAsync_TruncatedToolCall_DiscardsArgumentsWithoutRetry()
@@ -113,7 +149,7 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(1);
     }
 
-    // TEST-02: Reject malformed JSON, missing fields, extra fields, invalid enums, refusal and truncated responses.
+    // TEST-07: Reject malformed JSON, missing fields, extra fields, invalid enums, refusal and truncated responses.
     /// <summary>Validates every provider-output boundary before Application receives an actionable step.</summary>
     [Theory]
     [InlineData("json", AgentLlmFailureKind.InvalidSchema)][InlineData("missing", AgentLlmFailureKind.InvalidSchema)]
@@ -134,7 +170,72 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(1);
     }
 
-    // TEST-03: Preserve provider tool call IDs and parse only allowlisted strictly validated arguments.
+    // TEST-08: Invalid output reports the first mismatching schema path and masks invented field names; covers malformed JSON, missing, unexpected, invented, enum and nested-enum fields.
+    /// <summary>Names the first mismatching schema path so a repair is targeted, masking invented field names.</summary>
+    [Theory]
+    [InlineData("json", "output_json")]
+    [InlineData("missing", "output:$.action(missing)")]
+    [InlineData("extra", "output:$.userId(unexpected)")]
+    [InlineData("invented", "output:$.?(unexpected)")]
+    [InlineData("enum", "output:$.action")]
+    [InlineData("nested", "output:$.scope.mealSlot")]
+    public async Task RunAsync_InvalidSchema_ReportsSafeSchemaPath(string area, string reason)
+    {
+        var output = area switch { "json" => "{", "missing" => "{}", "extra" => Output().TrimEnd('}') + ",\"userId\":99}",
+            "invented" => Output().TrimEnd('}') + ",\"private prompt text\":1}", "enum" => Output().Replace("answer", "delete_roadmap"),
+            _ => Output().Replace("\"mealSlot\":null", "\"mealSlot\":\"brunch\"") };
+        var handler = new Handler(_ => Task.FromResult(Response(new
+            { choices = new[] { new { finish_reason = "stop", message = new { content = output, refusal = (string?)null } } } })));
+
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.InvalidSchema);
+        result.Failure.Reason.Should().Be(reason);
+    }
+
+    // TEST-09: Invalid tool calls report a fixed reason without model text; covers too many calls, a non-function type, an unknown name,
+    // malformed argument JSON, an argument schema path and tool calls returned with finish_reason=stop.
+    /// <summary>Makes tool-call schema failures diagnosable while keeping unknown tool names out of logs.</summary>
+    [Theory]
+    [InlineData("count", "tool_call_count")]
+    [InlineData("type", "tool_type")]
+    [InlineData("name", "tool_name")]
+    [InlineData("json", "tool_json:get_roadmap")]
+    [InlineData("args", "tool_args:get_roadmap:$.roadmapId")]
+    [InlineData("finish", "tool_calls_with_finish:stop")]
+    public async Task RunAsync_InvalidToolCall_ReportsSafeReason(string area, string reason)
+    {
+        var calls = Enumerable.Range(0, area == "count" ? 7 : 1).Select(index => ToolCall($"call-{index}", area)).ToArray();
+        var handler = new Handler(_ => Task.FromResult(Response(new { choices = new[] { new
+            { finish_reason = area == "finish" ? "stop" : "tool_calls", message = new { tool_calls = calls } } } })));
+
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+
+        result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.InvalidSchema);
+        result.Failure.Reason.Should().Be(reason).And.NotContain("private");
+        result.Tools.Should().BeEmpty();
+    }
+
+    // TEST-10: A context with tools closed after a duplicate request sends tool_choice=none before the round budget is spent.
+    /// <summary>A repeated identical tool request closes tools for the next call even before the round budget is spent.</summary>
+    [Fact]
+    public async Task RunAsync_ToolsClosed_ForcesFinalOutput()
+    {
+        var handler = new Handler(async request =>
+        {
+            using var sent = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            sent.RootElement.GetProperty("tool_choice").GetString().Should().Be("none");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output(), refusal = (string?)null } } } });
+        });
+        var context = AgentTestData.Context(); context.ToolsClosed = true;
+
+        var result = await Service(handler).RunAsync(context, false, CancellationToken.None);
+
+        result!.Output!.Action.Should().Be("answer");
+        handler.Calls.Should().Be(1);
+    }
+
+    // TEST-11: Preserve provider tool call IDs and parse only allowlisted strictly validated arguments.
     /// <summary>Verifies tool-call/result correlation needed by subsequent provider rounds.</summary>
     [Fact]
     public async Task RunAsync_ToolCall_PreservesProviderIdentity()
@@ -145,7 +246,7 @@ public sealed class OpenAiAgentLlmServiceTests
         result!.Tools.Single().Id.Should().Be("call-owned"); result.Tools.Single().Name.Should().Be("get_roadmap");
     }
 
-    // TEST-04: Missing provider credentials avoid HTTP calls and caller cancellation is never converted to fallback.
+    // TEST-12: Missing provider credentials avoid HTTP calls and caller cancellation is never converted to fallback.
     /// <summary>Verifies configuration and cancellation boundaries.</summary>
     [Fact]
     public async Task RunAsync_NoCredentialsOrCancellation_RespectsBoundary()
@@ -158,7 +259,7 @@ public sealed class OpenAiAgentLlmServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    // TEST-05: Gemini requires its opaque tool signature on the subsequent assistant message.
+    // TEST-13: Gemini requires its opaque tool signature on the subsequent assistant message.
     /// <summary>Checks a real parse/replay boundary and keeps provider metadata out of stored tool transcripts.</summary>
     [Theory]
     [InlineData(true)]
@@ -198,7 +299,7 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(2);
     }
 
-    // TEST-06: Escaped Unicode in nested JSON can make a provider return literal escape sequences as province names.
+    // TEST-14: Escaped Unicode in nested JSON can make a provider return literal escape sequences as province names.
     /// <summary>Preserves readable Vietnamese inside both context and tool data messages without changing persisted JSON.</summary>
     [Fact]
     public async Task RunAsync_VietnameseContextAndToolResult_RemainReadable()
@@ -218,7 +319,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output!.Action.Should().Be("answer");
     }
 
-    // TEST-07: Preserve safe HTTP status and Retry-After without reading or exposing a provider error body.
+    // TEST-15: Preserve safe HTTP status and Retry-After without reading or exposing a provider error body.
     /// <summary>Distinguishes quota, authentication, rejected requests and unavailable services with one transport attempt.</summary>
     [Theory]
     [InlineData(429, AgentLlmFailureKind.RateLimited)]
@@ -238,6 +339,8 @@ public sealed class OpenAiAgentLlmServiceTests
         AgentJson.Write(result).Should().NotContain("private-key").And.NotContain("test-key"); handler.Calls.Should().Be(1);
     }
 
+    // TEST-16: A high-demand 503 keeps only the provider code and the high_demand reason, never the raw message.
+    /// <summary>Classifies provider overload safely without leaking upstream error text.</summary>
     [Fact]
     public async Task RunAsync_GeminiHighDemand_PreservesSafeReasonWithoutRawMessage()
     {
@@ -248,6 +351,8 @@ public sealed class OpenAiAgentLlmServiceTests
         AgentJson.Write(result).Should().NotContain("private-key");
     }
 
+    // TEST-17: Budget gateway denials map to a non-retryable configuration failure with a quota message; covers budget exhausted, spending stopped, ledger unavailable and gateway required.
+    /// <summary>Keeps spending-control failures distinct from provider outages so they are never retried.</summary>
     [Theory]
     [InlineData(429, "gateway_budget_exhausted")]
     [InlineData(503, "gateway_spending_stopped")]
@@ -266,6 +371,8 @@ public sealed class OpenAiAgentLlmServiceTests
         handler.Calls.Should().Be(1);
     }
 
+    // TEST-18: Unusual 429 bodies still classify as RateLimited with status 429; covers empty object array, empty array, null and a bare string.
+    /// <summary>Ensures malformed error envelopes cannot hide a rate-limit response.</summary>
     [Theory]
     [InlineData("[{}]")]
     [InlineData("[]")]
@@ -279,6 +386,8 @@ public sealed class OpenAiAgentLlmServiceTests
         result.Failure.HttpStatus.Should().Be(429);
     }
 
+    // TEST-19: A Gemini array-wrapped 429 yields RESOURCE_EXHAUSTED, the rate_limit reason and a rounded-up retry delay.
+    /// <summary>Reads Gemini's array error envelope so short limits can be retried at the right time.</summary>
     [Fact]
     public async Task RunAsync_GeminiArrayRateLimit_ReadsStatusAndRetryInfo()
     {
@@ -288,7 +397,7 @@ public sealed class OpenAiAgentLlmServiceTests
         result!.Failure.Should().Be(new AgentLlmFailure(AgentLlmFailureKind.RateLimited, 429, 13, "RESOURCE_EXHAUSTED", "rate_limit"));
     }
 
-    // TEST-08: HttpClient timeout and a transport exception remain distinct from received malformed output.
+    // TEST-20: HttpClient timeout and a transport exception remain distinct from received malformed output.
     /// <summary>Exercises cancellation-aware fake transport without making any network request.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -306,7 +415,7 @@ public sealed class OpenAiAgentLlmServiceTests
         AgentJson.Write(result).Should().NotContain("sensitive"); handler.Calls.Should().Be(1);
     }
 
-    // TEST-09: Date-based retry hints use the injected clock and malformed or expired hints are ignored.
+    // TEST-21: Date-based retry hints use the injected clock and malformed or expired hints are ignored.
     /// <summary>Checks deterministic retry guidance without weakening HTTP failure classification.</summary>
     [Theory]
     [InlineData("future", 30)][InlineData("past", null)][InlineData("invalid", null)]
@@ -326,7 +435,7 @@ public sealed class OpenAiAgentLlmServiceTests
         result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.RateLimited); result.Failure.RetryAfterSeconds.Should().Be(expected);
     }
 
-    // TEST-10: An invalid provider envelope retains HTTP 200 but is not misclassified as received model content needing repair.
+    // TEST-22: An invalid provider envelope retains HTTP 200 but is not misclassified as received model content needing repair.
     /// <summary>Distinguishes protocol corruption from malformed JSON produced inside a valid model response.</summary>
     [Fact]
     public async Task RunAsync_InvalidEnvelope_PreservesStatusWithoutSchemaRepair()
@@ -350,6 +459,12 @@ public sealed class OpenAiAgentLlmServiceTests
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
     private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key", AgentLimits? limits = null, string model = "configured-model") => new(
         new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = model }), limits ?? new AgentLimits(), TimeProvider.System);
+    /// <summary>Builds one provider tool call whose type, name or arguments are corrupted according to the scenario.</summary>
+    private static object ToolCall(string id, string area) => new { id, type = area == "type" ? "custom" : "function", function = new
+    {
+        name = area == "name" ? "delete_roadmap private" : "get_roadmap",
+        arguments = area switch { "json" => "{", "args" => "{\"roadmapId\":\"88\"}", _ => "{\"roadmapId\":88}" }
+    } };
     /// <summary>Encodes an OpenAI-compatible test response as JSON.</summary>
     private static HttpResponseMessage Response(object value) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
 

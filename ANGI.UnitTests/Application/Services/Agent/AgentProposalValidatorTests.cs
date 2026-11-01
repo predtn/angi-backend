@@ -1,5 +1,6 @@
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Roadmap;
+using ANGI.Application.Services.Agent;
 using ANGI.Domain.Enums;
 using FluentAssertions;
 using Moq;
@@ -9,6 +10,59 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Exercises catalog, provenance, budget and current-price validation boundaries.</summary>
 public sealed class AgentProposalValidatorTests
 {
+    // TEST-01: A full snapshot that copies an unaffected day keeps that day's provenance while the edited item takes the fresh grant.
+    /// <summary>Lets a full-scope selection copy untouched rows without forcing a rerank.</summary>
+    [Fact]
+    public async Task ValidateAsync_FullSnapshotCopiesUnaffectedDay_PreservesItsProvenanceWithoutReranking()
+    {
+        var selected = AgentTestData.Item() with { Price = 50000 };
+        var copied = AgentTestData.Item(2, "untouched", 2) with { Price = 50000, RequestId = Guid.NewGuid() };
+        var source = AgentTestData.Snapshot(selected, copied);
+        var context = AgentTestData.Context(source);
+        var grant = AgentTestData.Grant([1], 1, "lunch");
+        context.Grants.Add(grant);
+        var snapshot = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
+            Items = [selected, copied] });
+
+        var result = await AgentTestData.Validator(AgentTestData.Dish(), AgentTestData.Dish(2)).Validator
+            .ValidateAsync(snapshot, source, false, false, default, [grant]);
+
+        result.Validation.Errors.Should().BeEmpty();
+        result.Snapshot.Items.Single(item => item.ItemKey == selected.ItemKey).RequestId.Should().Be(grant.RequestId);
+        result.Snapshot.Items.Single(item => item.ItemKey == copied.ItemKey).RequestId.Should().Be(copied.RequestId);
+        snapshot.RetainedItems.Should().ContainSingle().Which.Should().Be(copied);
+    }
+
+    // TEST-02: Reselecting a fallback-ranked dish requires a fresh grant and then carries the new request ID; covers create_proposal and patch_proposal.
+    /// <summary>Ensures a re-ranked dish never keeps stale fallback provenance.</summary>
+    [Theory]
+    [InlineData("create_proposal")]
+    [InlineData("patch_proposal")]
+    public async Task ValidateAsync_ReselectedFallbackDish_UsesFreshRecoAndRequiresItsGrant(string action)
+    {
+        var item = AgentTestData.Item() with { SourceItemId = 33, Price = 50000 };
+        var source = AgentTestData.Snapshot(item);
+        var context = AgentTestData.Context(source);
+        var grant = AgentTestData.Grant([1], 1, "lunch");
+        context.Grants.Add(grant);
+        var output = new AgentOutput { Action = action, Reply = "Reselected", Scope = new(1, "lunch"),
+            Items = action == "create_proposal" ? [item] : [],
+            Changes = action == "patch_proposal" ? [new("replace", item.ItemKey, item)] : [] };
+        var snapshot = new AgentProposalBuilder().Build(context, output);
+        var validator = AgentTestData.Validator(AgentTestData.Dish()).Validator;
+
+        (await validator.ValidateAsync(snapshot, source, false, false, default, [])).Validation.Errors.Should().NotBeEmpty();
+        var result = await validator.ValidateAsync(snapshot, source, false, false, default, [grant]);
+
+        result.Validation.Errors.Should().BeEmpty();
+        result.Validation.Warnings.Should().NotContain(warning => warning.Contains("đánh giá"));
+        result.Snapshot.Items.Single().RequestId.Should().Be(grant.RequestId);
+        result.Snapshot.Items.Single().SourceItemId.Should().Be(33);
+        (await validator.ValidateAsync(result.Snapshot, source, true, false, default)).Validation.Errors.Should().BeEmpty();
+    }
+
+    // TEST-03: A taste change after ranking invalidates the old grant and requires new candidates.
+    /// <summary>Blocks dishes ranked under a different taste fingerprint.</summary>
     [Fact]
     public async Task ValidateAsync_TasteChangedAfterRanking_RequiresNewCandidates()
     {
@@ -19,7 +73,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().NotBeEmpty();
     }
 
-    // TEST-01: Reprice an issued candidate from the backend and calculate the day route before ready.
+    // TEST-04: Reprice an issued candidate from the backend and calculate the day route before ready.
     /// <summary>Verifies backend metadata overrides all untrusted proposal metadata.</summary>
     [Fact]
     public async Task ValidateAsync_ValidCandidate_PopulatesTrustedMetadata()
@@ -33,7 +87,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Routes.Should().HaveCount(1);
     }
 
-    // TEST-02: Reject unavailable catalog states, hard constraints, wrong scopes and forged source identity.
+    // TEST-05: Reject unavailable catalog states, hard constraints, wrong scopes and forged source identity.
     /// <summary>Checks each deterministic rejection class independently.</summary>
     [Theory]
     [InlineData("missing")][InlineData("hidden")][InlineData("removed")][InlineData("sold-out")][InlineData("restaurant-closed")]
@@ -85,7 +139,7 @@ public sealed class AgentProposalValidatorTests
         fixture.Routes.Verify(x => x.CalculateRouteAsync(It.IsAny<RouteCoordinate?>(), It.IsAny<IReadOnlyList<RouteCoordinate>>(), It.IsAny<RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-03: A price change or unavailable dish before confirmation cannot be silently committed.
+    // TEST-06: A price change or unavailable dish before confirmation cannot be silently committed.
     /// <summary>Requires a refreshed preview for any changed business price, including decreases.</summary>
     [Theory]
     [InlineData(49999)][InlineData(50001)]
@@ -96,7 +150,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().Contain(x => x.Contains("Giá"));
     }
 
-    // TEST-04: New replacements require a candidate grant from this turn even when an older snapshot once authorized the same ID.
+    // TEST-07: New replacements require a candidate grant from this turn even when an older snapshot once authorized the same ID.
     /// <summary>Prevents old candidate grants from authorizing a newly added or replaced dish in a later turn.</summary>
     [Fact]
     public async Task ValidateAsync_NewReplacement_RequiresFreshScopedGrant()
@@ -110,7 +164,7 @@ public sealed class AgentProposalValidatorTests
         current.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-05: Removing the final saved item is valid while creating an empty official roadmap from chat is rejected.
+    // TEST-08: Removing the final saved item is valid while creating an empty official roadmap from chat is rejected.
     /// <summary>Checks the empty-itinerary boundary without inventing destination or unlimited-budget consent for a removal-only update.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -122,7 +176,7 @@ public sealed class AgentProposalValidatorTests
         (result.Validation.Errors.Length == 0).Should().Be(update);
     }
 
-    // TEST-06: An unchanged source item is valid without reranking and retains its recommendation request ID.
+    // TEST-09: An unchanged source item is valid without reranking and retains its recommendation request ID.
     /// <summary>Verifies explanation/reordering paths can reuse existing provenance.</summary>
     [Fact]
     public async Task ValidateAsync_UnchangedSource_DoesNotRequireNewGrant()
@@ -131,5 +185,116 @@ public sealed class AgentProposalValidatorTests
         var source = new AgentSnapshot(AgentTestData.State(), [item], []);
         var result = await AgentTestData.Validator(AgentTestData.Dish()).Validator.ValidateAsync(source, source, false, false, CancellationToken.None);
         result.Validation.Errors.Should().BeEmpty(); result.Snapshot.Items.Single().RequestId.Should().Be(item.RequestId);
+    }
+
+    // TEST-10: Rejected item keys are exposed for repair only when a missing scoped grant is the sole error; covers scope-only,
+    // scope plus budget and a valid proposal.
+    /// <summary>Prevents backend substitution from masking any other business error.</summary>
+    [Theory]
+    [InlineData("scope-only")][InlineData("scope-and-budget")][InlineData("valid")]
+    public async Task ValidateAsync_ScopeRejection_ExposesItemKeysOnlyWhenItIsTheOnlyError(string area)
+    {
+        var state = AgentTestData.State() with { BudgetAmount = area == "scope-and-budget" ? 49999 : 500000 };
+        AgentCandidateGrant[] grants = area == "valid" ? [AgentTestData.Grant([1])] : [AgentTestData.Grant([1], day: 2)];
+
+        var result = await AgentTestData.Validator(AgentTestData.Dish()).Validator
+            .ValidateAsync(new(state, [AgentTestData.Item()], grants), null, false, false, CancellationToken.None);
+
+        if (area == "scope-only") result.Validation.ScopeRejectedItemKeys.Should().Equal("a");
+        else result.Validation.ScopeRejectedItemKeys.Should().BeNull();
+        result.Validation.Errors.Should().HaveCount(area switch { "scope-only" => 1, "scope-and-budget" => 2, _ => 0 });
+    }
+
+    // TEST-11: A day-1-only candidate copied into day 3 is replaced by the best authorized dish for that position, with grants pruned,
+    // changes updated and backend-owned metadata cleared for revalidation.
+    /// <summary>Verifies the substitution produces a snapshot that passes full validation without another LLM call.</summary>
+    [Fact]
+    public async Task RepairScopeAsync_OutOfScopeCandidate_SubstitutesBestAuthorizedDish()
+    {
+        var (snapshot, grants, catalog) = ScopeScenario();
+        var target = snapshot.Items.Single(item => item.ItemKey == "item6");
+        snapshot = snapshot with { Items = snapshot.Items.Select(item => item.ItemKey == "item6" ? item with { Price = 1, DishName = "Fake" } : item).ToArray(),
+            Changes = [new("add", null, target)] };
+        var validator = AgentTestData.Validator(catalog).Validator;
+
+        var repaired = await validator.RepairScopeAsync(snapshot, null, grants, ["item6"], CancellationToken.None);
+
+        var replaced = repaired!.Items.Single(item => item.ItemKey == "item6");
+        replaced.DishId.Should().Be(7);
+        replaced.Should().Be(new AgentItem("item6", null, 3, "breakfast", 0, 7));
+        repaired.Changes!.Single().Item!.DishId.Should().Be(7);
+        repaired.Grants.Should().Contain(grant => grant.DayNumber == null && grant.DishIds.Contains(7))
+            .And.NotContain(grant => grant.DishIds.Contains(221));
+        (await validator.ValidateAsync(repaired, null, false, false, CancellationToken.None, grants)).Validation.Errors.Should().BeEmpty();
+    }
+
+    // TEST-12: Substitution keeps recommendation order but prefers a narrower, newer grant and a name not already in the plan;
+    // covers default rank order, reversed rank order, a day/meal grant and a duplicate dish name.
+    /// <summary>Checks the selection priority so the substitute stays as close as possible to the user's ranking.</summary>
+    [Theory]
+    [InlineData("rank-order", 7)][InlineData("reversed-rank", 10)][InlineData("specific-grant", 10)][InlineData("same-name", 10)]
+    public async Task RepairScopeAsync_Candidates_FollowSelectionPriority(string area, int expected)
+    {
+        var (snapshot, grants, catalog) = ScopeScenario();
+        var state = snapshot.State;
+        if (area == "reversed-rank") grants[0] = grants[0] with { DishIds = [1, 2, 3, 4, 5, 6, 8, 9, 10, 7] };
+        if (area == "specific-grant") grants.Add(new(3, "breakfast", [10], Guid.NewGuid(), state));
+        if (area == "same-name") catalog.Single(dish => dish.Id == 7).Name = "Dish 1";
+
+        var repaired = await AgentTestData.Validator(catalog).Validator.RepairScopeAsync(snapshot, null, grants, ["item6"], CancellationToken.None);
+
+        repaired!.Items.Single(item => item.ItemKey == "item6").DishId.Should().Be(expected);
+    }
+
+    // TEST-13: No substitution is made when it could exceed the safe boundary; covers more than a third of items, an unknown key,
+    // an item outside the edit scope, an unchanged source item, a different taste fingerprint, wrong meal tags, unavailable dishes,
+    // the trip budget, the per-meal price cap and only already-used candidates.
+    /// <summary>Ensures the backend never widens scope, relaxes constraints or reuses dishes when substituting.</summary>
+    [Theory]
+    [InlineData("too-many")][InlineData("unknown-key")][InlineData("outside-scope")][InlineData("unchanged-source")][InlineData("taste")]
+    [InlineData("meal-tag")][InlineData("unavailable")][InlineData("budget")][InlineData("meal-price")][InlineData("used-only")]
+    public async Task RepairScopeAsync_UnsafeSubstitution_ReturnsNull(string area)
+    {
+        var (snapshot, grants, catalog) = ScopeScenario();
+        string[] keys = ["item6"];
+        AgentSnapshot? source = null;
+        var lunchTag = new ANGI.Domain.Entities.Tag { Id = 2, Code = "lunch", Name = "Bữa trưa", TagType = TagType.MealTime };
+        switch (area)
+        {
+            case "too-many": keys = ["item0", "item1", "item2", "item6"]; break;
+            case "unknown-key": keys = ["item6", "missing"]; break;
+            case "outside-scope": snapshot = snapshot with { Scope = new(1, null) }; break;
+            case "unchanged-source": source = snapshot; break;
+            case "taste":
+                for (var index = 0; index < grants.Count; index++)
+                    grants[index] = grants[index] with { Constraints = snapshot.State with { TasteTargets = [new("spicy", 1)] } };
+                break;
+            case "meal-tag":
+                foreach (var dish in catalog.Where(dish => dish.Id is 7 or 10)) dish.DishTags.Add(new() { TagId = 2, Tag = lunchTag });
+                break;
+            case "unavailable": foreach (var dish in catalog.Where(dish => dish.Id is 7 or 10)) dish.IsAvailable = false; break;
+            case "budget": snapshot = snapshot with { State = snapshot.State with { BudgetAmount = 8 * 50000 + 49999 } }; break;
+            case "meal-price": snapshot = snapshot with { State = snapshot.State with { MaxPricePerMeal = 49999 } }; break;
+            case "used-only": grants[0] = grants[0] with { DishIds = [1, 2, 3, 4, 5, 6, 8, 9] }; break;
+        }
+
+        var repaired = await AgentTestData.Validator(catalog).Validator.RepairScopeAsync(snapshot, source, grants, keys, CancellationToken.None);
+
+        repaired.Should().BeNull(area);
+    }
+
+    /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
+    private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
+    {
+        var state = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000, MealSlots = ["breakfast", "lunch", "dinner"] };
+        var items = Enumerable.Range(0, 9).Select(index => AgentTestData.Item(index == 6 ? 221 : index + 1, $"item{index}",
+            (short)(index / 3 + 1), state.MealSlots[index % 3])).ToArray();
+        var grants = new List<AgentCandidateGrant>
+        {
+            new(null, null, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], Guid.NewGuid(), state),
+            new(1, "breakfast", [221], Guid.NewGuid(), state)
+        };
+        var catalog = Enumerable.Range(1, 10).Append(221).Select(id => AgentTestData.Dish(id)).ToArray();
+        return (new AgentSnapshot(state, items, grants.ToArray(), Scope: new()), grants, catalog);
     }
 }

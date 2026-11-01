@@ -13,6 +13,39 @@ namespace ANGI.UnitTests.Application.UseCases.Agent.SendMessage;
 /// <summary>Verifies idempotent turn admission and isolated failure recovery.</summary>
 public sealed class SendAgentMessageUseCaseTests
 {
+    // TEST-01: Incomplete planning does not return the old fallback proposal as the current result.
+    /// <summary>Prevents the user from seeing an outdated proposal as the answer to an unfinished request.</summary>
+    [Fact]
+    public async Task ExecuteAsync_IncompletePlanning_DoesNotReturnOldFallbackAsCurrentResult()
+    {
+        var fixture = new AgentUseCaseFixture();
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Limits.MaxLlmCalls = 1;
+        var proposal = ReadyProposal(9, AgentTestData.Snapshot(AgentTestData.Item()));
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "clarify", Clarification = "coverage", Reply = "Thiếu món" }));
+        var request = Request();
+        request.Content = "tôi muốn ngày 1 ăn đồ ngọt vừa, ngày 2 chỉ có đồ uống thôi, ngày 3 thì theo bạn quyết định";
+        var useCase = Create(fixture);
+
+        var result = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        var replay = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Proposal.Should().BeNull();
+        fixture.Conversation.CurrentProposalId.Should().Be(9);
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        result.Reply.Should().Contain("chưa hoàn tất việc sắp xếp lịch").And.Contain("Bản đề xuất trước đó được giữ lại");
+        replay.Reply.Should().Be(result.Reply);
+        replay.Proposal.Should().BeNull();
+        replay.Replayed.Should().BeTrue();
+        fixture.Repository.Verify(repo => repo.AddProposal(It.IsAny<ANGI.Domain.Entities.AgentProposal>()), Times.Never);
+        fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-02: Reviewing the existing proposal returns its full preview without calling the provider or committing.
+    /// <summary>Ensures reviewing a plan is free of model cost and never saves it.</summary>
     [Fact]
     public async Task ExecuteAsync_ReviewExistingProposal_ReturnsFullPreviewWithoutProviderOrCommit()
     {
@@ -27,6 +60,8 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
+    // TEST-03: Accepting a pending constraint change generates and persists a fresh complete preview.
+    /// <summary>Ensures an accepted constraint change produces a new full preview instead of reusing the old one.</summary>
     [Fact]
     public async Task ExecuteAsync_AcceptConstraintChange_GeneratesAndPersistsFreshCompletePreview()
     {
@@ -50,6 +85,7 @@ public sealed class SendAgentMessageUseCaseTests
         result.Commit.Should().BeNull();
     }
 
+    /// <summary>Creates a ready, unexpired proposal entity for conversation 7 that wraps the given snapshot.</summary>
     private static ANGI.Domain.Entities.AgentProposal ReadyProposal(long id, AgentSnapshot snapshot) => new()
     {
         Id = id, ConversationId = 7, ProposalVersion = 1, Status = ANGI.Domain.Enums.AgentProposalStatus.Ready,
@@ -57,6 +93,8 @@ public sealed class SendAgentMessageUseCaseTests
         ValidationResult = AgentJson.Write(new AgentValidation([], [], 50000, []))
     };
 
+    // TEST-04: A changed state without a fresh preview does not replay the old commit as a new save.
+    /// <summary>Prevents an old commit result from being reported as a save of the changed state.</summary>
     [Fact]
     public async Task ExecuteAsync_ChangedStateWithoutFreshPreview_DoesNotReplayOldCommitAsNewSave()
     {
@@ -72,7 +110,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-01: A completed stale-version retry replays its stored response without provider calls or extra saves.
+    // TEST-05: A completed stale-version retry replays its stored response without provider calls or extra saves.
     /// <summary>Checks replay-before-version validation using the real request hash implementation.</summary>
     [Fact]
     public async Task ExecuteAsync_CompletedRetry_ReplaysWithoutProviderOrSave()
@@ -87,7 +125,7 @@ public sealed class SendAgentMessageUseCaseTests
         (await ((Func<Task>)(async () => await useCase.ExecuteAsync(7, request, CancellationToken.None))).Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("MESSAGE_ID_REUSED");
     }
 
-    // TEST-02: Busy, stale and expired conversations reject admission before the LLM.
+    // TEST-06: Busy, stale and expired conversations reject admission before the LLM.
     /// <summary>Checks all pre-execution conversation guards at their boundary.</summary>
     [Theory]
     [InlineData("busy", "CONVERSATION_BUSY")][InlineData("version", "CONVERSATION_VERSION_CONFLICT")][InlineData("expired", "CONVERSATION_EXPIRED")]
@@ -102,7 +140,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-03: Persistent minute and daily quota exhaustion returns the correct retry delay without provider calls.
+    // TEST-07: Persistent minute and daily quota exhaustion returns the correct retry delay without provider calls.
     /// <summary>Verifies both independently configured per-user cost limits.</summary>
     [Theory]
     [InlineData(false, 60)][InlineData(true, 86400)]
@@ -116,7 +154,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-04: Provider failure resets rolled-back tracking before releasing only its own lease.
+    // TEST-08: Provider failure resets rolled-back tracking before releasing only its own lease.
     /// <summary>Prevents a recovery flush from persisting a partially prepared proposal.</summary>
     [Fact]
     public async Task ExecuteAsync_ProviderFailure_ReleasesLeaseWithCleanTracking()
@@ -128,7 +166,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Conversation.ProcessingAttemptId.Should().BeNull(); fixture.Message!.ProcessingStatus.Should().Be(ANGI.Domain.Enums.AgentProcessingStatus.Failed);
     }
 
-    // TEST-05: Equivalent decimal scales and province casing do not turn a completed business retry into a different message.
+    // TEST-09: Equivalent decimal scales and province casing do not turn a completed business retry into a different message.
     /// <summary>Checks canonical hashing ignores representation differences while retaining business identity.</summary>
     [Fact]
     public async Task ExecuteAsync_EquivalentStateRepresentation_Replays()
@@ -140,7 +178,7 @@ public sealed class SendAgentMessageUseCaseTests
         (await useCase.ExecuteAsync(7, request, CancellationToken.None)).Replayed.Should().BeTrue();
     }
 
-    // TEST-06: Explicit save without a preview produces a natural answer without calling the provider or creating a roadmap.
+    // TEST-10: Explicit save without a preview produces a natural answer without calling the provider or creating a roadmap.
     /// <summary>Supports chat-only saving without asking the client to construct a confirm request.</summary>
     [Fact]
     public async Task ExecuteAsync_SaveWithoutPreview_AnswersWithoutLlm()
@@ -151,7 +189,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-07: A short affirmative accepts only the pending constraint snapshot and never saves a roadmap.
+    // TEST-11: A short affirmative accepts only the pending constraint snapshot and never saves a roadmap.
     /// <summary>Checks both acceptance and rejection without trusting model-generated consent.</summary>
     [Theory]
     [InlineData(true)]
@@ -171,7 +209,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-08: Ordinary or negated chat is sent to the model and cannot reach the deterministic save writer.
+    // TEST-12: Ordinary or negated chat is sent to the model and cannot reach the deterministic save writer.
     /// <summary>Protects against ambiguous agreement and negative save instructions.</summary>
     [Theory]
     [InlineData("đồng ý")]
@@ -184,7 +222,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-09: Repeated prompt-only text creates distinct messages instead of replaying or conflicting with an earlier turn.
+    // TEST-13: Repeated prompt-only text creates distinct messages instead of replaying or conflicting with an earlier turn.
     /// <summary>Checks automatic allocation, a changed revision and retrying the returned ID without provider usage.</summary>
     [Fact]
     public async Task ExecuteAsync_PromptOnly_AllocatesFreshIdentityAndCanReplay()
@@ -202,7 +240,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-10: Supplying a stale version remains an explicit conflict even without a client-selected message ID.
+    // TEST-14: Supplying a stale version remains an explicit conflict even without a client-selected message ID.
     /// <summary>Checks that prompt-only defaults do not silently ignore requested concurrency protection.</summary>
     [Fact]
     public async Task ExecuteAsync_OptionalIdWithExplicitStaleVersion_StillConflicts()
@@ -213,7 +251,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-11: Prompt-only admission retains the busy, expiry and quota guards before provider execution.
+    // TEST-15: Prompt-only admission retains the busy, expiry and quota guards before provider execution.
     /// <summary>Checks that omission of transport metadata cannot bypass existing admission limits.</summary>
     [Theory]
     [InlineData("busy", "CONVERSATION_BUSY")]

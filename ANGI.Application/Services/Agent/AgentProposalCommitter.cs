@@ -71,7 +71,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         proposal.CommittedAt = now;
         conversation.RoadmapId = roadmap.Id;
         conversation.State = AgentJson.Write(snapshot.State with { FocusDay = null, FocusMeal = null,
-            PendingQuestion = null, PendingStateChange = null, SourceRoadmapUpdatedAt = updatedAt });
+            PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, SourceRoadmapUpdatedAt = updatedAt });
         return (result, true);
     }
 
@@ -126,7 +126,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         if (proposal.ExpiresAt <= now) throw new GoneException("PROPOSAL_EXPIRED", "Đề xuất đã hết hạn.");
         if (proposal.Status != AgentProposalStatus.Ready || conversation.CurrentProposalId != proposal.Id) throw NotCommittable();
         var state = AgentJson.Read<AgentState>(conversation.State);
-        if (state.PendingQuestion is not null || state.PendingStateChange is not null ||
+        if (state.PendingQuestion is not null || state.PendingStateChange is not null || state.PendingPlanningRequest is not null ||
             !AgentConversationRules.SameConstraints(state, AgentJson.Read<AgentSnapshot>(proposal.Payload).State)) throw NotCommittable();
     }
 

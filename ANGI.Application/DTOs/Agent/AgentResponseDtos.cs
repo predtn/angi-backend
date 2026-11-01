@@ -15,7 +15,8 @@ public sealed record AgentConversationDto(long ConversationId, long Version, str
 public sealed record AgentProposalDto(long ProposalId, int Version, string Operation, string Status,
     AgentSnapshot Snapshot, AgentValidation Validation, DateTime ExpiresAt);
 
-/// <summary>Represents a stored completed response or the status of an in-flight retry.</summary>
+/// <summary>Represents a stored turn. Proposal is the newly validated preview or an applicable reviewed preview;
+/// clarification/failed planning does not attach an obsolete preview. GET conversation still restores the durable draft.</summary>
 public sealed record AgentTurnDto(string Status, string Reply, long ConversationVersion,
     AgentProposalDto? Proposal = null, AgentValidation? Validation = null, bool Replayed = false, AgentCommitDto? Commit = null,
     long? ClientMessageId = null);
