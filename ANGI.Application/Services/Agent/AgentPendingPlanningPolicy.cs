@@ -22,8 +22,10 @@ public static class AgentPendingPlanningPolicy
         var duration = Regex.Matches(text, @"\b(?<days>\d{1,2})\s+ngay\b", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => TripDuration(text, match));
         if (duration is not null && short.TryParse(duration.Groups["days"].Value, out var parsedDays)) days = parsedDays;
+        // "ngay" right after the amount ("500000 dong ngay", "500k ngay") is also per day, but not "ngay dau/cuoi/thu/2"
+        // (a single day of the trip); "500k 4 ngay" stays a total because only 1/mot may sit between amount and "ngay".
         var budget = Regex.Matches(text, @"\bngan sach\s*(?:(?:la|khoang|tam|toi da)\s*|:\s*)?" + Money +
-            @"(?<daily>\s*(?:/\s*|(?:cho\s+)?(?:moi|1|mot)\s+)ngay\b)?", RegexOptions.CultureInvariant)
+            @"(?<daily>\s*(?:/\s*|(?:cho\s+)?(?:moi|1|mot)\s+)?ngay\b(?!\s+(?:dau|cuoi|thu|\d)))?", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => !Negated(text, match.Index));
         if (budget is not null && ParseMoney(budget, out var amount))
         {

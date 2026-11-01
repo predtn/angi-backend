@@ -7,13 +7,15 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Verifies the backend-owned pending planning request captures trip duration and budget from user text and cannot be altered by the model.</summary>
 public sealed class AgentPendingPlanningPolicyTests
 {
-    // TEST-01: Duration and daily budget from the first request survive later taste answers and are applied without mutating the original state; covers the budget spellings 500000 đồng 1 ngày, 500.000 đồng mỗi ngày, 500k/ngày and 0,5 triệu/ngày.
+    // TEST-01: Duration and daily budget from the first request survive later taste answers and are applied without mutating the original state; covers the budget spellings 500000 đồng 1 ngày, 500.000 đồng mỗi ngày, 500k/ngày, 0,5 triệu/ngày, 500000 đồng ngày and 500k ngày.
     /// <summary>Ensures follow-up taste answers do not erase the trip size and budget from the original request.</summary>
     [Theory]
     [InlineData("500000 đồng 1 ngày")]
     [InlineData("500.000 đồng mỗi ngày")]
     [InlineData("500k/ngày")]
     [InlineData("0,5 triệu/ngày")]
+    [InlineData("500000 đồng ngày")]
+    [InlineData("500k ngày")]
     public void Capture_MixedRequestAndTasteAnswers_PreservesDurationAndDailyBudget(string dailyBudget)
     {
         var original = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000 };
@@ -53,6 +55,19 @@ public sealed class AgentPendingPlanningPolicyTests
         var draft = AgentPendingPlanningPolicy.Capture(null, text);
         draft.NumDays.Should().BeNull(); draft.DailyBudget.Should().BeNull(); draft.TotalBudget.Should().BeNull();
         draft.Messages.Should().ContainSingle().Which.Should().Be(text);
+    }
+
+    // TEST-07: An amount followed by a single trip day or a duration is a total budget, not a daily one; covers ngày đầu, ngày cuối, ngày 1 and 4 ngày.
+    /// <summary>Keeps "ngày" that names one day of the trip or its length from turning a total budget into a per-day budget.</summary>
+    [Theory]
+    [InlineData("ngân sách 500k ngày đầu, sau đó tính tiếp")]
+    [InlineData("ngân sách 500k ngày cuối thôi")]
+    [InlineData("ngân sách 500k ngày 1, còn lại tùy bạn")]
+    [InlineData("ngân sách 500000 đồng 4 ngày")]
+    public void Capture_AmountBeforeTripDayOrDuration_IsTotalBudget(string text)
+    {
+        var draft = AgentPendingPlanningPolicy.Capture(null, text);
+        draft.TotalBudget.Should().Be(500000); draft.DailyBudget.Should().BeNull();
     }
 
     // TEST-04: Many partial replies keep the original request and its parsed values while the stored message history stays bounded to 6 entries.
