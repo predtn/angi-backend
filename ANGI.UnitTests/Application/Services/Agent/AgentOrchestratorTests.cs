@@ -581,6 +581,58 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-30: A proposal rejected only for exceeding the trip budget ends in a question about the budget with the observed figures
+    // when the repaired output gives up (empty proposal), still exceeds the budget, or asks a budget clarification; covers all three.
+    /// <summary>Turns "the dishes do not fit the budget" into a question the user can answer instead of a generic invalid-proposal error.</summary>
+    [Theory]
+    [InlineData("empty")][InlineData("still-over")][InlineData("clarify")]
+    public async Task RunAsync_OverBudgetThenNoFittingProposal_AsksAboutBudget(string repair)
+    {
+        var state = AgentTestData.State() with { BudgetAmount = 80000, MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        context.Grants.Add(new(null, "lunch", [1, 2], Guid.NewGuid(), state));
+        var plan = new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2)] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], plan))
+            .ReturnsAsync(new AgentLlmStep([], repair switch
+            {
+                "empty" => new AgentOutput { Action = "create_proposal", Reply = "Không đủ ngân sách" },
+                "still-over" => plan,
+                _ => new AgentOutput { Action = "clarify", Clarification = "budget", Reply = "Tăng ngân sách nhé" }
+            }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().Contain("tổng 100.000 đồng/người").And.Contain("vượt ngân sách 80.000 đồng")
+            .And.Contain("khoảng 40.000 đồng/bữa cho 2 bữa").And.Contain("tăng ngân sách").And.NotContain("không hợp lệ");
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        result.Validation!.Errors.Should().Equal(AgentProposalValidator.BudgetExceeded);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-31: A budget clarification without an observed over-budget proposal is repaired once, and the repaired proposal is built.
+    /// <summary>Keeps the model from asking the user to raise the budget before the backend has seen a proposal exceed it.</summary>
+    [Fact]
+    public async Task RunAsync_UnsupportedBudgetClarification_RepairsAndBuildsProposal()
+    {
+        var state = AgentTestData.State() with { MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        context.Grants.Add(new(null, "lunch", [1, 2], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "clarify", Clarification = "budget", Reply = "Tăng ngân sách nhé" }))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Draft",
+                Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Snapshot!.Items.Should().HaveCount(2);
+        context.RepairFeedback.Should().Contain("Chưa có bằng chứng vượt ngân sách");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null)

@@ -14,7 +14,7 @@ public static class AgentReplyBuilder
         "các món này vẫn theo khẩu vị, ngân sách và điều kiện bạn đã nêu.";
     public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì catalog hiện chưa có đủ món khác nhau đáp ứng điều kiện của các bữa đó.";
     public static readonly string[] Clarifications = ["trip_details", "taste_scope", "taste_intensity", "edit_scope",
-        "novelty", "catalog_choice", "coverage", "catalog_support", "general"];
+        "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general"];
 
     /// <summary>Lists the full reviewed itinerary by day and meal using actual catalog items.</summary>
     public static string Proposal(AgentSnapshot snapshot, AgentValidation? validation = null, bool saved = false, int substituted = 0)
@@ -71,11 +71,28 @@ public static class AgentReplyBuilder
             "catalog_choice" => "Bạn muốn chọn món hoặc nhà hàng nào trong các kết quả catalog đã tìm thấy?",
             "coverage" => Coverage(context),
             "catalog_support" => "Yêu cầu này cần dữ liệu hoặc tag phù hợp trong catalog; mình chưa thể xác nhận từ dữ liệu hiện có. Bạn có muốn chọn tiêu chí khác không?",
+            "budget" => "Ngân sách hiện tại có thể chưa đủ cho các món phù hợp. Bạn muốn tăng ngân sách, bớt số ngày/bữa, hay đặt mức giá tối đa mỗi bữa để mình chọn món rẻ hơn?",
             // Chưa có lịch nào: không mời "xem lại đề xuất". Đã lấy gợi ý mà chưa ghép được lịch thì nói rõ là chưa hoàn tất.
             _ when context.Source is null => context.Exchanges.Count > 0 ? PlanningIncomplete
                 : "Mình đã có địa điểm, số ngày và ngân sách. Bạn muốn mình lập lịch ngay hay bổ sung yêu cầu về bữa, món hoặc khẩu vị?",
             _ => "Bạn muốn xem lại lịch hiện tại hay thay đổi ngày/bữa hoặc món nào?"
         };
+    }
+
+    /// <summary>True when the only reason a proposal failed validation is a total above the trip budget.</summary>
+    public static bool OverBudgetOnly(AgentValidation? validation) => validation is { Errors.Length: > 0 } &&
+        validation.Errors.All(error => error == AgentProposalValidator.BudgetExceeded);
+
+    /// <summary>
+    /// Asks how to resolve a budget the authorized dishes did not fit, with the observed figures, instead of a generic failure.
+    /// Only the user may raise the budget, drop meals or cap prices; the backend never relaxes the budget itself.
+    /// </summary>
+    public static string BudgetShortfall(AgentState state, AgentValidation validation)
+    {
+        var perMeal = AgentScopedPlanning.BudgetPerMeal(state) is { } amount
+            ? $" (khoảng {Money(amount)} đồng/bữa cho {AgentScopedPlanning.MealCount(state)} bữa)" : "";
+        return $"Các món phù hợp mình tìm được có tổng {Money(validation.TotalCost)} đồng/người, vượt ngân sách {Money(state.BudgetAmount ?? 0)} đồng " +
+            $"cho cả chuyến{perMeal}. Bạn muốn tăng ngân sách, bớt số ngày/bữa, hay đặt mức giá tối đa mỗi bữa để mình chọn món rẻ hơn?";
     }
 
     /// <summary>Only current, backend-observed empty meals support a claim of missing choices.</summary>

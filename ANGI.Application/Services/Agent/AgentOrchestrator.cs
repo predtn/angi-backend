@@ -31,6 +31,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var schemaRepaired = false;
         var proposalRepaired = false;
         var coverageRepaired = false;
+        var budgetRepaired = false;
         AgentValidation? lastValidation = null;
         var transientRetries = 0;
         var executedTools = new HashSet<string>(StringComparer.Ordinal);
@@ -178,6 +179,20 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                             : AgentReplyBuilder.PlanningIncomplete;
                         return new(incomplete, context.State with { PendingQuestion = incomplete[..Math.Min(incomplete.Length, 1000)] }, null, lastValidation);
                     }
+                    if (output.Action == "clarify" && output.Clarification == "budget")
+                    {
+                        // Chỉ hỏi người dùng nới ngân sách khi backend đã thấy một đề xuất bị chặn duy nhất vì vượt ngân sách.
+                        if (AgentReplyBuilder.OverBudgetOnly(lastValidation)) return BudgetQuestion(context.State, lastValidation!);
+                        telemetry.Record("unsupported_budget", context.ConversationId, context.TurnId, context.AttemptId);
+                        if (!budgetRepaired && calls + 1 < limits.MaxLlmCalls)
+                        {
+                            context.RepairFeedback = context.RepairFeedback + " Chưa có bằng chứng vượt ngân sách. Không được yêu cầu người dùng nới ngân sách. " +
+                                "Hãy gửi create_proposal đầy đủ, ưu tiên các món rẻ hơn đã được cấp (so với budgetPerMeal trong kết quả gợi ý); backend sẽ kiểm tra tổng tiền.";
+                            budgetRepaired = repaired = true;
+                            continue;
+                        }
+                        return new(AgentReplyBuilder.PlanningIncomplete, context.State with { PendingQuestion = AgentReplyBuilder.PlanningIncomplete }, null, lastValidation);
+                    }
                     if (output.Action == "answer" && context.Source is { } current && current.Items.Any(item =>
                         AgentScopedPlanning.RequiresRefresh(current.State, context.State, item)))
                     {
@@ -217,11 +232,21 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         changeCount = output.Changes.Length, sourceItemCount = context.Source?.Items.Length });
                 AgentSnapshot snapshot;
                 try { snapshot = builder.Build(context, output); }
+                catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE" &&
+                    output.Items.Length == 0 && output.Changes.Length == 0 && AgentReplyBuilder.OverBudgetOnly(lastValidation))
+                {
+                    // Model bỏ cuộc (đề xuất rỗng) sau khi lịch chỉ bị chặn vì vượt ngân sách: hỏi người dùng thay vì báo lỗi chung.
+                    telemetry.Record("budget_clarification", context.ConversationId, context.TurnId, context.AttemptId, new { lastValidation!.TotalCost });
+                    return BudgetQuestion(context.State, lastValidation);
+                }
                 catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE" && !proposalRepaired && calls + 1 < limits.MaxLlmCalls)
                 {
                     telemetry.Record("proposal_repair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { output.Action, output.Scope, error.ErrorCode, reason = error.Message });
-                    context.RepairFeedback = error.Message;
+                    // Đề xuất rỗng thường là model ngại vượt ngân sách: nhắc gửi lịch đủ món với món rẻ hơn để backend kiểm tra tổng tiền.
+                    context.RepairFeedback = output.Items.Length == 0 && output.Changes.Length == 0
+                        ? error.Message + " create_proposal phải có đủ món cho mọi bữa. Nếu ngân sách chặt, chọn các món rẻ hơn đã được cấp (so với budgetPerMeal) và vẫn gửi đề xuất đầy đủ."
+                        : error.Message;
                     context.RejectedOutput = output;
                     proposalRepaired = repaired = true;
                     continue;
@@ -261,6 +286,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         proposalRepaired = repaired = true;
                         continue;
                     }
+                    if (AgentReplyBuilder.OverBudgetOnly(validated.Validation)) return BudgetQuestion(context.State, validated.Validation);
                     return new("Đề xuất chưa hợp lệ. Vui lòng làm rõ hoặc điều chỉnh các điều kiện.", context.State, null, validated.Validation);
                 }
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
@@ -277,6 +303,13 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
         catch (FluentValidation.ValidationException) { throw Unavailable(); }
+    }
+
+    /// <summary>Asks the user how to resolve a budget the rejected proposal exceeded; the previous ready proposal stays.</summary>
+    private static AgentPreparedTurn BudgetQuestion(AgentState state, AgentValidation validation)
+    {
+        var question = AgentReplyBuilder.BudgetShortfall(state, validation);
+        return new(question, state with { PendingQuestion = question[..Math.Min(question.Length, 1000)] }, null, validation);
     }
 
     /// <summary>Creates a controlled limit/contract error without replacing the last ready proposal.</summary>

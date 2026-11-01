@@ -10,6 +10,9 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Enforces source, catalog, budget and route rules before ready state and again before commit.</summary>
 public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepository tags, AgentRouteEstimator routes)
 {
+    /// <summary>Error of a proposal whose total exceeds the trip budget; the orchestrator turns it into a budget question.</summary>
+    public const string BudgetExceeded = "Tổng tiền vượt ngân sách toàn chuyến cho một người.";
+
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
@@ -122,7 +125,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     !normalized.Any(x => x.DayNumber == day && x.MealSlot == meal && catalog[x.DishId].DishTags.Any(tag => tag.TagId == mainTag.Id)))
                     errors.Add($"Bữa {meal} ngày {day} cần ít nhất một món chính; đồ uống, tráng miệng và món ăn vặt chỉ là món phụ trừ khi người dùng yêu cầu riêng cho bữa đó.");
         var total = normalized.Sum(x => x.Price);
-        if (state.BudgetAmount.HasValue && total > state.BudgetAmount) errors.Add("Tổng tiền vượt ngân sách toàn chuyến cho một người.");
+        if (state.BudgetAmount.HasValue && total > state.BudgetAmount) errors.Add(BudgetExceeded);
         var repeats = !confirm && errors.Count == 0 && freshGrants is { Count: > 0 }
             ? await AvoidableRepeatsAsync(normalized, added, state, freshGrants, catalog, allTags, mainTag, ct) : [];
         var routeResults = new List<AgentDayRoute>();

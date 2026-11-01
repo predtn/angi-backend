@@ -51,7 +51,7 @@ public static class AgentLlmSchema
     public static readonly object Output = Obj(new()
     {
         ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation"), ["reply"] = Scalar("string"),
-        ["clarification"] = Nullable(Choice("trip_details", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "general")),
+        ["clarification"] = Nullable(Choice("trip_details", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general")),
         ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
         ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()

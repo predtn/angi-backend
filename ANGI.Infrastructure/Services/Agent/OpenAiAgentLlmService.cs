@@ -98,6 +98,13 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         With available candidates, produce the complete create/patch proposal. Use clarification=coverage only
         for an observed missing meal; never ask the human to relax conditions without evidence. If you cannot
         finish assembling a proposal, that is a planning failure, not proof that catalog data is missing.
+        budgetAmount is a hard per-person total for the whole trip. Tool results include budgetPerMeal, the budget
+        split evenly over the planned meals: prefer authorized candidates priced near or below it (a pricier meal
+        is fine when others are cheaper) so the total fits. Never return create_proposal with empty items because the
+        budget looks tight; submit the complete proposal with the cheapest suitable authorized candidates and let the
+        backend check the total. Only after validation reports the trip budget is exceeded and no cheaper authorized
+        candidates remain, return clarify with clarification=budget. Never raise the budget, drop meals or set
+        maxPricePerMeal yourself; only the user may change them.
         Targets never imply verified dietary guarantees or hard tag filters.
         The backend authenticates and enforces ownership. Only get_recommendation, estimate_day_route and get_roadmap
         and search_catalog are allowed. Ask for province, number of days, and budget when missing.
