@@ -323,6 +323,25 @@ public sealed class AgentProposalValidatorTests
         else result.Validation.AvoidableRepeatItemKeys.Should().BeNull();
     }
 
+    // TEST-16: Repeat repair replaces every repeated position that still has an unused dish name and keeps the others unchanged,
+    // instead of discarding the whole repair; covers a partly fixable plan and a plan with no spare dish at all.
+    /// <summary>Ensures one exhausted position (e.g. the last day) cannot cancel the repeat fixes of every other position.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task RepairScopeAsync_RepeatsOnly_KeepsPositionsWithoutSpareAndFixesTheRest(bool spare)
+    {
+        var state = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000, MealSlots = ["lunch"] };
+        var items = new[] { AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2), AgentTestData.Item(1, "c", 3) };
+        AgentCandidateGrant[] grants = [new(2, "lunch", spare ? [1, 2] : [1], Guid.NewGuid(), state), new(3, "lunch", [1], Guid.NewGuid(), state)];
+        var snapshot = new AgentSnapshot(state, items, grants, Scope: new());
+
+        var repaired = await AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2)).Validator
+            .RepairScopeAsync(snapshot, null, grants, ["b", "c"], CancellationToken.None, repeatsOnly: true);
+
+        if (!spare) { repaired.Should().BeNull(); return; }
+        repaired!.Items.Select(item => (item.ItemKey, item.DishId)).Should().Equal(("a", 1), ("b", 2), ("c", 1));
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {

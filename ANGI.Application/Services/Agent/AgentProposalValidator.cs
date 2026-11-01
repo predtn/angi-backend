@@ -215,22 +215,33 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         var usedIds = kept.Select(item => item.DishId).Concat(sourceItems.Select(item => item.DishId)).ToHashSet();
         var usedNames = kept.Where(item => catalog.ContainsKey(item.DishId))
             .Select(item => AgentScopedPlanning.Normalize(catalog[item.DishId].Name)!).ToHashSet(StringComparer.Ordinal);
-        var total = kept.Sum(item => catalog.TryGetValue(item.DishId, out var dish) ? dish.Price : 0);
+        decimal PriceOf(AgentItem item) => catalog.TryGetValue(item.DishId, out var dish) ? dish.Price : 0;
+        // Món lặp có thể được giữ nguyên nên tổng tiền tính cả giá hiện tại của nó; thay món thì trừ giá cũ ra.
+        var total = kept.Sum(PriceOf) + (repeatsOnly ? targets.Sum(PriceOf) : 0);
         var replacements = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var item in targets)
         {
+            var current = repeatsOnly ? PriceOf(item) : 0;
             var fits = options[item.ItemKey].Where(id => catalog.TryGetValue(id, out var dish) && IsPublic(dish) && FitsMeal(dish, item.MealSlot) &&
                 !usedIds.Contains(id) && (!state.MaxPricePerMeal.HasValue || dish.Price <= state.MaxPricePerMeal) &&
-                (state.BudgetAmount is not { } budget || total + dish.Price <= budget)).ToArray();
+                (state.BudgetAmount is not { } budget || total - current + dish.Price <= budget)).ToArray();
             // Ưu tiên món khác tên với các món còn lại để lịch không lặp; nếu không có thì lấy món xếp hạng cao nhất hợp lệ.
-            var chosen = fits.Where(id => !usedNames.Contains(AgentScopedPlanning.Normalize(catalog[id].Name)!)).Select(id => (int?)id).FirstOrDefault()
-                ?? fits.Select(id => (int?)id).FirstOrDefault();
-            if (chosen is not { } replacement) return null;
+            var unusedName = fits.Where(id => !usedNames.Contains(AgentScopedPlanning.Normalize(catalog[id].Name)!)).Select(id => (int?)id).FirstOrDefault();
+            // Sửa món lặp chỉ có ích khi còn món khác tên. Vị trí đã hết lựa chọn thì giữ món cũ và sửa tiếp các vị trí khác,
+            // không bỏ cả lượt sửa chỉ vì một bữa (ví dụ ngày cuối chỉ còn các món đã dùng).
+            if (repeatsOnly && unusedName is null)
+            {
+                usedIds.Add(item.DishId);
+                if (catalog.TryGetValue(item.DishId, out var keptDish)) usedNames.Add(AgentScopedPlanning.Normalize(keptDish.Name)!);
+                continue;
+            }
+            if ((unusedName ?? fits.Select(id => (int?)id).FirstOrDefault()) is not { } replacement) return null;
             replacements[item.ItemKey] = replacement;
             usedIds.Add(replacement);
             usedNames.Add(AgentScopedPlanning.Normalize(catalog[replacement].Name)!);
-            total += catalog[replacement].Price;
+            total += catalog[replacement].Price - current;
         }
+        if (replacements.Count == 0) return null;
         // Giá, tên, provenance được validator tính lại; grant được thu gọn như builder để còn dùng khi xác nhận.
         var items = snapshot.Items.Select(item => replacements.TryGetValue(item.ItemKey, out var id)
             ? new AgentItem(item.ItemKey, null, item.DayNumber, item.MealSlot, item.SortOrder, id) : item).ToArray();
