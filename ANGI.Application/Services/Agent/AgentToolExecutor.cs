@@ -108,6 +108,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var candidateCount = rankings.Sum(x => x.CandidateCount);
         var ignoredCount = rankings.Sum(x => x.IgnoredCount);
         var mealCoverage = coverage.Select(x => new { x.DayNumber, x.MealSlot, x.AvailableCount, x.RequiredTags });
+        // Ngân sách chia đều cho các bữa: mốc giá để model chọn món vừa túi tiền, không phải bộ lọc (một bữa có thể đắt hơn nếu bữa khác rẻ hơn).
+        var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
         // Payload gọn cho LLM: tọa độ do backend tự tra khi tính tuyến, bữa ăn nằm ở allowedMealSlots nên tags chỉ giữ mã loại món.
         // Giữ thông báo fallback để model không mô tả thứ tự theo đánh giá là ranking cá nhân hóa.
         if (rankings.Count == 1)
@@ -115,7 +117,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             {
                 rankingMode = personalized ? "personalized" : "rating_fallback",
                 selectionScope = new { scope.DayNumber, scope.MealSlot },
-                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings,
+                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
                 items = Items(rankings[0])
             };
         // Phạm vi đã tách: mỗi scopedResults có selectionScope riêng, món chỉ được dùng đúng ngày/bữa của phần đó.
@@ -123,7 +125,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             rankingMode = personalized ? "personalized" : "rating_fallback",
             selectionScope = new { scope.DayNumber, scope.MealSlot },
-            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings,
+            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
             scopedResults = rankings.Select(x => new { selectionScope = new { x.Scope.DayNumber, x.Scope.MealSlot }, items = Items(x) })
         };
     }

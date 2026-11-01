@@ -56,6 +56,13 @@ public static class AgentScopedPlanning
             .Select(meal => ((short)day, meal))).Where(x => (!scope.DayNumber.HasValue || scope.DayNumber == x.Item1) &&
                 (scope.MealSlot is null || scope.MealSlot == x.meal));
 
+    /// <summary>Number of planned meals in the trip; legacy state without declared meals plans breakfast, lunch and dinner.</summary>
+    public static int MealCount(AgentState state) => (state.NumDays ?? 0) * (state.MealSlots.Length > 0 ? state.MealSlots.Length : 3);
+
+    /// <summary>The trip budget split evenly over its meals: a price reference for choosing dishes, never a hard per-meal cap.</summary>
+    public static decimal? BudgetPerMeal(AgentState state) =>
+        state.BudgetAmount is { } budget && MealCount(state) is > 0 and var meals ? decimal.Floor(budget / meals) : null;
+
     /// <summary>Catalog category code of a main dish; drinks, desserts, starters and snacks are side items.</summary>
     public const string MainTagCode = "local_sf_main";
 

@@ -417,6 +417,29 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Single(grant => grant.DayNumber == 2).DishIds.Should().Equal(2, 3, 1);
     }
 
+    // TEST-23: Recommendation results carry the trip budget split over the planned meals as a price reference, and none without a budget; covers both.
+    /// <summary>Gives the model a per-meal price reference so it can pick dishes that fit the trip budget.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task Recommendation_Result_IncludesBudgetPerMeal(bool budgeted)
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(1)); var reco = new Mock<IRecommendationService>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RecommendationResult(Guid.NewGuid(), [1], [], [.9], "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 2, MealSlots = ["breakfast", "lunch"],
+            BudgetAmount = budgeted ? 500000 : null, BudgetUnrestricted = !budgeted,
+            Preferences = new() { Initialized = true, BaselineVector = Enumerable.Repeat(.25, 12).ToArray() } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var response = await tools.ExecuteAsync(context, Recommend(new(Scope: "slot", DayNumber: 1, MealSlot: "lunch", TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)), default);
+
+        var budgetPerMeal = response.GetProperty("budgetPerMeal");
+        if (budgeted) budgetPerMeal.GetDecimal().Should().Be(125000);
+        else budgetPerMeal.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
     /// <summary>Builds the conversation-16 state: two days of declared meals, a real snack tag and snack requests for day-1 lunch and dinner.</summary>
     private static (AgentToolExecutor Tools, AgentProposalValidator Validator, Mock<IRecommendationService> Reco, AgentContext Context)
         SnackFixture(Func<DishCandidateFilter, int[]> candidatesFor)
