@@ -50,7 +50,8 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         Day overrides inherit the trip; meal overrides inherit the day. Keep other dimensions and scopes intact.
         A taste for one meal on every day (e.g. 'bữa trưa' without a day) needs one meal override per day, never
         tasteTargets. Each clause keeps its own scope: 'chua cho bữa trưa, bữa tối ngày 1 ăn vặt' means sour lunch
-        overrides plus a snack mealRequest for day 1 dinner only. Ask with clarification=taste_scope when unsure.
+        overrides plus one mealRequest {dayNumber:1, mealSlot:"dinner", tagIds:[snack category tag]} for day 1 dinner only.
+        Ask with clarification=taste_scope when unsure.
         When the user explicitly changes the taste of EVERY meal, update/remove overlapping overrides for those
         dimensions so old exceptions cannot defeat that request. Preserve unrelated dimensions. Ask whether existing
         exceptions should remain only when the user's wording is ambiguous.
@@ -80,6 +81,11 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         drinks, desserts, starters and snacks are side items, and default recommendations for those meals list mains.
         A user's category, dish or restaurant request for a meal (e.g. 'bữa sáng chỉ đồ uống') replaces that default:
         write it in mealRequests with the real category tag, one entry per requested day, because a meal needs a day.
+        A whole-day request such as 'ngày 3 chỉ ăn vặt' or 'ngày 2 chỉ đồ uống' is ONE day-level mealRequest
+        {dayNumber:3, mealSlot:null, tagIds:[that category tag]}: every declared meal of that day uses the category.
+        Never encode it as mealSlot="snack"; the snack meal slot is an extra meal, not the snack category.
+        Do not add snack or other meals to mealSlots because of a category request: mealSlots applies to every day,
+        so add a meal there only when the user asks for that extra meal on the trip.
         To add a side item next to a main, call get_recommendation for that slot with the category in tagIds
         (a search filter, not state). Drinks are valid itinerary items for the requested meals when their catalog meal tags permit them.
         A soft sweet target does not require every candidate to be dessert or have a verified sweetness level.
