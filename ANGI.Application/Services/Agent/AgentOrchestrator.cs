@@ -262,7 +262,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             // Đã dùng hết số lần gọi cho phép mà chưa có kết quả cuối hợp lệ.
             throw Unavailable();
         }
-        catch (AgentStateChangeRequiredException change) { return AgentChatPolicy.StageChange(confirmedState, change.Proposed); }
+        catch (AgentStateChangeRequiredException change)
+        { return AgentChatPolicy.StageChange(confirmedState, change.Proposed, context.Source is not null || context.Roadmap is not null); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
         catch (FluentValidation.ValidationException) { throw Unavailable(); }

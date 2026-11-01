@@ -66,7 +66,10 @@ public static class AgentReplyBuilder
             "catalog_choice" => "Bạn muốn chọn món hoặc nhà hàng nào trong các kết quả catalog đã tìm thấy?",
             "coverage" => Coverage(context),
             "catalog_support" => "Yêu cầu này cần dữ liệu hoặc tag phù hợp trong catalog; mình chưa thể xác nhận từ dữ liệu hiện có. Bạn có muốn chọn tiêu chí khác không?",
-            _ => "Bạn muốn lập lịch mới, xem lại đề xuất hay thay đổi ngày/bữa hoặc món nào?"
+            // Chưa có lịch nào: không mời "xem lại đề xuất". Đã lấy gợi ý mà chưa ghép được lịch thì nói rõ là chưa hoàn tất.
+            _ when context.Source is null => context.Exchanges.Count > 0 ? PlanningIncomplete
+                : "Mình đã có địa điểm, số ngày và ngân sách. Bạn muốn mình lập lịch ngay hay bổ sung yêu cầu về bữa, món hoặc khẩu vị?",
+            _ => "Bạn muốn xem lại lịch hiện tại hay thay đổi ngày/bữa hoặc món nào?"
         };
     }
 
@@ -94,7 +97,7 @@ public static class AgentReplyBuilder
         ? Proposal(source, saved: context.Roadmap is not null && context.CurrentProposal?.Status != "ready")
         : "Mình có thể lập lịch ăn uống từ những món và nhà hàng trong catalog ANGI. Bạn muốn lập lịch hoặc tìm món/quán nào?");
 
-    private static string Meal(string value) => value switch
+    internal static string Meal(string value) => value switch
     { "breakfast" => "bữa sáng", "lunch" => "bữa trưa", "dinner" => "bữa tối", "snack" => "bữa phụ", "late_night" => "bữa khuya", _ => "bữa ăn" };
     private static string Money(decimal value) => value.ToString("N0", CultureInfo.GetCultureInfo("vi-VN"));
     private static string Safe(string? value) => value is null ? "Chưa có thông tin" : new string(value

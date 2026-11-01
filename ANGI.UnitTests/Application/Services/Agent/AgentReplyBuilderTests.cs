@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent;
 using FluentAssertions;
@@ -141,5 +142,23 @@ public sealed class AgentReplyBuilderTests
 
         if (substituted == 0) reply.Should().NotContain(AgentReplyBuilder.SubstitutionNote);
         else reply.Should().Contain($"Có {substituted} món được hệ thống chọn lại").And.Contain("khẩu vị, ngân sách và điều kiện");
+    }
+
+    // TEST-10: A general clarification only offers to review an existing plan; covers no plan before searches, no plan after searches, and an existing plan.
+    /// <summary>Prevents the fallback question from inviting the user to review a proposal that was never built.</summary>
+    [Theory]
+    [InlineData("no-plan")][InlineData("searched")][InlineData("plan")]
+    public void Clarify_GeneralQuestion_OffersReviewOnlyWhenAPlanExists(string situation)
+    {
+        var context = AgentTestData.Context(situation == "plan" ? AgentTestData.Snapshot(AgentTestData.Item()) : null);
+        if (situation == "searched")
+            context.Exchanges.Add(new([new("rank", "get_recommendation", JsonDocument.Parse("{}").RootElement)], [JsonDocument.Parse("{}").RootElement]));
+
+        var reply = AgentReplyBuilder.Clarify(context, "general");
+
+        if (situation == "plan") reply.Should().Contain("xem lại lịch hiện tại");
+        else reply.Should().NotContain("xem lại").And.NotContain("đề xuất");
+        if (situation == "searched") reply.Should().Be(AgentReplyBuilder.PlanningIncomplete);
+        if (situation == "no-plan") reply.Should().Contain("lập lịch ngay");
     }
 }

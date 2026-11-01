@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.UseCases.Validators.Agent;
 
 namespace ANGI.Application.Services.Agent;
 
@@ -33,7 +34,7 @@ public static class AgentChatPolicy
     };
 
     /// <summary>Stages validated proposed constraints, retaining the original state until the user confirms them.</summary>
-    public static AgentPreparedTurn StageChange(AgentState current, AgentState proposed)
+    public static AgentPreparedTurn StageChange(AgentState current, AgentState proposed, bool hasPlan = true)
     {
         var changes = new List<string>();
         if (current.Province != proposed.Province) changes.Add($"địa điểm: {proposed.Province ?? "chưa chọn"}");
@@ -42,14 +43,30 @@ public static class AgentChatPolicy
             changes.Add(proposed.BudgetUnrestricted ? "ngân sách không giới hạn" : $"ngân sách: {proposed.BudgetAmount:0} đồng");
         if (current.MaxPricePerMeal != proposed.MaxPricePerMeal) changes.Add($"trần giá mỗi món: {proposed.MaxPricePerMeal?.ToString("0", CultureInfo.InvariantCulture) ?? "không giới hạn"} đồng");
         if (!current.TagIds.SequenceEqual(proposed.TagIds) || !current.ExcludeTagIds.SequenceEqual(proposed.ExcludeTagIds)) changes.Add("bộ lọc món ăn");
-        if (AgentJson.Write(current.MealRequests) != AgentJson.Write(proposed.MealRequests)) changes.Add("yêu cầu món/quán theo ngày hoặc bữa");
+        changes.AddRange(MealRequestChanges(current.MealRequests, proposed.MealRequests));
         if (current.RadiusKm != proposed.RadiusKm || current.OriginMode != proposed.OriginMode || current.OriginLatitude != proposed.OriginLatitude || current.OriginLongitude != proposed.OriginLongitude)
             changes.Add("điểm xuất phát hoặc bán kính tìm món");
-        var reply = $"Bạn xác nhận thay đổi {string.Join("; ", changes)}? Nhắn ‘xác nhận thay đổi’ để áp dụng hoặc ‘giữ nguyên’ để hủy. Bản lịch đang lưu chưa thay đổi.";
+        // Chưa có lịch xem trước/đã lưu thì không nhắc "bản lịch chưa thay đổi" để người dùng không tưởng đã có lịch.
+        var reply = $"Bạn xác nhận thay đổi {string.Join("; ", changes)}? Nhắn ‘xác nhận thay đổi’ để áp dụng hoặc ‘giữ nguyên’ để hủy." +
+            (hasPlan ? " Bản lịch hiện tại chưa thay đổi." : "");
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
             FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,
             SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
         return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending, PendingPlanningRequest = null }, null, null);
+    }
+
+    /// <summary>Names each trip/day/meal scope whose dish or restaurant request was added, removed or changed.</summary>
+    private static IEnumerable<string> MealRequestChanges(AgentMealRequest[] current, AgentMealRequest[] proposed)
+    {
+        var before = current.ToDictionary(x => (x.DayNumber, x.MealSlot));
+        var after = proposed.ToDictionary(x => (x.DayNumber, x.MealSlot));
+        foreach (var key in before.Keys.Union(after.Keys).OrderBy(x => x.DayNumber ?? 0).ThenBy(x => x.MealSlot is null ? -1 : Array.IndexOf(AgentStateValidator.Meals, x.MealSlot)))
+        {
+            var scope = key.DayNumber is not { } day ? "toàn chuyến" : key.MealSlot is null ? $"ngày {day}" : $"{AgentReplyBuilder.Meal(key.MealSlot)} ngày {day}";
+            if (!after.ContainsKey(key)) yield return $"bỏ yêu cầu món/quán cho {scope}";
+            else if (!before.ContainsKey(key)) yield return $"thêm yêu cầu món/quán cho {scope}";
+            else if (AgentJson.Write(before[key]) != AgentJson.Write(after[key])) yield return $"đổi yêu cầu món/quán cho {scope}";
+        }
     }
 
     /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>

@@ -103,7 +103,10 @@ LLM reply text is an internal draft and is not forwarded as factual user-visible
 AgentOutput.clarification is nullable and allowlisted: trip_details, taste_scope, taste_intensity,
 edit_scope, novelty, catalog_choice, coverage, catalog_support, general.
 Backend constructs proposal summaries, catalog failure messages, clarification questions and answers
-from validated snapshots/tool outcomes and fixed templates. Names/prices/totals are
+from validated snapshots/tool outcomes and fixed templates. A general clarification never offers to
+review a proposal that does not exist; after searches without a valid proposal it reports incomplete
+planning. Constraint-consent questions name each changed day/meal request and mention the unchanged
+plan only when a preview or roadmap exists. Names/prices/totals are
 backend-derived. Unknown opening hours, fame, dietary certainty and ranking explanations are omitted.
 Snapshots remain authoritative for consumers; factual correctness is limited by catalog freshness.
 Itinerary replies start with “Đây sẽ là roadmap khám phá ẩm thực của bạn trong {numDays} ngày.”

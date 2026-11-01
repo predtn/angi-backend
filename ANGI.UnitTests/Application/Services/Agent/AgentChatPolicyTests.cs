@@ -57,4 +57,21 @@ public sealed class AgentChatPolicyTests
         result.State.PendingQuestion.Should().NotBeNullOrWhiteSpace();
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
+
+    // TEST-05: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
+    /// <summary>Ensures the user can see exactly which meal request the model wants to change before agreeing.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public void StageChange_MealRequests_NamesEachScopeAndPlanStatus(bool hasPlan)
+    {
+        var current = AgentTestData.State() with { MealRequests = [new(1, "lunch", null, null, [6]), new(1, "dinner", null, null, [6])] };
+        var proposed = current with { MealRequests = [new(1, "lunch", null, null, [6, 7]), new(2, null, null, null, [6])] };
+
+        var reply = AgentChatPolicy.StageChange(current, proposed, hasPlan).Reply;
+
+        reply.Should().Contain("đổi yêu cầu món/quán cho bữa trưa ngày 1").And.Contain("bỏ yêu cầu món/quán cho bữa tối ngày 1")
+            .And.Contain("thêm yêu cầu món/quán cho ngày 2");
+        if (hasPlan) reply.Should().Contain("Bản lịch hiện tại chưa thay đổi");
+        else reply.Should().NotContain("Bản lịch");
+    }
 }
