@@ -17,7 +17,7 @@ namespace ANGI.Application.UseCases.Moderation.ResolveReport;
 public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> validator, ModerationAccess access,
     IRestaurantModerationRepository repository, IUnitOfWork unitOfWork, RestaurantModerationEffects effects,
     IAuditLogService audit, ICloudinaryService cloudinary, IAccountStatusCache accountStatusCache, TimeProvider clock,
-    UserSanctionEffects? sanctionEffects = null) : IResolveReportUseCase
+    UserSanctionEffects? sanctionEffects = null, BlogModerationEffects? blogEffects = null) : IResolveReportUseCase
 {
     private readonly UserSanctionEffects _sanctionEffects = sanctionEffects ?? new UserSanctionEffects(audit);
     /// <summary>Checks target-specific permissions, serializes the target workflow, and commits all report effects atomically.</summary>
@@ -103,14 +103,22 @@ public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> val
             effects.Apply(restaurant!, action == ResolutionAction.HideRestaurant ? RestaurantModerationStatus.Hidden : RestaurantModerationStatus.Suspended, note, reportId);
         if (action is ResolutionAction.HideBlog or ResolutionAction.RemoveBlog)
         {
-            var oldStatus = blog!.Status;
-            blog.Status = action == ResolutionAction.HideBlog ? BlogStatus.Hidden : BlogStatus.Removed;
-            if (oldStatus != blog.Status) audit.Add(new AuditLogEntry
+            var targetStatus = action == ResolutionAction.HideBlog ? BlogStatus.Hidden : BlogStatus.Removed;
+            if (blogEffects != null)
             {
-                Action = action == ResolutionAction.HideBlog ? AuditActions.BlogHidden : AuditActions.BlogRemoved,
-                EntityType = AuditEntityTypes.Blog, EntityId = blog.Id, SubjectUserId = ownerId,
-                OldValues = new { Status = oldStatus }, NewValues = new { blog.Status, Reason = note }
-            });
+                blogEffects.Apply(blog!, targetStatus, note, reportId);
+            }
+            else
+            {
+                var oldStatus = blog!.Status;
+                blog.Status = targetStatus;
+                if (oldStatus != blog.Status) audit.Add(new AuditLogEntry
+                {
+                    Action = action == ResolutionAction.HideBlog ? AuditActions.BlogHidden : AuditActions.BlogRemoved,
+                    EntityType = AuditEntityTypes.Blog, EntityId = blog.Id, SubjectUserId = ownerId,
+                    OldValues = new { Status = oldStatus }, NewValues = new { blog.Status, Reason = note }
+                });
+            }
         }
         if (action is not (ResolutionAction.WarnUser or ResolutionAction.SuspendUser or ResolutionAction.BanUser)) return null;
 
