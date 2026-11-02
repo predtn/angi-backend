@@ -52,8 +52,41 @@ internal static class ModerationMapper
         LikedByMe = blog.Likes.Any(like => like.UserId == callerId), IsMine = blog.AuthorId == callerId, UpdatedAt = blog.UpdatedAt
     };
 
+    /// <summary>Maps a blog aggregate and its pending report count into a ModBlogCardDto for MOD-B1.</summary>
+    internal static ModBlogCardDto ModBlogCard(Blog blog, int pendingReportCount) => new()
+    {
+        Id = blog.Id,
+        Title = blog.Title,
+        Slug = blog.Slug,
+        Excerpt = blog.Content.Length <= 200 ? blog.Content.Trim() : blog.Content[..200].TrimEnd(),
+        CoverUrl = blog.CoverMedia?.Url,
+        Author = Summary(blog.Author),
+        HasRoadmap = blog.RoadmapSnapshot is not null,
+        LikeCount = blog.LikeCount,
+        CommentCount = blog.CommentCount,
+        ViewCount = blog.ViewCount,
+        PublishedAt = blog.PublishedAt,
+        Status = Api(blog.Status),
+        PendingReportCount = pendingReportCount
+    };
+
     /// <summary>Converts a domain enum to its exact snake_case API representation.</summary>
     internal static string Api<T>(T value) where T : struct, Enum => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
+
+    /// <summary>Maps a newly created user sanction to its API DTO.</summary>
+    internal static SanctionDto Sanction(UserSanction sanction, UserSummaryDto issuedBy) => new()
+    {
+        Id = sanction.Id,
+        Type = Api(sanction.Type),
+        Reason = sanction.Reason,
+        ReportId = sanction.ReportId,
+        IssuedBy = issuedBy,
+        StartsAt = sanction.StartsAt,
+        EndsAt = sanction.EndsAt,
+        LiftedAt = sanction.LiftedAt,
+        LiftedBy = null,
+        LiftReason = sanction.LiftReason
+    };
 
     /// <summary>Maps the projected restaurant and its open report count into a list card.</summary>
     internal static ModRestaurantCardDto Card(ModRestaurantListItem item, TimeProvider clock)
@@ -96,7 +129,7 @@ internal static class ModerationMapper
     }
 
     /// <summary>Maps an owner account to the administrative card without password or token fields.</summary>
-    private static AdminUserCardDto AdminUser(User user) => new()
+    internal static AdminUserCardDto AdminUser(User user) => new()
     {
         Id = user.Id, Email = user.Email, DisplayName = user.DisplayName, AvatarUrl = user.AvatarMedia?.Url,
         Role = user.Role.Code, Status = Api(user.Status), SuspendedUntil = user.SuspendedUntil,
@@ -133,4 +166,33 @@ internal static class ModerationMapper
         Action = log.Action, EntityType = log.EntityType, EntityId = log.EntityId,
         SubjectUser = log.SubjectUser is null ? null : Summary(log.SubjectUser), CreatedAt = log.CreatedAt
     };
+
+    /// <summary>Maps a RestaurantReview aggregate to ModReviewDto for MOD-F1.</summary>
+    internal static ModReviewDto ModReview(RestaurantReview review)
+    {
+        var baseDto = RestaurantDetailMapper.MapReview(review, includeAllReplies: true);
+        return new ModReviewDto
+        {
+            Id = baseDto.Id,
+            RestaurantId = baseDto.RestaurantId,
+            User = baseDto.User,
+            Rating = baseDto.Rating,
+            Content = baseDto.Content,
+            Images = baseDto.Images,
+            RoadmapItemId = baseDto.RoadmapItemId,
+            Status = baseDto.Status,
+            CreatedAt = baseDto.CreatedAt,
+            Reply = baseDto.Reply,
+            Restaurant = new DTOs.Discovery.RestaurantMiniDto
+            {
+                Id = review.Restaurant.Id,
+                Name = review.Restaurant.Name,
+                Ward = review.Restaurant.Ward,
+                ProvinceName = review.Restaurant.ProvinceName,
+                Latitude = review.Restaurant.Latitude,
+                Longitude = review.Restaurant.Longitude,
+                RatingAvg = review.Restaurant.RatingAvg
+            }
+        };
+    }
 }
