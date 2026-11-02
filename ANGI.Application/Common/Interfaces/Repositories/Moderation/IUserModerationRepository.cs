@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Account;
 using ANGI.Application.DTOs.Moderation;
+using ANGI.Domain.Entities;
 
 namespace ANGI.Application.Common.Interfaces.Repositories.Moderation;
 
@@ -15,4 +16,7 @@ public interface IUserModerationRepository : IUserSanctionRepository
 
     /// <summary>Loads the public profile summary of a moderator/user by id.</summary>
     Task<UserSummaryDto?> GetUserSummaryAsync(int userId, CancellationToken ct);
+
+    /// <summary>Queries active unlifted sanctions for a user.</summary>
+    Task<IReadOnlyList<UserSanction>> GetActiveSanctionsAsync(int userId, DateTime now, CancellationToken ct);
 }

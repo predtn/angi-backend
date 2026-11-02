@@ -10,9 +10,54 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Moderation;
 
-/// <summary>Verifies MOD-U3 controller delegation and HTTP 201 response wrapper.</summary>
+/// <summary>Verifies thin controller delegation and role restrictions for ModUsersController.</summary>
 public sealed class ModUsersControllerTests
 {
+    // TEST-01: MOD-U4 unban delegates route identifier, request body, and cancellation token.
+    [Fact]
+    public async Task Unban_DelegatesToUseCase_ReturnsOkEnvelope()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var unbanUser = new Mock<IUnbanUserUseCase>();
+
+        var request = new UnbanUserRequestDto { LiftReason = "Lý do gỡ lệnh cấm" };
+        var expectedCard = new AdminUserCardDto
+        {
+            Id = 12,
+            Email = "user@test.local",
+            DisplayName = "Test User",
+            Role = "TRAVELER",
+            Status = "active",
+            SuspendedUntil = null,
+            CreatedAt = new DateTime(2026, 9, 20, 3, 0, 0, DateTimeKind.Utc)
+        };
+
+        unbanUser
+            .Setup(x => x.ExecuteAsync(12, request, cancellation.Token))
+            .ReturnsAsync(expectedCard);
+
+        var controller = new ModUsersController(
+            Mock.Of<IGetUsersUseCase>(),
+            Mock.Of<IGetUserDetailUseCase>(),
+            Mock.Of<ICreateUserSanctionUseCase>(),
+            unbanUser.Object);
+
+        // Act
+        var actionResult = await controller.Unban(12, request, cancellation.Token);
+
+        // Assert
+        var okResult = actionResult.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+
+        var envelope = okResult.Value.Should().BeOfType<ApiResponse<AdminUserCardDto>>().Subject;
+        envelope.Success.Should().BeTrue();
+        envelope.Data.Should().BeSameAs(expectedCard);
+
+        unbanUser.Verify(x => x.ExecuteAsync(12, request, cancellation.Token), Times.Once);
+    }
+
+    // TEST-02: MOD-U3 delegates to the sanction use case and answers 201 Created.
     [Fact]
     public async Task CreateSanction_Returns201Created_WithSanctionDto()
     {
@@ -38,7 +83,8 @@ public sealed class ModUsersControllerTests
         var controller = new ModUsersController(
             Mock.Of<IGetUsersUseCase>(),
             Mock.Of<IGetUserDetailUseCase>(),
-            useCase.Object);
+            useCase.Object,
+            Mock.Of<IUnbanUserUseCase>());
 
         // Act
         var actionResult = await controller.CreateSanction(15, request, cts.Token);
@@ -56,6 +102,7 @@ public sealed class ModUsersControllerTests
         useCase.Verify(x => x.ExecuteAsync(15, request, cts.Token), Times.Once);
     }
 
+    // TEST-03: Require MOD or ADMIN role on the controller.
     [Fact]
     public void ModUsersController_RequiresModeratorOrAdminRole()
     {

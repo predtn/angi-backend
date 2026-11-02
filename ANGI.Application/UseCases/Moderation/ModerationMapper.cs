@@ -129,7 +129,7 @@ internal static class ModerationMapper
     }
 
     /// <summary>Maps an owner account to the administrative card without password or token fields.</summary>
-    private static AdminUserCardDto AdminUser(User user) => new()
+    internal static AdminUserCardDto AdminUser(User user) => new()
     {
         Id = user.Id, Email = user.Email, DisplayName = user.DisplayName, AvatarUrl = user.AvatarMedia?.Url,
         Role = user.Role.Code, Status = Api(user.Status), SuspendedUntil = user.SuspendedUntil,

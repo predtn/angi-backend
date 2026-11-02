@@ -215,6 +215,15 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
         };
     }
 
+    /// <summary>Queries active unlifted sanctions for a user.</summary>
+    public async Task<IReadOnlyList<UserSanction>> GetActiveSanctionsAsync(int userId, DateTime now, CancellationToken ct) =>
+        await context.UserSanctions
+            .Where(s => s.UserId == userId && s.LiftedAt == null &&
+                (s.Type == SanctionType.Ban || s.Type == SanctionType.Suspend))
+            .OrderByDescending(s => s.StartsAt)
+            .ThenByDescending(s => s.Id)
+            .ToListAsync(ct);
+
     private static bool TryParseStatus(string raw, out UserStatus status)
     {
         switch (raw.Trim().ToLowerInvariant())
@@ -261,10 +270,14 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
                 currentTime < hour.CloseTime);
     }
 
-    /// <summary>Locks an account and loads its current role before applying a sanction.</summary>
+    /// <summary>
+    /// Locks a non-deleted account for a sanction (MOD-U3) or an unban (MOD-U4) and loads its role and avatar
+    /// (the unban response is an AdminUserCard).
+    /// </summary>
     public Task<User?> LockUserAsync(int userId, CancellationToken ct) => context.Users
-        .FromSqlInterpolated($"SELECT * FROM core.users WHERE id = {userId} FOR UPDATE")
+        .FromSqlInterpolated($"SELECT * FROM core.users WHERE id = {userId} AND deleted_at IS NULL FOR UPDATE")
         .Include(u => u.Role)
+        .Include(u => u.AvatarMedia)
         .SingleOrDefaultAsync(ct);
 
     /// <summary>Tracks unrevoked sessions for atomic revocation with a suspension or ban.</summary>
