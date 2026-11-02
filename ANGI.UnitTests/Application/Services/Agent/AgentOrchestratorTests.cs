@@ -781,6 +781,22 @@ public sealed class AgentOrchestratorTests
         llm.VerifyNoOtherCalls();
     }
 
+    // TEST-39: "Đổi cái đó đi" over an existing plan returns the fixed edit-scope question without an LLM call.
+    /// <summary>Ensures an edit that names nothing is clarified instead of being guessed as a whole-plan rewrite.</summary>
+    [Fact]
+    public async Task RunAsync_EditWithoutTarget_AsksWhichItem()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item())); context.Request.Content = "đổi cái đó đi";
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        result.Snapshot.Should().BeNull();
+        llm.VerifyNoOtherCalls();
+    }
+
     // TEST-40: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
     // another LLM call, and the reserve dish keeps its provenance in the snapshot.
     /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>

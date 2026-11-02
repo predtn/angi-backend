@@ -1451,6 +1451,37 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         JsonSerializer.Deserialize<double[]>(row.GetString(6))!.Should().Equal(snapshot.State.Preferences.EffectiveVector);
     }
 
+    // TEST-56: A bare "lưu" only reminds the exact save wording and keeps the preview savable, while an edit naming nothing asks which item
+    // to change and, like every clarification, blocks saving until answered; none of these turns calls the LLM.
+    /// <summary>Verifies through HTTP and PostgreSQL that a save intent is never turned into a new plan and an unscoped edit is clarified.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_BareSaveAndUnscopedEdit_KeepPreviewWithoutLlm()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        var calls = scenario.Llm.Calls;
+
+        var reminder = await SendPromptAsync(client, conversation.ConversationId, "lưu");
+        var current = await GetAsync(client, conversation.ConversationId);
+        var edit = await SendPromptAsync(client, conversation.ConversationId, "đổi cái đó đi");
+        var blocked = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
+
+        reminder.Commit.Should().BeNull();
+        reminder.Reply.Should().StartWith("Bạn muốn lưu bản xem trước hiện tại (1 món").And.EndWith("Nhắn ‘chốt lịch này’ để lưu.");
+        current.CurrentProposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        current.CurrentProposal.Status.Should().Be("ready"); current.State.PendingQuestion.Should().BeNull();
+        edit.Reply.Should().StartWith("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("trả lời câu hỏi");
+        scenario.Llm.Calls.Should().Be(calls);
+        await factory.ExecuteDbAsync(async db =>
+        {
+            (await db.Roadmaps.CountAsync()).Should().Be(0);
+            (await db.AgentProposals.CountAsync()).Should().Be(1);
+        });
+    }
+
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>
     private static async Task<AgentTurnDto> SendPromptAsync(HttpClient client, long id, string content)
     {
