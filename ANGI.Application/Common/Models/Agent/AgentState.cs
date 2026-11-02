@@ -124,6 +124,8 @@ public sealed class AgentContext
     public AgentOutput? RejectedOutput { get; set; }
     public bool ReplanAfterConfirmation { get; set; }
     public AgentState? ConstraintBaseline { get; set; }
+    /// <summary>Dish/restaurant requests the backend placed on one meal this turn; a later model state cannot widen or drop them.</summary>
+    public List<AgentMealRequest> PlacedRequests { get; } = [];
     public object[] CatalogTags { get; set; } = [];
     /// <summary>Catalog tag names by ID, used to check that a tag the model adds is grounded in the user's wording.</summary>
     public IReadOnlyDictionary<short, string> CatalogTagNames { get; set; } = new Dictionary<short, string>();

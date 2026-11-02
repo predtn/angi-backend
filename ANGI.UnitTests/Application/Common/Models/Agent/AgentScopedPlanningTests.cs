@@ -156,7 +156,7 @@ public sealed class AgentScopedPlanningTests
         DishCandidateFilter? filter = null;
         fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .Callback<DishCandidateFilter, int, CancellationToken>((value, _, _) => filter = value).ReturnsAsync(Array.Empty<int>());
-        var context = AgentTestData.Context(); context.State = context.State with { MealRequests = [new(null, null, "Món X", "Quán A", [])] };
+        var context = AgentTestData.Context(); context.Request.Content = "mọi bữa đều ăn Món X"; context.State = context.State with { MealRequests = [new(null, null, "Món X", "Quán A", [])] };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
         await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [])), default);
         filter!.RestaurantId.Should().Be(11); filter.DishIds.Should().Equal(7);

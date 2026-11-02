@@ -330,7 +330,7 @@ public sealed class AgentToolExecutorTests
         catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync(
             [new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true), new(2, "Phở", 11, "Quán B", "Da Nang", "2 B", true)]);
         var context = AgentTestData.Context();
-        context.State = context.State with { MealSlots = ["lunch"], MealRequests = [new(null, null, "Phở", null, [])] };
+        context.Request.Content = "cả chuyến chỉ ăn Phở"; context.State = context.State with { MealSlots = ["lunch"], MealRequests = [new(null, null, "Phở", null, [])] };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
             new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
 
@@ -510,6 +510,71 @@ public sealed class AgentToolExecutorTests
             context.ToolNotice.Should().StartWith("Chưa tìm thấy món/quán"); context.CatalogNotice.Should().Be(context.ToolNotice);
             context.CatalogAnswer.Should().BeNull();
         }
+    }
+
+    // TEST-21: A named dish without a meal is placed on one fitting meal before ranking, so other meals keep their own candidates.
+    /// <summary>Fixes "phải có món X" filtering every meal to X and ending in "no candidates for breakfast".</summary>
+    [Fact]
+    public async Task ExecuteAsync_NamedDishWithoutMeal_IsPlacedOnOneMeal()
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.DishIds.Count > 0 ? [1] : new[] { 2 });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context();
+        context.Request.Content = "nhất định phải có món Phở";
+        context.State = context.State with { MealSlots = ["breakfast", "lunch"], MealRequests = [new(null, null, "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        context.State.MealRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
+        context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
+    }
+
+    // TEST-25: A restaurant serving only dinner moves off a meal the backend chose; a meal the user named stays and reports no candidates.
+    /// <summary>Fixes a replacement restaurant getting stuck on the lunch position its predecessor was placed on.</summary>
+    [Theory]
+    [InlineData("đổi sang quán Lẩu Bò", "dinner")]
+    [InlineData("bữa trưa ngày 1 ăn ở quán Lẩu Bò", "lunch")]
+    public async Task ExecuteAsync_RestaurantCannotServeMeal_MovesOnlyBackendPlacement(string content, string expected)
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Lẩu"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.CompatibleMealTimeCode == "dinner" ? [1] : Array.Empty<int>());
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("restaurant", "Lẩu Bò", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(10, "Lẩu Bò", 10, "Lẩu Bò", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context();
+        context.Request.Content = content;
+        context.State = context.State with { MealSlots = ["lunch", "dinner"], MealRequests = [new(1, "lunch", null, "Lẩu Bò", [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        context.State.MealRequests.Single().MealSlot.Should().Be(expected);
+    }
+
+    // TEST-22: An unresolved name keeps its wide request so the ranking step reports it as a catalog question.
+    /// <summary>Ensures placement never hides a dish the catalog does not have.</summary>
+    [Fact]
+    public async Task ExecuteAsync_UnknownNamedDish_StaysUnplacedAndAsks()
+    {
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), 21, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var context = AgentTestData.Context();
+        context.Request.Content = "phải có món Phở Sao Hỏa";
+        context.State = context.State with { MealSlots = ["lunch"], MealRequests = [new(null, null, "Phở Sao Hỏa", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        context.PlacedRequests.Should().BeEmpty();
+        context.ToolNotice.Should().Contain("Phở Sao Hỏa");
     }
 
     // TEST-23: Pointing words are refused as a catalog name before any lookup and never become a "not found" notice.

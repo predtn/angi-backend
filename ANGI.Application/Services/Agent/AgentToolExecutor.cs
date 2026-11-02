@@ -57,8 +57,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // userId luôn lấy từ context đã xác thực, không phải tham số do model cung cấp.
         // Khẩu vị "bữa 2 ngày 1" được giữ đúng bữa trước khi tính vector, kể cả khi model ghi thành cả ngày 1.
         if (!context.ReplanAfterConfirmation)
-            context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(
-                AgentMealScopePolicy.Narrow(input.State, context.State, AgentMealScopePolicy.Evidence(context)), context.Request.Content), context.ConstraintBaseline);
+            context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(AgentNamedRequestPolicy.Retain(
+                AgentMealScopePolicy.Narrow(input.State, context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
         var state = context.State;
         // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
         // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
@@ -68,6 +68,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             context.TripDetailsMissing = true;
             return new { status = "missing_trip_details", rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>() };
         }
+        // "Phải có món X" chỉ cần X ở một bữa; nếu để cả chuyến, bữa nào cũng bị lọc còn X và bữa sáng không có ứng viên.
+        context.State = state = await PlaceNamedRequestsAsync(context, state, ct);
         var scope = new AgentScope(input.DayNumber, input.MealSlot);
         // Tham số sai do model gửi (phạm vi, tag, topK, giá, bán kính...) được trả lại cho model để nó tự sửa trong cùng lượt,
         // thay vì làm hỏng cả lượt chat thành 503/409 như trước. Số vòng tool vẫn bị giới hạn ở orchestrator.
@@ -147,6 +149,66 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         };
     }
 
+    /// <summary>Moves dish/restaurant requests wider than a meal onto one meal that can serve them; an unresolved name keeps its normal catalog question.</summary>
+    private async Task<AgentState> PlaceNamedRequestsAsync(AgentContext context, AgentState state, CancellationToken ct)
+    {
+        if (catalogSearch is null) return state;
+        var messages = context.History.Where(turn => turn.Role == "user").Select(turn => turn.Content).Append(context.Request.Content).ToArray();
+        foreach (var request in AgentNamedRequestPolicy.Placeable(state, messages))
+        {
+            var fitting = await FittingMealsAsync(state, request, ct);
+            if (fitting is null || AgentNamedRequestPolicy.Slot(state, request, fitting) is not { } slot) continue;
+            state = AgentNamedRequestPolicy.Place(state, request, slot.Day, slot.Meal);
+            context.PlacedRequests.Add(state.MealRequests[^1]);
+            // Yêu cầu rộng đã có từ lượt trước không tính là nới ràng buộc khi được chuyển về một bữa.
+            if (context.ConstraintBaseline is { } baseline)
+                context.ConstraintBaseline = AgentNamedRequestPolicy.Rebase(baseline, request, slot.Day, slot.Meal);
+        }
+        // Bữa do backend tự xếp mà món/quán mới không phục vụ (quán lẩu chỉ bán bữa tối thay cho bữa trưa): chuyển sang bữa hợp lệ gần nhất trong ngày.
+        foreach (var request in AgentNamedRequestPolicy.Relocatable(state, messages))
+        {
+            var fitting = await FittingMealsAsync(state, request, ct);
+            if (fitting is null || fitting.Contains(request.MealSlot!) ||
+                AgentNamedRequestPolicy.Slot(state, request with { MealSlot = null }, fitting) is not { } slot) continue;
+            state = AgentNamedRequestPolicy.Place(state, request, slot.Day, slot.Meal);
+            context.PlacedRequests.Add(state.MealRequests[^1]);
+            if (context.ConstraintBaseline is { } baseline)
+                context.ConstraintBaseline = AgentNamedRequestPolicy.Rebase(baseline, request, slot.Day, slot.Meal);
+        }
+        return state;
+    }
+
+    /// <summary>Meals the named dish or restaurant can serve, best first; null when the name is unresolved so the ranking step reports it.</summary>
+    private async Task<string[]?> FittingMealsAsync(AgentState state, AgentMealRequest request, CancellationToken ct)
+    {
+        var meals = AgentNamedRequestPolicy.Meals(state);
+        long? restaurantId = null;
+        if (request.RestaurantName is { } restaurantName)
+        {
+            var restaurant = await LookupAsync(new("restaurant", restaurantName, state.Province, request.RestaurantId), ct);
+            if (restaurant.Status != "found") return null;
+            restaurantId = restaurant.Matches.Single().RestaurantId;
+        }
+        int[] dishIds = [];
+        if (request.DishName is { } dishName)
+        {
+            var lookup = await LookupAsync(new("dish", dishName, state.Province), ct);
+            if (lookup.Status != "found") return null;
+            dishIds = lookup.Matches.Where(match => match.Available && (!restaurantId.HasValue || match.RestaurantId == restaurantId))
+                .Select(match => checked((int)match.Id)).ToArray();
+            if (dishIds.Length == 0) return null;
+        }
+        var fitting = new List<string>();
+        foreach (var meal in meals)
+        {
+            var filter = new DishCandidateFilter { Province = state.Province, RestaurantId = restaurantId, DishIds = dishIds, RequireAllTags = true, CompatibleMealTimeCode = meal };
+            var ids = await dishes.GetCandidateIdsAsync(filter, 1, ct);
+            if (ids is { Count: > 0 }) fitting.Add(meal);
+        }
+        // Không bữa nào hợp: vẫn xếp vào bữa ưu tiên để bước xếp hạng báo thiếu đúng bữa đó.
+        return fitting.Count > 0 ? [.. fitting] : meals;
+    }
+
     /// <summary>Splits a broad scope into day scopes, or meal scopes of a day, whose positions share one taste and meal request.</summary>
     private static AgentScope[] HomogeneousScopes(AgentState state, AgentScope scope)
     {
@@ -194,13 +256,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         int[] namedDishIds = [];
         if (mealRequest.RestaurantName is { } restaurantName)
         {
-            var lookup = await LookupAsync(context, new("restaurant", restaurantName, state.Province, mealRequest.RestaurantId), ct);
+            var lookup = await LookupAsync(new("restaurant", restaurantName, state.Province, mealRequest.RestaurantId), ct);
             if (lookup.Status != "found") return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             restaurantId = lookup.Matches.Single().RestaurantId;
         }
         if (mealRequest.DishName is { } dishName)
         {
-            var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
+            var lookup = await LookupAsync(new("dish", dishName, state.Province), ct);
             if (lookup.Status != "found") return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             namedDishIds = lookup.Matches.Where(x => x.Available && (!restaurantId.HasValue || x.RestaurantId == restaurantId))
                 .Select(x => checked((int)x.Id)).ToArray();
@@ -365,7 +427,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // "cái này", "món đó" chỉ là từ chỉ trỏ, không phải tên: tra cứu sẽ báo "không tìm thấy" một món người dùng chưa từng nêu.
         if (AgentEditScopePolicy.IsPointingOnly(input.Name))
             return ArgumentError(context, "Đây là từ chỉ trỏ, không phải tên món/quán. Hãy hỏi người dùng muốn nói món/bữa nào (clarification=edit_scope).");
-        var result = await LookupAsync(context, input, ct);
+        var result = await LookupAsync(input, ct);
         // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
         // mọi câu clarify của lượt sẽ thành "Đã tìm thấy kết quả đúng tên trong catalog."
         if (result.Status == "found") context.CatalogAnswer = Describe(result);
@@ -375,7 +437,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         return new { result.Status, result.Message, result.Matches };
     }
 
-    private async Task<CatalogLookup> LookupAsync(AgentContext context, AgentCatalogInput input, CancellationToken ct)
+    private async Task<CatalogLookup> LookupAsync(AgentCatalogInput input, CancellationToken ct)
     {
         if (input.Kind is not ("dish" or "restaurant") || string.IsNullOrWhiteSpace(input.Name) || input.Name.Length > 200 ||
             input.Province is not null && (string.IsNullOrWhiteSpace(input.Province) || input.Province.Length > 100) || input.SelectedId is <= 0)

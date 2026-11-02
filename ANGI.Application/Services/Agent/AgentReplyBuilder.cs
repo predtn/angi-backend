@@ -49,6 +49,9 @@ public static class AgentReplyBuilder
         if (snapshot.Items.Any(x => !x.RequestId.HasValue)) lines.Add("Một phần đề xuất dùng thứ tự đánh giá thay cho cá nhân hóa.");
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) lines.Add($"Khẩu vị áp dụng: {tastes}.");
+        // Món/quán người dùng gọi tên được xếp vào bữa nào thì nói rõ, để họ biết có thể yêu cầu đổi sang bữa khác.
+        foreach (var request in snapshot.State.MealRequests.Where(x => x.DayNumber.HasValue && x.MealSlot is not null && (x.DishName ?? x.RestaurantName) is not null))
+            lines.Add($"Theo yêu cầu của bạn: {Safe(request.DishName ?? request.RestaurantName)} ở {Meal(request.MealSlot!)} ngày {request.DayNumber}.");
         if (snapshot.State.TasteTargets.Length > 0 || snapshot.State.TasteOverrides.Length > 0)
             lines.Add("Khẩu vị là tiêu chí ưu tiên mềm, chưa bảo đảm từng món đạt mức vị đã chọn. Mức phù hợp còn phụ thuộc dữ liệu món và lịch sử tương tác.");
         if (validation?.Warnings.Any(x => x.Contains("ước lượng", StringComparison.Ordinal)) == true)

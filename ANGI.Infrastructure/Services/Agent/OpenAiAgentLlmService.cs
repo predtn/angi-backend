@@ -63,6 +63,8 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         may stay only if fresh recommendations still authorize them. Do not rerank unrelated days/meals.
         mealRequests separates catalog intent from taste: {dayNumber,mealSlot,dishName,restaurantName,restaurantId,tagIds,differentFromPlan}.
         Null day/meal means trip, null meal means day. Specific names override broader names; tags combine by AND.
+        'Phải có món X' or 'phải ăn ở quán Y' without a meal means one meal of the trip, not every meal: leave its
+        day/meal null and the backend places it on a fitting meal. Only 'mọi bữa'/'cả chuyến chỉ ăn' means every meal.
         A named dish or restaurant MUST be represented in mealRequests for its requested scope. Use search_catalog
         to resolve it; exact unavailable results are different from not_found. Near or duplicate restaurant names
         require catalog_choice clarification. Never silently substitute another dish/restaurant or infer a menu.
