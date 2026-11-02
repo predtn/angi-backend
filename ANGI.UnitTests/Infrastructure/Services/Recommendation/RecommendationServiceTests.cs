@@ -396,13 +396,16 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             result.RequestId.Should().BeNull(); result.Scores.Should().BeNull(); result.DishIds.Should().Equal(105);
         }
 
-        // TEST-22: A reco answer slower than the 100 ms list timeout but within the Agent timeout is used for a conversation ranking, while the same delay falls back for a regular ranking; covers both calls.
+        // TEST-22: A reco answer slower than the 100 ms list timeout but within the Agent timeout is used for a conversation ranking, while a regular
+        // ranking that reco never answers in time falls back; covers both calls.
         /// <summary>Ensures a brief reco pause no longer turns an Agent meal into rating fallback, without lengthening list screens.</summary>
         [Theory]
         [InlineData(true)][InlineData(false)]
         public async Task Ranking_SlowRecoAnswer_UsesAgentTimeoutOnlyForConversation(bool conversation)
         {
-            var handler = new DelayedHttpMessageHandler(TimeSpan.FromMilliseconds(400), """
+            // The regular call never gets an answer before its own timeout cancels it. A finite delay raced the 100 ms timer: when the thread pool
+            // was busy at the start of the parallel run, both timers fired in one batch and the reply sometimes won, so the test was flaky.
+            var handler = new DelayedHttpMessageHandler(conversation ? TimeSpan.FromMilliseconds(400) : Timeout.InfiniteTimeSpan, """
                 {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
                  "vector_source":"conversation","items":[{"dish_id":120,"rank":1,"recommend_score":0.9}],"ignored_dish_ids":[]}
                 """);
