@@ -7,11 +7,12 @@ using ANGI.Application.Common.Models.Discovery;
 using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.Services.Agent;
 using ANGI.Application.UseCases.Validators.Agent;
+using ANGI.UnitTests.Application.Services.Agent;
 using ANGI.UnitTests.Application.UseCases.Agent;
 using FluentAssertions;
 using Moq;
 
-namespace ANGI.UnitTests.Application.Services.Agent;
+namespace ANGI.UnitTests.Application.Common.Models.Agent;
 
 /// <summary>Checks scoped inheritance, named selectors, provenance and grounded replies at business boundaries.</summary>
 public sealed class AgentScopedPlanningTests
