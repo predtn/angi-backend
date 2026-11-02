@@ -14,6 +14,13 @@ public static class AgentReplyBuilder
         "các món này vẫn theo khẩu vị, ngân sách và điều kiện bạn đã nêu.";
     // Chỉ còn lặp khi cả danh sách gợi ý của bữa đó (kể cả món dự phòng) không còn món khác tên phù hợp; không suy ra catalog thiếu món.
     public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì danh sách gợi ý phù hợp cho các bữa đó không còn món khác.";
+    public const string NoveltyQuestion = "Bạn muốn món khác các món trong lịch hiện tại, hay món bạn chưa từng ăn? ANGI chưa có đủ dữ liệu để xác nhận toàn bộ lịch sử ăn uống của bạn.";
+    // ANGI không biết người dùng đã ăn gì; chỉ đề nghị điều backend làm được thật (khác các món trong lịch hiện tại).
+    public const string NoveltyWithoutHistory = "ANGI chưa có dữ liệu về những món bạn đã ăn nên chưa thể chọn theo ý \"món chưa từng ăn\". " +
+        "Mình có thể chọn các món khác với lịch hiện tại. Bạn có muốn vậy không?";
+    // Chưa có lịch thì không có "lịch hiện tại" để tránh: lập lịch theo khẩu vị như bình thường.
+    public const string NoveltyWithoutHistoryOrPlan = "ANGI chưa có dữ liệu về những món bạn đã ăn nên chưa thể chọn theo ý \"món chưa từng ăn\". " +
+        "Mình sẽ lập lịch theo các món hợp khẩu vị của bạn.";
     public static readonly string[] Clarifications = ["trip_details", "taste_scope", "taste_intensity", "edit_scope",
         "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general"];
 
@@ -88,7 +95,7 @@ public static class AgentReplyBuilder
             "taste_intensity" => tastes.Length > 0 ? $"Bạn muốn mức {tastes} như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?"
                 : "Bạn muốn vị nào và ở mức nào: không, nhẹ, vừa, nhiều hay rất nhiều?",
             "edit_scope" => "Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?",
-            "novelty" => "Bạn muốn món khác các món trong lịch hiện tại, hay món bạn chưa từng ăn? ANGI chưa có đủ dữ liệu để xác nhận toàn bộ lịch sử ăn uống của bạn.",
+            "novelty" => NoveltyQuestion,
             // Câu hỏi về catalog dùng kết quả tra cứu thật (tên không tìm thấy, các lựa chọn gần đúng) khi có.
             "catalog_choice" => context.CatalogNotice ?? "Bạn muốn chọn món hoặc nhà hàng nào trong các kết quả catalog đã tìm thấy?",
             "coverage" => Coverage(context),

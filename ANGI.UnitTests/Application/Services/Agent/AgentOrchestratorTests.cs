@@ -842,6 +842,26 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-42: "Món chưa ăn bao giờ" gets the novelty question and choosing "never eaten" gets the no-history reply, both without an LLM call
+    // and without any dish-name lookup.
+    /// <summary>Checks novelty is clarified honestly instead of being searched as a dish called "món chưa ăn bao giờ".</summary>
+    [Fact]
+    public async Task RunAsync_NoveltyRequest_IsClarifiedWithoutModel()
+    {
+        var context = AgentTestData.Context(); context.Request.Content = "Hà Nội 3 ngày, 1 triệu. Tôi muốn món chưa ăn bao giờ";
+        var llm = new Mock<IAgentLlmService>();
+
+        var question = await Create(llm.Object).RunAsync(context, default);
+        context.State = question.State; context.Request.Content = "Món chưa từng ăn";
+        var answer = await Create(llm.Object).RunAsync(context, default);
+
+        question.Reply.Should().Be(AgentReplyBuilder.NoveltyQuestion);
+        answer.Reply.Should().Be(AgentReplyBuilder.NoveltyWithoutHistoryOrPlan);
+        answer.State.PendingQuestion.Should().Be(AgentReplyBuilder.NoveltyWithoutHistoryOrPlan);
+        context.Grants.Should().BeEmpty();
+        llm.VerifyNoOtherCalls();
+    }
+
     // TEST-43: A real answer to the taste question ("Ít, toàn chuyến đi") keeps that question in the state the model receives, while
     // a reply that ignores it is sent without it; covers both.
     /// <summary>Prevents the model from losing which question a short answer refers to, which made it ask the scope again.</summary>

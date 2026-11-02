@@ -40,6 +40,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             telemetry.Record("edit_scope_clarification", context.ConversationId, context.TurnId, context.AttemptId);
             return new(editQuestion, context.State with { PendingQuestion = editQuestion }, null, null);
         }
+        // "Món lạ/món mới/món chưa ăn" không có tag nào tương ứng: hỏi nghĩa trước, không để model tra nó như tên món.
+        if (AgentNoveltyPolicy.Question(context) is { } noveltyQuestion)
+        {
+            telemetry.Record("novelty_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(noveltyQuestion, context.State with { PendingQuestion = noveltyQuestion }, null, null);
+        }
         // Timeout áp dụng cho toàn bộ vòng LLM/tools của lượt chat; ct vẫn giữ quyền hủy từ caller.
         // Use case đã commit bước claim trước khi vào đây nên không giữ transaction DB trong lúc chờ AI.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
