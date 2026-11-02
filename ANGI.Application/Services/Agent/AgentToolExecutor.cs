@@ -193,17 +193,17 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (mealRequest.RestaurantName is { } restaurantName)
         {
             var lookup = await LookupAsync(context, new("restaurant", restaurantName, state.Province, mealRequest.RestaurantId), ct);
-            if (lookup.Status != "found") return ScopedRanking.Stopped(scope, Notice(context, Describe(lookup), lookup.Status));
+            if (lookup.Status != "found") return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             restaurantId = lookup.Matches.Single().RestaurantId;
         }
         if (mealRequest.DishName is { } dishName)
         {
             var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
-            if (lookup.Status != "found") return ScopedRanking.Stopped(scope, Notice(context, Describe(lookup), lookup.Status));
+            if (lookup.Status != "found") return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             namedDishIds = lookup.Matches.Where(x => x.Available && (!restaurantId.HasValue || x.RestaurantId == restaurantId))
                 .Select(x => checked((int)x.Id)).ToArray();
             if (namedDishIds.Length == 0)
-                return ScopedRanking.Stopped(scope, Notice(context, "Chưa tìm thấy món được yêu cầu trong menu khả dụng của nhà hàng đã chọn. Bạn có muốn chọn món hoặc nhà hàng khác không?", "menu_mismatch"));
+                return ScopedRanking.Stopped(scope, CatalogNotice(context, "Chưa tìm thấy món được yêu cầu trong menu khả dụng của nhà hàng đã chọn. Bạn có muốn chọn món hoặc nhà hàng khác không?", "menu_mismatch"));
         }
         // Hai giới hạn cùng tồn tại thì lấy giá trị nhỏ hơn: tool không được tăng trần giá/bán kính của state.
         var maxPrice = Min(state.MaxPricePerMeal, input.MaxPricePerMeal);
@@ -355,7 +355,12 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             input.Province is not null && (string.IsNullOrWhiteSpace(input.Province) || input.Province.Length > 100) || input.SelectedId is <= 0)
             return ArgumentError(context, "Tên món/quán cần tra cứu không hợp lệ.");
         var result = await LookupAsync(context, input, ct);
-        context.ToolNotice = Describe(result);
+        // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
+        // mọi câu clarify của lượt sẽ thành "Đã tìm thấy kết quả đúng tên trong catalog."
+        if (result.Status == "found") context.CatalogAnswer = Describe(result);
+        // Giữ riêng kết quả tra cứu không khớp (kèm các lựa chọn gần đúng): lần lấy gợi ý sau xóa ToolNotice, làm câu hỏi
+        // "chọn trong kết quả đã tìm thấy" mất danh sách và "không tìm thấy" mất tên món/quán.
+        else context.ToolNotice = context.CatalogNotice = Describe(result);
         return new { result.Status, result.Message, result.Matches };
     }
 
@@ -397,6 +402,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     {
         context.ToolNotice = message;
         return new { status, rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>(), warnings = new[] { message } };
+    }
+
+    /// <summary>A catalog lookup notice that later ranking calls cannot erase, so catalog questions keep the name and the near matches.</summary>
+    private static object CatalogNotice(AgentContext context, string message, string status)
+    {
+        context.CatalogNotice = message;
+        return Notice(context, message, status);
     }
 
     private static bool FitsMeal(ANGI.Domain.Entities.Dish dish, string? meal) => meal is null ||

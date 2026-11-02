@@ -459,6 +459,39 @@ public sealed class AgentToolExecutorTests
         telemetry.Verify(x => x.Record("tool_argument_error", 7, It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<object?>()), Times.Once);
     }
 
+    // TEST-20: An exact search_catalog match is kept only as an answer fact, never as a notice that replaces a clarification, while an
+    // unfound name becomes both the turn notice and the catalog notice; covers a found and an unfound restaurant.
+    /// <summary>Stops "Đã tìm thấy kết quả đúng tên trong catalog." from being sent as the reply to an unrelated question.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_SearchCatalog_FoundIsAnswerOnlyAndUnfoundIsNotice(bool found)
+    {
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("restaurant", "Lẩu Bò Mai", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync(found
+            ? [new(575, "Lẩu Bò Mai", 575, "Lẩu Bò Mai", "Da Nang", "2 Tống Duy Tân", true)] : []);
+        catalog.Setup(x => x.SearchAsync("restaurant", "Lẩu Bò Mai", null, 21, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var context = AgentTestData.Context();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "Lẩu Bò Mai", "Da Nang"), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be(found ? "found" : "not_found");
+        if (found)
+        {
+            context.ToolNotice.Should().BeNull(); context.CatalogNotice.Should().BeNull();
+            context.CatalogAnswer.Should().StartWith("Đã tìm thấy kết quả đúng tên trong catalog.");
+        }
+        else
+        {
+            context.ToolNotice.Should().StartWith("Chưa tìm thấy món/quán"); context.CatalogNotice.Should().Be(context.ToolNotice);
+            context.CatalogAnswer.Should().BeNull();
+        }
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {

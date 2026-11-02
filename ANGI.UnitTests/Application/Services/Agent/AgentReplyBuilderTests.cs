@@ -197,4 +197,35 @@ public sealed class AgentReplyBuilderTests
 
         AgentReplyBuilder.SaveConfirmation(proposal).Should().Be(expected);
     }
+
+    // TEST-15: Catalog questions repeat the real lookup result (missing name, near matches) when one exists, even after a later ranking
+    // reset the tool notice; covers catalog_choice and catalog_support with and without a lookup result.
+    /// <summary>Prevents "choose from the results found" without any results, or "not supported" without naming what was not found.</summary>
+    [Theory]
+    [InlineData("catalog_choice", true)][InlineData("catalog_choice", false)]
+    [InlineData("catalog_support", true)][InlineData("catalog_support", false)]
+    public void Clarify_CatalogQuestion_UsesLookupResult(string kind, bool looked)
+    {
+        const string lookup = "Chưa tìm thấy món/quán theo tên yêu cầu trong danh mục ANGI. Bạn có muốn xem lựa chọn khác không?\nPhố Cổ Quán — 1 Hàng Bạc, Hà Nội; khả dụng";
+        var context = AgentTestData.Context();
+        context.ToolNotice = null;
+        if (looked) context.CatalogNotice = lookup;
+
+        var reply = AgentReplyBuilder.Clarify(context, kind);
+
+        if (looked) reply.Should().Be(lookup);
+        else reply.Should().NotContain("Phố Cổ Quán").And.NotBeNullOrWhiteSpace();
+    }
+
+    // TEST-16: An exact catalog match answers a direct catalog question but never replaces a clarification; covers answer and edit_scope.
+    /// <summary>Keeps the found-lookup text out of questions such as "Bạn muốn thay đổi toàn lịch hay ngày/bữa…".</summary>
+    [Fact]
+    public void CatalogAnswer_AnswersOnlyDirectQuestions()
+    {
+        var context = AgentTestData.Context();
+        context.CatalogAnswer = "Đã tìm thấy kết quả đúng tên trong catalog.\nLẩu Bò Mai — Lẩu Bò Mai, 2 Tống Duy Tân, Hà Nội; khả dụng";
+
+        AgentReplyBuilder.Answer(context).Should().Be(context.CatalogAnswer);
+        AgentReplyBuilder.Clarify(context, "edit_scope").Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+    }
 }

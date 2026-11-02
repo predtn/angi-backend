@@ -84,9 +84,10 @@ public static class AgentReplyBuilder
             "taste_intensity" => "Bạn muốn mức khẩu vị thấp, hơi thấp, vừa, hơi cao hay cao?",
             "edit_scope" => "Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?",
             "novelty" => "Bạn muốn món khác các món trong lịch hiện tại, hay món bạn chưa từng ăn? ANGI chưa có đủ dữ liệu để xác nhận toàn bộ lịch sử ăn uống của bạn.",
-            "catalog_choice" => "Bạn muốn chọn món hoặc nhà hàng nào trong các kết quả catalog đã tìm thấy?",
+            // Câu hỏi về catalog dùng kết quả tra cứu thật (tên không tìm thấy, các lựa chọn gần đúng) khi có.
+            "catalog_choice" => context.CatalogNotice ?? "Bạn muốn chọn món hoặc nhà hàng nào trong các kết quả catalog đã tìm thấy?",
             "coverage" => Coverage(context),
-            "catalog_support" => "Yêu cầu này cần dữ liệu hoặc tag phù hợp trong catalog; mình chưa thể xác nhận từ dữ liệu hiện có. Bạn có muốn chọn tiêu chí khác không?",
+            "catalog_support" => context.CatalogNotice ?? "Yêu cầu này cần dữ liệu hoặc tag phù hợp trong catalog; mình chưa thể xác nhận từ dữ liệu hiện có. Bạn có muốn chọn tiêu chí khác không?",
             "budget" => "Ngân sách hiện tại có thể chưa đủ cho các món phù hợp. Bạn muốn tăng ngân sách, bớt số ngày/bữa, hay đặt mức giá tối đa mỗi bữa để mình chọn món rẻ hơn?",
             // Chưa có lịch nào: không mời "xem lại đề xuất". Đã lấy gợi ý mà chưa ghép được lịch thì nói rõ là chưa hoàn tất.
             _ when context.Source is null => context.Exchanges.Count > 0 ? PlanningIncomplete
@@ -131,7 +132,7 @@ public static class AgentReplyBuilder
     }
 
     /// <summary>Answers using the current snapshot or a trusted tool outcome, without inventing facts.</summary>
-    public static string Answer(AgentContext context) => context.ToolNotice ?? (context.Source is { } source
+    public static string Answer(AgentContext context) => context.ToolNotice ?? context.CatalogAnswer ?? (context.Source is { } source
         ? Proposal(source, saved: context.Roadmap is not null && context.CurrentProposal?.Status != "ready")
         : "Mình có thể lập lịch ăn uống từ những món và nhà hàng trong catalog ANGI. Bạn muốn lập lịch hoặc tìm món/quán nào?");
 
