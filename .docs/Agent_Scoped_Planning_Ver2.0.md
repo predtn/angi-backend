@@ -172,7 +172,38 @@ remain committable. All saved dishes still go through the existing transactional
 
 ## Grounded replies
 
-LLM reply text is an internal draft and is not forwarded as factual user-visible text.
+LLM reply text is an internal draft and is not forwarded as factual user-visible text. The one exception,
+decided by the project owner on 2026-11-02, is `action=chat`: a social reply states no fact, so it is shown after
+`AgentSmallTalkPolicy` rejects anything with digits, prices, a claimed change, a link, markup, internal terms or
+more than 200 characters, falling back to a fixed sentence.
+A whole-message greeting, thanks or "who are you" gets a fixed reply before any LLM call ("Chào bạn, mình là ANGI…").
+`action=out_of_scope` covers anything outside dishes, restaurants and the food itinerary, including general food
+knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always exactly: "Việc này
+nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi." For a food question, the
+nullable `suggestedDish` adds one offer to find that dish, only when the user's own message names it.
+Both actions run before state acceptance and return the state from the start of the turn: they cannot change a
+constraint, close an open question or join the pending planning request, and the current proposal stays savable.
+A greeting repeats the question still open; the refusal stays verbatim.
+A new preview is announced in a few sentences (place, days, total, empty meals, required disclosures); an edit names
+what changed and says the rest stayed. Its dishes are shown by the proposal card and map, never repeated in chat. The
+itinerary is listed in chat only for a request to see a saved plan (`AgentChatPolicy.IsPlanViewRequest`) with no ready
+proposal on screen.
+Decided by the project owner on 2026-11-03: the model also words `answer` replies, `edit_scope` and `general`
+clarifications (when no tool ran and no trip detail is missing) and a fact-free opener for a preview. `AgentGroundedReply`
+shows that wording only if every number and mid-sentence capitalized name appears in the plan, trip state, this turn's
+tool results or the user's message, and it makes no change claim, internal term, link or unbacked claim (opening hours,
+fame). It cannot detect an invented lowercase dish name. Any failure shows the fixed reply. Taste, novelty, budget,
+coverage and catalog questions stay fixed because state or evidence depends on their exact text.
+
+Saving is handled by `AgentSavePolicy` without the model, also decided on 2026-11-03. Saving with no known start date
+asks for one and names the planned days; the answer ("3/11", "từ 3/11 đến 5/11", "ngày mai", "thứ 7 tuần sau", read by
+`AgentDatePolicy` in Vietnam time) saves at once. A date already past or a range whose length differs from the plan is
+asked again and never changes the plan; "đổi thành N ngày" is a normal constraint change. "Để sau" saves with no date,
+because `roadmaps.start_date` stays nullable. A bare "lưu" with a known date asks "Mình lưu lịch hiện tại … nhé?", and a
+short yes ("ok", "ừ", "đúng rồi") then saves. Backend-owned `pendingSave` ties that yes to the exact proposal ID and
+version asked about; it lives one turn, and clients or the model cannot set it. A plain yes without it saves nothing.
+A start date stated after the preview does not need a new preview, since it does not change the dishes. AGENT-04 accepts
+an optional `startDate` for the save dialog.
 AgentOutput.clarification is nullable and allowlisted: trip_details, taste_scope, taste_intensity,
 edit_scope, novelty, catalog_choice, coverage, catalog_support, general.
 Backend constructs proposal summaries, catalog failure messages, clarification questions and answers

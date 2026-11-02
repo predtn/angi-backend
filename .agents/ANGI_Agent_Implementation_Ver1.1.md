@@ -112,6 +112,10 @@ Không dựng lại lịch chính thức chỉ từ nội dung chat. State và s
 | Không có ứng viên | Nêu điều kiện gây thiếu, hỏi có muốn nới điều kiện; không tự bỏ giới hạn bắt buộc. |
 | “Vui vui, lạ miệng” | Hỏi cách hiểu cụ thể và chỉ ánh xạ sang tag/bộ lọc có thật. |
 | “Đồng ý” trong khi còn câu hỏi chưa giải quyết | Không tự coi là xác nhận commit. |
+| Chốt lịch khi chưa có ngày đi | Hỏi ngày bắt đầu và nêu số ngày của lịch; “để sau” thì lưu không có ngày. Khoảng ngày lệch số ngày thì hỏi lại, không tự đổi lịch. |
+| “Ok” ngay sau “Mình lưu lịch hiện tại … nhé?” | Lưu đúng phiên bản proposal vừa hỏi; “ok” ở lúc khác không lưu gì. |
+| Chào hỏi, cảm ơn, hỏi “bạn là ai” | Trả lời tự nhiên và giới thiệu là ANGI; không đổi lịch, state hay câu hỏi đang mở. |
+| Việc ngoài món ăn, quán và lịch ăn uống | Từ chối bằng đúng câu cố định; câu hỏi ẩm thực chung có nêu tên món thì đề nghị tìm quán món đó. |
 
 RECO-05 hiện chưa có tham số taste vector theo câu chat. Không mô tả việc hiểu văn nói là một thuật toán ranking mới đã được triển khai.
 
@@ -683,7 +687,7 @@ This section supersedes the required three-field transport contract in section X
 
 This section supersedes section XIX's no-retry and uniform HTTP 503 rules. The user explicitly requested real Gemini verification for the itinerary lifecycle fixes.
 
-- Province, duration and budget are required to plan; startDate is optional. Preserve known duration without asking for calendar dates. Supply currentDate and actual catalogTags in provider context; unsupported sweet/spicy tastes remain notes, never invented tag guarantees.
+- Province, duration and budget are required to plan; startDate is optional while planning and asked for by the backend at save time. Preserve known duration without asking for calendar dates. Supply currentDate and actual catalogTags in provider context; unsupported sweet/spicy tastes remain notes, never invented tag guarantees.
 - Return complete proposal snapshots ordered by day, meal, sortOrder and stable item key, including older proposals restored through GET. Clear navigation focus after a successful edit.
 - Candidate searches may cover a broader scope than an edit. Only new/replacement dishes must differ from previous alternatives; preserve unchanged side dishes and every item outside the edit boundary. Explicit legacy alternative commands retain full-scope exclusion.
 - A proposal-operation error permits one bounded repair with specific backend feedback. patch_proposal requires empty items and nonempty changes. Disable provider tools at the tool-round ceiling so the model finishes or clarifies instead of requesting another round. MaxLlmCalls defaults to 8.
