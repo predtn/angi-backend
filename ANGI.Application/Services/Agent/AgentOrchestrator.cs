@@ -198,7 +198,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     AgentChangeRequestPolicy.IsUnrequested(context.Request.Content, confirmedState, context.State, context.CatalogTagNames))
                 {
                     telemetry.Record("unrequested_change", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope });
-                    return new(AgentReplyBuilder.Clarify(context, "general"), confirmedState, null, null);
+                    // Câu hỏi cũ (nếu có) cũng hết hiệu lực: giữ lại nó sẽ chặn "chốt lịch này" bằng một câu hỏi người dùng đã bỏ qua.
+                    return new(AgentReplyBuilder.Clarify(context, "general"), confirmedState with { PendingQuestion = ClearedQuestion(confirmedState) }, null, null);
                 }
                 if (output.Action is "clarify" or "answer")
                 {
@@ -277,8 +278,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                             future.State, checkedFuture.Snapshot, checkedFuture.Validation);
                     }
                     var reply = output.Action == "clarify" ? AgentReplyBuilder.Clarify(context, output.Clarification) : AgentReplyBuilder.Answer(context);
-                    if (output.Action == "clarify") context.State = context.State with
-                        { PendingQuestion = reply[..Math.Min(reply.Length, 1000)] };
+                    // Model đã trả lời thay vì hỏi tiếp nghĩa là câu hỏi cũ không còn mở; câu hỏi khẩu vị còn gắn với yêu cầu đang lập nên giữ.
+                    context.State = context.State with { PendingQuestion = output.Action == "clarify" ? reply[..Math.Min(reply.Length, 1000)] : ClearedQuestion(context.State) };
                     return new(reply, context.State, null, null);
                 }
                 // create_proposal supplies a scoped selection; backend creates or updates from the owned source.
@@ -384,6 +385,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
         catch (FluentValidation.ValidationException) { throw Unavailable(); }
     }
+
+    /// <summary>A superseded question is dropped; a taste question stays because it belongs to the planning request being clarified.</summary>
+    private static string? ClearedQuestion(AgentState state) =>
+        AgentTasteClarificationPolicy.IsQuestion(state.PendingQuestion) ? state.PendingQuestion : null;
 
     /// <summary>Asks the user how to resolve a budget the rejected proposal exceeded; the previous ready proposal stays.</summary>
     private static AgentPreparedTurn BudgetQuestion(AgentState state, AgentValidation validation)

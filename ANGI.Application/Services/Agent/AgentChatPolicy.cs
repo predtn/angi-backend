@@ -30,6 +30,14 @@ public static class AgentChatPolicy
     /// <summary>Rejects the pending constraint change without discarding the previously valid preview.</summary>
     public static bool RejectsChange(string content) => Normalize(content) is "khong" or "khong dong y" or "giu nguyen" or "huy thay doi" or "no";
 
+    /// <summary>Declines an open clarification over an existing plan: nothing changes and the plan stays savable.</summary>
+    public static bool DismissesQuestion(string content) => Normalize(content) is "khong" or "thoi" or "giu nguyen" or "khong doi" or "khong doi nua" or "khong can" or "no";
+
+    /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
+    public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
+        ? $"Trước khi lưu, mình cần bạn trả lời: {question} Nếu không muốn đổi gì, nhắn ‘giữ nguyên’ rồi ‘chốt lịch này’."
+        : "Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.";
+
     /// <summary>Resolves unambiguous draft controls before a provider call; other natural phrases remain model-interpreted.</summary>
     public static string? DraftControl(string content) => Normalize(content) switch
     {

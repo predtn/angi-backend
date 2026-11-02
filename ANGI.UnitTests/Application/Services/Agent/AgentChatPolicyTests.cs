@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent;
 using FluentAssertions;
 
@@ -89,4 +90,30 @@ public sealed class AgentChatPolicyTests
     [InlineData("lưu?", false)]
     [InlineData("lưu món này vào yêu thích", false)]
     public void IsShortSaveRequest_BareIntentOnly(string text, bool expected) => AgentChatPolicy.IsShortSaveRequest(text).Should().Be(expected);
+
+    // TEST-07: Declining a clarification is recognized; covers each accepted phrase and wording that asks for something else.
+    /// <summary>Gives the user a free way out of a question so the current plan can be saved.</summary>
+    [Theory]
+    [InlineData("không", true)][InlineData("Thôi", true)][InlineData("giữ nguyên", true)][InlineData("không đổi nữa", true)][InlineData("không cần", true)]
+    [InlineData("đổi bữa trưa", false)][InlineData("có", false)]
+    public void DismissesQuestion_ReadsWholeMessage(string content, bool expected)
+    {
+        AgentChatPolicy.DismissesQuestion(content).Should().Be(expected);
+    }
+
+    // TEST-08: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
+    /// <summary>Prevents the user from being told to answer a question the message does not show.</summary>
+    [Theory]
+    [InlineData("question")][InlineData("change")][InlineData("planning")]
+    public void SaveBlocked_ExplainsWhatIsOpen(string area)
+    {
+        var state = new AgentState { PendingQuestion = "Bạn muốn đổi bữa nào?" };
+        if (area == "change") state = state with { PendingStateChange = new AgentState() };
+        if (area == "planning") state = state with { PendingPlanningRequest = new(["x"]) };
+
+        var reply = AgentChatPolicy.SaveBlocked(state);
+
+        if (area == "question") reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
+        else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
+    }
 }

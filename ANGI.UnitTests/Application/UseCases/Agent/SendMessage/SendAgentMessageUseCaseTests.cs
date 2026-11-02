@@ -287,6 +287,69 @@ public sealed class SendAgentMessageUseCaseTests
     }
 
     /// <summary>Creates a complete real use case over isolated persistence/provider boundaries.</summary>
+    // TEST-17: Declining an open clarification over a ready preview closes it without a provider call and the plan stays current.
+    /// <summary>Gives the user a free way past a question so "chốt lịch này" works next.</summary>
+    [Theory]
+    [InlineData("giữ nguyên")][InlineData("thôi")][InlineData("không")]
+    public async Task ExecuteAsync_DeclineQuestionOverReadyProposal_ClearsItWithoutProvider(string content)
+    {
+        var fixture = new AgentUseCaseFixture();
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Bạn muốn đổi bữa nào?" });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        var request = Request(); request.Content = content;
+
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Reply.Should().Contain("Đã giữ nguyên lịch hiện tại");
+        result.Proposal.Should().NotBeNull();
+        AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().BeNull();
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-20: Declining after an accepted change that produced no preview returns to the reviewed constraints, so the preview can be saved.
+    /// <summary>Prevents "giữ nguyên" from leaving a state that no longer matches the preview and blocks saving.</summary>
+    [Fact]
+    public async Task ExecuteAsync_DeclineAfterFailedChange_RestoresReviewedConstraints()
+    {
+        var fixture = new AgentUseCaseFixture();
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Chưa có món?", MealRequests = [new(1, "lunch", null, "Quán khác", [])] });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        var request = Request(); request.Content = "giữ nguyên";
+
+        await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        AgentJson.Read<AgentState>(fixture.Conversation.State).MealRequests.Should().BeEmpty();
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-18: A save with an open clarification names that question and points to the way out.
+    /// <summary>Prevents a dead end where the user is told to answer a question that is not shown.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SaveWithOpenQuestion_NamesTheQuestion()
+    {
+        var fixture = new AgentUseCaseFixture();
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Bạn muốn đổi bữa nào?" });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        var request = Request(); request.Content = "chốt lịch này";
+
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Commit.Should().BeNull();
+        result.Reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
+    }
+
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),
         fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object, fixture.Clock, fixture.Limits,
         new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object), fixture.Orchestrator(), fixture.Telemetry, fixture.Committer());

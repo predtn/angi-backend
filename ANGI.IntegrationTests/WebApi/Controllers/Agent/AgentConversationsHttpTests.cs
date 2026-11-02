@@ -1473,13 +1473,34 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         current.CurrentProposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
         current.CurrentProposal.Status.Should().Be("ready"); current.State.PendingQuestion.Should().BeNull();
         edit.Reply.Should().StartWith("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
-        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("trả lời câu hỏi");
+        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?").And.Contain("giữ nguyên");
         scenario.Llm.Calls.Should().Be(calls);
         await factory.ExecuteDbAsync(async db =>
         {
             (await db.Roadmaps.CountAsync()).Should().Be(0);
             (await db.AgentProposals.CountAsync()).Should().Be(1);
         });
+    }
+
+    // TEST-57: Declining an open clarification closes it without the LLM, so the same preview is saved by the next save message.
+    /// <summary>Verifies through HTTP and PostgreSQL that a question the user declines no longer blocks saving.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_DeclineQuestion_ThenSaveCommitsPreview()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        var calls = scenario.Llm.Calls;
+
+        await SendPromptAsync(client, conversation.ConversationId, "đổi cái đó đi");
+        var kept = await SendPromptAsync(client, conversation.ConversationId, "giữ nguyên");
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
+
+        kept.Reply.Should().StartWith("Đã giữ nguyên lịch hiện tại.");
+        saved.Commit!.CommittedProposalId.Should().Be(preview.Proposal!.ProposalId);
+        scenario.Llm.Calls.Should().Be(calls);
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>

@@ -141,6 +141,11 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 }
                 else if (context.State.PendingStateChange is not null && AgentChatPolicy.RejectsChange(request.Content))
                     prepared = new("Đã giữ nguyên các điều kiện trước đó.", context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
+                // Từ chối một câu hỏi làm rõ khi đã có lịch: đóng câu hỏi, không gọi LLM, để lịch hiện tại lưu được ngay.
+                else if (context.State.PendingQuestion is not null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
+                    context.CurrentProposal?.Status == "ready" && AgentChatPolicy.DismissesQuestion(request.Content))
+                    // Về đúng điều kiện của bản đề xuất: một yêu cầu đổi chưa thành lịch (ví dụ quán không có món cho bữa đó) sẽ không còn chặn việc lưu.
+                    prepared = new("Đã giữ nguyên lịch hiện tại. Nhắn ‘chốt lịch này’ nếu bạn muốn lưu.", context.CurrentProposal.Snapshot.State with { PendingQuestion = null }, null, null);
                 else if (AgentChatPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
                     context.State.PendingQuestion is null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
                     AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
@@ -149,7 +154,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 {
                     var proposal = context.CurrentProposal;
                     if (context.State.PendingQuestion is not null || context.State.PendingStateChange is not null || context.State.PendingPlanningRequest is not null)
-                        prepared = new("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.", context.State, null, null);
+                        prepared = new(AgentChatPolicy.SaveBlocked(context.State), context.State, null, null);
                     else if (proposal is null || proposal.Status is not ("ready" or "committed"))
                         prepared = new("Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.", context.State, null, null);
                     else if (proposal.Status == "committed" && !AgentConversationRules.SameConstraints(context.State, proposal.Snapshot.State))

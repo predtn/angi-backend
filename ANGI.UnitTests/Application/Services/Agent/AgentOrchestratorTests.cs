@@ -906,7 +906,7 @@ public sealed class AgentOrchestratorTests
 
         result.Snapshot.Should().BeNull();
         result.Reply.Should().Be("Bạn muốn xem lại lịch hiện tại hay thay đổi ngày/bữa hoặc món nào?");
-        result.State.Should().BeSameAs(start);
+        result.State.Should().Be(start);
         result.State.PendingQuestion.Should().BeNull();
         context.Source.Should().BeSameAs(source);
     }
@@ -959,6 +959,43 @@ public sealed class AgentOrchestratorTests
     }
 
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>
+    // TEST-47: An unrequested change also closes an older clarification question, so the current plan can be saved.
+    /// <summary>Fixes a stale question that kept blocking "chốt lịch này" after the user moved on.</summary>
+    [Fact]
+    public async Task RunAsync_UnrequestedChangeWithOldQuestion_ClearsQuestion()
+    {
+        var source = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2));
+        var context = AgentTestData.Context(source); context.Request.Content = "ăn vui vui";
+        context.State = context.State with { PendingQuestion = "Bạn có muốn xem lựa chọn khác không?" };
+        context.Grants.Add(new(null, "lunch", [3, 4], Guid.NewGuid(), context.State));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(3, "a", 1), AgentTestData.Item(4, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3), AgentTestData.Dish(4)]).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.State.PendingQuestion.Should().BeNull();
+    }
+
+    // TEST-48: An answer closes an older clarification question; a taste question stays because it belongs to the request being clarified.
+    /// <summary>Ensures only questions the user has really moved past are dropped.</summary>
+    [Theory]
+    [InlineData("Bạn có muốn xem lựa chọn khác không?", false)]
+    [InlineData("Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?", true)]
+    public async Task RunAsync_AnswerWithOldQuestion_ClearsOnlyNonTasteQuestion(string question, bool kept)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1)));
+        context.Request.Content = "Có những món gì?";
+        context.State = context.State with { PendingQuestion = question };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        result.State.PendingQuestion.Should().Be(kept ? question : null);
+    }
+
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
     {
