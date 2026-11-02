@@ -1,8 +1,12 @@
 using ANGI.Application.Common.Interfaces.UseCases.Administration;
-using ANGI.Application.UseCases.Administration.GetModPermissions;
-using ANGI.Application.UseCases.Administration.GetModDetail;
-using ANGI.Application.UseCases.Administration.GetPermissionCatalog;
 using ANGI.Application.UseCases.Administration.CreateMod;
+using ANGI.Application.UseCases.Administration.GetDashboardSummary;
+using ANGI.Application.UseCases.Administration.GetDashboardTimeSeries;
+using ANGI.Application.UseCases.Administration.GetDashboardTop;
+using ANGI.Application.UseCases.Administration.GetFailedOutboxMessages;
+using ANGI.Application.UseCases.Administration.GetModDetail;
+using ANGI.Application.UseCases.Administration.GetModPermissions;
+using ANGI.Application.UseCases.Administration.GetPermissionCatalog;
 using ANGI.Application.UseCases.Administration.ListMods;
 using ANGI.Application.UseCases.Administration.ReplaceModPermissions;
 using ANGI.Application.UseCases.Administration.ReplaceModRolePermissions;
@@ -25,6 +29,10 @@ public static class AdministrationModule
         services.AddScoped<IGetModPermissionsUseCase, GetModPermissionsUseCase>();
         services.AddScoped<IReplaceModPermissionsUseCase, ReplaceModPermissionsUseCase>();
         services.AddScoped<IReplaceModRolePermissionsUseCase, ReplaceModRolePermissionsUseCase>();
+        services.AddScoped<IGetDashboardSummaryUseCase, GetDashboardSummaryUseCase>();
+        services.AddScoped<IGetDashboardTimeSeriesUseCase, GetDashboardTimeSeriesUseCase>();
+        services.AddScoped<IGetDashboardTopUseCase, GetDashboardTopUseCase>();
+        services.AddScoped<IGetFailedOutboxMessagesUseCase, GetFailedOutboxMessagesUseCase>();
         return services;
     }
 }
