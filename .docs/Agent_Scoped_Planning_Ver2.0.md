@@ -107,6 +107,26 @@ is the N-th declared meal (default breakfast, lunch, dinner). A whole-day overri
 for a day whose meals the user named is narrowed to those meals, unless the same day is also named
 without a meal. A meal number beyond the declared meals is asked about before any LLM call. Itinerary
 replies list each applied taste with its level and scope.
+A dish or restaurant named without a meal ("phải có món X", "phải ăn ở quán Y") means one meal of the trip: the backend
+moves it from the trip/day request to the first free, fitting meal (lunch, dinner, then breakfast) before ranking, and keeps
+that placement when the model resends the wide request. Wording naming it with "mọi bữa", "cả chuyến", "chỉ ăn" keeps the
+wide scope. Duration and budget stated in the current message override the model's copy ("500k 1 ngày" can never become
+1,500 đồng); constraint confirmation still applies. On a trip_details clarify the model returns every value stated so far.
+An answer or an unrequested-change result closes any open non-taste question, so it cannot keep blocking save. "giữ nguyên",
+"thôi", "không" declining an open question over a ready proposal close it without an LLM call; a blocked save names the open
+question. A bare acknowledgement ("ok", "thôi", "hmm") over a plan with nothing open, and a dislike naming nothing ("cái này
+không ngon"), get a fixed reply before any LLM call; pointing words are refused as a catalog name.
+A whole-message removal of a meal with its day, a whole day, a meal on every day or an exact dish name ("xóa bữa tối ngày 2", "xóa
+ngày 3", "bỏ bữa trưa toàn chuyến", "bỏ món Phở Gà", or a bare removal of the UI-selected item) is applied without an LLM call and
+returns a new preview, keeping numDays; "bỏ bữa sáng" alone asks which days, without an LLM call; a meal holding a named request goes to the
+model so constraint confirmation applies. Backend-owned `skippedMeals` lists meals removed on purpose. A declared meal may stay
+empty when skipped or when the source already lacked it; a gap the edit creates, a new day or a new meal slot still blocks.
+Removing every item of an unsaved preview points to discarding it. Backend-owned `replacedDishNames` (last 40) keeps replaced
+and removed dishes out of later rankings of the trip unless they are the only candidates or requested by name, so repeated "món
+khác" does not cycle. A proposal only over budget is repaired before the model repair: the most expensive new dishes are swapped
+for cheaper dishes already ranked for that position and constraints (ranking keeps at least 30 names per meal as reserve grants,
+never sent to the model); requested names and retained rows stay, and the budget question is asked only when nothing cheaper fits.
+A conversation whose roadmap was deleted answers ROADMAP_NOT_FOUND with the way forward; "làm lại từ đầu" detaches it and starts empty.
 Taste clarification retains a backend-owned `pendingPlanningRequest`: the original request, bounded
 recent partial answers, and explicitly stated duration/total or daily budget. The active trip and draft
 stay unchanged while taste is unresolved. When resolved, those explicit facts override stale model
