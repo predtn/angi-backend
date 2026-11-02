@@ -40,6 +40,8 @@ public static class AgentReplyBuilder
         }
         lines.Add($"Tổng tiền dự kiến theo đề xuất: {Money(snapshot.Items.Sum(x => x.Price))} đồng/người.");
         if (snapshot.Items.Any(x => !x.RequestId.HasValue)) lines.Add("Một phần đề xuất dùng thứ tự đánh giá thay cho cá nhân hóa.");
+        // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
+        if (TasteScopes(snapshot.State) is { } tastes) lines.Add($"Khẩu vị áp dụng: {tastes}.");
         if (snapshot.State.TasteTargets.Length > 0 || snapshot.State.TasteOverrides.Length > 0)
             lines.Add("Khẩu vị là tiêu chí ưu tiên mềm, chưa bảo đảm từng món đạt mức vị đã chọn. Mức phù hợp còn phụ thuộc dữ liệu món và lịch sử tương tác.");
         if (validation?.Warnings.Any(x => x.Contains("ước lượng", StringComparison.Ordinal)) == true)
@@ -78,10 +80,13 @@ public static class AgentReplyBuilder
     {
         if (context.ToolNotice is { } notice) return notice;
         if (TripDetailsQuestion(context.State) is { } tripQuestion) return tripQuestion;
+        // Gọi đúng tên vị người dùng vừa nhắc và dùng chung thang chữ với câu hỏi khẩu vị cố định của backend.
+        var tastes = string.Join(", ", AgentTasteClarificationPolicy.MentionedTastes(context.Request.Content));
         return kind switch
         {
-            "taste_scope" => "Bạn muốn áp dụng khẩu vị này cho toàn chuyến hay ngày/bữa cụ thể? Bạn muốn cập nhật các bữa đã có hay chỉ các gợi ý tiếp theo?",
-            "taste_intensity" => "Bạn muốn mức khẩu vị thấp, hơi thấp, vừa, hơi cao hay cao?",
+            "taste_scope" => $"Bạn muốn áp dụng khẩu vị {(tastes.Length > 0 ? tastes : "này")} cho toàn chuyến hay ngày/bữa cụ thể nào? Bạn muốn cập nhật các bữa đã có hay chỉ các gợi ý tiếp theo?",
+            "taste_intensity" => tastes.Length > 0 ? $"Bạn muốn mức {tastes} như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?"
+                : "Bạn muốn vị nào và ở mức nào: không, nhẹ, vừa, nhiều hay rất nhiều?",
             "edit_scope" => "Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?",
             "novelty" => "Bạn muốn món khác các món trong lịch hiện tại, hay món bạn chưa từng ăn? ANGI chưa có đủ dữ liệu để xác nhận toàn bộ lịch sử ăn uống của bạn.",
             // Câu hỏi về catalog dùng kết quả tra cứu thật (tên không tìm thấy, các lựa chọn gần đúng) khi có.
@@ -138,6 +143,24 @@ public static class AgentReplyBuilder
 
     internal static string Meal(string value) => value switch
     { "breakfast" => "bữa sáng", "lunch" => "bữa trưa", "dinner" => "bữa tối", "snack" => "bữa phụ", "late_night" => "bữa khuya", _ => "bữa ăn" };
+
+    /// <summary>Lists each user taste with its level and scope ("chua mức vừa cho bữa trưa ngày 1"), or null when there is none.</summary>
+    private static string? TasteScopes(AgentState state)
+    {
+        var parts = state.TasteTargets.Select(target => $"{Taste(target)} cho toàn chuyến")
+            .Concat(state.TasteOverrides.OrderBy(x => x.DayNumber).ThenBy(x => x.MealSlot is null ? -1 : Array.IndexOf(AgentStateValidator.Meals, x.MealSlot))
+                .SelectMany(x => x.Targets.Select(target => $"{Taste(target)} cho {(x.MealSlot is null ? "" : Meal(x.MealSlot) + " ")}ngày {x.DayNumber}")))
+            .ToArray();
+        return parts.Length == 0 ? null : string.Join("; ", parts);
+    }
+
+    // Cùng thang chữ với câu hỏi mức vị: không, nhẹ, vừa, nhiều, rất nhiều.
+    private static string Taste(AgentTasteTarget target) => (target.Dimension switch
+    {
+        "sweet" => "ngọt", "sour" => "chua", "salty" => "mặn", "bitter" => "đắng", "umami" => "umami", "spicy" => "cay",
+        "cooling" => "thanh mát", "astringent" => "chát", "fatty" => "béo", "fresh" => "tươi", "rich" => "đậm đà", "aromatic" => "thơm",
+        _ => target.Dimension
+    }) + " mức " + target.Target switch { 0d => "không", .25 => "nhẹ", .5 => "vừa", .75 => "nhiều", _ => "rất nhiều" };
     private static string Money(decimal value) => value.ToString("N0", CultureInfo.GetCultureInfo("vi-VN"));
     private static string Safe(string? value) => value is null ? "Chưa có thông tin" : new string(value
         .Where(character => !char.IsControl(character) && character is not '<' and not '>').Take(200).ToArray());

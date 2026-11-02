@@ -182,6 +182,37 @@ public sealed class AgentReplyBuilderTests
         AgentReplyBuilder.TripDetailsQuestion(state, askProvince).Should().Be(expected);
     }
 
+    // TEST-12: The proposal reply states each applied taste with its level and scope, ordered trip → day → meal; covers trip, day and meal scopes.
+    /// <summary>Lets the user see at once whether a taste was applied to the meal they named or widened to another scope.</summary>
+    [Fact]
+    public void Proposal_AppliedTastes_ListLevelAndScope()
+    {
+        var state = AgentTestData.State() with
+        {
+            TasteTargets = [new("spicy", .25)],
+            TasteOverrides = [new(3, null, [new("sweet", .75)]), new(1, "lunch", [new("sour", .5)])]
+        };
+
+        var reply = AgentReplyBuilder.Proposal(new AgentSnapshot(state, [AgentTestData.Item()], []));
+
+        reply.Should().Contain("Khẩu vị áp dụng: cay mức nhẹ cho toàn chuyến; chua mức vừa cho bữa trưa ngày 1; ngọt mức nhiều cho ngày 3.");
+    }
+
+    // TEST-13: Model-chosen taste questions name the tastes in the user's message and use the fixed taste scale; covers intensity with a taste,
+    // intensity without a recognizable taste, and scope with a taste.
+    /// <summary>Replaces the generic "thấp, hơi thấp…" question with the same specific wording as the backend taste question.</summary>
+    [Theory]
+    [InlineData("taste_intensity", "Hà Nội 3 ngày, cho tôi món hợp khẩu vị, đừng cay quá", "Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?")]
+    [InlineData("taste_intensity", "Cho tôi món hợp khẩu vị", "Bạn muốn vị nào và ở mức nào: không, nhẹ, vừa, nhiều hay rất nhiều?")]
+    [InlineData("taste_scope", "Ít ngọt thôi", "Bạn muốn áp dụng khẩu vị ngọt cho toàn chuyến hay ngày/bữa cụ thể nào? Bạn muốn cập nhật các bữa đã có hay chỉ các gợi ý tiếp theo?")]
+    public void Clarify_TasteQuestions_NameTheTasteAndShareTheScale(string kind, string content, string expected)
+    {
+        var context = AgentTestData.Context();
+        context.Request.Content = content;
+
+        AgentReplyBuilder.Clarify(context, kind).Should().Be(expected);
+    }
+
     // TEST-14: A bare save intent is answered with the plan size, total and exact save wording, a saved-plan notice, or a no-preview notice;
     // covers ready, committed and missing proposals.
     /// <summary>Verifies "lưu" never saves or replans, but tells the user what would be saved and how to save it.</summary>
