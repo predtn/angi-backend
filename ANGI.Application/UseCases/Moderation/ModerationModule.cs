@@ -22,6 +22,9 @@ using ANGI.Application.UseCases.Moderation.UpdateBlogCommentStatus;
 using ANGI.Application.UseCases.Moderation.UpdateBlogStatus;
 using ANGI.Application.UseCases.Moderation.UpdateDishModerationStatus;
 using ANGI.Application.UseCases.Moderation.UpdateRestaurantModerationStatus;
+using ANGI.Application.UseCases.Moderation.GetModReviews;
+using ANGI.Application.UseCases.Moderation.UpdateReviewStatus;
+using ANGI.Application.UseCases.Moderation.UpdateReviewReplyStatus;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ANGI.Application.UseCases.Moderation;
@@ -59,6 +62,9 @@ public static class ModerationModule
         services.AddScoped<IGetUserDetailUseCase, GetUserDetailUseCase>();
         services.AddScoped<IUnbanUserUseCase, UnbanUserUseCase>();
         services.AddScoped<IExpireUserSuspensionsUseCase, ExpireUserSuspensionsUseCase>();
+        services.AddScoped<IGetModReviewsUseCase, GetModReviewsUseCase>();
+        services.AddScoped<IUpdateReviewStatusUseCase, UpdateReviewStatusUseCase>();
+        services.AddScoped<IUpdateReviewReplyStatusUseCase, UpdateReviewReplyStatusUseCase>();
         return services;
     }
 }

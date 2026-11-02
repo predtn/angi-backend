@@ -97,7 +97,7 @@ internal sealed class ModerationTestContext
         Current.SetupGet(x => x.UserId).Returns(3);
         Current.SetupGet(x => x.Role).Returns("MOD");
         Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(["RESTAURANT_MODERATE", "RESTAURANT_VERIFY", "REPORT_RESTAURANT_HANDLE", "REPORT_SOCIAL_HANDLE", "USER_SUSPEND", "USER_BAN", "BLOG_MODERATE"]);
+            .ReturnsAsync(["RESTAURANT_MODERATE", "RESTAURANT_VERIFY", "REPORT_RESTAURANT_HANDLE", "REPORT_SOCIAL_HANDLE", "USER_SUSPEND", "USER_BAN", "BLOG_MODERATE", "REVIEW_MODERATE"]);
         UnitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Transaction.Object);
         Repository.Setup(x => x.LockRestaurantAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(Restaurant);
         BlogModerationRepo.Setup(x => x.GetBlogByIdAsync(45, It.IsAny<CancellationToken>())).ReturnsAsync(Blog);
