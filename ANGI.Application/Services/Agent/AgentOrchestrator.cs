@@ -13,6 +13,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     public async Task<AgentPreparedTurn> RunAsync(AgentContext context, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        // Giữ state đầu lượt: lời chào hoặc câu ngoài phạm vi không được làm mất câu hỏi đang mở hay lọt vào yêu cầu lập lịch.
+        var turnState = context.State;
+        // "Xin chào", "cảm ơn", "bạn là ai": trả lời luôn, không tốn lần gọi LLM và không đụng tới lịch.
+        if (AgentSmallTalkPolicy.FixedReply(context) is { } smallTalk)
+        {
+            telemetry.Record("small_talk", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(smallTalk, turnState, null, null, "chat");
+        }
         if (AgentTasteClarificationPolicy.Question(context) is { } tasteQuestion)
         {
             var pending = AgentPendingPlanningPolicy.Capture(context.State.PendingPlanningRequest, context.Request.Content);
@@ -56,7 +64,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         if (AgentEditScopePolicy.IsBareAcknowledgement(context))
         {
             telemetry.Record("acknowledgement", context.ConversationId, context.TurnId, context.AttemptId);
-            return new(AgentReplyBuilder.Clarify(context, "general") + " Nhắn ‘chốt lịch này’ nếu bạn muốn lưu bản hiện tại.", context.State, null, null);
+            return new(AgentReplyBuilder.Clarify(context, "general") + " Ưng rồi thì cứ bảo mình chốt nhé.", context.State, null, null);
         }
         // "Món lạ/món mới/món chưa ăn" không có tag nào tương ứng: hỏi nghĩa trước, không để model tra nó như tên món.
         if (AgentNoveltyPolicy.Question(context) is { } noveltyQuestion)
@@ -192,19 +200,26 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (string.IsNullOrWhiteSpace(output.Reply) || output.Reply.Length > limits.MaxMessageLength ||
                     output.Clarification is not null && !AgentReplyBuilder.Clarifications.Contains(output.Clarification) ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
-                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation"))
+                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation" or "chat" or "out_of_scope"))
                 {
                     if (schemaRepaired) throw Unavailable();
                     schemaRepaired = repaired = true;
                     continue;
+                }
+                // Dừng trước khi nhận state của model: câu lạc đề không được đổi điều kiện chuyến đi, và mọi items/changes kèm theo đều bị bỏ qua.
+                if (output.Action is "chat" or "out_of_scope")
+                {
+                    telemetry.Record(output.Action, context.ConversationId, context.TurnId, context.AttemptId);
+                    return new(output.Action == "chat" ? AgentSmallTalkPolicy.ChatReply(output.Reply, turnState)
+                        : AgentSmallTalkPolicy.OutOfScopeReply(context.Request.Content, output.SuggestedDish), turnState, null, null, output.Action);
                 }
                 // Model có thể bổ sung/siết điều kiện, nhưng không được tự nới ràng buộc đã chốt.
                 // Cờ ConstraintsChangeConfirmed không cấp quyền; backend giữ pending change để người dùng xác nhận.
                 if (output.Action is "discard_proposal" or "reset_conversation")
                 {
                     if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) throw Unavailable();
-                    return new(output.Action == "discard_proposal" ? "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu được giữ nguyên."
-                        : "Đã bắt đầu lại ngữ cảnh lập lịch. Lịch đã lưu được giữ nguyên.", context.State, null, null,
+                    return new(output.Action == "discard_proposal" ? "Mình đã bỏ bản nháp này rồi. Lịch đã lưu vẫn được giữ nguyên."
+                        : "Mình bắt đầu lại từ đầu nhé. Lịch đã lưu vẫn được giữ nguyên.", context.State, null, null,
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 if (!context.ReplanAfterConfirmation)
@@ -295,7 +310,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         return new("Đã cập nhật khẩu vị cho các gợi ý tiếp theo. Các món trong bản đề xuất hiện tại được giữ nguyên; lịch chính thức chưa thay đổi.",
                             future.State, checkedFuture.Snapshot, checkedFuture.Validation);
                     }
-                    var reply = output.Action == "clarify" ? AgentReplyBuilder.Clarify(context, output.Clarification) : AgentReplyBuilder.Answer(context);
+                    var reply = AgentGroundedReply.Choose(context, output);
                     // Model đã trả lời thay vì hỏi tiếp nghĩa là câu hỏi cũ không còn mở; câu hỏi khẩu vị còn gắn với yêu cầu đang lập nên giữ.
                     context.State = context.State with { PendingQuestion = output.Action == "clarify" ? reply[..Math.Min(reply.Length, 1000)] : ClearedQuestion(context.State) };
                     return new(reply, context.State, null, null);
@@ -402,14 +417,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         continue;
                     }
                     if (AgentReplyBuilder.OverBudgetOnly(validated.Validation)) return BudgetQuestion(context.State, validated.Validation);
-                    return new("Đề xuất chưa hợp lệ. Vui lòng làm rõ hoặc điều chỉnh các điều kiện.", context.State, null, validated.Validation);
+                    return new("Mình chưa sắp được lịch phù hợp. Bạn thử nói rõ hơn hoặc điều chỉnh yêu cầu giúp mình nhé.", context.State, null, validated.Validation);
                 }
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null,
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentRemovalPolicy.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
-                return new(AgentReplyBuilder.Proposal(validated.Snapshot, validated.Validation, substituted: substituted), reviewedState,
+                return new(AgentReplyBuilder.Proposal(validated.Snapshot, substituted, context.Source, AgentGroundedReply.Opener(output.Reply)), reviewedState,
                     validated.Snapshot with { State = reviewedState }, validated.Validation);
             }
             // Đã dùng hết số lần gọi cho phép mà chưa có kết quả cuối hợp lệ.
@@ -429,7 +444,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var remaining = source.Items.Except(removed).ToArray();
         // Bản xem trước chưa lưu không thể rỗng; roadmap đã lưu thì được phép (xem luật lịch rỗng trong validator).
         if (remaining.Length == 0 && !source.BaseRoadmapId.HasValue)
-            return new("Đây là toàn bộ món trong bản xem trước. Nếu muốn bỏ cả bản này, nhắn ‘bỏ đề xuất’.", context.State with { PendingQuestion = null }, null, null);
+            return new("Đây là toàn bộ món trong bản nháp rồi. Nếu muốn bỏ hết, bạn nhắn “bỏ đề xuất” nhé.", context.State with { PendingQuestion = null }, null, null);
         var state = AgentRemovalPolicy.WithSkippedMeals(context.State with { PendingQuestion = null, FocusDay = null, FocusMeal = null }, source, remaining);
         state = state with { ReplacedDishNames = AgentScopedPlanning.Replaced(state, source, source with { Items = remaining }) };
         var snapshot = source with { State = state, Items = remaining, RetainedItems = remaining, Scope = new(),
@@ -437,8 +452,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var checkedRemoval = await validator.ValidateAsync(snapshot, source, false, true, ct, context.Grants);
         if (checkedRemoval.Validation.Errors.Length > 0)
             return new("Chưa thể bỏ món này: " + string.Join(" ", checkedRemoval.Validation.Errors), context.State, null, checkedRemoval.Validation);
-        var names = string.Join(", ", removed.Select(item => AgentReplyBuilder.Safe(item.DishName)).Distinct());
-        return new($"Đã bỏ {names} khỏi bản xem trước.\n" + AgentReplyBuilder.Proposal(checkedRemoval.Snapshot, checkedRemoval.Validation),
+        return new(AgentReplyBuilder.Proposal(checkedRemoval.Snapshot, source: source),
             state, checkedRemoval.Snapshot with { State = state }, checkedRemoval.Validation);
     }
 
@@ -457,7 +471,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     // Các nguyên nhân ở đây (hết vòng tool, output sai hợp đồng, context quá lớn) lặp lại nếu gửi lại y nguyên,
     // nên không mời "thử lại"; lỗi provider tạm thời đi qua AgentProviderException với thông báo riêng.
     private static ServiceUnavailableException Unavailable() => new("AGENT_UNAVAILABLE",
-        "Agent chưa hoàn tất yêu cầu này. Bạn có thể nói rõ hơn hoặc điều chỉnh yêu cầu (ngày/bữa, món, ngân sách hoặc khẩu vị).");
+        "Mình chưa xử lý xong yêu cầu này. Bạn thử nói rõ hơn hoặc điều chỉnh ngày, bữa, món, ngân sách hay khẩu vị giúp mình nhé.");
 }
 
 /// <summary>Prepared turn data that must pass lease fencing before persistence.</summary>

@@ -19,7 +19,7 @@ public sealed class AgentEditScopePolicyTests
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
-        AgentEditScopePolicy.Question(context).Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        AgentEditScopePolicy.Question(context).Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
     }
 
     // TEST-02: An edit with a day, meal, whole-plan wording, a new requirement or a non-edit message reaches the model; covers
@@ -65,7 +65,7 @@ public sealed class AgentEditScopePolicyTests
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
-        AgentEditScopePolicy.Question(context).Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        AgentEditScopePolicy.Question(context).Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
     }
 
     // TEST-05: A dislike naming something, or a compliment, reaches the model; covers a named dish, a day and praise.

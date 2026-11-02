@@ -388,7 +388,7 @@ public sealed class AgentOrchestratorTests
         var error = (await ((Func<Task>)(async () => await Create(llm.Object, limits).RunAsync(context, CancellationToken.None)))
             .Should().ThrowAsync<ServiceUnavailableException>()).Which;
         // A limit failure repeats if resent unchanged, so the message asks for clarification instead of a retry.
-        error.Message.Should().Contain("điều chỉnh yêu cầu").And.NotContain("thử lại");
+        error.Message.Should().Contain("điều chỉnh ngày, bữa, món").And.NotContain("thử lại");
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(expectedCalls));
     }
 
@@ -472,7 +472,7 @@ public sealed class AgentOrchestratorTests
         llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentLlmStep.Failed(AgentLlmFailureKind.ProviderUnavailable, 503))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
-        (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("catalog ANGI").And.NotContain("Recovered");
+        (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("có trên ANGI").And.NotContain("Recovered");
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -500,7 +500,7 @@ public sealed class AgentOrchestratorTests
         llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], null, Failure: new(AgentLlmFailureKind.RateLimited, 429, 1, "RESOURCE_EXHAUSTED", reason)))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
-        if (recover) (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("catalog ANGI").And.NotContain("Recovered");
+        if (recover) (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("có trên ANGI").And.NotContain("Recovered");
         else await ((Func<Task>)(async () => await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None))).Should().ThrowAsync<AgentProviderException>();
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(recover ? 2 : 1));
     }
@@ -518,7 +518,7 @@ public sealed class AgentOrchestratorTests
             new AgentOutput { Action = "create_proposal", Reply = "Selection", Items = [AgentTestData.Item()] }));
         var result = await Create(llm.Object).RunAsync(context, CancellationToken.None);
         result.Snapshot!.Items.Single().RequestId.Should().Be(grant.RequestId);
-        result.Reply.Should().NotContain("thứ tự đánh giá");
+        result.Reply.Should().NotContain(AgentReplyBuilder.RatingFallbackNote);
         context.RepairFeedback.Should().BeNull();
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -791,7 +791,7 @@ public sealed class AgentOrchestratorTests
 
         var result = await Create(llm.Object).RunAsync(context, default);
 
-        result.Reply.Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        result.Reply.Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
         result.State.PendingQuestion.Should().Be(result.Reply);
         result.Snapshot.Should().BeNull();
         llm.VerifyNoOtherCalls();
@@ -1008,7 +1008,7 @@ public sealed class AgentOrchestratorTests
         var result = await Create(llm.Object).RunAsync(context, default);
 
         result.Snapshot.Should().BeNull();
-        result.Reply.Should().Contain("chốt lịch này");
+        result.Reply.Should().Contain("bảo mình chốt");
         result.State.PendingQuestion.Should().BeNull();
         llm.VerifyNoOtherCalls();
     }
@@ -1031,7 +1031,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot!.Items.Select(item => item.ItemKey).Should().Equal("a");
         result.State.SkippedMeals.Should().Equal(new AgentScope(1, "dinner"));
         result.State.ReplacedDishNames.Should().Equal("Dish 2");
-        result.Reply.Should().StartWith("Đã bỏ Dish 2 khỏi bản xem trước.").And.Contain("Chưa có món trong bữa này.");
+        result.Reply.Should().StartWith("Xong rồi! Mình đã bỏ Dish 2. Các món còn lại giữ nguyên.").And.NotContain("Dish 1");
         llm.VerifyNoOtherCalls();
     }
 
@@ -1087,6 +1087,126 @@ public sealed class AgentOrchestratorTests
         var result = await Create(llm.Object).RunAsync(context, default);
 
         result.State.BudgetAmount.Should().Be(1000000);
+    }
+
+    // TEST-54: "Xin chào" over a plan answers with the self-introduction and never calls the provider, changes the plan or clears an open planning question.
+    /// <summary>Fixes the greeting that used to print the whole itinerary and spend a paid call.</summary>
+    [Fact]
+    public async Task RunAsync_Greeting_AnswersWithoutProviderOrPlanChange()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng" }));
+        context.Request.Content = "Xin chào";
+        var pending = new AgentPendingPlanningRequest(["Lập lịch 3 ngày"]);
+        context.State = context.State with { PendingQuestion = "Bạn muốn mức cay như thế nào?", PendingPlanningRequest = pending };
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().StartWith(AgentSmallTalkPolicy.GreetingFor(context.State)).And.Contain("Bạn muốn mức cay như thế nào?").And.NotContain("Mì Quảng");
+        result.Action.Should().Be("chat");
+        result.Snapshot.Should().BeNull(); result.Validation.Should().BeNull();
+        result.State.PendingQuestion.Should().Be("Bạn muốn mức cay như thế nào?");
+        result.State.PendingPlanningRequest.Should().Be(pending);
+        llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-55: A model-written social reply is shown, while its state, items and changes are ignored; covers a safe reply and one falling back for stating a price.
+    /// <summary>Ensures a social turn can sound natural but can never alter the trip or the plan.</summary>
+    [Theory]
+    [InlineData("Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!", "Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!")]
+    [InlineData("Phở chỉ 50000 thôi", AgentSmallTalkPolicy.ChatFallback)]
+    public async Task RunAsync_ChatAction_ShowsSafeReplyAndKeepsState(string draft, string expected)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.Request.Content = "Hôm nay bạn thế nào?";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "chat", Reply = draft, State = new AgentState { Province = "Hue", NumDays = 9 }, Items = [AgentTestData.Item(9, "z")] }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(expected);
+        result.Action.Should().Be("chat");
+        result.Snapshot.Should().BeNull();
+        result.State.Province.Should().Be("Da Nang"); result.State.NumDays.Should().Be(2);
+        llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-56: "Hướng dẫn bóc cam" gets the owner's exact refusal in one call, whether or not a plan exists, ignoring the model's draft, state and items.
+    /// <summary>Guarantees out-of-scope requests are refused instead of printing the plan or asking for trip details.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task RunAsync_OutOfScope_RefusesWithExactSentence(bool hasPlan)
+    {
+        var context = AgentTestData.Context(hasPlan ? AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng" }) : null);
+        context.State = new AgentState();
+        context.Request.Content = "Hướng dẫn bóc cam";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "out_of_scope", Reply = "Trước tiên hãy khía vỏ cam", State = new AgentState { Province = "Hue" }, Items = [AgentTestData.Item(9, "z")] }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be("Việc này nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi.");
+        result.Action.Should().Be("out_of_scope");
+        result.Snapshot.Should().BeNull();
+        result.State.Province.Should().BeNull();
+        llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-57: A general food question is refused with an offer to find the dish the user named; covers a dish in the message and one the model invented.
+    /// <summary>Gives a useful next step while keeping the offer tied to the user's own words.</summary>
+    [Theory]
+    [InlineData("phở", " Bạn có muốn mình tìm quán phở không?")]
+    [InlineData("bún chả", "")]
+    public async Task RunAsync_OutOfScopeFoodQuestion_OffersOnlyTheNamedDish(string dish, string offer)
+    {
+        var context = AgentTestData.Context();
+        context.Request.Content = "Cách nấu phở";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "out_of_scope", Reply = "Draft", SuggestedDish = dish }));
+
+        (await Create(llm.Object).RunAsync(context, default)).Reply.Should().Be(AgentSmallTalkPolicy.OutOfScope + offer);
+    }
+
+    // TEST-58: An off-topic reply to an open taste question keeps that question and does not join the request being planned.
+    /// <summary>Prevents "bóc cam" from clearing the taste question or being read as part of the trip request.</summary>
+    [Fact]
+    public async Task RunAsync_OutOfScopeDuringTasteQuestion_KeepsQuestionAndPlanningRequest()
+    {
+        var context = AgentTestData.Context();
+        const string question = "Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?";
+        var pending = new AgentPendingPlanningRequest(["Lập lịch, tôi thích ăn cay"]);
+        context.State = context.State with { PendingQuestion = question, PendingPlanningRequest = pending };
+        context.History.Add(new("user", "Lập lịch, tôi thích ăn cay"));
+        context.Request.Content = "Hướng dẫn bóc cam";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "out_of_scope", Reply = "Draft" }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(AgentSmallTalkPolicy.OutOfScope);
+        result.State.PendingQuestion.Should().Be(question);
+        result.State.PendingPlanningRequest.Should().Be(pending);
+    }
+
+    // TEST-59: A question answered by the model no longer dumps the plan; a request to see it over a saved plan still lists it.
+    /// <summary>Verifies the end-to-end behaviour of the answer action for both kinds of message.</summary>
+    [Theory]
+    [InlineData("Vì sao chọn món này?", false)]
+    [InlineData("Xem lại lịch giúp mình", true)]
+    public async Task RunAsync_AnswerAction_ListsPlanOnlyWhenAsked(string content, bool listed)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng" }));
+        context.Request.Content = content;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Contains("Mì Quảng").Should().Be(listed);
+        if (!listed) result.Reply.Should().Be(AgentReplyBuilder.AnswerUnavailable);
     }
 
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,

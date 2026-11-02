@@ -474,9 +474,29 @@ public sealed class OpenAiAgentLlmServiceTests
         new ANGI.Application.Common.Exceptions.AgentProviderException(result.Failure!).Message.Should().NotContain("quản trị viên");
     }
 
+    // TEST-24: Every request tells the model its scope and offers the chat and out_of_scope actions with suggestedDish in the strict schema.
+    /// <summary>Without these the model has no way to decline "hướng dẫn bóc cam" and falls back to answer or clarify.</summary>
+    [Fact]
+    public async Task RunAsync_Request_DeclaresScopeAndSmallTalkActions()
+    {
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
+            system.Should().Contain("action=chat is only for social messages").And.Contain("action=out_of_scope is for everything else")
+                .And.Contain("hướng dẫn bóc cam").And.Contain("replaces it with fixed text").And.Contain("the backend asks for them when the user saves");
+            var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("properties");
+            schema.GetProperty("action").GetProperty("enum").EnumerateArray().Select(value => value.GetString()).Should().Contain(["chat", "out_of_scope"]);
+            schema.TryGetProperty("suggestedDish", out _).Should().BeTrue();
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+
+        (await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None))!.Output.Should().NotBeNull();
+    }
+
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
-        clarification = (string?)null,
+        suggestedDish = (string?)null, clarification = (string?)null,
         constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>() });
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
     private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key", AgentLimits? limits = null, string model = "configured-model") => new(

@@ -106,7 +106,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
         var request = Request(); request.Content = "chốt lịch này";
         var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
-        result.Commit.Should().BeNull(); result.Reply.Should().Contain("chưa có đề xuất mới");
+        result.Commit.Should().BeNull(); result.Reply.Should().Contain("chưa có lịch mới");
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
@@ -185,7 +185,7 @@ public sealed class SendAgentMessageUseCaseTests
     {
         var fixture = new AgentUseCaseFixture(); var request = Request(); request.Content = "lưu lịch trình này";
         var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
-        result.Commit.Should().BeNull(); result.Reply.Should().Contain("Chưa có");
+        result.Commit.Should().BeNull(); result.Reply.Should().Be(AgentReplyBuilder.NothingToSave);
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
@@ -281,7 +281,7 @@ public sealed class SendAgentMessageUseCaseTests
 
         var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
 
-        result.Reply.Should().StartWith("Bạn muốn lưu bản xem trước hiện tại (2 món").And.Contain("chốt lịch này");
+        result.Reply.Should().Be("Mình lưu lịch hiện tại (2 món, tổng 0 đồng/người) nhé?");
         result.Commit.Should().BeNull();
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
@@ -304,7 +304,7 @@ public sealed class SendAgentMessageUseCaseTests
 
         var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
 
-        result.Reply.Should().Contain("Đã giữ nguyên lịch hiện tại");
+        result.Reply.Should().Contain("Mình giữ nguyên lịch hiện tại");
         result.Proposal.Should().NotBeNull();
         AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().BeNull();
         fixture.Llm.VerifyNoOtherCalls();
@@ -366,6 +366,55 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Conversation.RoadmapId.Should().BeNull();
         AgentJson.Read<AgentState>(fixture.Conversation.State).Province.Should().BeNull();
         fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-20: A greeting with an open question keeps the current proposal as the result and the question open, with no "previous proposal kept" note.
+    /// <summary>Prevents the fixed note from being appended to a social reply and verifies the turn is still stored and replayable.</summary>
+    [Fact]
+    public async Task ExecuteAsync_GreetingWithOpenQuestion_KeepsProposalWithoutExtraNote()
+    {
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Bạn muốn đổi món nào?" });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        var request = Request(); request.Content = "Xin chào";
+        var useCase = Create(fixture);
+
+        var result = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        var replay = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Reply.Should().Be($"{AgentSmallTalkPolicy.GreetingFor(snapshot.State)}\nBạn muốn đổi món nào?");
+        AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().Be("Bạn muốn đổi món nào?");
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        fixture.Conversation.CurrentProposalId.Should().Be(9);
+        replay.Reply.Should().Be(result.Reply); replay.Replayed.Should().BeTrue();
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-21: An out-of-scope message over a ready proposal keeps it committable: no new proposal, and the same proposal returned as still current.
+    /// <summary>A refusal must not change the plan or block a later save.</summary>
+    [Fact]
+    public async Task ExecuteAsync_OutOfScope_KeepsReadyProposalCurrent()
+    {
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.State = AgentJson.Write(snapshot.State);
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "out_of_scope", Reply = "Draft" }));
+        var request = Request(); request.Content = "Hướng dẫn bóc cam";
+
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Reply.Should().Be(AgentSmallTalkPolicy.OutOfScope);
+        result.Proposal!.ProposalId.Should().Be(9);
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        fixture.Repository.Verify(repo => repo.AddProposal(It.IsAny<ANGI.Domain.Entities.AgentProposal>()), Times.Never);
+        fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),

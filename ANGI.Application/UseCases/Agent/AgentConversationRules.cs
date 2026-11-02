@@ -41,10 +41,10 @@ public static class AgentConversationRules
         conversation.ProcessingUntil = null;
     }
 
-    /// <summary>Compares hard trip values while ignoring navigation focus and a resolved clarification question.</summary>
+    /// <summary>Compares hard trip values; navigation focus, a resolved question and the calendar start date do not change the reviewed dishes.</summary>
     public static bool SameConstraints(AgentState left, AgentState right) =>
-        AgentJson.Write(CanonicalState(left) with { FocusDay = null, FocusMeal = null, PendingQuestion = null }) ==
-        AgentJson.Write(CanonicalState(right) with { FocusDay = null, FocusMeal = null, PendingQuestion = null });
+        AgentJson.Write(CanonicalState(left) with { FocusDay = null, FocusMeal = null, PendingQuestion = null, StartDate = null }) ==
+        AgentJson.Write(CanonicalState(right) with { FocusDay = null, FocusMeal = null, PendingQuestion = null, StartDate = null });
 
     /// <summary>Normalizes equivalent set, province and numeric representations for retry hashing and constraint comparison.</summary>
     public static AgentState CanonicalState(AgentState state) => state with
@@ -60,7 +60,7 @@ public static class AgentConversationRules
         MealSlots = state.MealSlots.Order(StringComparer.Ordinal).ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
-        PendingStateChange = null, PendingPlanningRequest = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+        PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
         ReplacedDishNames = null
     };
 

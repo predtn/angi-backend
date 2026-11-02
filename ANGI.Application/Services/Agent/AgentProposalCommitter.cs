@@ -24,6 +24,9 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
             return new(conversation.Id, proposal.Id, proposal.ProposalVersion, null, AgentJson.Read<AgentCommitDto>(proposal.CommitResult!));
         RequireCommittable(conversation, proposal, clock.GetUtcNow().UtcDateTime, ownsTurn);
         var snapshot = AgentJson.Read<AgentSnapshot>(proposal.Payload);
+        // Ngày đi có thể được chốt sau khi bản nháp đã dựng; nó không đổi món nên không cần bản nháp mới.
+        if ((request.StartDate ?? AgentJson.Read<AgentState>(conversation.State).StartDate) is { } startDate)
+            snapshot = snapshot with { State = snapshot.State with { StartDate = startDate } };
         var source = snapshot.BaseRoadmapId is { } sourceId
             ? await roadmaps.GetOwnedDetailAsync(sourceId, userId, ct) ?? throw RoadmapMissing() : null;
         if (source is not null && source.UpdatedAt != snapshot.BaseRoadmapUpdatedAt) throw RoadmapConflict();
@@ -71,7 +74,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         proposal.CommittedAt = now;
         conversation.RoadmapId = roadmap.Id;
         conversation.State = AgentJson.Write(snapshot.State with { FocusDay = null, FocusMeal = null,
-            PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, SourceRoadmapUpdatedAt = updatedAt });
+            PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, SourceRoadmapUpdatedAt = updatedAt });
         return (result, true);
     }
 
@@ -131,9 +134,9 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
     }
 
     /// <summary>Reports an official roadmap change that requires a fresh reviewed proposal.</summary>
-    private static ConflictException RoadmapConflict() => new("ROADMAP_UPDATED_AT_CONFLICT", "Roadmap đã thay đổi. Cần tạo đề xuất mới.");
+    private static ConflictException RoadmapConflict() => new("ROADMAP_UPDATED_AT_CONFLICT", "Lịch vừa thay đổi. Bạn nhờ mình lập lại trước khi lưu nhé.");
     /// <summary>Conceals unavailable or foreign proposal references behind the standard confirmation failure.</summary>
     private static ConflictException NotCommittable() => new("PROPOSAL_NOT_COMMITTABLE", "Đề xuất không còn sẵn sàng để xác nhận.");
     /// <summary>Reports an unavailable owned source roadmap.</summary>
-    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
+    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Không tìm thấy lịch này.");
 }

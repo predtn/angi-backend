@@ -37,6 +37,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Agent;
 public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
     private const string Path = "/api/v1/agent/conversations";
+    private static readonly DateOnly TripStart = new(2099, 1, 1);
     private static long _nextClientMessageId;
 
     // TEST-01: A trip prompt with an unscoped taste asks for intensity and scope before any LLM or ranking call; covers 3-day sour and 5-day spicy prompts.
@@ -123,7 +124,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     {
         var vectors = new List<double[]?>();
         var scenario = await SetupAsync(ScopedReco(vectors).Object); using var host = scenario.Host; using var client = scenario.Client;
-        var initial = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, BudgetAmount = 1500000, MealSlots = ["lunch"] };
+        var initial = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, StartDate = TripStart, BudgetAmount = 1500000, MealSlots = ["lunch"] };
         scenario.Llm.Override = context => context.Exchanges.Count == 0
             ? new([new("initial", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
                 State: initial, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12), AgentJson.Options))], null)
@@ -195,7 +196,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             var dish = await db.Dishes.OrderByDescending(x => x.Id).FirstAsync();
             dish.DishTags.Add(new() { Tag = tag }); await db.SaveChangesAsync(); return tag.Id;
         });
-        var state = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, BudgetAmount = 500000,
+        var state = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, StartDate = TripStart, BudgetAmount = 500000,
             MealSlots = ["lunch"], TasteOverrides = [new(1, null, [new("spicy", 1)])],
             MealRequests = [new(2, null, null, null, [specialty]), new(3, null, null, null, [], true)] };
         scenario.Llm.Override = context =>
@@ -242,7 +243,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             foreach (var dish in await db.Dishes.ToArrayAsync()) dish.DishTags.Add(new() { Tag = tag });
             await db.SaveChangesAsync(); return tag.Id;
         });
-        var initialState = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, BudgetAmount = 1500000,
+        var initialState = new AgentState { Province = "Ho Chi Minh City", NumDays = 3, StartDate = TripStart, BudgetAmount = 1500000,
             MealSlots = ["breakfast", "lunch", "dinner"] };
         scenario.Llm.Override = context =>
         {
@@ -281,7 +282,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         updated.Proposal.Snapshot.Items.Select(item => item.ItemKey).Should().OnlyContain(key => key.StartsWith("old-"));
         updated.Proposal.Validation.Errors.Should().BeEmpty();
         updated.Proposal.Validation.Warnings.Should().NotContain(warning => warning.Contains("đánh giá"));
-        updated.Reply.Should().NotContain("thứ tự đánh giá").And.NotContain("chưa hoàn tất");
+        updated.Reply.Should().NotContain(AgentReplyBuilder.RatingFallbackNote).And.NotContain("chưa hoàn tất");
         (await GetAsync(client, conversation.ConversationId)).CurrentProposal!.ProposalId.Should().Be(updated.Proposal.ProposalId);
         (await factory.ExecuteDbAsync(db => db.AgentProposals.SingleAsync(p => p.Id == first.Proposal.ProposalId)))
             .Status.Should().Be(AgentProposalStatus.Superseded);
@@ -296,7 +297,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
         scenario.Llm.Override = context => context.Exchanges.Count == 0
             ? new([new("named", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
-                State: new() { Province = "Ho Chi Minh City", NumDays = 1, BudgetAmount = 500000,
+                State: new() { Province = "Ho Chi Minh City", NumDays = 1, StartDate = TripStart, BudgetAmount = 500000,
                     MealRequests = [new(null, null, "Món tuyệt đối không có trong catalog", null, [])] },
                 TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null)
             : new([], new AgentOutput { Action = "clarify", Reply = "Tôi đã tự thêm món vào quán nổi tiếng.", Clarification = "catalog_choice" });
@@ -1268,7 +1269,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         scenario.Llm.Provider = new OpenAiAgentLlmService(http,
             Options.Create(new AiSettings { ApiKey = "fake-test-key", Model = "fake-test-model" }), new(), TimeProvider.System);
         var answered = await SendPromptAsync(client, conversation.ConversationId, "Giải thích bản nháp");
-        answered.Reply.Should().Contain("Đây sẽ là roadmap khám phá ẩm thực").And.Contain("Đây là bản xem trước.").And.NotContain("Đã giải thích lịch."); answered.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
+        answered.Reply.Should().Be("Đã giải thích lịch."); answered.Proposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
         handler.Calls.Should().Be(2); handler.RepairCalls.Should().Be(1);
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
@@ -1469,11 +1470,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var blocked = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
 
         reminder.Commit.Should().BeNull();
-        reminder.Reply.Should().StartWith("Bạn muốn lưu bản xem trước hiện tại (1 món").And.EndWith("Nhắn ‘chốt lịch này’ để lưu.");
+        reminder.Reply.Should().StartWith("Mình lưu lịch hiện tại (1 món").And.EndWith("nhé?");
         current.CurrentProposal!.ProposalId.Should().Be(preview.Proposal!.ProposalId);
         current.CurrentProposal.Status.Should().Be("ready"); current.State.PendingQuestion.Should().BeNull();
-        edit.Reply.Should().StartWith("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
-        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?").And.Contain("giữ nguyên");
+        edit.Reply.Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
+        blocked.Commit.Should().BeNull(); blocked.Reply.Should().Contain("Bạn muốn đổi món nào, hay cả lịch?").And.Contain("giữ nguyên");
         scenario.Llm.Calls.Should().Be(calls);
         await factory.ExecuteDbAsync(async db =>
         {
@@ -1497,7 +1498,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var kept = await SendPromptAsync(client, conversation.ConversationId, "giữ nguyên");
         var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
 
-        kept.Reply.Should().StartWith("Đã giữ nguyên lịch hiện tại.");
+        kept.Reply.Should().StartWith("Mình giữ nguyên lịch hiện tại");
         saved.Commit!.CommittedProposalId.Should().Be(preview.Proposal!.ProposalId);
         scenario.Llm.Calls.Should().Be(calls);
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
@@ -1526,6 +1527,98 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).RoadmapId.Should().BeNull();
     }
 
+    // TEST-59: Over a ready preview, a greeting costs no provider call, an out-of-scope request gets the exact refusal, and the same preview can still be saved.
+    /// <summary>Verifies through HTTP and PostgreSQL that social and refused turns are stored without touching the plan.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_GreetingAndOutOfScope_KeepPreviewSavable()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var preview = await SendAsync(client, conversation.ConversationId, Message(1));
+        var calls = scenario.Llm.Calls;
+
+        var greeting = await SendPromptAsync(client, conversation.ConversationId, "Xin chào");
+        scenario.Llm.Calls.Should().Be(calls);
+        scenario.Llm.Override = _ => new AgentLlmStep([], new AgentOutput { Action = "out_of_scope", Reply = "Trước tiên hãy khía vỏ cam" });
+        var refusal = await SendPromptAsync(client, conversation.ConversationId, "Hướng dẫn bóc cam");
+        scenario.Llm.Override = null;
+        var current = await GetAsync(client, conversation.ConversationId);
+
+        greeting.Reply.Should().Be(AgentSmallTalkPolicy.GreetingFor(current.State));
+        refusal.Reply.Should().Be("Việc này nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi.");
+        new[] { greeting.Proposal!.ProposalId, refusal.Proposal!.ProposalId, current.CurrentProposal!.ProposalId }.Should().OnlyContain(id => id == preview.Proposal!.ProposalId);
+        current.Messages.Select(message => message.Content).Should().Contain(greeting.Reply).And.Contain(refusal.Reply);
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "chốt lịch này");
+        saved.Commit.Should().NotBeNull();
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+    }
+
+    // TEST-60: Saving with no start date asks for it, a stated date is stored on the roadmap, and nothing is written before that.
+    /// <summary>Verifies through HTTP and PostgreSQL the missing step: the question, the answer and the saved date, with no provider call.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_SaveWithoutDate_AsksThenStoresTheDate()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario, dated: false);
+        var conversation = await OpenAsync(client);
+        await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        var calls = scenario.Llm.Calls;
+
+        var asked = await SendPromptAsync(client, conversation.ConversationId, "chốt lịch này");
+        asked.Commit.Should().BeNull();
+        asked.Reply.Should().StartWith("Lịch của bạn có 1 ngày. Bạn muốn bắt đầu từ ngày nào?");
+        (await GetAsync(client, conversation.ConversationId)).CurrentProposal!.Status.Should().Be("ready");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "15/6/2099");
+
+        saved.Commit.Should().NotBeNull();
+        saved.Reply.Should().Be("Mình đã lưu lịch 1 ngày của bạn, vào 15/06/2099. Muốn chỉnh gì cứ nhắn mình nhé.");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).StartDate.Should().Be(new DateOnly(2099, 6, 15));
+        scenario.Llm.Calls.Should().Be(calls);
+    }
+
+    // TEST-61: A bare "lưu" over a dated preview asks once and a plain "ok" then saves that proposal; "ok" alone before any question saves nothing.
+    /// <summary>Verifies the short confirmation is tied to the question and never writes on its own.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_ShortYesAfterQuestion_SavesThatProposal()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+
+        (await SendPromptAsync(client, conversation.ConversationId, "ok")).Commit.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+        var asked = await SendPromptAsync(client, conversation.ConversationId, "lưu");
+        asked.Reply.Should().StartWith("Mình lưu lịch hiện tại (1 món").And.EndWith("nhé?");
+
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "ok");
+
+        saved.Commit.Should().NotBeNull();
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).StartDate.Should().Be(TripStart);
+    }
+
+    // TEST-62: AGENT-04 stores a start date sent by the save dialog, and the proposal stays reusable for its replay.
+    /// <summary>Verifies the save button path, which never goes through chat, can also set the date.</summary>
+    [PostgresEndToEndFact]
+    public async Task Confirm_WithStartDate_StoresItOnTheRoadmap()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario, dated: false);
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+
+        using var confirm = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm",
+            new { proposalId = preview.Proposal!.ProposalId, proposalVersion = preview.Proposal.Version, startDate = "2099-06-15" });
+
+        var commit = await DataAsync<AgentCommitDto>(confirm);
+        var roadmap = await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync());
+        roadmap.Id.Should().Be(commit.RoadmapId);
+        roadmap.StartDate.Should().Be(new DateOnly(2099, 6, 15));
+        (await GetAsync(client, conversation.ConversationId)).State.StartDate.Should().Be(new DateOnly(2099, 6, 15));
+    }
+
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>
     private static async Task<AgentTurnDto> SendPromptAsync(HttpClient client, long id, string content)
     {
@@ -1534,11 +1627,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     }
 
     /// <summary>Models a normal chat plan with tool-proven candidates and no frontend-provided state or command.</summary>
-    private static void EnableChatPlanning(Scenario scenario) => scenario.Llm.Override = context =>
+    private static void EnableChatPlanning(Scenario scenario, bool dated = true) => scenario.Llm.Override = context =>
     {
         if (context.Exchanges.Count == 0)
             return new([new("chat-candidates", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
-                State: new AgentState { Province = "Ho Chi Minh City", NumDays = 1, BudgetAmount = 500000 }, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null);
+                State: new AgentState { Province = "Ho Chi Minh City", NumDays = 1, StartDate = dated ? TripStart : null, BudgetAmount = 500000 }, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null);
         var candidates = context.Exchanges[0].Results[0].GetProperty("items");
         return new([], new AgentOutput { Action = "create_proposal", Reply = "Bản xem trước bữa trưa", Items =
             [new AgentItem("chat-lunch", null, 1, "lunch", 0, candidates[0].GetProperty("dishId").GetInt32())] });
@@ -1581,7 +1674,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     private static SendAgentMessageRequestDto Message(long version) => new()
     {
         ClientMessageId = Interlocked.Increment(ref _nextClientMessageId), ExpectedConversationVersion = version, Content = "Create or replace lunch",
-        ConfirmedState = new AgentState { Province = "Ho Chi Minh City", NumDays = 1, BudgetAmount = 500000 }
+        ConfirmedState = new AgentState { Province = "Ho Chi Minh City", NumDays = 1, StartDate = TripStart, BudgetAmount = 500000 }
     };
 
     /// <summary>Opens a conversation through its actual HTTP contract.</summary>

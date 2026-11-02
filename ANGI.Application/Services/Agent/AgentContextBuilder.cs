@@ -19,7 +19,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
-                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest }
+                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null }
             : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
@@ -31,7 +31,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         {
             source = AgentJson.Read<AgentSnapshot>(proposal.Payload);
             if (source.BaseRoadmapUpdatedAt.HasValue && source.BaseRoadmapUpdatedAt != roadmap?.UpdatedAt)
-                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Roadmap đã thay đổi. Hãy bỏ bản chỉnh sửa cũ và tạo đề xuất mới.");
+                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Lịch vừa thay đổi. Bạn bỏ bản nháp cũ để mình lập lại nhé.");
         }
         else if (roadmap is not null)
         {
@@ -101,7 +101,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
     }
 
     /// <summary>Returns the existing ownership-safe roadmap error.</summary>
-    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Roadmap của hội thoại này không còn tồn tại. Nhắn ‘làm lại từ đầu’ để lập lịch mới.");
+    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Lịch của cuộc trò chuyện này không còn nữa. Bạn nhắn ‘làm lại từ đầu’ để lập lịch mới nhé.");
 }
 
 /// <summary>Safe stored message content and per-attempt admission timestamps used by persistent quotas.</summary>

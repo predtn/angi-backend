@@ -127,10 +127,13 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 context = await contextBuilder.BuildAsync(conversation, request, ct);
                 context.TurnId = message.TurnId;
                 context.AttemptId = attemptId;
+                // Câu hỏi lưu chỉ sống đúng một lượt: mọi tin nhắn không trả lời nó đều kết thúc việc chờ, để "ok" về sau không lưu nhầm.
+                var pendingSave = context.State.PendingSave;
+                context.State = context.State with { PendingSave = null };
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
                 if (context.State.PendingStateChange is { } stalePending && AgentChatPolicy.AcceptsChange(request.Content) &&
                     stalePending.SourceRoadmapUpdatedAt != context.State.SourceRoadmapUpdatedAt)
-                    prepared = new("Roadmap đã thay đổi sau câu hỏi xác nhận. Hãy nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất.",
+                    prepared = new("Lịch vừa thay đổi sau câu hỏi xác nhận. Bạn nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất nhé.",
                         context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
                 else if (context.State.PendingStateChange is { } pending && AgentChatPolicy.AcceptsChange(request.Content))
                 {
@@ -145,31 +148,31 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 else if (context.State.PendingQuestion is not null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
                     context.CurrentProposal?.Status == "ready" && AgentChatPolicy.DismissesQuestion(request.Content))
                     // Về đúng điều kiện của bản đề xuất: một yêu cầu đổi chưa thành lịch (ví dụ quán không có món cho bữa đó) sẽ không còn chặn việc lưu.
-                    prepared = new("Đã giữ nguyên lịch hiện tại. Nhắn ‘chốt lịch này’ nếu bạn muốn lưu.", context.CurrentProposal.Snapshot.State with { PendingQuestion = null }, null, null);
+                    prepared = new("Mình giữ nguyên lịch hiện tại nhé. Ưng rồi thì cứ bảo mình chốt.", context.CurrentProposal.Snapshot.State with { PendingQuestion = null }, null, null);
                 else if (AgentChatPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
                     context.State.PendingQuestion is null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
                     AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
-                    prepared = new("Đây là toàn bộ đề xuất hiện tại để bạn xem lại. Nhắn ‘chốt lịch này’ để lưu thành roadmap.", context.State, null, null);
-                else if (AgentChatPolicy.IsSaveRequest(request.Content))
+                    prepared = new("Lịch hiện tại ở thẻ bên dưới, bạn xem lại nhé. Ưng rồi thì cứ bảo mình chốt.", context.State, null, null);
+                // Việc lưu và câu hỏi ngày đi không cần LLM: chỉ backend được quyết định ghi roadmap.
+                else if (AgentSavePolicy.Decide(context, pendingSave, AgentDatePolicy.Today(clock)) is { } save)
                 {
-                    var proposal = context.CurrentProposal;
-                    if (context.State.PendingQuestion is not null || context.State.PendingStateChange is not null || context.State.PendingPlanningRequest is not null)
-                        prepared = new(AgentChatPolicy.SaveBlocked(context.State), context.State, null, null);
-                    else if (proposal is null || proposal.Status is not ("ready" or "committed"))
-                        prepared = new("Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.", context.State, null, null);
-                    else if (proposal.Status == "committed" && !AgentConversationRules.SameConstraints(context.State, proposal.Snapshot.State))
-                        prepared = new("Yêu cầu chuyến đi đã thay đổi nhưng chưa có đề xuất mới để lưu. Hãy tạo bản xem trước cập nhật trước khi chốt lịch.", context.State, null, null);
-                    else
+                    if (save.Commit)
                     {
-                        var commit = await committer.PrepareAsync(conversation, userId,
-                            new ConfirmAgentProposalRequestDto { ProposalId = proposal.ProposalId, ProposalVersion = proposal.Version }, true, ct);
-                        prepared = new("Đã lưu lịch trình của bạn.", context.State, null, null, "confirm", commit);
+                        var proposal = context.CurrentProposal!;
+                        var commit = await committer.PrepareAsync(conversation, userId, new ConfirmAgentProposalRequestDto
+                            { ProposalId = proposal.ProposalId, ProposalVersion = proposal.Version, StartDate = save.StartDate }, true, ct);
+                        prepared = new(AgentReplyBuilder.Saved(proposal.Snapshot.State.NumDays, save.StartDate ?? context.State.StartDate ?? proposal.Snapshot.State.StartDate),
+                            context.State, null, null, "confirm", commit);
                     }
+                    else prepared = new(save.Reply!, context.State with { PendingSave = save.Pending }, null, null);
                 }
-                // "lưu"/"chốt đi" chưa đủ rõ để ghi roadmap: nhắc câu lưu chính xác cho bản hiện tại, không gọi LLM và không đổi món.
-                else if (AgentChatPolicy.IsShortSaveRequest(request.Content))
-                    prepared = new(AgentReplyBuilder.SaveConfirmation(context.CurrentProposal), context.State, null, null);
-                else prepared = await orchestrator.RunAsync(context, ct);
+                else
+                {
+                    prepared = await orchestrator.RunAsync(context, ct);
+                    // Lời chào hay câu ngoài phạm vi không trả lời câu hỏi lưu nhưng cũng không hủy nó.
+                    if (pendingSave is not null && prepared.Action is "chat" or "out_of_scope")
+                        prepared = prepared with { State = prepared.State with { PendingSave = pendingSave } };
+                }
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with
                     { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null } };

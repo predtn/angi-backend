@@ -13,8 +13,8 @@ public sealed class AgentStatePolicy
     {
         if (proposed is null && current.PendingPlanningRequest is null) return current;
         proposed ??= current;
-        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest)
-            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest };
+        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave)
+            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave };
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
             proposed = proposed with { FocusDay = current.FocusDay, FocusMeal = current.FocusMeal };

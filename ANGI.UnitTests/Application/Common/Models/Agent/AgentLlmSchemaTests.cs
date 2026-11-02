@@ -97,10 +97,27 @@ public sealed class AgentLlmSchemaTests
         AgentLlmSchema.FindMismatch(document.RootElement, AgentLlmSchema.Tools["get_roadmap"]).Should().Be(expected);
     }
 
+    // TEST-06: The social and refusal actions are allowed, and suggestedDish is a required nullable string; covers both actions, null, text, a wrong type and a missing field.
+    /// <summary>Keeps the new actions inside the strict contract so a malformed refusal is repaired rather than shown.</summary>
+    [Theory]
+    [InlineData("chat", "null", null)]
+    [InlineData("out_of_scope", "\"phở\"", null)]
+    [InlineData("out_of_scope", "5", "$.suggestedDish")]
+    [InlineData("out_of_scope", "missing", "$.suggestedDish(missing)")]
+    public void FindMismatch_SmallTalkActions_AreAllowed(string action, string dish, string? expected)
+    {
+        var output = Output(); output["action"] = action;
+        if (dish == "missing") output.Remove("suggestedDish");
+        else output["suggestedDish"] = JsonNode.Parse(dish);
+        using var document = JsonDocument.Parse(output.ToJsonString());
+
+        AgentLlmSchema.FindMismatch(document.RootElement, AgentLlmSchema.Output).Should().Be(expected);
+    }
+
     /// <summary>Builds a complete strict output with explicit nulls and empty arrays, matching the provider contract.</summary>
     private static JsonObject Output() => new()
     {
-        ["action"] = "answer", ["reply"] = "Explanation", ["clarification"] = null, ["state"] = null,
+        ["action"] = "answer", ["reply"] = "Explanation", ["suggestedDish"] = null, ["clarification"] = null, ["state"] = null,
         ["constraintsChangeConfirmed"] = false, ["baseProposalVersion"] = null,
         ["scope"] = new JsonObject { ["dayNumber"] = null, ["mealSlot"] = null },
         ["items"] = new JsonArray(), ["changes"] = new JsonArray()

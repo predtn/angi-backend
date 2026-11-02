@@ -429,7 +429,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return ArgumentError(context, "Đây là từ chỉ trỏ, không phải tên món/quán. Hãy hỏi người dùng muốn nói món/bữa nào (clarification=edit_scope).");
         var result = await LookupAsync(input, ct);
         // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
-        // mọi câu clarify của lượt sẽ thành "Đã tìm thấy kết quả đúng tên trong catalog."
+        // mọi câu clarify của lượt sẽ thành "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI."
         if (result.Status == "found") context.CatalogAnswer = Describe(result);
         // Giữ riêng kết quả tra cứu không khớp (kèm các lựa chọn gần đúng): lần lấy gợi ý sau xóa ToolNotice, làm câu hỏi
         // "chọn trong kết quả đã tìm thấy" mất danh sách và "không tìm thấy" mất tên món/quán.
@@ -461,7 +461,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return new("ambiguous", "Có nhiều kết quả cùng tên. Bạn muốn chọn nhà hàng/chi nhánh nào trong danh sách?", exact.Take(20).ToArray());
         if (!exact.Any(x => x.Available))
             return new("unavailable", "Món/quán có trong hệ thống nhưng hiện chưa khả dụng. Bạn có muốn xem lựa chọn khác không?", exact);
-        return new("found", "Đã tìm thấy kết quả đúng tên trong catalog.", exact);
+        return new("found", "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI.", exact);
     }
 
     /// <summary>Returns a model-argument error to the model as a tool result so it can correct the call; never a user-visible notice.</summary>

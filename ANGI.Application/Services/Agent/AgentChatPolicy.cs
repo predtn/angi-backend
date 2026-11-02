@@ -24,6 +24,28 @@ public static class AgentChatPolicy
         @"^(?:hay )?(?:lap|tong hop|hoan thien) (?:lich|lich trinh)(?: giup toi| cho toi)? de chot(?: lich| lich trinh)?$",
         RegexOptions.CultureInvariant);
 
+    /// <summary>"Ok lên lịch", "lên lịch đi": a go-ahead that means saving only while a ready proposal exists; without one it is a planning request.</summary>
+    public static bool IsGoAheadRequest(string content) => Regex.IsMatch(Normalize(content),
+        @"^(?:(?:ok|oke|okay|vay|thoi|roi) )?(?:len lich|dat lich|chot lich)(?: (?:di|nhe|nha|luon|nao|giup|dum|cho toi|giup toi))*$",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>A short yes to "Mình lưu lịch này nhé?"; it saves only because that question named this exact proposal version.</summary>
+    public static bool AcceptsSave(string content) => IsShortSaveRequest(content) || IsGoAheadRequest(content) || Regex.IsMatch(Normalize(content),
+        @"^(?:ok|oke|okay|okie|u|uh|vang|da|co|dung|dung roi|duoc|dong y|xac nhan|yes)(?: (?:roi|nhe|nha|luon|di|a))*$", RegexOptions.CultureInvariant);
+
+    /// <summary>Backs out of an open save question; the proposal stays as it is.</summary>
+    public static bool DeclinesSave(string content) => Regex.IsMatch(Normalize(content),
+        @"^(?:khong|thoi|khoan|chua|huy|no)(?: (?:da|luu|nua|nhe|nha|di))*$|^dung luu(?: (?:nhe|nha|nua))*$", RegexOptions.CultureInvariant);
+
+    /// <summary>Saves without a start date because the user does not know it yet; the roadmap's date stays open.</summary>
+    public static bool DefersStartDate(string content) => Regex.IsMatch(Normalize(content),
+        @"^(?:de sau|chon sau|chua biet|khong biet|chua chon|chua co ngay|bo qua|khong can|khong can ngay|luu luon)(?: (?:ngay|nhe|nha|di|luon))*$", RegexOptions.CultureInvariant);
+
+    /// <summary>Recognizes a request to see the current plan, the only question answered by listing it again.</summary>
+    public static bool IsPlanViewRequest(string content) => Regex.IsMatch(Normalize(content),
+        @"\b(?:xem|in|liet ke|hien thi|tong hop)\b.*\b(?:lich|lo trinh|roadmap|ke hoach|de xuat|ban nhap)\b|\b(?:lich|lo trinh|roadmap|ke hoach)\b.*\b(?:co gi|the nao|ra sao|hien tai)\b",
+        RegexOptions.CultureInvariant);
+
     /// <summary>Allows a short affirmative only when a validated pending constraint change exists.</summary>
     public static bool AcceptsChange(string content) => Normalize(content) is "dong y" or "xac nhan thay doi" or "dong y thay doi" or "xac nhan" or "ok" or "yes" or "dung roi";
 
@@ -35,7 +57,7 @@ public static class AgentChatPolicy
 
     /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
     public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
-        ? $"Trước khi lưu, mình cần bạn trả lời: {question} Nếu không muốn đổi gì, nhắn ‘giữ nguyên’ rồi ‘chốt lịch này’."
+        ? $"Trước khi lưu, mình cần bạn trả lời: {question} Nếu không muốn đổi gì, bạn nhắn “giữ nguyên” rồi bảo mình chốt nhé."
         : "Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.";
 
     /// <summary>Resolves unambiguous draft controls before a provider call; other natural phrases remain model-interpreted.</summary>

@@ -481,7 +481,7 @@ public sealed class AgentToolExecutorTests
 
     // TEST-20: An exact search_catalog match is kept only as an answer fact, never as a notice that replaces a clarification, while an
     // unfound name becomes both the turn notice and the catalog notice; covers a found and an unfound restaurant.
-    /// <summary>Stops "Đã tìm thấy kết quả đúng tên trong catalog." from being sent as the reply to an unrelated question.</summary>
+    /// <summary>Stops "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI." from being sent as the reply to an unrelated question.</summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -503,7 +503,7 @@ public sealed class AgentToolExecutorTests
         if (found)
         {
             context.ToolNotice.Should().BeNull(); context.CatalogNotice.Should().BeNull();
-            context.CatalogAnswer.Should().StartWith("Đã tìm thấy kết quả đúng tên trong catalog.");
+            context.CatalogAnswer.Should().StartWith("Mình tìm thấy đúng món/quán bạn hỏi trên ANGI.");
         }
         else
         {

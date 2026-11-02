@@ -15,7 +15,7 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 internal static class AgentTestData
 {
     /// <summary>Returns a complete budgeted trip with no inferred dietary guarantees.</summary>
-    public static AgentState State() => new() { Province = "Da Nang", NumDays = 2, BudgetAmount = 500000 };
+    public static AgentState State() => new() { Province = "Da Nang", NumDays = 2, BudgetAmount = 500000, StartDate = new(2026, 12, 1) };
     /// <summary>Returns a stable day-one lunch proposal item.</summary>
     public static AgentItem Item(int id = 1, string key = "a", short day = 1, string meal = "lunch") => new(key, null, day, meal, 0, id);
     /// <summary>Returns an owned in-memory context whose state is independent from transport version.</summary>

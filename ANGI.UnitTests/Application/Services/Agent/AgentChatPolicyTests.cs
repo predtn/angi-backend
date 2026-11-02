@@ -116,4 +116,13 @@ public sealed class AgentChatPolicyTests
         if (area == "question") reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
         else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
     }
+
+    // TEST-09: Only a request to see the plan counts as a view request; covers accents, no accents, both word orders, a greeting and a question about the plan.
+    /// <summary>The plan is listed again only for these messages, so an unrelated question never receives the whole itinerary.</summary>
+    [Theory]
+    [InlineData("Xem lịch", true)][InlineData("cho mình xem lại lịch", true)][InlineData("xem lo trinh", true)][InlineData("Liệt kê đề xuất", true)]
+    [InlineData("Lịch hiện tại có gì?", true)][InlineData("lich the nao", true)]
+    [InlineData("Xin chào", false)][InlineData("Giải thích bản nháp", false)][InlineData("Vì sao chọn món này", false)][InlineData("đổi bữa trưa", false)][InlineData("", false)]
+    public void IsPlanViewRequest_MatchesOnlyRequestsToSeeThePlan(string content, bool expected) =>
+        AgentChatPolicy.IsPlanViewRequest(content).Should().Be(expected);
 }

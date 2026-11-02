@@ -8,12 +8,10 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Checks honest user-facing taste guidance and fallback warnings tied to the selected items.</summary>
 public sealed class AgentReplyBuilderTests
 {
-    // TEST-01: The proposal reply lists every selected dish by day and meal, including several dishes per meal; covers preview and saved wording.
-    /// <summary>Verifies the full itinerary is shown instead of a truncated summary.</summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Proposal_ListsEverySelectedDishByDayAndMealWithVariableCounts(bool saved)
+    // TEST-01: The saved itinerary lists every dish by day and meal, including several dishes per meal.
+    /// <summary>Verifies a user who asked to see a saved plan gets all of it, since no proposal card shows it.</summary>
+    [Fact]
+    public void Itinerary_ListsEverySelectedDishByDayAndMealWithVariableCounts()
     {
         var items = new[]
         {
@@ -30,28 +28,27 @@ public sealed class AgentReplyBuilderTests
         }.Select(item => item with { DishName = $"Món {item.DishId}", RestaurantName = "Quán A", Price = 50000,
             RequestId = Guid.NewGuid() }).ToArray();
 
-        var reply = AgentReplyBuilder.Proposal(AgentTestData.Snapshot(items.Reverse().ToArray()), saved: saved);
+        var reply = AgentReplyBuilder.Itinerary(AgentTestData.Snapshot(items.Reverse().ToArray()));
 
-        reply.Should().StartWith("Đây sẽ là roadmap khám phá ẩm thực của bạn trong 2 ngày.\n\nNgày 1:\n\n" +
+        reply.Should().StartWith("Đây là lịch 2 ngày đã lưu của bạn nhé.\n\nNgày 1:\n\n" +
             "Bữa sáng:\n- Món 1 — Quán A, 50.000 đồng.\n\n" +
             "Bữa trưa:\n- Món 2 — Quán A, 50.000 đồng.\n- Món 3 — Quán A, 50.000 đồng.\n\n" +
             "Bữa tối:\n- Món 4 — Quán A, 50.000 đồng.");
         reply.Should().MatchRegex("Ngày 2:\n\nBữa sáng:\n- Món 5[^\n]+\n\nBữa trưa:\n- Món 6[^\n]+\n\n" +
             "Bữa tối:\n- Món 7[^\n]+\n- Món 8[^\n]+\n- Món 9[^\n]+\n- Món 10[^\n]+");
         reply.Split('\n').Count(line => line.StartsWith("- ")).Should().Be(items.Length);
-        reply.Should().Contain("Tổng tiền dự kiến theo đề xuất: 500.000 đồng/người.");
-        reply.Should().Contain(saved ? "Đây là lịch đã lưu." : "Đây là bản xem trước.");
-        reply.Should().NotContain("Các món còn lại").And.NotContain("Bữa phụ:").And.NotContain("Bữa khuya:");
+        reply.Should().Contain("Tổng tiền dự kiến: 500.000 đồng/người.");
+        reply.Should().NotContain("Bữa phụ:").And.NotContain("Bữa khuya:").And.NotContain("roadmap");
     }
 
-    // TEST-02: Empty meals and days stay visible with an explicit placeholder and no invented dish.
+    // TEST-02: Empty meals and days stay visible in the saved itinerary with an explicit placeholder and no invented dish.
     /// <summary>Keeps missing meals honest in the user-facing itinerary.</summary>
     [Fact]
-    public void Proposal_EmptyMealsAndDaysRemainVisibleWithoutInventedDishes()
+    public void Itinerary_EmptyMealsAndDaysRemainVisibleWithoutInventedDishes()
     {
         var item = AgentTestData.Item() with { DishName = "Mì Quảng" };
 
-        var reply = AgentReplyBuilder.Proposal(AgentTestData.Snapshot(item));
+        var reply = AgentReplyBuilder.Itinerary(AgentTestData.Snapshot(item));
 
         reply.Should().Contain("Bữa sáng:\nChưa có món trong bữa này.");
         reply.Should().Contain("Ngày 2:\n\nBữa sáng:\nChưa có món trong bữa này.\n\n" +
@@ -59,15 +56,15 @@ public sealed class AgentReplyBuilderTests
         reply.Split('\n').Where(line => line.StartsWith("- ")).Should().ContainSingle().Which.Should().StartWith("- Mì Quảng");
     }
 
-    // TEST-03: Snack and late-night meals appear when selected or declared, even if empty.
+    // TEST-03: Snack and late-night meals appear in the saved itinerary when selected or declared, even if empty.
     /// <summary>Shows optional meals only when the plan actually includes them.</summary>
     [Fact]
-    public void Proposal_AdditionalMealsAreShownWhenSelectedOrRequested()
+    public void Itinerary_AdditionalMealsAreShownWhenSelectedOrRequested()
     {
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item(meal: "snack") with { DishName = "Chè" });
         snapshot = snapshot with { State = snapshot.State with { MealSlots = ["snack", "late_night"] } };
 
-        var reply = AgentReplyBuilder.Proposal(snapshot);
+        var reply = AgentReplyBuilder.Itinerary(snapshot);
 
         reply.Should().Contain("Bữa phụ:\n- Chè").And.Contain("Bữa khuya:\nChưa có món trong bữa này.");
     }
@@ -100,8 +97,8 @@ public sealed class AgentReplyBuilderTests
         validated.Validation.Errors.Should().BeEmpty();
         validated.Validation.Warnings.Should().NotContain(warning => warning.Contains("đánh giá"));
         var reply = AgentReplyBuilder.Proposal(snapshot);
-        reply.Should().NotContain("thứ tự đánh giá");
-        reply.Should().Contain("ưu tiên mềm").And.Contain("chưa bảo đảm từng món").And.Contain("lịch sử tương tác");
+        reply.Should().NotContain(AgentReplyBuilder.RatingFallbackNote);
+        reply.Should().Contain(AgentReplyBuilder.TasteNote);
     }
 
     // TEST-06: A selected item without personalized provenance is disclosed as rating-ordered.
@@ -110,7 +107,7 @@ public sealed class AgentReplyBuilderTests
     public void SelectedFallbackItem_IsStillDisclosed()
     {
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
-        AgentReplyBuilder.Proposal(snapshot).Should().Contain("thứ tự đánh giá thay cho cá nhân hóa");
+        AgentReplyBuilder.Proposal(snapshot).Should().Contain(AgentReplyBuilder.RatingFallbackNote);
     }
 
     // TEST-07: A meal-level taste override also states that taste is a soft, unguaranteed preference.
@@ -120,7 +117,7 @@ public sealed class AgentReplyBuilderTests
     {
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
         snapshot = snapshot with { State = snapshot.State with { TasteOverrides = [new(1, "lunch", [new("spicy", .5)])] } };
-        AgentReplyBuilder.Proposal(snapshot).Should().Contain("chưa bảo đảm từng món");
+        AgentReplyBuilder.Proposal(snapshot).Should().Contain(AgentReplyBuilder.TasteNote);
     }
 
     // TEST-08: The planning-incomplete reply asks the user to clarify or adjust instead of resending the same request.
@@ -217,9 +214,9 @@ public sealed class AgentReplyBuilderTests
     // covers ready, committed and missing proposals.
     /// <summary>Verifies "lưu" never saves or replans, but tells the user what would be saved and how to save it.</summary>
     [Theory]
-    [InlineData("ready", "Bạn muốn lưu bản xem trước hiện tại (2 món, tổng 80.000 đồng/người) thành roadmap? Nhắn ‘chốt lịch này’ để lưu.")]
-    [InlineData("committed", "Lịch trình này đã được lưu thành roadmap. Bạn muốn chỉnh sửa gì thêm không?")]
-    [InlineData(null, "Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.")]
+    [InlineData("ready", "Mình lưu lịch hiện tại (2 món, tổng 80.000 đồng/người) nhé?")]
+    [InlineData("committed", "Lịch này đã được lưu rồi. Bạn muốn chỉnh gì thêm không?")]
+    [InlineData(null, AgentReplyBuilder.NothingToSave)]
     public void SaveConfirmation_DescribesWhatWouldBeSaved(string? status, string expected)
     {
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item(1, "a") with { Price = 30000 }, AgentTestData.Item(2, "b", 2) with { Price = 50000 });
@@ -257,6 +254,72 @@ public sealed class AgentReplyBuilderTests
         context.CatalogAnswer = "Đã tìm thấy kết quả đúng tên trong catalog.\nLẩu Bò Mai — Lẩu Bò Mai, 2 Tống Duy Tân, Hà Nội; khả dụng";
 
         AgentReplyBuilder.Answer(context).Should().Be(context.CatalogAnswer);
-        AgentReplyBuilder.Clarify(context, "edit_scope").Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+        AgentReplyBuilder.Clarify(context, "edit_scope").Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
+    }
+
+    // TEST-17: A preview reply is a short introduction naming the place, days and total; it lists no dish, restaurant or internal wording.
+    /// <summary>Stops the chat from repeating the proposal card, which caused two copies of the same plan on screen.</summary>
+    [Fact]
+    public void Proposal_IsShortIntroductionWithoutRepeatingTheCard()
+    {
+        var items = new[] { AgentTestData.Item(1, "a", 1, "breakfast"), AgentTestData.Item(2, "b", 1, "lunch"), AgentTestData.Item(3, "c", 1, "dinner"),
+                AgentTestData.Item(4, "d", 2, "breakfast"), AgentTestData.Item(5, "e", 2, "lunch"), AgentTestData.Item(6, "f", 2, "dinner") }
+            .Select(item => item with { DishName = $"Món {item.DishId}", RestaurantName = "Quán A", Price = 50000, RequestId = Guid.NewGuid() }).ToArray();
+
+        var reply = AgentReplyBuilder.Proposal(AgentTestData.Snapshot(items));
+
+        reply.Should().Be("Xong rồi! Mình đã lên lịch 2 ngày ở Da Nang cho bạn, tổng khoảng 300.000 đồng/người. Bạn xem danh sách món và các điểm trên bản đồ nhé.\n" +
+            "Ưng rồi thì cứ bảo mình chốt, muốn đổi món nào cứ nhắn nhé.");
+    }
+
+    // TEST-18: A preview names its empty meals, omits the place when unknown, and caps the list at six plus a remainder; covers 5 and 8 empty meals.
+    /// <summary>The card lists only existing dishes, so an empty meal must still be disclosed without turning the reply into a long list.</summary>
+    [Theory]
+    [InlineData(2, "Còn thiếu món cho bữa sáng ngày 1; bữa tối ngày 1; bữa sáng ngày 2; bữa trưa ngày 2; bữa tối ngày 2.")]
+    [InlineData(3, "Còn thiếu món cho bữa sáng ngày 1; bữa tối ngày 1; bữa sáng ngày 2; bữa trưa ngày 2; bữa tối ngày 2; bữa sáng ngày 3; 2 bữa khác.")]
+    public void Proposal_EmptyMeals_AreNamedAndCapped(int days, string expected)
+    {
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { RequestId = Guid.NewGuid() });
+        snapshot = snapshot with { State = snapshot.State with { NumDays = (short)days, Province = null } };
+
+        var reply = AgentReplyBuilder.Proposal(snapshot);
+
+        reply.Should().StartWith($"Xong rồi! Mình đã lên lịch {days} ngày cho bạn,").And.Contain(expected);
+    }
+
+    // TEST-19: Answer never dumps the plan for an unrelated question, and shows it only on request; covers another question, a view request over a
+    // ready proposal, a view request over a saved plan and a view request with no plan.
+    /// <summary>Fixes "xin chào" and any other question receiving the entire itinerary as the reply.</summary>
+    [Theory]
+    [InlineData("Giải thích bản nháp", "ready", AgentReplyBuilder.AnswerUnavailable)]
+    [InlineData("Xem lại lịch giúp mình", "ready", "Lịch hiện tại có 1 món, tổng khoảng 50.000 đồng/người. Bạn xem chi tiết ở thẻ bên dưới và trên bản đồ nhé.")]
+    [InlineData("Xem lại lịch giúp mình", "saved", "Đây là lịch 2 ngày đã lưu của bạn nhé.")]
+    [InlineData("Xem lại lịch giúp mình", "none", "Mình có thể lập lịch ăn uống từ những món và quán có trên ANGI.")]
+    public void Answer_ListsThePlanOnlyWhenAskedAndNoCardShowsIt(string content, string plan, string expected)
+    {
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng", Price = 50000 });
+        var context = new AgentContext
+        {
+            ConversationId = 7, UserId = 3, State = AgentTestData.State(), Source = plan == "none" ? null : snapshot,
+            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = content },
+            CurrentProposal = plan != "ready" ? null
+                : new ANGI.Application.DTOs.Agent.AgentProposalDto(1, 1, "create", "ready", snapshot, new AgentValidation([], [], 50000, []), DateTime.UtcNow.AddHours(1))
+        };
+
+        var reply = AgentReplyBuilder.Answer(context);
+
+        reply.Should().StartWith(expected);
+        reply.Contains("Mì Quảng").Should().Be(plan == "saved");
+    }
+
+    // TEST-20: A tool notice still takes priority over every plan answer.
+    /// <summary>Keeps trusted tool outcomes visible rather than replacing them with a generic reply.</summary>
+    [Fact]
+    public void Answer_ToolNotice_TakesPriority()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.ToolNotice = "Chưa lấy được gợi ý.";
+
+        AgentReplyBuilder.Answer(context).Should().Be("Chưa lấy được gợi ý.");
     }
 }

@@ -52,6 +52,9 @@ public sealed record AgentState
     /// <summary>Backend-owned request retained while taste questions are unresolved; not yet confirmed trip state.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentPendingPlanningRequest? PendingPlanningRequest { get; init; }
+    /// <summary>Backend-owned save question awaiting a reply; it never blocks the proposal and clients or the model cannot set it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentPendingSave? PendingSave { get; init; }
     /// <summary>Last observed exact UTC roadmap timestamp; unchanged timestamps preserve chat planning constraints.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? SourceRoadmapUpdatedAt { get; init; }
@@ -63,6 +66,9 @@ public sealed record AgentState
 /// <summary>Bounded user messages plus explicit duration/budget values collected across clarification turns.</summary>
 public sealed record AgentPendingPlanningRequest(string[] Messages, short? NumDays = null,
     decimal? TotalBudget = null, decimal? DailyBudget = null);
+
+/// <summary>The exact proposal version a save question is about, so a later "ok" can never save a different plan.</summary>
+public sealed record AgentPendingSave(long ProposalId, int ProposalVersion, string Stage);
 
 /// <summary>One backend-priced itinerary item with stable proposal identity.</summary>
 public sealed record AgentItem(string ItemKey, long? SourceItemId, short DayNumber, string MealSlot,
@@ -172,6 +178,8 @@ public sealed record AgentOutput
 {
     public required string Action { get; init; }
     public required string Reply { get; init; }
+    /// <summary>Dish named in a general food question refused as out of scope; offered only if the user's own message names it.</summary>
+    public string? SuggestedDish { get; init; }
     /// <summary>Allowlisted question intent; free provider text is never a factual response.</summary>
     public string? Clarification { get; init; }
     public AgentState? State { get; init; }
