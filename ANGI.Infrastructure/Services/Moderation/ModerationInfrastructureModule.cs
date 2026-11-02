@@ -14,6 +14,7 @@ public static class ModerationInfrastructureModule
         services.AddScoped<IMenuReviewRepository, MenuReviewRepository>();
         services.AddScoped<IRestaurantModerationRepository, RestaurantModerationRepository>();
         services.AddScoped<IUserModerationRepository, UserModerationRepository>();
+        services.AddScoped<IBlogModerationRepository, BlogModerationRepository>();
         services.AddHostedService<AccountSuspensionExpiryWorker>();
         return services;
     }

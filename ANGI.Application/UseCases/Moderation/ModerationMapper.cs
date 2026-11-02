@@ -52,6 +52,24 @@ internal static class ModerationMapper
         LikedByMe = blog.Likes.Any(like => like.UserId == callerId), IsMine = blog.AuthorId == callerId, UpdatedAt = blog.UpdatedAt
     };
 
+    /// <summary>Maps a blog aggregate and its pending report count into a ModBlogCardDto for MOD-B1.</summary>
+    internal static ModBlogCardDto ModBlogCard(Blog blog, int pendingReportCount) => new()
+    {
+        Id = blog.Id,
+        Title = blog.Title,
+        Slug = blog.Slug,
+        Excerpt = blog.Content.Length <= 200 ? blog.Content.Trim() : blog.Content[..200].TrimEnd(),
+        CoverUrl = blog.CoverMedia?.Url,
+        Author = Summary(blog.Author),
+        HasRoadmap = blog.RoadmapSnapshot is not null,
+        LikeCount = blog.LikeCount,
+        CommentCount = blog.CommentCount,
+        ViewCount = blog.ViewCount,
+        PublishedAt = blog.PublishedAt,
+        Status = Api(blog.Status),
+        PendingReportCount = pendingReportCount
+    };
+
     /// <summary>Converts a domain enum to its exact snake_case API representation.</summary>
     internal static string Api<T>(T value) where T : struct, Enum => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 
