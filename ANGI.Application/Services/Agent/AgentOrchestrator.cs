@@ -15,9 +15,11 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         ct.ThrowIfCancellationRequested();
         if (AgentTasteClarificationPolicy.Question(context) is { } tasteQuestion)
         {
+            var pending = AgentPendingPlanningPolicy.Capture(context.State.PendingPlanningRequest, context.Request.Content);
+            // Hỏi gộp số ngày/ngân sách còn thiếu trong cùng câu, để lượt sau không gọi gợi ý khi chưa có ngân sách.
+            if (AgentPendingPlanningPolicy.MissingTripDetails(context.State, pending) is { } tripQuestion) tasteQuestion += " " + tripQuestion;
             telemetry.Record("taste_clarification", context.ConversationId, context.TurnId, context.AttemptId);
-            return new(tasteQuestion, context.State with { PendingQuestion = tasteQuestion,
-                PendingPlanningRequest = AgentPendingPlanningPolicy.Capture(context.State.PendingPlanningRequest, context.Request.Content) }, null, null);
+            return new(tasteQuestion, context.State with { PendingQuestion = tasteQuestion, PendingPlanningRequest = pending }, null, null);
         }
         if (context.State.PendingPlanningRequest is { } pendingRequest)
             context.State = context.State with { PendingPlanningRequest = AgentPendingPlanningPolicy.Capture(pendingRequest, context.Request.Content) };

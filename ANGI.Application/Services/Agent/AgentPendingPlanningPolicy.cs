@@ -10,6 +10,13 @@ namespace ANGI.Application.Services.Agent;
 public static class AgentPendingPlanningPolicy
 {
     private const string Money = @"(?<amount>\d+(?:[.,]\d+)*)(?:\s*(?<unit>trieu|tr|nghin|ngan|k))?\s*(?:dong|vnd)?";
+    // Số tiền bắt buộc có đơn vị, dùng cho câu trả lời không kèm chữ "ngân sách" để "4 ngày" không bị đọc thành tiền.
+    private const string MoneyWithUnit = @"(?<amount>\d+(?:[.,]\d+)*)\s*(?:(?<unit>trieu|tr|nghin|ngan|k)\s*(?:dong|vnd)?|dong|vnd)";
+    // "ngay" right after the amount ("500000 dong ngay", "500k ngay") is also per day, but not "ngay dau/cuoi/thu/2"
+    // (a single day of the trip); "500k 4 ngay" stays a total because only 1/mot may sit between amount and "ngay".
+    private const string Daily = @"(?<daily>\s*(?:/\s*|(?:cho\s+)?(?:moi|1|mot)\s+)?ngay\b(?!\s+(?:dau|cuoi|thu|\d)))?";
+    private const string MentionedDays = @"(?<!(?:\d|k|trieu|tr|nghin|ngan|dong|vnd)\s*)(?<!/\s*)\b\d{1,2}\s+ngay\b(?!\s+(?:dau|cuoi))";
+    private const string Unrestricted = @"\b(?:khong gioi han|thoai mai|tuy y)\s+(?:ve\s+)?ngan sach\b|\bngan sach\s*(?:la\s*)?(?:khong gioi han|thoai mai|tuy y)\b";
 
     public static AgentPendingPlanningRequest Capture(AgentPendingPlanningRequest? previous, string content)
     {
@@ -22,10 +29,12 @@ public static class AgentPendingPlanningPolicy
         var duration = Regex.Matches(text, @"\b(?<days>\d{1,2})\s+ngay\b", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => TripDuration(text, match));
         if (duration is not null && short.TryParse(duration.Groups["days"].Value, out var parsedDays)) days = parsedDays;
-        // "ngay" right after the amount ("500000 dong ngay", "500k ngay") is also per day, but not "ngay dau/cuoi/thu/2"
-        // (a single day of the trip); "500k 4 ngay" stays a total because only 1/mot may sit between amount and "ngay".
-        var budget = Regex.Matches(text, @"\bngan sach\s*(?:(?:la|khoang|tam|toi da)\s*|:\s*)?" + Money +
-            @"(?<daily>\s*(?:/\s*|(?:cho\s+)?(?:moi|1|mot)\s+)?ngay\b(?!\s+(?:dau|cuoi|thu|\d)))?", RegexOptions.CultureInvariant)
+        var budget = Regex.Matches(text, @"\bngan sach\s*(?:(?:la|khoang|tam|toi da)\s*|:\s*)?" + Money + Daily, RegexOptions.CultureInvariant)
+            .Cast<Match>().LastOrDefault(match => !Negated(text, match.Index));
+        // Trả lời câu hỏi ngân sách bằng một mệnh đề chỉ có số tiền ("500k 1 ngày", "khoảng 2 triệu").
+        // "món dưới 50k" không khớp vì mệnh đề không bắt đầu bằng số tiền, nên trần giá món không thành ngân sách chuyến.
+        budget ??= Regex.Matches(text, @"(?:^|[,;.!?\n])\s*(?:(?:khoang|tam|toi da|la)\s+)?" + MoneyWithUnit + Daily +
+            @"\s*(?:nhe|nha|thoi)?\s*(?=[,;.!?\n]|$)", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => !Negated(text, match.Index));
         if (budget is not null && ParseMoney(budget, out var amount))
         {
@@ -43,6 +52,21 @@ public static class AgentPendingPlanningPolicy
             ? request.DailyBudget.Value * days.Value : proposed.BudgetAmount);
         return proposed with { NumDays = days, BudgetAmount = budget,
             BudgetUnrestricted = request.TotalBudget.HasValue || request.DailyBudget.HasValue ? false : proposed.BudgetUnrestricted };
+    }
+
+    /// <summary>Asks the duration/budget still unknown after the retained request; province is left to the planning turn.</summary>
+    public static string? MissingTripDetails(AgentState state, AgentPendingPlanningRequest request)
+    {
+        var known = Apply(state, request);
+        var texts = request.Messages.Select(Normalize).ToArray();
+        // Bản sao chỉ để quyết định có hỏi không; state thật không đổi. Capture chỉ ghi số ngày ở mẫu câu chặt vì nó ghi đè state,
+        // còn ở đây chỉ cần biết người dùng đã nói "4 ngày" ("Hà Nội 4 ngày") để không hỏi lại; "500k 1 ngày" là ngân sách theo ngày.
+        if (!known.NumDays.HasValue && texts.Any(text => Regex.IsMatch(text, MentionedDays, RegexOptions.CultureInvariant)))
+            known = known with { NumDays = 1 };
+        // Ngân sách theo ngày khi chưa biết số ngày đã đủ; "ngân sách không giới hạn" vẫn cần xác nhận riêng theo chính sách ràng buộc.
+        if (request.DailyBudget.HasValue || texts.Any(text => Regex.IsMatch(text, Unrestricted, RegexOptions.CultureInvariant)))
+            known = known with { BudgetUnrestricted = true };
+        return AgentReplyBuilder.TripDetailsQuestion(known, askProvince: false);
     }
 
     private static bool ParseMoney(Match match, out decimal amount)

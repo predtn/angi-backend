@@ -107,4 +107,51 @@ public sealed class AgentPendingPlanningPolicyTests
         var pending = state with { PendingPlanningRequest = new(["Lập lịch 3 ngày"], 3) };
         policy.Accept(pending, state).PendingPlanningRequest.Should().BeSameAs(pending.PendingPlanningRequest);
     }
+
+    // TEST-08: A clause that is only an amount with a unit answers the budget question; covers a daily answer, a total answer,
+    // a duration followed by a daily amount and a plain đồng amount.
+    /// <summary>Lets a user answer "Ngân sách bao nhiêu?" with just the amount instead of repeating the word "ngân sách".</summary>
+    [Theory]
+    [InlineData("500k 1 ngày", null, null, 500000d)]
+    [InlineData("Khoảng 2 triệu", null, 2000000d, null)]
+    [InlineData("4 ngày, 500k/ngày nhé", (short)4, null, 500000d)]
+    [InlineData("1500000 đồng", null, 1500000d, null)]
+    public void Capture_BareAmountAnswer_BecomesBudget(string text, short? days, double? total, double? daily)
+    {
+        var draft = AgentPendingPlanningPolicy.Capture(new(["Tôi thích ăn chua"]), text);
+
+        draft.NumDays.Should().Be(days);
+        draft.TotalBudget.Should().Be((decimal?)total);
+        draft.DailyBudget.Should().Be((decimal?)daily);
+    }
+
+    // TEST-09: An amount inside another clause never becomes the trip budget; covers a dish price ceiling, a negated amount and a duration without money.
+    /// <summary>Keeps per-dish prices and negated amounts from silently becoming a hard trip budget.</summary>
+    [Theory]
+    [InlineData("Tôi muốn món dưới 50k")]
+    [InlineData("Không phải 500k đâu")]
+    [InlineData("4 ngày")]
+    public void Capture_AmountOutsideBudgetAnswer_IsIgnored(string text)
+    {
+        var draft = AgentPendingPlanningPolicy.Capture(new(["Tôi thích ăn chua"]), text);
+
+        draft.TotalBudget.Should().BeNull();
+        draft.DailyBudget.Should().BeNull();
+    }
+
+    // TEST-10: The combined taste question asks only the duration/budget still unknown and never the province; covers nothing known,
+    // a daily budget without a duration, an unrestricted-budget request, budget and days already in state, and everything stated.
+    /// <summary>Verifies which required trip values are appended to the taste question.</summary>
+    [Theory]
+    [InlineData("Tôi thích ăn chua", false, "Bạn cho mình biết số ngày, ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
+    [InlineData("Ngân sách 500k mỗi ngày, tôi thích ăn chua", false, "Bạn cho mình biết số ngày để lập lịch nhé?")]
+    [InlineData("Đi 3 ngày, ngân sách không giới hạn, tôi thích ăn chua", false, null)]
+    [InlineData("Tôi thích ăn chua", true, null)]
+    [InlineData("Hà Nội 4 ngày, ngân sách 2 triệu, tôi thích ăn chua", false, null)]
+    public void MissingTripDetails_UnknownValues_AreAskedWithoutProvince(string text, bool stateKnown, string? expected)
+    {
+        var state = stateKnown ? new AgentState { NumDays = 2, BudgetAmount = 500000 } : new AgentState();
+
+        AgentPendingPlanningPolicy.MissingTripDetails(state, AgentPendingPlanningPolicy.Capture(null, text)).Should().Be(expected);
+    }
 }

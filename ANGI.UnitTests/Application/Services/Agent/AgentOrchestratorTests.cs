@@ -698,6 +698,28 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
+    // TEST-35: The first taste question also asks the duration/budget still missing from the wording, never the province, without an LLM call;
+    // covers missing budget, missing duration and budget, and a fully stated trip.
+    /// <summary>Ensures the user is asked every missing required trip value together with the taste question.</summary>
+    [Theory]
+    [InlineData("Tôi muốn ăn ở Hà Nội 4 ngày, tôi thích ăn chua", false, true)]
+    [InlineData("Tôi thích ăn chua", true, true)]
+    [InlineData("Tôi muốn ăn ở Hà Nội 4 ngày, ngân sách 500k 1 ngày, tôi thích ăn chua", false, false)]
+    public async Task RunAsync_TasteQuestionWithMissingTripValues_AsksThemTogether(string content, bool asksDays, bool asksBudget)
+    {
+        var context = AgentTestData.Context(); context.State = new AgentState(); context.Request.Content = content;
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().StartWith("Bạn muốn mức chua").And.NotContain("tỉnh/thành phố");
+        result.Reply.Contains("số ngày").Should().Be(asksDays);
+        result.Reply.Contains("ngân sách cho một người").Should().Be(asksBudget);
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        result.State.PendingPlanningRequest!.Messages.Should().Equal(content);
+        llm.VerifyNoOtherCalls();
+    }
+
     // TEST-36: A recommendation requested before the budget is known ends the turn with the fixed budget question, keeps the accepted taste
     // and makes no further LLM call instead of failing with AGENT_UNAVAILABLE.
     /// <summary>Protects the user's taste answer and the turn itself when the model asks for recommendations too early.</summary>
