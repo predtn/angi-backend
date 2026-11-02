@@ -934,14 +934,38 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    // TEST-46: A restaurant the catalog cannot find is asked about without being kept in mealRequests, so naming another restaurant
+    // next turn is a new request rather than a constraint change; a tag the turn added for that meal is kept.
+    /// <summary>Stops an unfound name ("Hương Sen Phố Cổ") from turning the user's next choice into a "xác nhận thay đổi" question.</summary>
+    [Fact]
+    public async Task RunAsync_UnfoundRestaurant_IsAskedWithoutKeepingTheName()
+    {
+        var context = AgentTestData.Context(); context.Request.Content = "Bữa tối ngày 1 tôi muốn ăn ở nhà hàng Hương Sen Phố Cổ";
+        var start = context.State;
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("restaurant", "Hương Sen Phố Cổ", It.IsAny<string?>(), 21, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var search = System.Text.Json.JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "Hương Sen Phố Cổ", "Da Nang"), AgentJson.Options);
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([new("a", "search_catalog", search)], null))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "clarify", Reply = "?", Clarification = "catalog_support",
+                State = start with { MealRequests = [new(1, "dinner", null, "Hương Sen Phố Cổ", [53])] } }));
+
+        var result = await Create(llm.Object, catalogSearch: catalog.Object).RunAsync(context, default);
+
+        result.Reply.Should().StartWith("Chưa tìm thấy món/quán theo tên yêu cầu");
+        result.State.MealRequests.Should().ContainSingle().Which.Should().Match<AgentMealRequest>(request =>
+            request.RestaurantName == null && request.DayNumber == 1 && request.MealSlot == "dinner" && request.TagIds.Single() == 53);
+    }
+
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
-        ANGI.Domain.Entities.Dish[]? catalog = null)
+        ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
     {
         var fixture = AgentTestData.Validator(catalog ?? [AgentTestData.Dish()]);
         telemetry ??= Mock.Of<IAgentTelemetry>(); var limits = configuredLimits ?? new AgentLimits(); var state = new AgentStatePolicy();
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), state,
-            new AgentRouteEstimator(fixture.Routes.Object), limits, telemetry);
+            new AgentRouteEstimator(fixture.Routes.Object), limits, telemetry, catalogSearch: catalogSearch);
         return new(llm, tools, state, new(), fixture.Validator, limits, telemetry);
     }
 }

@@ -78,4 +78,22 @@ public sealed class AgentChangeRequestPolicyTests
 
         AgentChangeRequestPolicy.IsUnrequested(content, before, after, Tags).Should().Be(unrequested);
     }
+
+    // TEST-05: A turn that ends on a catalog question drops the dish/restaurant names it added and keeps their tags, while a name already
+    // in the turn-start state stays; covers a new unfound restaurant with a tag, a new unfound dish alone and an earlier restaurant.
+    /// <summary>Keeps an unsettled name out of the state so the user can name another dish or restaurant without a change confirmation.</summary>
+    [Fact]
+    public void WithoutUnsettledNames_DropsOnlyNamesAddedThisTurn()
+    {
+        var before = AgentTestData.State() with { MealRequests = [new(2, "lunch", null, "Lẩu Bò Mai", [], RestaurantId: 575)] };
+        var after = before with { MealRequests = [new(2, "lunch", null, "Lẩu Bò Mai", [], RestaurantId: 575),
+            new(1, "dinner", null, "Hương Sen Phố Cổ", [53]), new(1, "lunch", "Phở Không Có", null, [])] };
+
+        var result = AgentChangeRequestPolicy.WithoutUnsettledNames(after, before);
+
+        result.MealRequests.Should().HaveCount(2);
+        result.MealRequests[0].Should().BeSameAs(after.MealRequests[0]);
+        result.MealRequests[1].Should().Match<AgentMealRequest>(request => request.DayNumber == 1 && request.MealSlot == "dinner" &&
+            request.RestaurantName == null && request.DishName == null && request.TagIds.Single() == 53);
+    }
 }

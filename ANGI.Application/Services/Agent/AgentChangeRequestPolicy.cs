@@ -46,6 +46,27 @@ public static class AgentChangeRequestPolicy
             !addedNames.Any(name => NameMentioned(name, text));
     }
 
+    /// <summary>
+    /// Removes the dish/restaurant names the turn added to meal requests, keeping their tags; used when the turn ends on a catalog
+    /// question, because a name the catalog did not settle is not a user constraint and picking another must need no confirmation.
+    /// </summary>
+    public static AgentState WithoutUnsettledNames(AgentState state, AgentState baseline)
+    {
+        var requests = new List<AgentMealRequest>();
+        foreach (var request in state.MealRequests)
+        {
+            if (request.DishName is null && request.RestaurantName is null || baseline.MealRequests.Any(previous => SameNames(previous, request)))
+            { requests.Add(request); continue; }
+            var unnamed = request with { DishName = null, RestaurantName = null, RestaurantId = null };
+            if (unnamed.TagIds.Length > 0 || unnamed.DifferentFromPlan) requests.Add(unnamed);
+        }
+        return state with { MealRequests = [.. requests] };
+    }
+
+    private static bool SameNames(AgentMealRequest previous, AgentMealRequest current) => previous.DayNumber == current.DayNumber &&
+        previous.MealSlot == current.MealSlot && previous.DishName == current.DishName && previous.RestaurantName == current.RestaurantName &&
+        previous.RestaurantId == current.RestaurantId;
+
     private static bool TagMentioned(string tagName, string accentedContent) =>
         Regex.Split(tagName.Normalize(NormalizationForm.FormC).ToLowerInvariant(), @"[\s(),]+")
             .Where(word => word.Length > 1 && !GenericTagWords.Contains(word))

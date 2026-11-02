@@ -207,6 +207,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // Với prompt "sửa roadmap cho tôi" mà chưa rõ sửa gì, Instructions hướng dẫn clarify;
                     // code ở đây kiểm tra hợp đồng output, không tự hiểu/chấm đúng sai ngữ nghĩa câu hỏi.
                     if (output.Items.Length != 0 || output.Changes.Length != 0) throw Unavailable();
+                    // Tên món/quán catalog chưa xác nhận (không thấy, nhiều kết quả, ngoài tỉnh) chưa phải ràng buộc: không giữ trong state,
+                    // nếu không lượt sau người dùng chọn quán khác sẽ bị hỏi "xác nhận thay đổi yêu cầu món/quán".
+                    if (context.CatalogNotice is not null) context.State = AgentChangeRequestPolicy.WithoutUnsettledNames(context.State, confirmedState);
                     // Model hỏi lại mức/phạm vi dù người dùng vừa trả lời đủ ("Ít, toàn chuyến đi"): cho một lần sửa kèm đúng giá trị
                     // backend đã đọc được, thay vì hỏi người dùng lần nữa. Model vẫn tự lập lịch; backend chỉ nêu câu trả lời.
                     if (output.Action == "clarify" && output.Clarification is "taste_intensity" or "taste_scope" &&
