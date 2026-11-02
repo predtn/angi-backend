@@ -16,8 +16,10 @@ namespace ANGI.Application.UseCases.Moderation.ResolveReport;
 /// <summary>Implements MOD-RP4 by resolving reports and applying their action in one transaction.</summary>
 public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> validator, ModerationAccess access,
     IRestaurantModerationRepository repository, IUnitOfWork unitOfWork, RestaurantModerationEffects effects,
-    IAuditLogService audit, ICloudinaryService cloudinary, IAccountStatusCache accountStatusCache, TimeProvider clock) : IResolveReportUseCase
+    IAuditLogService audit, ICloudinaryService cloudinary, IAccountStatusCache accountStatusCache, TimeProvider clock,
+    UserSanctionEffects? sanctionEffects = null, BlogModerationEffects? blogEffects = null) : IResolveReportUseCase
 {
+    private readonly UserSanctionEffects _sanctionEffects = sanctionEffects ?? new UserSanctionEffects(audit);
     /// <summary>Checks target-specific permissions, serializes the target workflow, and commits all report effects atomically.</summary>
     public async Task<ReportDto> ExecuteAsync(long reportId, ResolveReportRequestDto request, CancellationToken ct)
     {
@@ -101,25 +103,28 @@ public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> val
             effects.Apply(restaurant!, action == ResolutionAction.HideRestaurant ? RestaurantModerationStatus.Hidden : RestaurantModerationStatus.Suspended, note, reportId);
         if (action is ResolutionAction.HideBlog or ResolutionAction.RemoveBlog)
         {
-            var oldStatus = blog!.Status;
-            blog.Status = action == ResolutionAction.HideBlog ? BlogStatus.Hidden : BlogStatus.Removed;
-            if (oldStatus != blog.Status) audit.Add(new AuditLogEntry
+            var targetStatus = action == ResolutionAction.HideBlog ? BlogStatus.Hidden : BlogStatus.Removed;
+            if (blogEffects != null)
             {
-                Action = action == ResolutionAction.HideBlog ? AuditActions.BlogHidden : AuditActions.BlogRemoved,
-                EntityType = AuditEntityTypes.Blog, EntityId = blog.Id, SubjectUserId = ownerId,
-                OldValues = new { Status = oldStatus }, NewValues = new { blog.Status, Reason = note }
-            });
+                blogEffects.Apply(blog!, targetStatus, note, reportId);
+            }
+            else
+            {
+                var oldStatus = blog!.Status;
+                blog.Status = targetStatus;
+                if (oldStatus != blog.Status) audit.Add(new AuditLogEntry
+                {
+                    Action = action == ResolutionAction.HideBlog ? AuditActions.BlogHidden : AuditActions.BlogRemoved,
+                    EntityType = AuditEntityTypes.Blog, EntityId = blog.Id, SubjectUserId = ownerId,
+                    OldValues = new { Status = oldStatus }, NewValues = new { blog.Status, Reason = note }
+                });
+            }
         }
         if (action is not (ResolutionAction.WarnUser or ResolutionAction.SuspendUser or ResolutionAction.BanUser)) return null;
 
         var user = await repository.LockUserAsync(ownerId, ct)
             ?? throw new NotFoundException("USER_NOT_FOUND", "Không tìm thấy tài khoản.");
-        if (user.Role.Code is "MOD" or "ADMIN")
-            throw new ForbiddenException("CANNOT_SANCTION_STAFF", "Không thể xử phạt tài khoản Mod hoặc Admin.");
-        if (user.Status == UserStatus.Banned)
-            throw new ConflictException("USER_ALREADY_BANNED", "Tài khoản đã bị cấm.");
-        var oldUserStatus = user.Status;
-        var oldSuspendedUntil = user.SuspendedUntil;
+
         var sanctionType = action switch
         {
             ResolutionAction.WarnUser => SanctionType.Warn,
@@ -127,30 +132,9 @@ public sealed class ResolveReportUseCase(IValidator<ResolveReportRequestDto> val
             _ => SanctionType.Ban
         };
         var endsAt = sanctionType == SanctionType.Suspend ? request.SuspendUntil!.Value.UtcDateTime : (DateTime?)null;
-        repository.AddSanction(new UserSanction
-        {
-            UserId = ownerId, IssuedBy = actorId, ReportId = reportId, Type = sanctionType,
-            Reason = note ?? "Xử lý vi phạm theo báo cáo.", StartsAt = now, EndsAt = endsAt
-        });
-        if (sanctionType != SanctionType.Warn)
-        {
-            user.Status = sanctionType == SanctionType.Ban ? UserStatus.Banned : UserStatus.Suspended;
-            user.SuspendedUntil = endsAt;
-            foreach (var session in await repository.GetSessionsAsync(ownerId, ct)) session.RevokedAt = now;
-        }
-        var userChanges = ChangedValues(note, (nameof(user.Status), oldUserStatus, user.Status),
-            (nameof(user.SuspendedUntil), oldSuspendedUntil, user.SuspendedUntil));
-        audit.Add(new AuditLogEntry
-        {
-            Action = sanctionType switch { SanctionType.Warn => AuditActions.UserWarned, SanctionType.Suspend => AuditActions.UserSuspended, _ => AuditActions.UserBanned },
-            EntityType = AuditEntityTypes.User, EntityId = ownerId, SubjectUserId = ownerId,
-            OldValues = userChanges.Old, NewValues = userChanges.New
-        });
-        repository.AddNotification(new Domain.Entities.Notification
-        {
-            RecipientId = ownerId, Type = "ACCOUNT_SANCTIONED", Title = "Tài khoản đã nhận xử phạt",
-            Body = note, Data = JsonSerializer.Serialize(new { report_id = reportId })
-        });
+
+        await _sanctionEffects.ApplyAsync(repository, user, sanctionType, note ?? "Xử lý vi phạm theo báo cáo.", endsAt, reportId, actorId, now, ct);
+
         return sanctionType == SanctionType.Warn ? null : ownerId;
     }
 
