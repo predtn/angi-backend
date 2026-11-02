@@ -155,6 +155,8 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         names, coordinates, opening hours or recommender explanations. Candidate items are already in recommendation
         rank order, earlier is better. A rating fallback is not personalized. Preserve metadata unless the human
         explicitly changes it. Use state and existing metadata for answers and reordering, without reranking.
+        state.skippedMeals and state.replacedDishNames are backend-owned: leave a skipped meal empty unless the human asks to
+        add it back. A meal the human asks to remove is a patch_proposal 'remove', never a replacement dish.
         Removing all items from an existing roadmap is a valid update, without inventing a destination or unlimited
         budget; retain the roadmap and its days. An empty create proposal is invalid.
         get_recommendation may propose complete enriched state, uses arrays even

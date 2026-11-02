@@ -40,6 +40,18 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             telemetry.Record("edit_scope_clarification", context.ConversationId, context.TurnId, context.AttemptId);
             return new(editQuestion, context.State with { PendingQuestion = editQuestion }, null, null);
         }
+        // "Bỏ bữa sáng" khi lịch nhiều ngày: hỏi ngày nào thay vì để model đọc thành đổi một món.
+        if (AgentRemovalPolicy.Question(context) is { } removalQuestion)
+        {
+            telemetry.Record("removal_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(removalQuestion, context.State with { PendingQuestion = removalQuestion }, null, null);
+        }
+        // "Xóa bữa tối ngày 2", "bỏ món Phở Gà": đã biết chính xác món cần bỏ, không cần LLM và không bị luật đủ bữa từ chối.
+        if (AgentRemovalPolicy.Targets(context) is { } removedItems)
+        {
+            telemetry.Record("removal", context.ConversationId, context.TurnId, context.AttemptId, new { count = removedItems.Length });
+            return await RemoveAsync(context, removedItems, ct);
+        }
         // "ok", "thôi" khi không có câu hỏi nào đang mở: không có gì để lập lịch, trả lời cố định thay vì tốn 2-3 lần gọi LLM rồi bị loại.
         if (AgentEditScopePolicy.IsBareAcknowledgement(context))
         {
@@ -336,6 +348,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     proposalRepaired = repaired = true;
                     continue;
                 }
+                // Model xóa một bữa theo yêu cầu người dùng: bữa đó được phép trống, nếu không luật đủ bữa sẽ từ chối đúng điều người dùng vừa yêu cầu.
+                if (context.Source is { } removalSource && output.Changes.Any(change => change.Type == "remove") && AgentRemovalPolicy.StatesRemoval(context.Request.Content))
+                {
+                    context.State = AgentRemovalPolicy.WithSkippedMeals(context.State, removalSource, snapshot.Items);
+                    snapshot = snapshot with { State = snapshot.State with { SkippedMeals = context.State.SkippedMeals } };
+                }
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, true, timeout.Token, context.Grants, context.ReserveGrants);
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 var substituted = 0;
@@ -378,7 +396,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
-                var reviewedState = context.State with { FocusDay = null, FocusMeal = null };
+                var reviewedState = context.State with { FocusDay = null, FocusMeal = null,
+                    ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
+                    SkippedMeals = AgentRemovalPolicy.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
                 return new(AgentReplyBuilder.Proposal(validated.Snapshot, validated.Validation, substituted: substituted), reviewedState,
                     validated.Snapshot with { State = reviewedState }, validated.Validation);
             }
@@ -390,6 +410,26 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
         catch (FluentValidation.ValidationException) { throw Unavailable(); }
+    }
+
+    /// <summary>Removes the named items from the source, validates the remainder and returns it as a new preview without a provider call.</summary>
+    private async Task<AgentPreparedTurn> RemoveAsync(AgentContext context, AgentItem[] removed, CancellationToken ct)
+    {
+        var source = context.Source!;
+        var remaining = source.Items.Except(removed).ToArray();
+        // Bản xem trước chưa lưu không thể rỗng; roadmap đã lưu thì được phép (xem luật lịch rỗng trong validator).
+        if (remaining.Length == 0 && !source.BaseRoadmapId.HasValue)
+            return new("Đây là toàn bộ món trong bản xem trước. Nếu muốn bỏ cả bản này, nhắn ‘bỏ đề xuất’.", context.State with { PendingQuestion = null }, null, null);
+        var state = AgentRemovalPolicy.WithSkippedMeals(context.State with { PendingQuestion = null, FocusDay = null, FocusMeal = null }, source, remaining);
+        state = state with { ReplacedDishNames = AgentScopedPlanning.Replaced(state, source, source with { Items = remaining }) };
+        var snapshot = source with { State = state, Items = remaining, RetainedItems = remaining, Scope = new(),
+            Changes = removed.Select(item => new AgentChange("remove", item.ItemKey, null)).ToArray() };
+        var checkedRemoval = await validator.ValidateAsync(snapshot, source, false, true, ct, context.Grants);
+        if (checkedRemoval.Validation.Errors.Length > 0)
+            return new("Chưa thể bỏ món này: " + string.Join(" ", checkedRemoval.Validation.Errors), context.State, null, checkedRemoval.Validation);
+        var names = string.Join(", ", removed.Select(item => AgentReplyBuilder.Safe(item.DishName)).Distinct());
+        return new($"Đã bỏ {names} khỏi bản xem trước.\n" + AgentReplyBuilder.Proposal(checkedRemoval.Snapshot, checkedRemoval.Validation),
+            state, checkedRemoval.Snapshot with { State = state }, checkedRemoval.Validation);
     }
 
     /// <summary>A superseded question is dropped; a taste question stays because it belongs to the planning request being clarified.</summary>

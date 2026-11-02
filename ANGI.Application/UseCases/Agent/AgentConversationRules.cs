@@ -60,7 +60,8 @@ public static class AgentConversationRules
         MealSlots = state.MealSlots.Order(StringComparer.Ordinal).ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
-        PendingStateChange = null, PendingPlanningRequest = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null
+        PendingStateChange = null, PendingPlanningRequest = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+        ReplacedDishNames = null
     };
 
     /// <summary>Removes insignificant decimal scale while preserving the exact numeric value.</summary>

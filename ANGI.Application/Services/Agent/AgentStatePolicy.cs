@@ -22,6 +22,8 @@ public sealed class AgentStatePolicy
             proposed = AgentPendingPlanningPolicy.Apply(proposed, pendingRequest);
         // Provider and client state can only change targets; trusted vectors always come from reco.
         if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
+        if (!ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) || !ReferenceEquals(proposed.SkippedMeals, current.SkippedMeals))
+            proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
         new AgentStateValidator().ValidateAndThrow(proposed);
         if (proposed.Preferences?.Initialized == true)
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };

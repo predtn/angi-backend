@@ -1013,6 +1013,44 @@ public sealed class AgentOrchestratorTests
         llm.VerifyNoOtherCalls();
     }
 
+    // TEST-50: Removing a meal builds a valid preview without a provider call, records the skipped meal and remembers the dish.
+    /// <summary>Fixes "xóa bữa tối ngày 2", which used to spend five calls and end in a validation error.</summary>
+    [Fact]
+    public async Task RunAsync_RemoveMeal_BuildsPreviewWithoutProvider()
+    {
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch", "dinner"] };
+        var lunch = AgentTestData.Item(1, "a", 1, "lunch") with { DishName = "Dish 1", Price = 50000 };
+        var dinner = AgentTestData.Item(2, "b", 1, "dinner") with { DishName = "Dish 2", Price = 50000 };
+        var context = AgentTestData.Context(new AgentSnapshot(state, [lunch, dinner], [AgentTestData.Grant()]));
+        context.State = state; context.Request.Content = "Xóa bữa tối ngày 1";
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Select(item => item.ItemKey).Should().Equal("a");
+        result.State.SkippedMeals.Should().Equal(new AgentScope(1, "dinner"));
+        result.State.ReplacedDishNames.Should().Equal("Dish 2");
+        result.Reply.Should().StartWith("Đã bỏ Dish 2 khỏi bản xem trước.").And.Contain("Chưa có món trong bữa này.");
+        llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-51: Removing every item of an unsaved preview points to discarding it instead of producing an invalid empty plan.
+    /// <summary>Keeps the empty-create rule while telling the user the command that does what they want.</summary>
+    [Fact]
+    public async Task RunAsync_RemoveEverythingFromDraft_PointsToDiscard()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1) with { DishName = "Dish 1" }));
+        context.Request.Content = "bỏ món Dish 1";
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().Contain("bỏ đề xuất");
+        llm.VerifyNoOtherCalls();
+    }
+
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
     {

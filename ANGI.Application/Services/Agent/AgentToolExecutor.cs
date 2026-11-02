@@ -252,7 +252,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot) &&
                     (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
             if (distinctNames) qualified = qualified.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name));
-            IReadOnlyList<int> candidates = qualified.Select(dish => dish.Id).Take(limits.MaxCandidates).ToArray();
+            // Món người dùng đã đổi đi trong chuyến này không quay lại khi họ đổi tiếp ("món khác" nhiều lần), trừ khi không còn món nào khác.
+            var replaced = (state.ReplacedDishNames ?? []).Select(AgentScopedPlanning.Normalize).ToHashSet();
+            var eligible = namedDishIds.Length > 0 ? qualified.ToArray() : qualified.Where(dish => !replaced.Contains(AgentScopedPlanning.Normalize(dish.Name))).ToArray();
+            if (eligible.Length == 0) eligible = qualified.ToArray();
+            IReadOnlyList<int> candidates = eligible.Select(dish => dish.Id).Take(limits.MaxCandidates).ToArray();
             candidateTotal += candidates.Count;
             // Bữa không có món phù hợp được ghi nhận qua mealCoverage = 0; không tự nới điều kiện.
             if (candidates.Count == 0)

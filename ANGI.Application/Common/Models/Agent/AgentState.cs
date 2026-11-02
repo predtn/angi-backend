@@ -40,6 +40,12 @@ public sealed record AgentState
     public string? PendingQuestion { get; init; }
     public short? FocusDay { get; init; }
     public string? FocusMeal { get; init; }
+    /// <summary>Backend-owned names the user already replaced or removed in this trip, so repeated "món khác" never cycles back to them.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? ReplacedDishNames { get; init; }
+    /// <summary>Backend-owned meals the user removed on purpose; they may stay empty although their meal slot is declared.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentScope[]? SkippedMeals { get; init; }
     /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentState? PendingStateChange { get; init; }

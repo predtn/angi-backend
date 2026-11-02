@@ -466,4 +466,21 @@ public sealed class AgentScopedPlanningTests
 
     /// <summary>Builds a get_recommendation tool call from the given input, serialized with the agent JSON options.</summary>
     private static AgentToolCall Recommend(AgentRecommendationInput input) => new("rank", "get_recommendation", JsonSerializer.SerializeToElement(input, AgentJson.Options));
+
+    // TEST-24: Dropped dishes are remembered once, a dish back in the plan is forgotten, the list is bounded and an empty list stays null.
+    /// <summary>Stops repeated "món khác" from cycling back without growing the LLM context without limit.</summary>
+    [Fact]
+    public void Replaced_TracksDroppedNamesWithinBound()
+    {
+        var a = AgentTestData.Item(1, "a") with { DishName = "Phở" };
+        var b = AgentTestData.Item(2, "b") with { DishName = "Bún" };
+        var source = AgentTestData.Snapshot(a, b);
+        var state = AgentTestData.State() with { ReplacedDishNames = ["Cơm", "Bún"] };
+
+        AgentScopedPlanning.Replaced(state, source, AgentTestData.Snapshot(b)).Should().Equal("Cơm", "Phở");
+        AgentScopedPlanning.Replaced(AgentTestData.State(), source, source).Should().BeNull();
+        AgentScopedPlanning.Replaced(AgentTestData.State(), null, source).Should().BeNull();
+        var many = AgentTestData.State() with { ReplacedDishNames = Enumerable.Range(0, 60).Select(index => $"Món {index}").ToArray() };
+        AgentScopedPlanning.Replaced(many, null, source).Should().HaveCount(40).And.EndWith("Món 59");
+    }
 }

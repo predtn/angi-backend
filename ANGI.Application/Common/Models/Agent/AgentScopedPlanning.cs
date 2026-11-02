@@ -63,6 +63,18 @@ public static class AgentScopedPlanning
     public static decimal? BudgetPerMeal(AgentState state) =>
         state.BudgetAmount is { } budget && MealCount(state) is > 0 and var meals ? decimal.Floor(budget / meals) : null;
 
+    /// <summary>Adds the source dishes no longer in the plan to the replaced names; bounded so the context cost stays small.</summary>
+    public static string[]? Replaced(AgentState state, AgentSnapshot? source, AgentSnapshot result)
+    {
+        var kept = result.Items.Select(item => Normalize(item.DishName)).ToHashSet();
+        var dropped = (source?.Items ?? []).Where(item => item.DishName is not null && !kept.Contains(Normalize(item.DishName))).Select(item => item.DishName!);
+        var names = (state.ReplacedDishNames ?? []).Where(name => !kept.Contains(Normalize(name))).Concat(dropped)
+            .DistinctBy(Normalize).TakeLast(MaxReplacedNames).ToArray();
+        return names.Length == 0 ? null : names;
+    }
+
+    private const int MaxReplacedNames = 40;
+
     /// <summary>Catalog category code of a main dish; drinks, desserts, starters and snacks are side items.</summary>
     public const string MainTagCode = "local_sf_main";
 

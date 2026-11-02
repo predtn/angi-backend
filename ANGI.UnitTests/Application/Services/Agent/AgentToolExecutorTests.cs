@@ -531,6 +531,25 @@ public sealed class AgentToolExecutorTests
         catalog.VerifyNoOtherCalls();
     }
 
+    // TEST-24: Dishes the user replaced earlier are not ranked again; when they are the only candidates they are still offered.
+    /// <summary>Prevents repeated "món khác" from cycling back while never leaving a meal without candidates.</summary>
+    [Theory]
+    [InlineData(new[] { "Bún" }, new[] { 1 })]
+    [InlineData(new[] { "Phở", "Bún" }, new[] { 1, 2 })]
+    public async Task ExecuteAsync_ReplacedDishes_ExcludedUnlessOnlyChoice(string[] replaced, int[] expected)
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch"], ReplacedDishNames = replaced };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(expected);
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {

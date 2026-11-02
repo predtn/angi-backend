@@ -342,6 +342,29 @@ public sealed class AgentProposalValidatorTests
         repaired!.Items.Select(item => (item.ItemKey, item.DishId)).Should().Equal(("a", 1), ("b", 2), ("c", 1));
     }
 
+    // TEST-17: A declared meal may stay empty when the user removed it or the source already lacked it; covers a skipped meal, a pre-existing gap,
+    // a gap this edit creates, a day new to this plan and a meal slot new to this plan.
+    /// <summary>Stops an unrelated edit being rejected for a meal removed earlier, while a real coverage gap still blocks.</summary>
+    [Theory]
+    [InlineData("skipped", true)][InlineData("already-empty", true)][InlineData("new-gap", false)][InlineData("new-day", false)][InlineData("new-slot", false)]
+    public async Task ValidateAsync_MissingDeclaredMeal_DependsOnWhyItIsEmpty(string area, bool valid)
+    {
+        var lunch = AgentTestData.Item(1, "a", 1, "lunch");
+        var dinner = AgentTestData.Item(2, "b", 1, "dinner");
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch", "dinner"] };
+        var source = new AgentSnapshot(state, area is "new-gap" or "skipped" ? [lunch, dinner] : [lunch], [AgentTestData.Grant()]);
+        if (area == "new-slot") source = source with { Items = [lunch, dinner], State = state with { MealSlots = ["lunch"] } };
+        if (area == "skipped") state = state with { SkippedMeals = [new(1, "dinner")] };
+        if (area == "new-day") { source = source with { Items = [lunch, dinner] }; state = state with { NumDays = 2 }; }
+        var kept = area == "new-slot" ? new[] { lunch } : new[] { lunch };
+        var snapshot = new AgentSnapshot(state, area == "new-day" ? [lunch, dinner] : kept, [AgentTestData.Grant()], Scope: new(), RetainedItems: kept);
+        var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2));
+
+        var result = await validator.ValidateAsync(snapshot, source, false, false, default, []);
+
+        result.Validation.Errors.Any(error => error.StartsWith("Chưa có món cho bữa", StringComparison.Ordinal)).Should().Be(!valid);
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {

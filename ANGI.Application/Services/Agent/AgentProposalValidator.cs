@@ -13,6 +13,13 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
     /// <summary>Error of a proposal whose total exceeds the trip budget; the orchestrator turns it into a budget question.</summary>
     public const string BudgetExceeded = "Tổng tiền vượt ngân sách toàn chuyến cho một người.";
 
+    /// <summary>
+    /// A declared meal the source already lacks (removed earlier, or deleted from the roadmap by hand) is not this edit's gap,
+    /// so an unrelated edit is not rejected for it. A day or meal slot new to this plan still has to be filled.
+    /// </summary>
+    private static bool AlreadyEmpty(AgentSnapshot? source, short day, string meal) => source is not null && day <= source.State.NumDays &&
+        source.State.MealSlots.Contains(meal) && !source.Items.Any(item => item.DayNumber == day && item.MealSlot == meal);
+
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
@@ -115,7 +122,8 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         if (!emptyUpdate && state.MealSlots.Length > 0)
             for (short day = 1; day <= state.NumDays; day++)
                 foreach (var meal in state.MealSlots)
-                    if (!normalized.Any(x => x.DayNumber == day && x.MealSlot == meal)) errors.Add($"Chưa có món cho bữa {meal} ngày {day}.");
+                    if (!normalized.Any(x => x.DayNumber == day && x.MealSlot == meal) && state.SkippedMeals?.Contains(new(day, meal)) != true && !AlreadyEmpty(source, day, meal))
+                        errors.Add($"Chưa có món cho bữa {meal} ngày {day}.");
         // Bữa sáng/trưa/tối mặc định cần một món chính. Chỉ kiểm tra bữa có món mới/được chọn lại trong lượt này
         // để lịch đã lưu trước quy tắc này vẫn sửa tiếp được; xác nhận lưu không áp lại quy tắc cho bản đã xem.
         var mainTag = allTags.FirstOrDefault(tag => tag.TagType == TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
