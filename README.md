@@ -171,7 +171,7 @@ On Render the same keys are environment variables with `__` instead of `:` (`Jwt
 To check the Brevo keys, send both emails to your own address (the live test is skipped unless both variables are set):
 
 ```bash
-RUN_BREVO_LIVE_TESTS=1 BREVO_LIVE_TEST_TO=you@example.com dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj --filter BrevoLiveTests
+RUN_BREVO_LIVE_TESTS=1 BREVO_LIVE_TEST_TO=you@example.com dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj --filter EmailServiceBrevoLiveTests
 ```
 
 ## Agent chat-only frontend

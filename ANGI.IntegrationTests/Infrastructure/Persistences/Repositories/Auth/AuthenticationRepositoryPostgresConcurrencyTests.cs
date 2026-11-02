@@ -20,7 +20,7 @@ using Npgsql;
 namespace ANGI.IntegrationTests.Infrastructure.Persistences.Repositories.Auth;
 
 /// <summary>Exercises email-verification concurrency against a real PostgreSQL database.</summary>
-public sealed class EmailVerificationPostgresConcurrencyTests
+public sealed class AuthenticationRepositoryPostgresConcurrencyTests
 {
     private static readonly DateTime Now = new(2026, 10, 12, 3, 0, 0, DateTimeKind.Utc);
 

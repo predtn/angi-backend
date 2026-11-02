@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ANGI.IntegrationTests.Infrastructure.Services.Email
 {
     /// <summary>Exercises transactional email delivery against a real Brevo account.</summary>
-    public sealed class BrevoLiveTests
+    public sealed class EmailServiceBrevoLiveTests
     {
         // TEST-01: Send both account emails through the real Brevo account to BREVO_LIVE_TEST_TO. Area: Brevo live integration.
         /// <summary>Verifies that verification and password-reset emails can be sent through the real Brevo account.</summary>

@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ANGI.IntegrationTests.Infrastructure.Persistences.Configs;
 
 /// <summary>Exercises the timestamp token against PostgreSQL, including raw SQL that bypasses EF auditing.</summary>
-public sealed class RoadmapUpdatedAtTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
+public sealed class RoadmapConfigurationUpdatedAtTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
     // TEST-01: Writes to the roadmap and its children advance updated_at, and a rollback restores the previous value.
     /// <summary>Ensures the concurrency token changes with every roadmap edit and is restored on rollback.</summary>

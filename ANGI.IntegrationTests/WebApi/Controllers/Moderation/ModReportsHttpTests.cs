@@ -16,7 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ANGI.IntegrationTests.WebApi.Controllers.Moderation;
 
 /// <summary>Checks the complete ANGI-194 report workflow against the real HTTP pipeline and PostgreSQL.</summary>
-public sealed class ReportModerationHttpTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
+public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
     /// <summary>Ids of the users, restaurants, blog and reports seeded for the report moderation scenarios.</summary>
     private sealed record World(long RestaurantId, long OtherRestaurantId, long BlogId, long ReportId,

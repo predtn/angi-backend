@@ -5,10 +5,10 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 
-namespace ANGI.IntegrationTests.Infrastructure.Persistences.Configs;
+namespace ANGI.IntegrationTests.Infrastructure.Persistences.Migrations;
 
 /// <summary>Verifies the conversation preferences migration upgrades real PostgreSQL data safely.</summary>
-public sealed class ConversationPreferencesMigrationTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
+public sealed class AddConversationPreferencesLifecycleTests(PostgresApiFactory factory) : IClassFixture<PostgresApiFactory>
 {
     // TEST-01: The upgrade migration fails on duplicate active conversations without deleting data, names them, then backfills the counters and enforces the unique index once resolved.
     /// <summary>Ensures the upgrade never deletes user data silently and leaves the unique index enforced.</summary>

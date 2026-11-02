@@ -14,7 +14,7 @@ namespace ANGI.IntegrationTests.Infrastructure.Services.Outbox;
 /// The outbox worker on PostgreSQL: rows written by the InitialCreate triggers, claimed with SKIP LOCKED in
 /// aggregate_key order, and settled by the dispatcher (project_architecture.md, Outbox).
 /// </summary>
-public sealed class OutboxPostgresTests : IAsyncLifetime
+public sealed class OutboxStorePostgresTests : IAsyncLifetime
 {
     private readonly string _connectionString =
         Environment.GetEnvironmentVariable(PostgresIntegrationFactAttribute.ConnectionStringVariable) ?? string.Empty;

@@ -5,17 +5,17 @@ using ANGI.IntegrationTests.WebApi.Controllers.Auth;
 using ANGI.WebApi.Common;
 using FluentAssertions;
 
-namespace ANGI.IntegrationTests.WebApi.Controllers
+namespace ANGI.IntegrationTests.WebApi.Filters
 {
     /// <summary>
     /// Runs the real pipeline to check that VALIDATION_FAILED never shows MVC's English messages, whether the request
     /// is rejected by model binding or by a validator after an explicit null.
     /// </summary>
-    public sealed class ValidationMessagesHttpTests : IClassFixture<AuthenticationApiFactory>
+    public sealed class NullBodyValidationFilterHttpTests : IClassFixture<AuthenticationApiFactory>
     {
         private readonly AuthenticationApiFactory _factory;
 
-        public ValidationMessagesHttpTests(AuthenticationApiFactory factory)
+        public NullBodyValidationFilterHttpTests(AuthenticationApiFactory factory)
         {
             _factory = factory;
         }

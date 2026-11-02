@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace ANGI.IntegrationTests.WebApi.Configs;
 
 /// <summary>Checks which client IP the anonymous rate limit counts, with and without ForwardedHeaders:Enabled.</summary>
-public sealed class ForwardedHeadersHttpTests
+public sealed class ForwardedHeadersConfigHttpTests
 {
     private const string AnonymousEndpoint = "/api/v1/tags";
 

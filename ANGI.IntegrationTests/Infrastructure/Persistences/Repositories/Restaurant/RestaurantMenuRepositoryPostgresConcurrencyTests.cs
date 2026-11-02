@@ -22,7 +22,7 @@ using Npgsql;
 namespace ANGI.IntegrationTests.Infrastructure.Persistences.Repositories.Restaurant;
 
 /// <summary>Exercises menu-submission locking and persistence against a real PostgreSQL database.</summary>
-public sealed class MenuSubmissionPostgresConcurrencyTests
+public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
 {
     private static readonly DateTime Now = new(2026, 10, 18, 9, 30, 0, DateTimeKind.Utc);
 

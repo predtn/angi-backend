@@ -27,12 +27,12 @@ using Microsoft.IdentityModel.Tokens;
 namespace ANGI.IntegrationTests.WebApi.Controllers.Roadmap;
 
 /// <summary>Verifies the roadmap endpoints' auth, binding and serialization through the real HTTP pipeline.</summary>
-public sealed class RoadmapHttpContractTests : IClassFixture<RoadmapApiFactory>
+public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
 {
     private readonly RoadmapApiFactory _factory;
 
     /// <summary>Initializes HTTP contract tests with the shared roadmap API host.</summary>
-    public RoadmapHttpContractTests(RoadmapApiFactory factory)
+    public RoadmapsHttpContractTests(RoadmapApiFactory factory)
     {
         _factory = factory;
     }

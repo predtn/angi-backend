@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ANGI.IntegrationTests.Infrastructure.Services.Mapbox;
 
 /// <summary>Verifies the registered Mapbox client works end to end against a local HTTP server and caches routes.</summary>
-public sealed class MapboxHttpIntegrationTests
+public sealed class MapboxRouteServiceHttpTests
 {
     // TEST-01: Resolve the real typed Mapbox client, call an HTTP server, map its response, and cache the route.
     /// <summary>Verifies the ANGI-230 outbound HTTP and dependency-injection boundary without using a live Mapbox token.</summary>
