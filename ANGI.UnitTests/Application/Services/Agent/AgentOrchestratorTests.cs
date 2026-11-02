@@ -633,6 +633,71 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    // TEST-32: An empty proposal before any validation is repaired once without blaming the budget; a second empty proposal ends in a question, not an invalid-proposal error.
+    /// <summary>Keeps a model that gives up twice from surfacing "Lịch đề xuất không hợp lệ" to the user.</summary>
+    [Fact]
+    public async Task RunAsync_EmptyProposalTwiceBeforeValidation_AsksInsteadOfFailing()
+    {
+        var state = AgentTestData.State() with { MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        context.Grants.Add(new(null, "lunch", [1, 2], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Không lập được" }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().Be(AgentReplyBuilder.PlanningIncomplete);
+        result.State.PendingQuestion.Should().Be(AgentReplyBuilder.PlanningIncomplete);
+        context.RepairFeedback.Should().Contain("ứng viên đã được cấp").And.NotContain("budgetPerMeal").And.NotContain("get_recommendation");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-33: An empty proposal with no issued candidates asks for recommendations while tools remain, and ends without another LLM call once tools are closed; covers both.
+    /// <summary>Points the repair at the real gap (no candidates) and never spends a paid call that cannot fetch them.</summary>
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public async Task RunAsync_EmptyProposalWithoutCandidates_RequestsRecommendationsOnlyWhenToolsRemain(bool toolsClosed)
+    {
+        var context = AgentTestData.Context(); context.State = AgentTestData.State() with { MealSlots = ["lunch"] };
+        context.ToolsClosed = toolsClosed;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Không lập được" }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(AgentReplyBuilder.PlanningIncomplete);
+        if (toolsClosed) context.RepairFeedback.Should().BeNull();
+        else context.RepairFeedback.Should().Contain("get_recommendation");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(toolsClosed ? 1 : 2));
+    }
+
+    // TEST-34: After an empty-proposal repair, a full proposal rejected by validation still gets its own repair and the corrected proposal is built.
+    /// <summary>Keeps the empty-proposal repair from consuming the repair reserved for validation errors.</summary>
+    [Fact]
+    public async Task RunAsync_EmptyProposalRepair_KeepsValidationRepairAvailable()
+    {
+        var state = AgentTestData.State() with { BudgetAmount = 80000, MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        context.Grants.Add(new(null, "lunch", [1, 2, 3], Guid.NewGuid(), state));
+        var cheap = AgentTestData.Dish(3); cheap.Price = 30000;
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Không lập được" }))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Draft",
+                Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2)] }))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Draft",
+                Items = [AgentTestData.Item(3, "a", 1), AgentTestData.Item(1, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), cheap]).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(3, 1);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+    }
+
     // TEST-40: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
     // another LLM call, and the reserve dish keeps its provenance in the snapshot.
     /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>

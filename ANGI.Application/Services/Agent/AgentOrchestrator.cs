@@ -30,6 +30,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var repaired = false;
         var schemaRepaired = false;
         var proposalRepaired = false;
+        // Đề xuất rỗng có lượt sửa riêng để không tiêu mất lượt sửa lỗi validation của lịch đủ món sau đó.
+        var emptyRepaired = false;
         var coverageRepaired = false;
         var budgetRepaired = false;
         AgentValidation? lastValidation = null;
@@ -66,7 +68,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 {
                     elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, callNumber = calls + 1,
                     repair = repaired, limits.MaxOutputTokens, limits.ReasoningEffort,
-                    schemaRepaired, proposalRepaired, coverageRepaired,
+                    schemaRepaired, proposalRepaired, emptyRepaired, coverageRepaired,
                     failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
                     step.Failure?.ProviderCode, step.Failure?.Reason
                 });
@@ -239,14 +241,33 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("budget_clarification", context.ConversationId, context.TurnId, context.AttemptId, new { lastValidation!.TotalCost });
                     return BudgetQuestion(context.State, lastValidation);
                 }
+                catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE" &&
+                    output.Items.Length == 0 && output.Changes.Length == 0)
+                {
+                    // Chưa có validation nào nên không có căn cứ cho rằng do ngân sách. Feedback chỉ dựa trên dữ liệu backend thấy:
+                    // chưa có ứng viên thì phải lấy gợi ý trước; đã có ứng viên thì phải dùng chúng để gửi đủ món.
+                    var noCandidates = context.Grants.Count == 0;
+                    var toolsAvailable = !context.ToolsClosed && context.Exchanges.Count < limits.MaxToolRounds;
+                    telemetry.Record("empty_proposal", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { output.Action, output.Scope, grantCount = context.Grants.Count, context.ToolsClosed, emptyRepaired });
+                    // Không còn tools mà chưa có ứng viên thì lần gọi sửa chắc chắn vô ích; không tốn thêm lượt gọi LLM.
+                    if (!emptyRepaired && calls + 1 < limits.MaxLlmCalls && (!noCandidates || toolsAvailable))
+                    {
+                        context.RepairFeedback = error.Message + (noCandidates
+                            ? " Chưa có ứng viên nào được cấp trong lượt này. Hãy gọi get_recommendation cho các ngày/bữa trong phạm vi, rồi gửi đề xuất đủ món cho mọi bữa."
+                            : " Đề xuất rỗng không được chấp nhận. Hãy gửi đủ món cho mọi bữa trong phạm vi bằng các ứng viên đã được cấp; backend sẽ tự kiểm tra giá và ngân sách.");
+                        context.RejectedOutput = output;
+                        emptyRepaired = repaired = true;
+                        continue;
+                    }
+                    // Model vẫn bỏ cuộc sau lượt sửa: hỏi lại người dùng thay vì trả lỗi "Lịch đề xuất không hợp lệ".
+                    return new(AgentReplyBuilder.PlanningIncomplete, context.State with { PendingQuestion = AgentReplyBuilder.PlanningIncomplete }, null, lastValidation);
+                }
                 catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE" && !proposalRepaired && calls + 1 < limits.MaxLlmCalls)
                 {
                     telemetry.Record("proposal_repair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { output.Action, output.Scope, error.ErrorCode, reason = error.Message });
-                    // Đề xuất rỗng thường là model ngại vượt ngân sách: nhắc gửi lịch đủ món với món rẻ hơn để backend kiểm tra tổng tiền.
-                    context.RepairFeedback = output.Items.Length == 0 && output.Changes.Length == 0
-                        ? error.Message + " create_proposal phải có đủ món cho mọi bữa. Nếu ngân sách chặt, chọn các món rẻ hơn đã được cấp (so với budgetPerMeal) và vẫn gửi đề xuất đầy đủ."
-                        : error.Message;
+                    context.RepairFeedback = error.Message;
                     context.RejectedOutput = output;
                     proposalRepaired = repaired = true;
                     continue;
