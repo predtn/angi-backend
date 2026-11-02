@@ -232,4 +232,35 @@ public sealed class AgentProposalBuilderTests
         result.Items.Single(item => item.ItemKey == "drink").Should().Be(drink);
         result.Items.Single(item => item.ItemKey == "main").DishId.Should().Be(4);
     }
+
+    // TEST-14: A day-scoped selection that also copies unchanged rows of other days is accepted: the copies are ignored and only the
+    // scoped day changes.
+    /// <summary>Stops a harmless model habit (copying the untouched days into a day edit) from failing the whole edit.</summary>
+    [Fact]
+    public void Build_ScopedSelectionWithUnchangedCopies_IgnoresCopies()
+    {
+        var day1 = AgentTestData.Item(1, "d1", 1);
+        var day2 = AgentTestData.Item(2, "d2", 2);
+        var context = AgentTestData.Context(AgentTestData.Snapshot(day1, day2));
+
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
+            Scope = new(2, null), Items = [day1, AgentTestData.Item(5, "d2", 2)] });
+
+        result.Items.Single(item => item.ItemKey == "d1").Should().Be(day1);
+        result.Items.Single(item => item.ItemKey == "d2").DishId.Should().Be(5);
+        result.Changes.Should().ContainSingle().Which.Type.Should().Be("replace");
+    }
+
+    // TEST-15: A day-scoped selection that changes a row of another day is rejected with feedback naming that day and meal.
+    /// <summary>Keeps edits outside the requested scope forbidden while telling the model exactly what to remove.</summary>
+    [Fact]
+    public void Build_ScopedSelectionChangingOtherDay_RejectsWithSpecificFeedback()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "d1", 1), AgentTestData.Item(2, "d2", 2)));
+
+        var act = () => new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
+            Scope = new(2, null), Items = [AgentTestData.Item(9, "d1", 1), AgentTestData.Item(5, "d2", 2)] });
+
+        act.Should().Throw<ConflictException>().Which.Message.Should().Contain("ngày 1 bữa trưa").And.Contain("Chỉ gửi các món thuộc phạm vi");
+    }
 }

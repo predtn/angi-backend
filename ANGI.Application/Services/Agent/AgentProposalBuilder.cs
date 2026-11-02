@@ -25,8 +25,17 @@ public sealed class AgentProposalBuilder
             if (context.AlternativeScopes.Count > 0 && context.Request.Command != "alternative" &&
                 !context.AlternativeScopes.Any(scope => scope.Covers(output.Scope)))
                 throw Invalid("Phạm vi đề xuất rộng hơn phạm vi tìm phương án thay thế.");
+            // Model đôi khi gửi phạm vi hẹp (ví dụ ngày 4) nhưng chép kèm các món ngày khác y nguyên. Bản sao không đổi đó vô hại:
+            // backend vốn giữ nguyên mọi món ngoài phạm vi, nên bỏ chúng thay vì từ chối cả đề xuất. Món ngoài phạm vi bị đổi vẫn bị từ chối.
+            if (output.Items is not null)
+                output = output with { Items = output.Items.Where(item => output.Scope.Contains(item) || !original.Any(old =>
+                    old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot && old.DishId == item.DishId)).ToArray() };
             if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
-            if (output.Items.Any(item => !output.Scope.Contains(item))) throw Invalid("Món nằm ngoài phạm vi yêu cầu.");
+            if (output.Items.Where(item => !output.Scope.Contains(item)).Select(item => $"ngày {item.DayNumber} {AgentReplyBuilder.Meal(item.MealSlot)}")
+                .Distinct().ToArray() is { Length: > 0 } outOfScope)
+                // Phản hồi cụ thể để lần sửa của model biết bỏ món nào, thay vì trả về đề xuất rỗng.
+                throw Invalid($"Món nằm ngoài phạm vi yêu cầu ({string.Join(", ", outOfScope)}). Chỉ gửi các món thuộc phạm vi đã chọn; " +
+                    "món ngoài phạm vi được giữ nguyên.");
             if (output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
                 throw Invalid("Khóa món bị trùng trong đề xuất.");
             var replaced = original.Where(output.Scope.Contains).ToArray();
