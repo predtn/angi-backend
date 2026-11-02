@@ -54,6 +54,17 @@ public static class AgentPendingPlanningPolicy
             BudgetUnrestricted = request.TotalBudget.HasValue || request.DailyBudget.HasValue ? false : proposed.BudgetUnrestricted };
     }
 
+    /// <summary>
+    /// Duration and budget stated in the current message override the model's reading of them, which once turned "500k 1 ngày"
+    /// into a 1,500 đồng trip budget. Constraint confirmation still applies to the resulting state.
+    /// </summary>
+    public static AgentState? ApplyStated(AgentState? proposed, string content)
+    {
+        if (proposed is null) return null;
+        var stated = Capture(null, content);
+        return stated.NumDays.HasValue || stated.TotalBudget.HasValue || stated.DailyBudget.HasValue ? Apply(proposed, stated) : proposed;
+    }
+
     /// <summary>Asks the duration/budget still unknown after the retained request; province is left to the planning turn.</summary>
     public static string? MissingTripDetails(AgentState state, AgentPendingPlanningRequest request)
     {

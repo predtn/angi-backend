@@ -208,8 +208,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 if (!context.ReplanAfterConfirmation)
-                    context.State = statePolicy.Accept(context.State,
-                        AgentMealScopePolicy.Narrow(output.State, context.State, AgentMealScopePolicy.Evidence(context)), confirmedState);
+                    context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(
+                        AgentMealScopePolicy.Narrow(output.State, context.State, AgentMealScopePolicy.Evidence(context)), context.Request.Content), confirmedState);
                 // Đã có lịch mà người dùng không yêu cầu đổi gì ("ăn vui vui", "ok") và model cũng không trích được ràng buộc mới:
                 // không nhận đề xuất đổi món. Giữ nguyên lịch và state đầu lượt, hỏi lại bằng câu chung; lịch hiện tại vẫn lưu được.
                 if (output.Action is "create_proposal" or "patch_proposal" && context.Source is not null && !context.ReplanAfterConfirmation &&

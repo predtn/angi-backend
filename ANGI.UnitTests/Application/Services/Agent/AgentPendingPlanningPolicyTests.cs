@@ -154,4 +154,27 @@ public sealed class AgentPendingPlanningPolicyTests
 
         AgentPendingPlanningPolicy.MissingTripDetails(state, AgentPendingPlanningPolicy.Capture(null, text)).Should().Be(expected);
     }
+
+    // TEST-11: Stated duration and budget override the model's reading; covers a misread daily budget, a stated total, a message
+    // with no trip facts and a null state.
+    /// <summary>Prevents "500k 1 ngày" from becoming a 1,500 đồng budget because the model dropped the thousands.</summary>
+    [Theory]
+    [InlineData("Lập lịch 3 ngày ở Hà Nội, ngân sách 500k 1 ngày", 1500, (short)2, 1500000d, (short)3)]
+    [InlineData("ngân sách 2 triệu", 1500, (short)3, 2000000d, (short)3)]
+    [InlineData("đổi bữa trưa ngày 2", 1500, (short)3, 1500d, (short)3)]
+    public void ApplyStated_OverridesModelValues(string content, int modelBudget, short modelDays, double budget, short days)
+    {
+        var state = AgentPendingPlanningPolicy.ApplyStated(new AgentState { BudgetAmount = modelBudget, NumDays = modelDays }, content)!;
+
+        state.BudgetAmount.Should().Be((decimal)budget);
+        state.NumDays.Should().Be(days);
+    }
+
+    // TEST-12: A null model state stays null so an unchanged state keeps its existing shortcut.
+    /// <summary>Ensures stated facts do not create a state the model did not propose.</summary>
+    [Fact]
+    public void ApplyStated_NullState_StaysNull()
+    {
+        AgentPendingPlanningPolicy.ApplyStated(null, "ngân sách 2 triệu").Should().BeNull();
+    }
 }

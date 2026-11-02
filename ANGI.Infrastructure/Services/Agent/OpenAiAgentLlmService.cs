@@ -112,7 +112,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         and search_catalog are allowed. Ask for province, number of days, and budget when missing.
         StartDate is optional: a duration such as '3 days' fully resolves numDays. Never require calendar dates to
         plan or save a trip, never ask again for known values, and preserve startDate=null unless the user supplies it.
-        Ask all missing required trip values together. Once province, numDays and budget are resolved, produce a
+        Ask all missing required trip values together. On such a clarify, return state holding every trip value the
+        human has stated so far (e.g. province from 'Hà Nội'), never state=null, so the next question asks only what is
+        still missing. Vague wording ('vài ngày', 'vừa phải') states nothing. Once province, numDays and budget are resolved, produce a
         complete preview after resolving requested taste intensity and scope. Taste clarification takes precedence
         over immediate planning, including replans after constraint confirmation. Do not ask for optional metadata.
         Unless the user requests fewer meals, plan

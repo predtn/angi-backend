@@ -1072,6 +1072,23 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-53: A daily budget the model misread is corrected from the user's wording before validation.
+    /// <summary>Prevents the 1,500 đồng budget the model produced for "500k 1 ngày".</summary>
+    [Fact]
+    public async Task RunAsync_ModelMisreadsDailyBudget_UsesUserWording()
+    {
+        var context = AgentTestData.Context();
+        context.State = new AgentState { MealSlots = [] };
+        context.Request.Content = "Lập lịch 2 ngày ở Da Nang, ngân sách 500k 1 ngày";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "clarify", Clarification = "general", Reply = "?", State = new AgentState { Province = "Da Nang", NumDays = 2, BudgetAmount = 1000 } }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.State.BudgetAmount.Should().Be(1000000);
+    }
+
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
     {

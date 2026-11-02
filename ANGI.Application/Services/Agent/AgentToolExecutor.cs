@@ -57,8 +57,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // userId luôn lấy từ context đã xác thực, không phải tham số do model cung cấp.
         // Khẩu vị "bữa 2 ngày 1" được giữ đúng bữa trước khi tính vector, kể cả khi model ghi thành cả ngày 1.
         if (!context.ReplanAfterConfirmation)
-            context.State = statePolicy.Accept(context.State,
-                AgentMealScopePolicy.Narrow(input.State, context.State, AgentMealScopePolicy.Evidence(context)), context.ConstraintBaseline);
+            context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(
+                AgentMealScopePolicy.Narrow(input.State, context.State, AgentMealScopePolicy.Evidence(context)), context.Request.Content), context.ConstraintBaseline);
         var state = context.State;
         // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
         // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
