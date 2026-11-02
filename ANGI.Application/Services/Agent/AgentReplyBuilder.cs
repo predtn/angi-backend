@@ -12,7 +12,8 @@ public static class AgentReplyBuilder
         "Bạn có thể nói rõ hơn hoặc điều chỉnh yêu cầu, ví dụ ngày/bữa, món muốn ăn, ngân sách hoặc khẩu vị.";
     public const string SubstitutionNote = "món được hệ thống chọn lại từ chính danh sách gợi ý đã lấy để đúng ngày/bữa hoặc tránh lặp món; " +
         "các món này vẫn theo khẩu vị, ngân sách và điều kiện bạn đã nêu.";
-    public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì catalog hiện chưa có đủ món khác nhau đáp ứng điều kiện của các bữa đó.";
+    // Chỉ còn lặp khi cả danh sách gợi ý của bữa đó (kể cả món dự phòng) không còn món khác tên phù hợp; không suy ra catalog thiếu món.
+    public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì danh sách gợi ý phù hợp cho các bữa đó không còn món khác.";
     public static readonly string[] Clarifications = ["trip_details", "taste_scope", "taste_intensity", "edit_scope",
         "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general"];
 
@@ -44,7 +45,7 @@ public static class AgentReplyBuilder
         if (validation?.Warnings.Any(x => x.Contains("ước lượng", StringComparison.Ordinal)) == true)
             lines.Add("Thông tin tuyến đường có phần ước lượng.");
         if (substituted > 0) lines.Add($"Có {substituted} {SubstitutionNote}");
-        // Lặp còn lại sau khi backend đã thay các món lặp tránh được là do catalog; món người dùng gọi tên không tính.
+        // Lặp còn lại sau khi backend đã thay các món lặp tránh được; món người dùng gọi tên không tính.
         if (snapshot.Items.Where(item => AgentScopedPlanning.Request(snapshot.State, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null })
                 .GroupBy(item => AgentScopedPlanning.Normalize(item.DishName)).Any(group => group.Key is not null && group.Count() > 1))
             lines.Add(RepeatNote);

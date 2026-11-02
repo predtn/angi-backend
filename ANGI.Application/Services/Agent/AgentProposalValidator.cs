@@ -16,7 +16,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
-        IReadOnlyList<AgentCandidateGrant>? freshGrants = null)
+        IReadOnlyList<AgentCandidateGrant>? freshGrants = null, IReadOnlyList<AgentCandidateGrant>? spareGrants = null)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -127,7 +127,8 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         var total = normalized.Sum(x => x.Price);
         if (state.BudgetAmount.HasValue && total > state.BudgetAmount) errors.Add(BudgetExceeded);
         var repeats = !confirm && errors.Count == 0 && freshGrants is { Count: > 0 }
-            ? await AvoidableRepeatsAsync(normalized, added, state, freshGrants, catalog, allTags, mainTag, ct) : [];
+            // Món dự phòng (chưa gửi cho model) cũng là lựa chọn thay thế hợp lệ, nên lặp vẫn tránh được khi grant chính đã dùng hết.
+            ? await AvoidableRepeatsAsync(normalized, added, state, [.. freshGrants, .. spareGrants ?? []], catalog, allTags, mainTag, ct) : [];
         var routeResults = new List<AgentDayRoute>();
         if (errors.Count == 0 && calculateRoutes)
         {

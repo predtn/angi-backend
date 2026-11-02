@@ -251,7 +251,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     proposalRepaired = repaired = true;
                     continue;
                 }
-                var validated = await validator.ValidateAsync(snapshot, context.Source, false, true, timeout.Token, context.Grants);
+                var validated = await validator.ValidateAsync(snapshot, context.Source, false, true, timeout.Token, context.Grants, context.ReserveGrants);
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 var substituted = 0;
                 // Lỗi DUY NHẤT là món nằm ngoài ngày/bữa được cấp: backend thay bằng món xếp hạng cao nhất đã được cấp cho
@@ -260,17 +260,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (validated.Validation.ScopeRejectedItemKeys is { Length: > 0 } rejectedKeys &&
                     await validator.RepairScopeAsync(snapshot, context.Source, context.Grants, rejectedKeys, timeout.Token) is { } repairedSnapshot)
                 {
-                    var revalidated = await validator.ValidateAsync(repairedSnapshot, context.Source, false, true, timeout.Token, context.Grants);
+                    var revalidated = await validator.ValidateAsync(repairedSnapshot, context.Source, false, true, timeout.Token, context.Grants, context.ReserveGrants);
                     telemetry.Record("scope_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { replaced = rejectedKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted = rejectedKeys.Length; }
                 }
                 // Món lặp tránh được (còn món chưa dùng đã cấp cho đúng vị trí): backend tự thay, không tốn thêm lượt gọi LLM.
                 // Không thay được an toàn thì giữ nguyên lịch hợp lệ; lặp chỉ là ưu tiên đa dạng, không chặn đề xuất.
+                // Grant dự phòng đứng trước grant chính vì RepairScopeAsync ưu tiên grant cấp sau: món model đã thấy vẫn được chọn trước.
+                List<AgentCandidateGrant> repeatGrants = [.. context.ReserveGrants, .. context.Grants];
                 if (validated.Validation.Errors.Length == 0 && validated.Validation.AvoidableRepeatItemKeys is { Length: > 0 } repeatKeys &&
-                    await validator.RepairScopeAsync(validated.Snapshot, context.Source, context.Grants, repeatKeys, timeout.Token, repeatsOnly: true) is { } varied)
+                    await validator.RepairScopeAsync(validated.Snapshot, context.Source, repeatGrants, repeatKeys, timeout.Token, repeatsOnly: true) is { } varied)
                 {
-                    var revalidated = await validator.ValidateAsync(varied, context.Source, false, true, timeout.Token, context.Grants);
+                    var revalidated = await validator.ValidateAsync(varied, context.Source, false, true, timeout.Token, repeatGrants);
                     telemetry.Record("repeat_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { replaced = repeatKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted += repeatKeys.Length; }

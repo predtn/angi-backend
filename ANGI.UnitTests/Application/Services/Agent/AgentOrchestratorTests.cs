@@ -559,8 +559,8 @@ public sealed class AgentOrchestratorTests
         AgentJson.Write(captured).Should().NotContain("private-prompt");
     }
 
-    // TEST-29: A dish repeated on day 2 is swapped for an unused authorized dish without another LLM call, and a repeat with no unused alternative stays and is explained as a catalog limit; covers both cases.
-    /// <summary>Keeps multi-day plans varied for free while never blocking a plan whose catalog cannot avoid a repeat.</summary>
+    // TEST-29: A dish repeated on day 2 is swapped for an unused authorized dish without another LLM call, and a repeat with no unused alternative stays and is disclosed by the repeat note; covers both cases.
+    /// <summary>Keeps multi-day plans varied for free while never blocking a plan whose ranked candidates cannot avoid a repeat.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
     public async Task RunAsync_RepeatedDish_IsReplacedOnlyWhenAnUnusedCandidateExists(bool spare)
@@ -631,6 +631,32 @@ public sealed class AgentOrchestratorTests
         result.Snapshot!.Items.Should().HaveCount(2);
         context.RepairFeedback.Should().Contain("Chưa có bằng chứng vượt ngân sách");
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-40: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
+    // another LLM call, and the reserve dish keeps its provenance in the snapshot.
+    /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>
+    [Fact]
+    public async Task RunAsync_RepeatWithOnlyReserveAlternative_IsReplacedFromReserve()
+    {
+        var state = AgentTestData.State() with { MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        var requestId = Guid.NewGuid();
+        context.Grants.Add(new(1, "lunch", [1], requestId, state));
+        context.Grants.Add(new(2, "lunch", [1], requestId, state));
+        context.ReserveGrants.Add(new(2, "lunch", [2], requestId, state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(1, 2);
+        result.Snapshot.Items.Should().OnlyContain(item => item.RequestId == requestId);
+        result.Snapshot.Grants.Should().Contain(grant => grant.DayNumber == 2 && grant.DishIds.SequenceEqual(new[] { 2 }));
+        result.Reply.Should().Contain("Có 1 món được hệ thống chọn lại").And.NotContain(AgentReplyBuilder.RepeatNote);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>

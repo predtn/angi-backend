@@ -108,6 +108,8 @@ public sealed class AgentContext
     public required DTOs.Agent.SendAgentMessageRequestDto Request { get; init; }
     public List<AgentTranscript> History { get; init; } = [];
     public List<AgentCandidateGrant> Grants { get; } = [];
+    /// <summary>The rest of each ranked list, never sent to the model; only the backend uses it to replace an avoidable repeat.</summary>
+    public List<AgentCandidateGrant> ReserveGrants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
     /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
     public List<AgentMealCoverage> MealCoverage { get; } = [];

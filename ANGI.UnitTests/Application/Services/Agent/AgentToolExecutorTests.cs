@@ -361,6 +361,31 @@ public sealed class AgentToolExecutorTests
         context.Grants.Should().BeEmpty();
     }
 
+    // TEST-17: A per-meal search grants the meal quota to the model and keeps the rest of the ranked distinct names as a reserve grant
+    // for the same position, which is never returned to the model.
+    /// <summary>Keeps unused ranked dishes available for backend repeat repair without enlarging the model's payload.</summary>
+    [Fact]
+    public async Task ExecuteAsync_PerMealSearch_KeepsRestOfRankingAsHiddenReserve()
+    {
+        var lunchTag = new ANGI.Domain.Entities.Tag { Id = 2, Code = "lunch", Name = "Bữa trưa", TagType = ANGI.Domain.Enums.TagType.MealTime };
+        var mainTag = new ANGI.Domain.Entities.Tag { Id = 5, Code = "local_sf_main", Name = "Món Chính", TagType = ANGI.Domain.Enums.TagType.Category };
+        var catalog = new[] { "Phở", "Bún chả", "Cơm tấm", "Bánh xèo", "Miến", "Bún riêu" }.Select((name, index) => Named(index + 1, name, mainTag, lunchTag)).ToArray();
+        var fixture = AgentTestData.Validator(catalog);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 3, 4, 5, 6 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 1, MealSlots = ["lunch"] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        // Một ngày trong phạm vi: suất 1 + 2 = 3 món cho model, 3 món còn lại làm dự phòng.
+        context.Grants.Single().DishIds.Should().Equal(1, 2, 3);
+        var reserve = context.ReserveGrants.Single();
+        reserve.DishIds.Should().Equal(4, 5, 6);
+        (reserve.DayNumber, reserve.MealSlot).Should().Be(((short?)null, "lunch"));
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2, 3);
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {

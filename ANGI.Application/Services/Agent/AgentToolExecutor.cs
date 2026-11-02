@@ -276,7 +276,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                     (namedDishIds.Length == 0 || namedDishIds.Contains(d.Id)) && mealTags.All(id => d.DishTags.Any(t => t.TagId == id))).ToArray();
             // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
             // của mỗi tên. Khi chia theo bữa, ưu tiên tên chưa dùng ở bữa trước (OrderBy ổn định nên vẫn giữ thứ tự ranking).
-            var chosen = distinctNames ? actual.DistinctBy(d => AgentScopedPlanning.Normalize(d.Name)).ToArray() : actual;
+            var distinct = distinctNames ? actual.DistinctBy(d => AgentScopedPlanning.Normalize(d.Name)).ToArray() : actual;
+            var chosen = distinct;
             if (diversify)
                 chosen = chosen.OrderBy(d => usedNames.Contains(AgentScopedPlanning.Normalize(d.Name)!) ? 1 : 0)
                     .Take(perMealSearch ? mealQuota : input.TopK).ToArray();
@@ -288,8 +289,12 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             picked.AddRange(chosen.Where(d => picked.All(x => x.Id != d.Id)));
             // Grant là bằng chứng backend đã cấp các món này cho đúng ngày/bữa và điều kiện lọc.
             // Validator dựa vào grant để chặn model thêm/thay bằng ID chưa được cấp hoặc sai scope.
-            context.Grants.Add(new(scope.DayNumber, mealSlot, chosen.Select(x => x.Id).ToArray(), ranked.RequestId,
-                state with { TagIds = mealTags, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = radius }));
+            var constraints = state with { TagIds = mealTags, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = radius };
+            context.Grants.Add(new(scope.DayNumber, mealSlot, chosen.Select(x => x.Id).ToArray(), ranked.RequestId, constraints));
+            // Phần còn lại của cùng danh sách reco (cùng request, cùng vector) không gửi cho model. Khi một ngày chỉ được cấp vài món
+            // và model chọn trùng món đã dùng, backend lấy món chưa dùng xếp hạng cao nhất ở đây để thay, không tốn thêm lần gọi LLM.
+            var reserve = distinct.Where(d => !chosen.Contains(d)).Select(x => x.Id).ToArray();
+            if (reserve.Length > 0) context.ReserveGrants.Add(new(scope.DayNumber, mealSlot, reserve, ranked.RequestId, constraints));
             telemetry.Record("ranking", context.ConversationId, context.TurnId, context.AttemptId, new { mode = ranked.RequestId.HasValue ? "personalized" : "rating_fallback",
                 candidateCount = candidates.Count, ranked.RequestId, mealSlot, returnedCount = chosen.Length });
         }
