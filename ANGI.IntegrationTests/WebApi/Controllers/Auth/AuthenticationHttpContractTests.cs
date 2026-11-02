@@ -21,7 +21,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace ANGI.IntegrationTests.WebApi.Controllers
+namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
 {
     /// <summary>Exercises the AuthenticationController through the complete HTTP pipeline.</summary>
     public sealed class AuthenticationHttpContractTests : IClassFixture<AuthenticationApiFactory>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using ANGI.IntegrationTests.WebApi.Controllers.Auth;
 using ANGI.WebApi.Common;
 using FluentAssertions;
 
