@@ -74,4 +74,19 @@ public sealed class AgentChatPolicyTests
         if (hasPlan) reply.Should().Contain("Bản lịch hiện tại chưa thay đổi");
         else reply.Should().NotContain("Bản lịch");
     }
+
+    // TEST-06: A bare save intent is recognized, while the explicit save wording, negations, questions and longer sentences are not;
+    // covers "lưu", "Lưu lại đi", "chốt đi", "ok lưu", "save" and their rejected counterparts.
+    /// <summary>Routes "lưu" to a save reminder instead of the model, without widening the explicit commit wording.</summary>
+    [Theory]
+    [InlineData("lưu", true)]
+    [InlineData("Lưu lại đi!", true)]
+    [InlineData("chốt đi", true)]
+    [InlineData("ok lưu", true)]
+    [InlineData("save", true)]
+    [InlineData("lưu lịch trình này", false)]
+    [InlineData("đừng lưu", false)]
+    [InlineData("lưu?", false)]
+    [InlineData("lưu món này vào yêu thích", false)]
+    public void IsShortSaveRequest_BareIntentOnly(string text, bool expected) => AgentChatPolicy.IsShortSaveRequest(text).Should().Be(expected);
 }

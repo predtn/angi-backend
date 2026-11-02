@@ -161,6 +161,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                         prepared = new("Đã lưu lịch trình của bạn.", context.State, null, null, "confirm", commit);
                     }
                 }
+                // "lưu"/"chốt đi" chưa đủ rõ để ghi roadmap: nhắc câu lưu chính xác cho bản hiện tại, không gọi LLM và không đổi món.
+                else if (AgentChatPolicy.IsShortSaveRequest(request.Content))
+                    prepared = new(AgentReplyBuilder.SaveConfirmation(context.CurrentProposal), context.State, null, null);
                 else prepared = await orchestrator.RunAsync(context, ct);
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with

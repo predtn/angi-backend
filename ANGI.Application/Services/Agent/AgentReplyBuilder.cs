@@ -53,6 +53,15 @@ public static class AgentReplyBuilder
         return string.Join('\n', lines);
     }
 
+    /// <summary>Answers a bare save intent with what would be saved and the exact save wording, without saving or changing the plan.</summary>
+    public static string SaveConfirmation(DTOs.Agent.AgentProposalDto? proposal) => proposal?.Status switch
+    {
+        "ready" => $"Bạn muốn lưu bản xem trước hiện tại ({proposal.Snapshot.Items.Length} món, tổng {Money(proposal.Snapshot.Items.Sum(x => x.Price))} đồng/người) " +
+            "thành roadmap? Nhắn ‘chốt lịch này’ để lưu.",
+        "committed" => "Lịch trình này đã được lưu thành roadmap. Bạn muốn chỉnh sửa gì thêm không?",
+        _ => "Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước."
+    };
+
     /// <summary>Asks only unresolved required values or the model's allowlisted clarification intent.</summary>
     public static string Clarify(AgentContext context, string? kind)
     {

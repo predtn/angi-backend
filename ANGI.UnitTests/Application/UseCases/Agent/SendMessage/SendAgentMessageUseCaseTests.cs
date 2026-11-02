@@ -268,6 +268,24 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
+    // TEST-16: A bare "lưu" over a ready preview answers with the save reminder, never calls the provider and never saves or replans.
+    /// <summary>Prevents a short save intent from being sent to the model, which used to reshuffle the plan instead of saving it.</summary>
+    [Fact]
+    public async Task ExecuteAsync_BareSaveIntent_RemindsExactWordingWithoutProviderOrCommit()
+    {
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var proposal = ReadyProposal(9, AgentTestData.Snapshot(AgentTestData.Item(), AgentTestData.Item(1, "b", 2)));
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        var request = Request(); request.Content = "lưu";
+
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Reply.Should().StartWith("Bạn muốn lưu bản xem trước hiện tại (2 món").And.Contain("chốt lịch này");
+        result.Commit.Should().BeNull();
+        fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
+    }
+
     /// <summary>Creates a complete real use case over isolated persistence/provider boundaries.</summary>
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),
         fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object, fixture.Clock, fixture.Limits,

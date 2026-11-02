@@ -161,4 +161,20 @@ public sealed class AgentReplyBuilderTests
         if (situation == "searched") reply.Should().Be(AgentReplyBuilder.PlanningIncomplete);
         if (situation == "no-plan") reply.Should().Contain("lập lịch ngay");
     }
+
+    // TEST-14: A bare save intent is answered with the plan size, total and exact save wording, a saved-plan notice, or a no-preview notice;
+    // covers ready, committed and missing proposals.
+    /// <summary>Verifies "lưu" never saves or replans, but tells the user what would be saved and how to save it.</summary>
+    [Theory]
+    [InlineData("ready", "Bạn muốn lưu bản xem trước hiện tại (2 món, tổng 80.000 đồng/người) thành roadmap? Nhắn ‘chốt lịch này’ để lưu.")]
+    [InlineData("committed", "Lịch trình này đã được lưu thành roadmap. Bạn muốn chỉnh sửa gì thêm không?")]
+    [InlineData(null, "Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước.")]
+    public void SaveConfirmation_DescribesWhatWouldBeSaved(string? status, string expected)
+    {
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item(1, "a") with { Price = 30000 }, AgentTestData.Item(2, "b", 2) with { Price = 50000 });
+        var proposal = status is null ? null : new ANGI.Application.DTOs.Agent.AgentProposalDto(1, 1, "create", status, snapshot,
+            new AgentValidation([], [], 80000, []), DateTime.UtcNow.AddHours(1));
+
+        AgentReplyBuilder.SaveConfirmation(proposal).Should().Be(expected);
+    }
 }

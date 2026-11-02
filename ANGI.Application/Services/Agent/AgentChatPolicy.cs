@@ -14,6 +14,11 @@ public static class AgentChatPolicy
         @"^(?:(?:toi (?:muon|xac nhan)|hay|dong y) )?(?:luu (?:lich trinh|lich|ban nhap|de xuat)(?: nay| hien tai)?|chot (?:lich trinh|lich|de xuat)(?: nay| hien tai)?|xac nhan luu(?: lich trinh| lich)?(?: nay)?|save (?:this )?(?:itinerary|plan))(?: giup toi| cho toi| nhe| di)?$",
         RegexOptions.CultureInvariant);
 
+    /// <summary>Recognizes a bare save intent ("lưu", "chốt đi"); it is answered with the exact save wording, never a roadmap write or a new plan.</summary>
+    public static bool IsShortSaveRequest(string content) => Regex.IsMatch(Normalize(content),
+        @"^(?:(?:ok|vay|thoi|roi) )?(?:luu|chot|save)(?: (?:lai|di|nhe|nha|luon|nao|giup|dum|cho toi|giup toi))*$",
+        RegexOptions.CultureInvariant);
+
     /// <summary>Requests a complete review before saving; this wording never authorizes a roadmap write.</summary>
     public static bool IsReviewRequest(string content) => Regex.IsMatch(Normalize(content),
         @"^(?:hay )?(?:lap|tong hop|hoan thien) (?:lich|lich trinh)(?: giup toi| cho toi)? de chot(?: lich| lich trinh)?$",
