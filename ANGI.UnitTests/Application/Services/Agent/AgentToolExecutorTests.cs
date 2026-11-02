@@ -271,10 +271,10 @@ public sealed class AgentToolExecutorTests
     }
 
     // TEST-11: A per-meal search over-requests ranking for name de-duplication up to MaxRanked while a slot search keeps the model's topK;
-    // covers the uncapped quota (2 days: 4 per meal x 3 = 12), a MaxRanked cap of 10 and slot scope.
+    // covers the reserve depth of 30 above the quota (2 days: 4 per meal x 3 = 12), a MaxRanked cap of 10 and slot scope.
     /// <summary>Checks the requested ranking size so de-duplication has headroom without exceeding the Recommendation contract.</summary>
     [Theory]
-    [InlineData("full", 200, 12)][InlineData("full", 10, 10)][InlineData("slot", 200, 50)]
+    [InlineData("full", 200, 30)][InlineData("full", 10, 10)][InlineData("slot", 200, 50)]
     public async Task ExecuteAsync_RankingSize_DependsOnScopeAndMaxRanked(string scope, int maxRanked, int expected)
     {
         var fixture = AgentTestData.Validator(Enumerable.Range(1, 60).Select(id => AgentTestData.Dish(id)).ToArray());

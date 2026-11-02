@@ -365,6 +365,44 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Any(error => error.StartsWith("Chưa có món cho bữa", StringComparison.Ordinal)).Should().Be(!valid);
     }
 
+    // TEST-18: Budget repair swaps the most expensive new dish for a cheaper ranked dish of that position; requested names and retained rows stay.
+    /// <summary>Avoids asking the user to raise a budget while cheaper ranked dishes exist.</summary>
+    [Fact]
+    public async Task RepairBudgetAsync_CheaperRankedDish_BringsTotalWithinBudget()
+    {
+        var expensive = AgentTestData.Dish(1); expensive.Price = 300000;
+        var mid = AgentTestData.Dish(2); mid.Price = 100000;
+        var cheap = AgentTestData.Dish(3); cheap.Price = 60000;
+        var state = AgentTestData.State() with { BudgetAmount = 200000, MealSlots = ["lunch"], NumDays = 2 };
+        var grant = new AgentCandidateGrant(null, "lunch", [2, 3], Guid.NewGuid(), state);
+        var items = new[] { AgentTestData.Item(1, "a", 1) with { Price = 300000 }, AgentTestData.Item(2, "b", 2) with { Price = 100000 } };
+        var (validator, _, _, _) = AgentTestData.Validator(expensive, mid, cheap);
+
+        var repaired = await validator.RepairBudgetAsync(new(state, items, [grant], Scope: new()), null, [grant], default);
+
+        repaired!.Value.Replaced.Should().Be(1);
+        repaired.Value.Snapshot.Items.Select(item => item.DishId).Should().Equal(3, 2);
+    }
+
+    // TEST-19: Budget repair returns null when it cannot fit; covers no cheaper dish, no budget, a requested dish name and a retained source row.
+    /// <summary>Keeps the honest budget question when no cheaper authorized dish can solve the overrun.</summary>
+    [Theory]
+    [InlineData("no-cheaper")][InlineData("no-budget")][InlineData("named")][InlineData("retained")]
+    public async Task RepairBudgetAsync_CannotFit_ReturnsNull(string area)
+    {
+        var expensive = AgentTestData.Dish(1); expensive.Price = 300000;
+        var cheap = AgentTestData.Dish(3); cheap.Price = 60000;
+        var state = AgentTestData.State() with { BudgetAmount = 200000, MealSlots = ["lunch"] };
+        if (area == "no-budget") state = state with { BudgetAmount = null };
+        if (area == "named") state = state with { MealRequests = [new(1, "lunch", "Dish 1", null, [])] };
+        var item = AgentTestData.Item(1, "a", 1) with { Price = 300000 };
+        var grant = new AgentCandidateGrant(null, "lunch", area == "no-cheaper" ? [1] : [3], Guid.NewGuid(), state);
+        var source = area == "retained" ? new AgentSnapshot(state, [item], [grant]) : null;
+        var (validator, _, _, _) = AgentTestData.Validator(expensive, cheap);
+
+        (await validator.RepairBudgetAsync(new(state, [item], [grant], Scope: new()), source, [grant], default)).Should().BeNull();
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {

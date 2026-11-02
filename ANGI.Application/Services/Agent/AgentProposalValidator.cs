@@ -253,7 +253,50 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             usedNames.Add(AgentScopedPlanning.Normalize(catalog[replacement].Name)!);
             total += catalog[replacement].Price - current;
         }
-        if (replacements.Count == 0) return null;
+        return replacements.Count == 0 ? null : WithReplacements(snapshot, grants, replacements);
+    }
+
+    /// <summary>
+    /// Brings an over-budget selection within budget by swapping its most expensive new dishes for cheaper dishes already ranked for
+    /// the same position under the same constraints. Requested names and retained rows stay; returns null when the budget stays exceeded.
+    /// </summary>
+    public async Task<(AgentSnapshot Snapshot, int Replaced)?> RepairBudgetAsync(AgentSnapshot snapshot, AgentSnapshot? source,
+        IReadOnlyList<AgentCandidateGrant> grants, CancellationToken ct)
+    {
+        var state = snapshot.State;
+        if (state.BudgetAmount is not { } budget) return null;
+        var scope = snapshot.Scope ?? new();
+        var sourceItems = source?.Items ?? [];
+        var targets = snapshot.Items.Where(item => scope.Contains(item) && !sourceItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId) &&
+            AgentScopedPlanning.Request(state, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null }).OrderByDescending(item => item.Price).ToArray();
+        // Giữ thứ tự xếp hạng của Recommendation trong từng grant để vẫn ưu tiên món hợp khẩu vị nhất trong số món rẻ hơn.
+        var options = targets.ToDictionary(item => item.ItemKey, item => grants
+            .Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == item.DayNumber) && (grant.MealSlot is null || grant.MealSlot == item.MealSlot) &&
+                AgentScopedPlanning.Fingerprint(grant.Constraints, item.DayNumber, item.MealSlot) == AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot))
+            .SelectMany(grant => grant.DishIds).Distinct().ToArray());
+        var catalog = (await dishes.GetCardDishesAsync(options.Values.SelectMany(ids => ids).Concat(snapshot.Items.Select(item => item.DishId)).Distinct().ToArray(), ct))
+            .ToDictionary(dish => dish.Id);
+        var usedNames = snapshot.Items.Where(item => catalog.ContainsKey(item.DishId))
+            .Select(item => AgentScopedPlanning.Normalize(catalog[item.DishId].Name)!).ToHashSet(StringComparer.Ordinal);
+        var total = snapshot.Items.Sum(item => item.Price);
+        var replacements = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var item in targets)
+        {
+            if (total <= budget) break;
+            var cheaper = options[item.ItemKey].Where(id => catalog.TryGetValue(id, out var dish) && IsPublic(dish) && FitsMeal(dish, item.MealSlot) &&
+                dish.Price < item.Price && !usedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)).Select(id => catalog[id]).ToArray();
+            if (cheaper.Length == 0) continue;
+            var pick = cheaper.FirstOrDefault(dish => total - item.Price + dish.Price <= budget) ?? cheaper.MinBy(dish => dish.Price)!;
+            replacements[item.ItemKey] = pick.Id;
+            usedNames.Add(AgentScopedPlanning.Normalize(pick.Name)!);
+            total += pick.Price - item.Price;
+        }
+        return total > budget || replacements.Count == 0 ? null : (WithReplacements(snapshot, grants, replacements), replacements.Count);
+    }
+
+    /// <summary>Applies dish replacements; price, name and provenance are recalculated by validation, and grants shrink to the dishes kept.</summary>
+    private static AgentSnapshot WithReplacements(AgentSnapshot snapshot, IReadOnlyList<AgentCandidateGrant> grants, IReadOnlyDictionary<string, int> replacements)
+    {
         // Giá, tên, provenance được validator tính lại; grant được thu gọn như builder để còn dùng khi xác nhận.
         var items = snapshot.Items.Select(item => replacements.TryGetValue(item.ItemKey, out var id)
             ? new AgentItem(item.ItemKey, null, item.DayNumber, item.MealSlot, item.SortOrder, id) : item).ToArray();

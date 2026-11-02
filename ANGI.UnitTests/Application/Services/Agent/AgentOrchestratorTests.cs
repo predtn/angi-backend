@@ -687,7 +687,7 @@ public sealed class AgentOrchestratorTests
         llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Không lập được" }))
             .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Draft",
-                Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2)] }))
+                Items = [AgentTestData.Item(4, "a", 1), AgentTestData.Item(2, "b", 2)] }))
             .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Draft",
                 Items = [AgentTestData.Item(3, "a", 1), AgentTestData.Item(1, "b", 2)] }));
 
@@ -1049,6 +1049,27 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
         result.Reply.Should().Contain("bỏ đề xuất");
         llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-52: A proposal only over budget is repaired from cheaper ranked dishes without another provider call, and the reply discloses the swap.
+    /// <summary>Fixes a low budget ending in "raise your budget" although cheaper dishes had been ranked.</summary>
+    [Fact]
+    public async Task RunAsync_OverBudgetWithCheaperDish_RepairsWithoutProvider()
+    {
+        var state = AgentTestData.State() with { BudgetAmount = 80000, MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(); context.State = state;
+        var cheap = AgentTestData.Dish(3); cheap.Price = 30000;
+        context.Grants.Add(new(null, "lunch", [1, 2, 3], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Draft", Items = [AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), cheap]).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Contain(3);
+        result.Reply.Should().Contain(AgentReplyBuilder.SubstitutionNote);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,

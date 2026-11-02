@@ -368,10 +368,20 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         new { replaced = rejectedKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted = rejectedKeys.Length; }
                 }
-                // Món lặp tránh được (còn món chưa dùng đã cấp cho đúng vị trí): backend tự thay, không tốn thêm lượt gọi LLM.
-                // Không thay được an toàn thì giữ nguyên lịch hợp lệ; lặp chỉ là ưu tiên đa dạng, không chặn đề xuất.
                 // Grant dự phòng đứng trước grant chính vì RepairScopeAsync ưu tiên grant cấp sau: món model đã thấy vẫn được chọn trước.
                 List<AgentCandidateGrant> repeatGrants = [.. context.ReserveGrants, .. context.Grants];
+                // Chỉ vượt ngân sách: backend đổi các món đắt nhất sang món rẻ hơn đã xếp hạng cho đúng vị trí, không hỏi người dùng nới
+                // khi catalog vẫn còn món rẻ và không tốn thêm lượt gọi LLM. Hết món rẻ hơn thì mới hỏi như cũ.
+                if (AgentReplyBuilder.OverBudgetOnly(validated.Validation) &&
+                    await validator.RepairBudgetAsync(validated.Snapshot, context.Source, [.. context.Grants, .. context.ReserveGrants], timeout.Token) is { } cheaper)
+                {
+                    var revalidated = await validator.ValidateAsync(cheaper.Snapshot, context.Source, false, true, timeout.Token, repeatGrants);
+                    telemetry.Record("budget_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { replaced = cheaper.Replaced, revalidated.Validation.TotalCost, revalidated.Validation.Errors });
+                    if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted += cheaper.Replaced; }
+                }
+                // Món lặp tránh được (còn món chưa dùng đã cấp cho đúng vị trí): backend tự thay, không tốn thêm lượt gọi LLM.
+                // Không thay được an toàn thì giữ nguyên lịch hợp lệ; lặp chỉ là ưu tiên đa dạng, không chặn đề xuất.
                 if (validated.Validation.Errors.Length == 0 && validated.Validation.AvoidableRepeatItemKeys is { Length: > 0 } repeatKeys &&
                     await validator.RepairScopeAsync(validated.Snapshot, context.Source, repeatGrants, repeatKeys, timeout.Token, repeatsOnly: true) is { } varied)
                 {

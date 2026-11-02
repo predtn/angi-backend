@@ -269,7 +269,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
             // Xin dư để còn đủ món sau khi bỏ trùng tên; reco chỉ tính lượt hiển thị qua /impressions khi lịch được lưu.
             // Khi đa dạng hóa, xin thêm đúng số tên đã dùng: sau khi đẩy các tên đó xuống cuối vẫn còn đủ món mới cho suất của bữa.
-            var topK = perMealSearch ? Math.Min(limits.MaxRanked, mealQuota * 3) : input.TopK;
+            // Phần vượt suất không gửi cho model (grant dự phòng), chỉ để backend có món rẻ hơn hoặc khác tên khi cần thay, nên không tốn thêm token LLM.
+            var topK = perMealSearch ? Math.Min(limits.MaxRanked, Math.Max(mealQuota * 3, ReserveDepth)) : input.TopK;
             if (diversify) topK = Math.Min(limits.MaxRanked, topK + usedNames.Count);
             // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
             // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
@@ -329,6 +330,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
 
     // RECO-05 nhận tối đa 2000 ứng viên; lấy rộng tới mức này trước khi gom theo tên rồi cắt theo Agent:MaxCandidates.
     private const int CandidatePool = 2000;
+    private const int ReserveDepth = 30;
 
     /// <summary>Ranking outcome of one homogeneous scope, or the trusted notice that stops the whole tool call.</summary>
     private sealed record ScopedRanking(AgentScope Scope, bool PerMeal, Dictionary<string, ANGI.Domain.Entities.Dish[]> ChosenByMeal,
