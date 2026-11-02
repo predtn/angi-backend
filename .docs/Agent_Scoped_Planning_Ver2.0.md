@@ -69,6 +69,44 @@ Direct underspecified taste preferences are checked by a conservative backend gu
 execution. A phrase such as "thích ăn cay" does not authorize any numeric target or whole-trip scope.
 Ask missing intensity and scope together, preserve the existing state/proposal, and collect partial
 answers across completed user turns. Reuse explicit human resolutions, not old model-chosen numbers.
+Limiting wording ("đừng cay quá", "bớt ngọt") is also an underspecified taste. Taste words are matched
+without diacritics only when the whole message is unaccented; an accented look-alike ("chưa", "mận",
+"đang", "cây", "tuổi") is never a taste. While a taste question is open, a reply with no intensity, scope,
+taste or duration/budget ends that question and goes to the model instead of repeating it. Model-chosen
+taste_intensity/taste_scope questions name the tastes in the message and use the same scale (không, nhẹ,
+vừa, nhiều, rất nhiều). An edit made only of an edit verb, fillers and pointing words ("đổi cái đó đi")
+over an existing plan, without a selected item or focus, gets the fixed edit_scope question before any LLM call.
+Novelty wording ("món chưa ăn bao giờ", "món lạ", "lạ miệng", "món mới") whose meaning is not already "different
+from this plan" gets the fixed novelty question before any LLM call; no catalog tag means new, and refused novelty
+("không cần món lạ") is not asked about. Choosing "never eaten" is answered that ANGI has no eating history and
+offers dishes different from the current plan (or, without any plan, plans by taste); it never becomes a dish-name
+lookup or an invented filter. Over an existing plan, a create/patch proposal answering a message with no change
+wording, taste, day/meal or new user constraint grounded in that message ("ăn vui vui", "ok") is not accepted; a tag,
+dish or restaurant the model adds counts only when the message names it (a "Món ăn vặt" tag invented from "ăn vui
+vui" does not). The plan and turn-start state
+stay unchanged and the general question is asked, without a pending question that would block saving.
+A scoped create_proposal that also copies unchanged rows outside its scope ignores those copies; a changed row
+outside the scope is still rejected, with repair feedback naming its day and meal. Malformed get_recommendation
+arguments (scope outside the trip, unknown tag, topK, price, radius, IDs), a get_roadmap ID not bound to the
+conversation, a route with unissued dishes and an invalid search_catalog name return invalid_arguments with the
+reason to the model within the bounded tool rounds instead of failing the chat turn; no unbound roadmap data is ever
+returned and schema violations still fail the turn. An unmatched catalog lookup (name not found, near matches) is kept
+for the turn, so catalog_choice/catalog_support questions repeat it even after later rankings.
+A clarify/answer turn with an unmatched lookup does not keep the dish/restaurant names it added to mealRequests:
+an unsettled name is not a user constraint, so naming another dish/restaurant next turn needs no change confirmation.
+A found lookup is never a clarification reply; only an answer to a direct catalog question repeats it.
+When the user answered the taste question with one taste, an explicit level and a day/meal/trip scope, and the model
+still asks taste_intensity or taste_scope, the model gets one repair stating the resolved target and placement.
+The same question also asks the duration and per-person budget (total or daily) still missing from the
+retained request; province is left to planning. A clause that is only an amount with a unit ("500k 1 ngày",
+"khoảng 2 triệu") answers the budget question; an amount inside another clause ("món dưới 50k") does not.
+A recommendation request while province, duration or budget is missing is not a contract failure: the
+turn returns the fixed trip_details question, keeps the accepted state including tastes, and makes no
+further LLM call. Explicit "bữa N ngày M" / "bữa trưa ngày M" wording binds a taste to that meal: "bữa N"
+is the N-th declared meal (default breakfast, lunch, dinner). A whole-day override the model newly proposes
+for a day whose meals the user named is narrowed to those meals, unless the same day is also named
+without a meal. A meal number beyond the declared meals is asked about before any LLM call. Itinerary
+replies list each applied taste with its level and scope.
 Taste clarification retains a backend-owned `pendingPlanningRequest`: the original request, bounded
 recent partial answers, and explicitly stated duration/total or daily budget. The active trip and draft
 stay unchanged while taste is unresolved. When resolved, those explicit facts override stale model
@@ -104,7 +142,10 @@ do not widen a day/meal grant. Model context also lists the issued candidate sco
 full-trip results rather than repeating identical searches. A dish name should not repeat across the
 itinerary while an unused authorized dish fits that position: the validator flags such new repeats without
 blocking, and the backend swaps them for the best unused grant of the same position without another LLM call.
-Remaining repeats are disclosed as a catalog limit; names the user requested are exempt.
+Each ranking also keeps the rest of its ranked distinct names as a reserve grant for the same position and
+request; reserves are never sent to the model and only serve this repeat repair, after the issued grants.
+Edits and alternatives exclude dishes whose name equals a dish they keep or replace, at any restaurant.
+Remaining repeats are disclosed as no other suitable ranked candidate; names the user requested are exempt.
 The backend never widens grants to make a misplaced selection pass.
 Confirm verifies stored provenance and catalog again without calling LLM/reco. Legacy retained items
 remain committable. All saved dishes still go through the existing transactional impression outbox.
