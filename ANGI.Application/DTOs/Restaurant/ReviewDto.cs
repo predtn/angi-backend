@@ -3,7 +3,7 @@ using ANGI.Application.DTOs.Account;
 namespace ANGI.Application.DTOs.Restaurant;
 
 /// <summary>Represents a restaurant review written by a traveler.</summary>
-public sealed class ReviewDto
+public class ReviewDto
 {
     public long Id { get; init; }
     public long RestaurantId { get; init; }

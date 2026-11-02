@@ -133,4 +133,33 @@ internal static class ModerationMapper
         Action = log.Action, EntityType = log.EntityType, EntityId = log.EntityId,
         SubjectUser = log.SubjectUser is null ? null : Summary(log.SubjectUser), CreatedAt = log.CreatedAt
     };
+
+    /// <summary>Maps a RestaurantReview aggregate to ModReviewDto for MOD-F1.</summary>
+    internal static ModReviewDto ModReview(RestaurantReview review)
+    {
+        var baseDto = RestaurantDetailMapper.MapReview(review, includeAllReplies: true);
+        return new ModReviewDto
+        {
+            Id = baseDto.Id,
+            RestaurantId = baseDto.RestaurantId,
+            User = baseDto.User,
+            Rating = baseDto.Rating,
+            Content = baseDto.Content,
+            Images = baseDto.Images,
+            RoadmapItemId = baseDto.RoadmapItemId,
+            Status = baseDto.Status,
+            CreatedAt = baseDto.CreatedAt,
+            Reply = baseDto.Reply,
+            Restaurant = new DTOs.Discovery.RestaurantMiniDto
+            {
+                Id = review.Restaurant.Id,
+                Name = review.Restaurant.Name,
+                Ward = review.Restaurant.Ward,
+                ProvinceName = review.Restaurant.ProvinceName,
+                Latitude = review.Restaurant.Latitude,
+                Longitude = review.Restaurant.Longitude,
+                RatingAvg = review.Restaurant.RatingAvg
+            }
+        };
+    }
 }
