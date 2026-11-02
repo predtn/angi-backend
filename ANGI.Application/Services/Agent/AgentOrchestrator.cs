@@ -21,8 +21,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             telemetry.Record("taste_clarification", context.ConversationId, context.TurnId, context.AttemptId);
             return new(tasteQuestion, context.State with { PendingQuestion = tasteQuestion, PendingPlanningRequest = pending }, null, null);
         }
+        // Câu trả lời khẩu vị backend đã đọc đủ (vị, mức, phạm vi): dùng làm phản hồi nếu model vẫn hỏi lại.
+        var tasteResolution = AgentTasteClarificationPolicy.Resolution(context);
+        // Người dùng bỏ qua câu hỏi khẩu vị: xóa nó để lượt sau không bị đọc lại như câu trả lời khẩu vị.
+        // Câu trả lời thật thì giữ câu hỏi trong state để model hiểu "Ít, toàn chuyến đi" đang trả lời câu nào.
+        if (AgentTasteClarificationPolicy.IsIgnored(context)) context.State = context.State with { PendingQuestion = null };
         if (context.State.PendingPlanningRequest is { } pendingRequest)
             context.State = context.State with { PendingPlanningRequest = AgentPendingPlanningPolicy.Capture(pendingRequest, context.Request.Content) };
+        // "Bữa 5" khi mỗi ngày chỉ có sáng/trưa/tối: hỏi lại thay vì để model đoán bữa.
+        if (AgentMealScopePolicy.Question(context.Request.Content, context.State) is { } mealQuestion)
+        {
+            telemetry.Record("meal_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(mealQuestion, context.State with { PendingQuestion = mealQuestion }, null, null);
+        }
         // Timeout áp dụng cho toàn bộ vòng LLM/tools của lượt chat; ct vẫn giữ quyền hủy từ caller.
         // Use case đã commit bước claim trước khi vào đây nên không giữ transaction DB trong lúc chờ AI.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -36,6 +47,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var emptyRepaired = false;
         var coverageRepaired = false;
         var budgetRepaired = false;
+        var tasteRepaired = false;
         AgentValidation? lastValidation = null;
         var transientRetries = 0;
         var executedTools = new HashSet<string>(StringComparer.Ordinal);
@@ -166,7 +178,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 if (!context.ReplanAfterConfirmation)
-                    context.State = statePolicy.Accept(context.State, output.State, confirmedState);
+                    context.State = statePolicy.Accept(context.State,
+                        AgentMealScopePolicy.Narrow(output.State, context.State, AgentMealScopePolicy.Evidence(context)), confirmedState);
                 if (output.Action is "clarify" or "answer")
                 {
                     // clarify: thiếu tỉnh/ngày/ngân sách, chưa rõ món hoặc nội dung cần sửa thì hỏi lại.
@@ -174,6 +187,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // Với prompt "sửa roadmap cho tôi" mà chưa rõ sửa gì, Instructions hướng dẫn clarify;
                     // code ở đây kiểm tra hợp đồng output, không tự hiểu/chấm đúng sai ngữ nghĩa câu hỏi.
                     if (output.Items.Length != 0 || output.Changes.Length != 0) throw Unavailable();
+                    // Model hỏi lại mức/phạm vi dù người dùng vừa trả lời đủ ("Ít, toàn chuyến đi"): cho một lần sửa kèm đúng giá trị
+                    // backend đã đọc được, thay vì hỏi người dùng lần nữa. Model vẫn tự lập lịch; backend chỉ nêu câu trả lời.
+                    if (output.Action == "clarify" && output.Clarification is "taste_intensity" or "taste_scope" &&
+                        tasteResolution is not null && !tasteRepaired && calls + 1 < limits.MaxLlmCalls)
+                    {
+                        telemetry.Record("taste_answer_repair", context.ConversationId, context.TurnId, context.AttemptId, new { output.Clarification });
+                        context.RejectedOutput = output;
+                        context.RepairFeedback = tasteResolution;
+                        tasteRepaired = repaired = true;
+                        continue;
+                    }
                     if (output.Action == "clarify" && output.Clarification == "coverage" &&
                         context.ToolNotice is null && AgentReplyBuilder.CoverageGaps(context).Length == 0)
                     {

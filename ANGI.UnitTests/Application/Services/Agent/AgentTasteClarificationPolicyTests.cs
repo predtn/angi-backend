@@ -92,8 +92,9 @@ public sealed class AgentTasteClarificationPolicyTests
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
-    // TEST-05: When the scope is already known, a short intensity answer completes the question.
-    /// <summary>Ensures a short intensity reply is enough once the scope is known.</summary>
+    // TEST-05: When the scope is already known, a short intensity answer completes the question, and an unrelated reply
+    // ends it instead of repeating the same question.
+    /// <summary>Ensures a short intensity reply is enough once the scope is known and a non-answer never traps the user in a loop.</summary>
     [Fact]
     public void ScopeAlreadySupplied_PartialIntensityAnswerCompletesTheQuestion()
     {
@@ -103,7 +104,7 @@ public sealed class AgentTasteClarificationPolicyTests
         context.Request.Content = "Vừa";
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
         context.Request.Content = "Nhiều quán hơn";
-        AgentTasteClarificationPolicy.Question(context).Should().Contain("Bạn muốn mức cay");
+        AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
     // TEST-06: Confirming a constraint change does not confirm a taste that still lacks intensity and scope.
@@ -128,5 +129,119 @@ public sealed class AgentTasteClarificationPolicyTests
         context.State = context.State with { PendingQuestion = "Bạn muốn áp dụng khẩu vị cay cho toàn chuyến hay ngày/bữa cụ thể nào?" };
         context.Request.Content = "Tôi thích ăn ngọt";
         AgentTasteClarificationPolicy.Question(context).Should().Contain("Bạn muốn mức ngọt").And.Contain("toàn chuyến");
+    }
+
+    // TEST-08: A numbered or ordinal meal of a day is an explicit scope, so no scope question is asked; covers bữa 2, bữa thứ hai, bữa đầu and bữa cuối.
+    /// <summary>Ensures "bữa 2 ngày 1" is read as a meal scope instead of only "ngày 1" or no scope at all.</summary>
+    [Theory]
+    [InlineData("Tôi thích ăn chua vừa cho bữa 2 ngày 1")]
+    [InlineData("Tôi thích ăn chua vừa cho bữa thứ hai")]
+    [InlineData("Tôi thích ăn chua vừa cho bữa đầu")]
+    [InlineData("Tôi thích ăn chua vừa cho bữa cuối ngày 3")]
+    public void NumberedMealScope_IsAnExplicitScope(string content)
+    {
+        var context = AgentTestData.Context();
+        context.Request.Content = content;
+
+        AgentTasteClarificationPolicy.Question(context).Should().BeNull();
+    }
+
+    // TEST-09: Only a declared taste preference counts as taste wording; covers a declaration, an edit request and a negated preference.
+    /// <summary>Limits meal-scope narrowing evidence to messages that actually state a taste.</summary>
+    [Theory]
+    [InlineData("Tôi thích ăn chua vừa cho bữa 2 ngày 1", true)]
+    [InlineData("Đổi món khác cho bữa 1 ngày 1", false)]
+    [InlineData("Tôi không thích ăn cay", false)]
+    public void StatesTaste_OnlyForDeclaredPreferences(string content, bool expected)
+    {
+        AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
+    }
+
+    // TEST-10: Look-alike words typed with diacritics never become a taste, while correct spellings and unaccented messages still do;
+    // covers chưa, mận, đang, cây, tuổi, accented chua/mặn/ngọt, and fully unaccented text.
+    /// <summary>Prevents "món chưa ăn bao giờ" from being read as a sour preference because diacritics were stripped before matching.</summary>
+    [Theory]
+    [InlineData("Tôi muốn món chưa ăn bao giờ", false)]
+    [InlineData("Tôi thích ăn mận", false)]
+    [InlineData("Tôi muốn đang ăn gì đó nhẹ", false)]
+    [InlineData("Tôi thích cây xanh", false)]
+    [InlineData("Tôi muốn tuổi trẻ", false)]
+    [InlineData("Tôi thích ăn chua", true)]
+    [InlineData("Tôi thích ăn mặn", true)]
+    [InlineData("Tôi muốn ăn ngọt", true)]
+    [InlineData("toi thich an chua", true)]
+    public void StatesTaste_LookAlikeWords_AreNotTastes(string content, bool expected)
+    {
+        AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
+    }
+
+    // TEST-11: While a taste question is open, a reply with no intensity, scope, taste or trip facts ends it, while a budget-only or
+    // scope-only reply keeps asking the missing part; covers a denial, a budget answer and a scope answer.
+    /// <summary>Stops the question loop for a non-answer without losing partial answers to the combined question.</summary>
+    [Theory]
+    [InlineData("Tôi đâu có nói chua, ý tôi là món lạ", false)]
+    [InlineData("500k 1 ngày", true)]
+    [InlineData("toàn chuyến", true)]
+    public void OpenTasteQuestion_NonAnswerEndsIt(string content, bool asksAgain)
+    {
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", "Tôi thích ăn chua"));
+        context.State = context.State with { PendingQuestion = "Bạn muốn mức chua như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều? Bạn muốn áp dụng khẩu vị chua cho toàn chuyến hay ngày/bữa cụ thể nào?" };
+        context.Request.Content = content;
+
+        var question = AgentTasteClarificationPolicy.Question(context);
+
+        if (asksAgain) question.Should().StartWith("Bạn muốn mức chua");
+        else question.Should().BeNull();
+    }
+
+    // TEST-12: Limiting wording names a taste without a level and is clarified with the fixed taste question; covers "đừng cay quá",
+    // "không cay quá cho cả chuyến" and "bớt ngọt ngày 2".
+    /// <summary>Asks the specific taste question before the model instead of a generic one when the user limits a taste.</summary>
+    [Theory]
+    [InlineData("Cho tôi món gì đó hợp khẩu vị, đừng cay quá", "Bạn muốn mức cay", true)]
+    [InlineData("Không cay quá cho cả chuyến", "Bạn muốn mức cay", false)]
+    [InlineData("Bớt ngọt ngày 2", "Bạn muốn mức ngọt", false)]
+    public void LimitingTaste_AsksFixedQuestion(string content, string expected, bool asksScope)
+    {
+        var context = AgentTestData.Context();
+        context.Request.Content = content;
+
+        var question = AgentTasteClarificationPolicy.Question(context);
+
+        question.Should().StartWith(expected);
+        question!.Contains("toàn chuyến hay ngày/bữa").Should().Be(asksScope);
+    }
+
+    // TEST-13: Mentioned tastes are listed by display name once each and look-alike words are ignored; covers two tastes and a "chưa" message.
+    /// <summary>Supplies the taste names used by the backend-rendered taste questions.</summary>
+    [Theory]
+    [InlineData("Đừng cay quá, ít ngọt thôi, cay vừa", new[] { "cay", "ngọt" })]
+    [InlineData("Món này chưa ngon", new string[0])]
+    public void MentionedTastes_NamesTastesIgnoringLookAlikes(string content, string[] expected)
+    {
+        AgentTasteClarificationPolicy.MentionedTastes(content).Should().Equal(expected);
+    }
+
+    // TEST-14: A complete answer to the taste question is turned into the exact target and placement for the model, while an answer without
+    // a level gives none; covers "Ít, toàn chuyến đi", "Vừa, áp dụng cho bữa 2 ngày 1", "Nhiều, áp dụng cho ngày 3" and a scope-only reply.
+    /// <summary>Gives the model the values the backend already read, so a short answer is not asked about again.</summary>
+    [Theory]
+    [InlineData("cay", "Ít, toàn chuyến đi", "cay mức nhẹ (spicy=0.25) cho toàn chuyến", "tasteTargets")]
+    [InlineData("chua", "Vừa, áp dụng cho bữa 2 ngày 1", "chua mức vừa (sour=0.5) cho bữa trưa ngày 1", "mealSlot đó")]
+    [InlineData("ngọt", "Nhiều, áp dụng cho ngày 3", "ngọt mức nhiều (sweet=0.75) cho ngày 3", "mealSlot=null")]
+    [InlineData("cay", "toàn chuyến", null, null)]
+    public void Resolution_CompleteAnswer_NamesTargetAndPlacement(string taste, string answer, string? expected, string? field)
+    {
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", $"Tôi muốn ăn ở Đà Nẵng 2 ngày, tôi thích ăn {taste}"));
+        context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
+            PendingQuestion = $"Bạn muốn mức {taste} như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều? Bạn muốn áp dụng khẩu vị {taste} cho toàn chuyến hay ngày/bữa cụ thể nào?" };
+        context.Request.Content = answer;
+
+        var resolution = AgentTasteClarificationPolicy.Resolution(context);
+
+        if (expected is null) resolution.Should().BeNull();
+        else resolution.Should().Contain(expected).And.Contain(field!).And.Contain("không hỏi lại");
     }
 }

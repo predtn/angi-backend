@@ -741,6 +741,46 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-37: A whole-day taste proposed for "bữa 2 ngày 1" is stored as lunch of day 1, while an override already in state is not
+    // narrowed by later edit wording such as "bữa 1 ngày 1"; covers both.
+    /// <summary>Checks final-output narrowing applies only to the taste scope the model proposes from the user's taste wording this turn.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_WholeDayTasteForNamedMeal_IsNarrowedOnlyWhenNewlyProposed(bool newTaste)
+    {
+        var context = AgentTestData.Context();
+        var dayTaste = new AgentTasteOverride(1, null, [new("sour", .5)]);
+        var state = AgentTestData.State() with { MealSlots = ["breakfast", "lunch", "dinner"] };
+        context.State = newTaste
+            ? state with { PendingPlanningRequest = new(["Tôi muốn ăn ở Đà Nẵng 2 ngày, tôi thích ăn chua"]) }
+            : state with { TasteOverrides = [dayTaste] };
+        context.Request.Content = newTaste ? "Vừa, áp dụng cho bữa 2 ngày 1" : "Đổi món khác cho bữa 1 ngày 1";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            AgentTestData.Answer() with { State = state with { TasteOverrides = [new(1, null, [new("sour", .5)])] } }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.State.TasteOverrides.Select(x => (x.DayNumber, x.MealSlot))
+            .Should().Equal(((short)1, newTaste ? "lunch" : null));
+    }
+
+    // TEST-38: A meal number beyond the meals planned per day ("bữa 5" with breakfast, lunch and dinner) is asked about without an LLM call.
+    /// <summary>Ensures the backend asks which meal is meant instead of letting the model guess an out-of-range meal.</summary>
+    [Fact]
+    public async Task RunAsync_MealNumberBeyondPlannedMeals_AsksWhichMeal()
+    {
+        var context = AgentTestData.Context(); context.Request.Content = "Đổi bữa 5 ngày 1 giúp tôi";
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be("Mỗi ngày trong lịch có 3 bữa (bữa sáng, bữa trưa, bữa tối). Bạn muốn chọn bữa nào?");
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        llm.VerifyNoOtherCalls();
+    }
+
     // TEST-40: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
     // another LLM call, and the reserve dish keeps its provenance in the snapshot.
     /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>
@@ -765,6 +805,72 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Grants.Should().Contain(grant => grant.DayNumber == 2 && grant.DishIds.SequenceEqual(new[] { 2 }));
         result.Reply.Should().Contain("Có 1 món được hệ thống chọn lại").And.NotContain(AgentReplyBuilder.RepeatNote);
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-41: A reply that ignores the open taste question clears it and lets the model answer, so the user is never stuck in a loop.
+    /// <summary>Checks the abandoned taste question no longer blocks the conversation or survives into the next turn.</summary>
+    [Fact]
+    public async Task RunAsync_ReplyIgnoringTasteQuestion_ClearsItAndCallsModel()
+    {
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", "Tôi thích ăn chua"));
+        context.State = context.State with { PendingQuestion = "Bạn muốn mức chua như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?" };
+        context.Request.Content = "Tôi đâu có nói vậy, cho tôi xem lịch trước đã";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().NotStartWith("Bạn muốn mức");
+        result.State.PendingQuestion.Should().BeNull();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-43: A real answer to the taste question ("Ít, toàn chuyến đi") keeps that question in the state the model receives, while
+    // a reply that ignores it is sent without it; covers both.
+    /// <summary>Prevents the model from losing which question a short answer refers to, which made it ask the scope again.</summary>
+    [Theory]
+    [InlineData("Ít, toàn chuyến đi", true)]
+    [InlineData("Tôi đâu có nói vậy, cho tôi xem lịch trước đã", false)]
+    public async Task RunAsync_TasteAnswer_KeepsQuestionForModelOnlyWhenAnswered(string content, bool keepsQuestion)
+    {
+        const string question = "Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều? Bạn muốn áp dụng khẩu vị cay cho toàn chuyến hay ngày/bữa cụ thể nào?";
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", "Tôi muốn ăn ở Đà Nẵng 2 ngày, tôi thích ăn cay"));
+        context.State = context.State with { PendingQuestion = question };
+        context.Request.Content = content;
+        string? seen = "not called";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((ctx, _, _) => seen = ctx.State.PendingQuestion)
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object).RunAsync(context, default);
+
+        seen.Should().Be(keepsQuestion ? question : null);
+    }
+
+    // TEST-45: When the model asks the taste level again after a complete answer, it gets one repair carrying the resolved value instead of
+    // the user being asked again; a second repeated question is then returned as usual.
+    /// <summary>Removes the flaky re-ask of "Ít, toàn chuyến đi" without letting the backend loop on a model that keeps asking.</summary>
+    [Fact]
+    public async Task RunAsync_ModelReasksAnsweredTaste_GetsOneRepairWithResolvedValue()
+    {
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", "Tôi muốn ăn ở Đà Nẵng 2 ngày, tôi thích ăn cay"));
+        context.State = context.State with { PendingQuestion = "Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều? Bạn muốn áp dụng khẩu vị cay cho toàn chuyến hay ngày/bữa cụ thể nào?" };
+        context.Request.Content = "Ít, toàn chuyến đi";
+        var reask = new AgentOutput { Action = "clarify", Reply = "Mức nào?", Clarification = "taste_intensity" };
+        string? feedback = null;
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], reask))
+            .ReturnsAsync(() => { feedback = context.RepairFeedback; return new AgentLlmStep([], reask); });
+
+        await Create(llm.Object).RunAsync(context, default);
+
+        feedback.Should().Contain("spicy=0.25").And.Contain("tasteTargets");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     /// <summary>Builds orchestration from deterministic catalog boundaries and observable provider mocks.</summary>

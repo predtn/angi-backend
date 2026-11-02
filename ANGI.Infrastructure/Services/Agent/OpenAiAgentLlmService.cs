@@ -48,6 +48,8 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         dimensions from the profile and ranks with the conversation vector; matching remains approximate.
         tasteTargets applies to the whole trip; tasteOverrides is an array of {dayNumber,mealSlot,targets}.
         Day overrides inherit the trip; meal overrides inherit the day. Keep other dimensions and scopes intact.
+        'Bữa N' of a day is the N-th declared meal in breakfast, lunch, dinner order: 'bữa 2 ngày 1' is
+        {dayNumber:1, mealSlot:lunch}. A taste named for one meal never becomes a whole-day override.
         A taste for one meal on every day (e.g. 'bữa trưa' without a day) needs one meal override per day, never
         tasteTargets. Each clause keeps its own scope: 'chua cho bữa trưa, bữa tối ngày 1 ăn vặt' means sour lunch
         overrides plus one mealRequest {dayNumber:1, mealSlot:"dinner", tagIds:[snack category tag]} for day 1 dinner only.

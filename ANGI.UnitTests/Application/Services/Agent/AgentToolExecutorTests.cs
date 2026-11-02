@@ -386,6 +386,26 @@ public sealed class AgentToolExecutorTests
         reco.VerifyNoOtherCalls();
     }
 
+    // TEST-16: A whole-day taste the model proposes for "bữa 2 ngày 1" is narrowed to lunch of day 1 before the meal is ranked.
+    /// <summary>Checks the backend binds a meal-specific taste to that meal even when the model widens it to the whole day.</summary>
+    [Fact]
+    public async Task ExecuteAsync_MealSpecificTasteWidenedByModel_IsNarrowedBeforeRanking()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
+            PendingPlanningRequest = new(["Tôi muốn ăn ở Hà Nội 2 ngày, tôi thích ăn chua", "Vừa, áp dụng cho bữa 2 ngày 1"]) };
+        // Model không gửi được pendingPlanningRequest (ngoài schema tool); backend tự giữ bản đã lưu.
+        var input = Input() with { State = context.State with { PendingPlanningRequest = null, TasteOverrides = [new(1, null, [new("sour", .5)])] } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
+
+        context.State.TasteOverrides.Select(x => (x.DayNumber, x.MealSlot)).Should().Equal(((short)1, "lunch"));
+        context.TripDetailsMissing.Should().BeFalse();
+    }
+
     // TEST-17: A per-meal search grants the meal quota to the model and keeps the rest of the ranked distinct names as a reserve grant
     // for the same position, which is never returned to the model.
     /// <summary>Keeps unused ranked dishes available for backend repeat repair without enlarging the model's payload.</summary>
