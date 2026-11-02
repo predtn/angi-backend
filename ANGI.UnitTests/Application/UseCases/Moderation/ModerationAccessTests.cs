@@ -69,9 +69,11 @@ internal sealed class ModerationTestContext
     internal Mock<IAuditLogService> Audit { get; } = new();
     internal Mock<ICloudinaryService> Cloudinary { get; } = new();
     internal Mock<IAccountStatusCache> Cache { get; } = new();
+    internal Mock<IUserModerationRepository> UserModerationRepo { get; } = new();
     internal TimeProvider Clock { get; } = new FixedClock();
     internal ModerationAccess Access => new(Current.Object, Accounts.Object);
     internal RestaurantModerationEffects Effects => new(Repository.Object, Audit.Object);
+    internal UserSanctionEffects UserEffects => new(Audit.Object);
     internal Domain.Entities.Restaurant Restaurant { get; } = new()
     {
         Id = 7, OwnerId = 12, Name = "Restaurant", Slug = "restaurant", AddressLine = "1 Street",

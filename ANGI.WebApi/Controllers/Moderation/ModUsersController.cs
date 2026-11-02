@@ -13,7 +13,8 @@ namespace ANGI.WebApi.Controllers.Moderation;
 [Authorize(Roles = "MOD,ADMIN,MODERATOR")]
 public sealed class ModUsersController(
     IGetUsersUseCase getUsers,
-    IGetUserDetailUseCase getUserDetail) : ControllerBase
+    IGetUserDetailUseCase getUserDetail,
+    ICreateUserSanctionUseCase createUserSanction) : ControllerBase
 {
     /// <summary>MOD-U1: lists user accounts using moderator filters and pagination.</summary>
     [HttpGet]
@@ -33,4 +34,19 @@ public sealed class ModUsersController(
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(int userId, CancellationToken ct) =>
         Ok(new ApiResponse<ModUserDetailDto> { Success = true, Data = await getUserDetail.ExecuteAsync(userId, ct) });
+
+    /// <summary>MOD-U3: creates a sanction (warn, suspend, ban) against a traveler or restaurant owner.</summary>
+    [HttpPost("{userId:int}/sanctions")]
+    [ProducesResponseType(typeof(ApiResponse<SanctionDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateSanction(int userId, CreateUserSanctionRequestDto request, CancellationToken ct) =>
+        StatusCode(StatusCodes.Status201Created, new ApiResponse<SanctionDto>
+        {
+            Success = true,
+            Data = await createUserSanction.ExecuteAsync(userId, request, ct)
+        });
 }

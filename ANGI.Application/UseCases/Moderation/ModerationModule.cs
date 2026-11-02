@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Interfaces.UseCases.Moderation;
 using ANGI.Application.UseCases.Moderation.ApproveMenuSubmission;
 using ANGI.Application.UseCases.Moderation.ClaimReport;
+using ANGI.Application.UseCases.Moderation.CreateUserSanction;
 using ANGI.Application.UseCases.Moderation.ExpireUserSuspensions;
 using ANGI.Application.UseCases.Moderation.GetMenuSubmissionReview;
 using ANGI.Application.UseCases.Moderation.GetModRestaurant;
@@ -36,6 +37,8 @@ public static class ModerationModule
         services.AddScoped<IRejectMenuSubmissionUseCase, RejectMenuSubmissionUseCase>();
         services.AddScoped<ModerationAccess>();
         services.AddScoped<RestaurantModerationEffects>();
+        services.AddScoped<UserSanctionEffects>();
+        services.AddScoped<ICreateUserSanctionUseCase, CreateUserSanctionUseCase>();
         services.AddScoped<IListModRestaurantsUseCase, ListModRestaurantsUseCase>();
         services.AddScoped<IGetModRestaurantUseCase, GetModRestaurantUseCase>();
         services.AddScoped<IUpdateRestaurantModerationStatusUseCase, UpdateRestaurantModerationStatusUseCase>();
