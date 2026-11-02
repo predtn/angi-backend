@@ -70,13 +70,25 @@ internal sealed class ModerationTestContext
     internal Mock<IAuditLogService> Audit { get; } = new();
     internal Mock<ICloudinaryService> Cloudinary { get; } = new();
     internal Mock<IAccountStatusCache> Cache { get; } = new();
+    internal Mock<IUserModerationRepository> UserModerationRepo { get; } = new();
+    internal Mock<IBlogModerationRepository> BlogModerationRepo { get; } = new();
     internal TimeProvider Clock { get; } = new FixedClock();
     internal ModerationAccess Access => new(Current.Object, Accounts.Object);
     internal RestaurantModerationEffects Effects => new(Repository.Object, Audit.Object);
+    internal BlogModerationEffects BlogEffects => new(BlogModerationRepo.Object, Audit.Object);
+    internal UserSanctionEffects UserEffects => new(Audit.Object);
     internal Domain.Entities.Restaurant Restaurant { get; } = new()
     {
         Id = 7, OwnerId = 12, Name = "Restaurant", Slug = "restaurant", AddressLine = "1 Street",
         Owner = new User { Id = 12, Email = "owner@test.local", DisplayName = "Owner", Role = new Role { Code = "RESTAURANT_OWNER" } }
+    };
+    internal Blog Blog { get; } = new()
+    {
+        Id = 45, AuthorId = 12, Title = "Blog Title", Slug = "blog-title", Content = "Blog Content", Status = BlogStatus.Published
+    };
+    internal BlogComment Comment { get; } = new()
+    {
+        Id = 302, BlogId = 45, UserId = 12, Content = "Comment Content", Status = ContentStatus.Visible
     };
 
     /// <summary>Configures deterministic identity, permissions, transactions and display metadata.</summary>
@@ -85,9 +97,11 @@ internal sealed class ModerationTestContext
         Current.SetupGet(x => x.UserId).Returns(3);
         Current.SetupGet(x => x.Role).Returns("MOD");
         Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(["RESTAURANT_MODERATE", "RESTAURANT_VERIFY", "REPORT_RESTAURANT_HANDLE", "REPORT_SOCIAL_HANDLE", "USER_SUSPEND", "USER_BAN"]);
+            .ReturnsAsync(["RESTAURANT_MODERATE", "RESTAURANT_VERIFY", "REPORT_RESTAURANT_HANDLE", "REPORT_SOCIAL_HANDLE", "USER_SUSPEND", "USER_BAN", "BLOG_MODERATE"]);
         UnitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Transaction.Object);
         Repository.Setup(x => x.LockRestaurantAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(Restaurant);
+        BlogModerationRepo.Setup(x => x.GetBlogByIdAsync(45, It.IsAny<CancellationToken>())).ReturnsAsync(Blog);
+        BlogModerationRepo.Setup(x => x.GetCommentByIdAsync(302, It.IsAny<CancellationToken>())).ReturnsAsync(Comment);
         Repository.Setup(x => x.GetReportDisplayDataAsync(It.IsAny<ReportTarget>(), It.IsAny<IReadOnlyList<Report>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReportDisplayData("Restaurant", new Dictionary<int, User>
             {

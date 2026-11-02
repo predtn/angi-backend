@@ -13,7 +13,7 @@ public sealed class ModerationAccess(ICurrentUserService currentUser, IAccountRe
         var userId = currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập.");
         if (currentUser.Role == "ADMIN") return userId;
-        if (currentUser.Role == "MOD")
+        if (currentUser.Role is "MOD" or "MODERATOR")
         {
             var effective = await accounts.GetEffectivePermissionsAsync(userId, "MOD", ct);
             if (permissions.Any(permission => effective.Contains(permission, StringComparer.Ordinal))) return userId;

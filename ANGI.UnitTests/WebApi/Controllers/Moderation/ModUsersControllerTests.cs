@@ -4,6 +4,7 @@ using ANGI.WebApi.Common.Models;
 using ANGI.WebApi.Controllers.Moderation;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 
@@ -18,8 +19,6 @@ public sealed class ModUsersControllerTests
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
-        var getUsers = new Mock<IGetUsersUseCase>();
-        var getUserDetail = new Mock<IGetUserDetailUseCase>();
         var unbanUser = new Mock<IUnbanUserUseCase>();
 
         var request = new UnbanUserRequestDto { LiftReason = "Lý do gỡ lệnh cấm" };
@@ -38,7 +37,11 @@ public sealed class ModUsersControllerTests
             .Setup(x => x.ExecuteAsync(12, request, cancellation.Token))
             .ReturnsAsync(expectedCard);
 
-        var controller = new ModUsersController(getUsers.Object, getUserDetail.Object, unbanUser.Object);
+        var controller = new ModUsersController(
+            Mock.Of<IGetUsersUseCase>(),
+            Mock.Of<IGetUserDetailUseCase>(),
+            Mock.Of<ICreateUserSanctionUseCase>(),
+            unbanUser.Object);
 
         // Act
         var actionResult = await controller.Unban(12, request, cancellation.Token);
@@ -54,11 +57,57 @@ public sealed class ModUsersControllerTests
         unbanUser.Verify(x => x.ExecuteAsync(12, request, cancellation.Token), Times.Once);
     }
 
-    // TEST-02: Require MOD, ADMIN or MODERATOR role on controller
+    // TEST-02: MOD-U3 delegates to the sanction use case and answers 201 Created.
     [Fact]
-    public void ModUsersController_RequiresModeratorRole()
+    public async Task CreateSanction_Returns201Created_WithSanctionDto()
+    {
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        var useCase = new Mock<ICreateUserSanctionUseCase>();
+        var request = new CreateUserSanctionRequestDto
+        {
+            Type = "suspend",
+            DurationDays = 7,
+            Reason = "Spamming"
+        };
+        var expectedSanction = new SanctionDto
+        {
+            Id = 42,
+            Type = "suspend",
+            Reason = "Spamming"
+        };
+
+        useCase.Setup(x => x.ExecuteAsync(15, request, cts.Token))
+            .ReturnsAsync(expectedSanction);
+
+        var controller = new ModUsersController(
+            Mock.Of<IGetUsersUseCase>(),
+            Mock.Of<IGetUserDetailUseCase>(),
+            useCase.Object,
+            Mock.Of<IUnbanUserUseCase>());
+
+        // Act
+        var actionResult = await controller.CreateSanction(15, request, cts.Token);
+
+        // Assert
+        var result = actionResult as ObjectResult;
+        result.Should().NotBeNull();
+        result!.StatusCode.Should().Be(StatusCodes.Status201Created);
+
+        var response = result.Value as ApiResponse<SanctionDto>;
+        response.Should().NotBeNull();
+        response!.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expectedSanction);
+
+        useCase.Verify(x => x.ExecuteAsync(15, request, cts.Token), Times.Once);
+    }
+
+    // TEST-03: Require MOD or ADMIN role on the controller.
+    [Fact]
+    public void ModUsersController_RequiresModeratorOrAdminRole()
     {
         var attribute = (AuthorizeAttribute)Attribute.GetCustomAttribute(typeof(ModUsersController), typeof(AuthorizeAttribute))!;
+        attribute.Should().NotBeNull();
         attribute.Roles.Should().Contain("MOD");
         attribute.Roles.Should().Contain("ADMIN");
     }
