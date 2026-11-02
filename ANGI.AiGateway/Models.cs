@@ -1,9 +1,11 @@
 namespace ANGI.AiGateway;
 
-public sealed class GatewayDenied(string code, int status = 503) : Exception(code)
+public sealed class GatewayDenied(string code, int status = 503, int? retryAfterSeconds = null) : Exception(code)
 {
     public string Code { get; } = code;
     public int Status { get; } = status;
+    // Only temporary rate/concurrency limits carry a hint; spending stops and exhausted budgets never invite a retry.
+    public int? RetryAfterSeconds { get; } = retryAfterSeconds;
 }
 
 public sealed record PreparedRequest(string Workload, byte[] Body, string InputHash, int MaxOutputTokens,

@@ -26,12 +26,7 @@ app.Use(async (context, next) =>
     catch (Exception error)
     {
         if (context.Response.HasStarted) throw;
-        var response = error is GatewayDenied denied ? GatewayService.Error(denied.Code, denied.Status)
-            : GatewayService.Error(error is BadHttpRequestException or JsonException ? "gateway_invalid_request" : "gateway_ledger_unavailable",
-                error is BadHttpRequestException or JsonException ? 400 : 503);
-        context.Response.StatusCode = response.Status;
-        context.Response.ContentType = "application/json";
-        await context.Response.Body.WriteAsync(response.Body);
+        await GatewayService.WriteErrorAsync(context.Response, error);
     }
 });
 

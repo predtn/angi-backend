@@ -9,6 +9,9 @@ Tests use fake AI responses. Installing, migrating, quoting, or running tests ma
 workload, with a 16,000 output-token ceiling so multi-day plans are not truncated. This is a ceiling, not a request
 for that many tokens. The default is one concurrent call and two admissions/minute across both backend clients.
 Multi-round chat may need more than two calls per turn; choose appropriate RPM, call and money limits before enabling it.
+The per-minute and in-flight limits are temporary: they return 429 `gateway_rate_limit` / `gateway_concurrency_limit`
+with `Retry-After` (seconds until the window frees a slot, or a short fixed hint). The backend classifies them as
+rate limits and retries within its bounded turn budget; spending stops and exhausted budgets never carry `Retry-After`.
 
 **Reco is independent.** Keep its existing provider, credentials, prompts, vector generation, retries and databases.
 Do not point reco at this gateway or give it a gateway credential. There is no vector workload, vector credential,

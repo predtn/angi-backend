@@ -452,6 +452,28 @@ public sealed class OpenAiAgentLlmServiceTests
         public override DateTimeOffset GetUtcNow() => new(2026, 10, 28, 0, 0, 0, TimeSpan.Zero);
     }
 
+    // TEST-23: Gateway rate and concurrency limits are temporary rate limits that keep the gateway's Retry-After, never spending-control
+    // failures; covers gateway_rate_limit and gateway_concurrency_limit.
+    /// <summary>Lets the orchestrator wait and retry a per-minute or in-flight gateway limit instead of telling the user to contact an administrator.</summary>
+    [Theory]
+    [InlineData("gateway_rate_limit", 7)]
+    [InlineData("gateway_concurrency_limit", 3)]
+    public async Task RunAsync_GatewayTemporaryLimit_IsRetryableRateLimit(string code, int retryAfter)
+    {
+        var handler = new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests) {
+                Content = new StringContent(JsonSerializer.Serialize(new { error = new { message = "AI request blocked by spending controls.", type = "budget_control", code } })) };
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(retryAfter));
+            return Task.FromResult(response);
+        });
+
+        var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+
+        result!.Failure.Should().Be(new AgentLlmFailure(AgentLlmFailureKind.RateLimited, 429, retryAfter, code, "rate_limit"));
+        new ANGI.Application.Common.Exceptions.AgentProviderException(result.Failure!).Message.Should().NotContain("quản trị viên");
+    }
+
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
         clarification = (string?)null,

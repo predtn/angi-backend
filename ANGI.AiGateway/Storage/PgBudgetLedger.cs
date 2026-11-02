@@ -41,10 +41,17 @@ public sealed class PgBudgetLedger(GatewaySettings settings) : IBudgetLedger
 
         var pending = await ScalarAsync<long>(connection, transaction,
             "SELECT count(*) FROM ai_control.reservations WHERE outcome='pending'", ct);
-        if (pending >= settings.MaxInFlight) throw new GatewayDenied("gateway_concurrency_limit", 429);
+        // A running call usually settles within seconds, so a short fixed hint is enough for the caller's bounded retry.
+        if (pending >= settings.MaxInFlight) throw new GatewayDenied("gateway_concurrency_limit", 429, ConcurrencyRetrySeconds);
         var recent = await ScalarAsync<long>(connection, transaction,
             "SELECT count(*) FROM ai_control.reservations WHERE admitted_at>@since", ct, ("since", now.AddMinutes(-1)));
-        if (recent >= settings.RequestsPerMinute) throw new GatewayDenied("gateway_rate_limit", 429);
+        if (recent >= settings.RequestsPerMinute)
+        {
+            // The window frees a slot when its oldest admission turns one minute old.
+            var oldest = await ScalarAsync<DateTime>(connection, transaction,
+                "SELECT min(admitted_at) FROM ai_control.reservations WHERE admitted_at>@since", ct, ("since", now.AddMinutes(-1)));
+            throw new GatewayDenied("gateway_rate_limit", 429, RateRetrySeconds(oldest, now));
+        }
         foreach (var scope in new[] { "global", request.Workload })
         {
             var budget = await BudgetAsync(connection, transaction, scope, ct);
@@ -195,6 +202,12 @@ public sealed class PgBudgetLedger(GatewaySettings settings) : IBudgetLedger
         if (!await reader.ReadAsync(ct)) throw new GatewayDenied("gateway_budget_not_initialized");
         return new(reader.GetDecimal(0), reader.GetDecimal(1), reader.GetInt32(2), reader.GetInt32(3));
     }
+
+    public const int ConcurrencyRetrySeconds = 3;
+
+    /// <summary>Whole seconds until the oldest admission leaves the one-minute window, at least 1 and at most 60.</summary>
+    public static int RateRetrySeconds(DateTime oldest, DateTime now) =>
+        (int)Math.Clamp(Math.Ceiling((oldest.AddMinutes(1) - now).TotalSeconds), 1, 60);
 
     private static Task<DateTime> NowAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken ct) =>
         ScalarAsync<DateTime>(connection, transaction, "SELECT clock_timestamp()", ct);

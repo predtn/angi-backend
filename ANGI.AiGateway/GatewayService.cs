@@ -48,6 +48,19 @@ public sealed class GatewayService(GatewaySettings settings, RequestPolicy polic
     public static GatewayResponse Error(string code, int status = 503) => new(status,
         JsonSerializer.SerializeToUtf8Bytes(new { error = new { message = "AI request blocked by spending controls.", type = "budget_control", code } }), code);
 
+    /// <summary>Writes a failed request as the JSON error envelope; only temporary rate/concurrency denials add Retry-After.</summary>
+    public static async Task WriteErrorAsync(Microsoft.AspNetCore.Http.HttpResponse response, Exception error)
+    {
+        var invalid = error is Microsoft.AspNetCore.Http.BadHttpRequestException or JsonException;
+        var result = error is GatewayDenied denied ? Error(denied.Code, denied.Status)
+            : Error(invalid ? "gateway_invalid_request" : "gateway_ledger_unavailable", invalid ? 400 : 503);
+        response.StatusCode = result.Status;
+        response.ContentType = "application/json";
+        if (error is GatewayDenied { RetryAfterSeconds: { } retryAfter })
+            response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await response.Body.WriteAsync(result.Body);
+    }
+
     private static async Task<byte[]> ReadBoundedAsync(HttpContent content, int maximum, CancellationToken ct)
     {
         if (content.Headers.ContentLength > maximum) throw new GatewayDenied("gateway_response_too_large");

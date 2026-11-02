@@ -311,8 +311,10 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object) return (null, null, null);
             var code = error.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String ? status.GetString() :
                 error.TryGetProperty("code", out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+            // Giới hạn tốc độ/đồng thời của gateway chỉ là tạm thời: phân loại như rate limit để orchestrator chờ Retry-After
+            // rồi thử lại, thay vì báo người dùng "liên hệ quản trị viên" như khi chi tiêu bị dừng.
+            if (code is "gateway_rate_limit" or "gateway_concurrency_limit") return (code, "rate_limit", null);
             if (code is "ai_budget_gateway_required" or "gateway_spending_stopped" or "gateway_budget_exhausted" or
-                "gateway_concurrency_limit" or "gateway_rate_limit" or
                 "gateway_pricing_review_expired" or "gateway_policy_mismatch" or "gateway_provider_not_configured" or
                 "gateway_ledger_unavailable" or "gateway_ledger_not_initialized" or "gateway_settlement_unavailable" or
                 "gateway_upstream_outcome_unknown" or "gateway_usage_missing" or "gateway_upstream_rejected")
