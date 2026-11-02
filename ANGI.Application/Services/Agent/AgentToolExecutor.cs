@@ -356,6 +356,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (input.Kind is not ("dish" or "restaurant") || string.IsNullOrWhiteSpace(input.Name) || input.Name.Length > 200 ||
             input.Province is not null && (string.IsNullOrWhiteSpace(input.Province) || input.Province.Length > 100) || input.SelectedId is <= 0)
             return ArgumentError(context, "Tên món/quán cần tra cứu không hợp lệ.");
+        // "cái này", "món đó" chỉ là từ chỉ trỏ, không phải tên: tra cứu sẽ báo "không tìm thấy" một món người dùng chưa từng nêu.
+        if (AgentEditScopePolicy.IsPointingOnly(input.Name))
+            return ArgumentError(context, "Đây là từ chỉ trỏ, không phải tên món/quán. Hãy hỏi người dùng muốn nói món/bữa nào (clarification=edit_scope).");
         var result = await LookupAsync(context, input, ct);
         // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
         // mọi câu clarify của lượt sẽ thành "Đã tìm thấy kết quả đúng tên trong catalog."
@@ -384,7 +387,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return new(outside ? "outside_province" : matches.Length > 0 ? "ambiguous" : "not_found",
                 outside ? "Có kết quả cùng tên trong hệ thống nhưng ngoài tỉnh đã chọn. Bạn muốn giữ địa điểm hay thay đổi?"
                 : matches.Length > 0 ? "Chưa xác định được đúng món/quán theo tên đã yêu cầu. Bạn muốn chọn kết quả nào trong danh sách?"
-                : "Chưa tìm thấy món/quán theo tên yêu cầu trong danh mục ANGI. Bạn có muốn xem lựa chọn khác không?", matches.Take(20).ToArray());
+                : $"Chưa tìm thấy món/quán theo tên yêu cầu (“{AgentReplyBuilder.Safe(input.Name)}”) trong danh mục ANGI. Bạn có muốn xem lựa chọn khác không?", matches.Take(20).ToArray());
         }
         if (input.Kind == "restaurant" && exact.Length != 1 || exact.Length > 20)
             return new("ambiguous", "Có nhiều kết quả cùng tên. Bạn muốn chọn nhà hàng/chi nhánh nào trong danh sách?", exact.Take(20).ToArray());

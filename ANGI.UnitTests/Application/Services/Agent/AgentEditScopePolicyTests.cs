@@ -53,4 +53,63 @@ public sealed class AgentEditScopePolicyTests
 
         AgentEditScopePolicy.Question(context).Should().BeNull();
     }
+
+    // TEST-04: A dislike without a target asks which item to change; covers "không ngon", "đắt quá" and a polite form.
+    /// <summary>Prevents the model from searching the catalog for "cái này" and reporting a dish the user never named as missing.</summary>
+    [Theory]
+    [InlineData("cái này không ngon")]
+    [InlineData("món này đắt quá")]
+    [InlineData("tôi không thích món đó")]
+    public void Question_DislikeWithoutTarget_AsksWhichItem(string content)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.Request.Content = content;
+
+        AgentEditScopePolicy.Question(context).Should().Be("Bạn muốn thay đổi toàn lịch hay ngày/bữa hoặc món cụ thể nào?");
+    }
+
+    // TEST-05: A dislike naming something, or a compliment, reaches the model; covers a named dish, a day and praise.
+    /// <summary>Keeps the rule from catching messages that already carry a target or no complaint.</summary>
+    [Theory]
+    [InlineData("Phở Gà không ngon")]
+    [InlineData("ngày 2 không ngon")]
+    [InlineData("cái này ngon")]
+    public void Question_DislikeWithTarget_ReachesModel(string content)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.Request.Content = content;
+
+        AgentEditScopePolicy.Question(context).Should().BeNull();
+    }
+
+    // TEST-06: Pointing words are not catalog names; covers "cái này", "món đó", a real dish and empty text.
+    /// <summary>Stops a lookup that could only report a false "not found".</summary>
+    [Theory]
+    [InlineData("cái này", true)]
+    [InlineData("món đó", true)]
+    [InlineData("Phở Gà", false)]
+    [InlineData("  ", false)]
+    public void IsPointingOnly_ReadsWords(string name, bool expected)
+    {
+        AgentEditScopePolicy.IsPointingOnly(name).Should().Be(expected);
+    }
+
+    // TEST-07: A bare acknowledgement is recognized only over a plan with nothing open; covers acknowledgements, a real request, no plan,
+    // an open question, a pending change, a pending planning request and a selected item.
+    /// <summary>Saves the two to three LLM calls such a message used to spend on a proposal that was then rejected.</summary>
+    [Theory]
+    [InlineData("ok", "", true)][InlineData("Oke nhé", "", true)][InlineData("thôi", "", true)][InlineData("hmm", "", true)][InlineData("được rồi", "", true)]
+    [InlineData("ok đổi bữa trưa", "", false)][InlineData("ok", "no-plan", false)][InlineData("ok", "question", false)]
+    [InlineData("ok", "change", false)][InlineData("ok", "planning", false)][InlineData("ok", "selected", false)]
+    public void IsBareAcknowledgement_OnlyWithNothingOpen(string content, string area, bool expected)
+    {
+        var context = AgentTestData.Context(area == "no-plan" ? null : AgentTestData.Snapshot(AgentTestData.Item()));
+        context.Request.Content = content;
+        if (area == "question") context.State = context.State with { PendingQuestion = "Có muốn đổi không?" };
+        if (area == "change") context.State = context.State with { PendingStateChange = AgentTestData.State() };
+        if (area == "planning") context.State = context.State with { PendingPlanningRequest = new(["x"]) };
+        if (area == "selected") context.Request.SelectedItemKey = "a";
+
+        AgentEditScopePolicy.IsBareAcknowledgement(context).Should().Be(expected);
+    }
 }

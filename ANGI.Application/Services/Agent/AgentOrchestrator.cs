@@ -40,6 +40,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             telemetry.Record("edit_scope_clarification", context.ConversationId, context.TurnId, context.AttemptId);
             return new(editQuestion, context.State with { PendingQuestion = editQuestion }, null, null);
         }
+        // "ok", "thôi" khi không có câu hỏi nào đang mở: không có gì để lập lịch, trả lời cố định thay vì tốn 2-3 lần gọi LLM rồi bị loại.
+        if (AgentEditScopePolicy.IsBareAcknowledgement(context))
+        {
+            telemetry.Record("acknowledgement", context.ConversationId, context.TurnId, context.AttemptId);
+            return new(AgentReplyBuilder.Clarify(context, "general") + " Nhắn ‘chốt lịch này’ nếu bạn muốn lưu bản hiện tại.", context.State, null, null);
+        }
         // "Món lạ/món mới/món chưa ăn" không có tag nào tương ứng: hỏi nghĩa trước, không để model tra nó như tên món.
         if (AgentNoveltyPolicy.Question(context) is { } noveltyQuestion)
         {

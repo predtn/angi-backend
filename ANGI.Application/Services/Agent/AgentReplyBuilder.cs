@@ -169,6 +169,6 @@ public static class AgentReplyBuilder
         _ => target.Dimension
     }) + " mức " + target.Target switch { 0d => "không", .25 => "nhẹ", .5 => "vừa", .75 => "nhiều", _ => "rất nhiều" };
     private static string Money(decimal value) => value.ToString("N0", CultureInfo.GetCultureInfo("vi-VN"));
-    private static string Safe(string? value) => value is null ? "Chưa có thông tin" : new string(value
+    internal static string Safe(string? value) => value is null ? "Chưa có thông tin" : new string(value
         .Where(character => !char.IsControl(character) && character is not '<' and not '>').Take(200).ToArray());
 }

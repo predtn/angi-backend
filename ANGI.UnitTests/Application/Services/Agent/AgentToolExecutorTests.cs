@@ -512,6 +512,25 @@ public sealed class AgentToolExecutorTests
         }
     }
 
+    // TEST-23: Pointing words are refused as a catalog name before any lookup and never become a "not found" notice.
+    /// <summary>Stops "cái này" from producing a false claim that the dish is not in the catalog.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SearchPointingWords_ReturnsArgumentErrorWithoutLookup()
+    {
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        var context = AgentTestData.Context();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("dish", "cái này"), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        context.ToolNotice.Should().BeNull();
+        catalog.VerifyNoOtherCalls();
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {

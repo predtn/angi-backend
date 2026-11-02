@@ -996,6 +996,23 @@ public sealed class AgentOrchestratorTests
         result.State.PendingQuestion.Should().Be(kept ? question : null);
     }
 
+    // TEST-49: A bare acknowledgement over a plan is answered with the fixed question without a provider call and leaves the plan savable.
+    /// <summary>Saves the calls an "ok" used to spend on a proposal that was then rejected.</summary>
+    [Fact]
+    public async Task RunAsync_BareAcknowledgement_AnswersWithoutProvider()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1)));
+        context.Request.Content = "ok";
+        var llm = new Mock<IAgentLlmService>();
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().Contain("chốt lịch này");
+        result.State.PendingQuestion.Should().BeNull();
+        llm.VerifyNoOtherCalls();
+    }
+
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
     {
