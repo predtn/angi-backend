@@ -123,6 +123,8 @@ public sealed class AgentContext
     public string? ToolNotice { get; set; }
     /// <summary>Set after a repeated identical tool request; the next provider call must return a final output.</summary>
     public bool ToolsClosed { get; set; }
+    /// <summary>Set when a recommendation was requested before province, duration and budget were known; the turn asks for them.</summary>
+    public bool TripDetailsMissing { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>

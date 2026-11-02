@@ -698,6 +698,27 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
+    // TEST-36: A recommendation requested before the budget is known ends the turn with the fixed budget question, keeps the accepted taste
+    // and makes no further LLM call instead of failing with AGENT_UNAVAILABLE.
+    /// <summary>Protects the user's taste answer and the turn itself when the model asks for recommendations too early.</summary>
+    [Fact]
+    public async Task RunAsync_RecommendationBeforeBudget_AsksBudgetAndKeepsTaste()
+    {
+        var context = AgentTestData.Context(); context.State = AgentTestData.State() with { BudgetAmount = null };
+        var input = new AgentRecommendationInput(context.State with { TasteTargets = [new("sour", .5)] }, "Da Nang", "full", null, null, [], [], []);
+        var call = new AgentToolCall("a", "get_recommendation", System.Text.Json.JsonSerializer.SerializeToElement(input, AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([call], null));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be("Bạn cho mình biết ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?");
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        result.State.TasteTargets.Should().Equal(new AgentTasteTarget("sour", .5));
+        result.Snapshot.Should().BeNull();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // TEST-40: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
     // another LLM call, and the reserve dish keeps its provenance in the snapshot.
     /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>

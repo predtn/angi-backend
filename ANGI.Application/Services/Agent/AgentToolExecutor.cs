@@ -58,23 +58,38 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (!context.ReplanAfterConfirmation)
             context.State = statePolicy.Accept(context.State, input.State, context.ConstraintBaseline);
         var state = context.State;
+        // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
+        // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
+        // Orchestrator hỏi lại bằng câu cố định mà không gọi thêm LLM.
+        if (AgentReplyBuilder.TripDetailsQuestion(state) is not null)
+        {
+            context.TripDetailsMissing = true;
+            return new { status = "missing_trip_details", rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>() };
+        }
         var scope = new AgentScope(input.DayNumber, input.MealSlot);
-        AgentProposalBuilder.ValidateScope(context, scope);
+        // Tham số sai do model gửi (phạm vi, tag, topK, giá, bán kính...) được trả lại cho model để nó tự sửa trong cùng lượt,
+        // thay vì làm hỏng cả lượt chat thành 503/409 như trước. Số vòng tool vẫn bị giới hạn ở orchestrator.
+        try { AgentProposalBuilder.ValidateScope(context, scope); }
+        catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE")
+        {
+            return ArgumentError(context, error.Message);
+        }
         // full = cả chuyến; day = một ngày; slot = một bữa của một ngày.
-        // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn).
         // Kiểm tra thêm giá VND, bán kính, số ID và topK để không vượt hợp đồng Recommendation.
         if (input.Scope is not ("full" or "day" or "slot") || input.Scope == "full" && (input.DayNumber.HasValue || input.MealSlot is not null) ||
             input.Scope is "day" or "slot" && !input.DayNumber.HasValue || input.Scope == "day" && input.MealSlot is not null || input.Scope == "slot" && input.MealSlot is null ||
-            string.IsNullOrWhiteSpace(state.Province) || !state.NumDays.HasValue ||
-            state.BudgetAmount is null && !state.BudgetUnrestricted ||
-            input.Province is not null && !string.Equals(input.Province.Trim(), state.Province.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            input.Province is not null && !string.Equals(input.Province.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) ||
             input.TopK < 1 || input.TopK > limits.MaxRanked || input.ExcludeDishIds is null || input.ExcludeDishIds.Length > 2000 || input.ExcludeDishIds.Any(x => x <= 0) ||
             input.TagIds is null || input.ExcludeTagIds is null || input.TagIds.Length > 100 || input.ExcludeTagIds.Length > 100 ||
             input.TagIds.Any(x => x <= 0) || input.ExcludeTagIds.Any(x => x <= 0) ||
             input.MaxPricePerMeal.HasValue && (input.MaxPricePerMeal < 0 || decimal.Truncate(input.MaxPricePerMeal.Value) != input.MaxPricePerMeal || input.MaxPricePerMeal > AgentStateValidator.MaxMoney) ||
             input.RadiusKm.HasValue && (input.RadiusKm < 1 || input.RadiusKm > 50 || state.OriginLatitude is null))
-            throw Invalid("Cần làm rõ tỉnh, ngân sách hoặc phạm vi trước khi lấy gợi ý.");
+            return ArgumentError(context, "Phạm vi, topK, giá tối đa, bán kính hoặc danh sách ID không đúng hợp đồng get_recommendation.");
         var catalogTags = await tags.GetTagsAsync(null, ct);
+        var unknownTags = state.TagIds.Concat(state.ExcludeTagIds).Concat(input.TagIds).Concat(input.ExcludeTagIds)
+            .Concat(state.MealRequests.SelectMany(request => request.TagIds)).Distinct().Except(catalogTags.Select(tag => tag.Id)).ToArray();
+        if (unknownTags.Length > 0)
+            return ArgumentError(context, $"Tag {string.Join(", ", unknownTags)} không có trong catalog. Chỉ dùng ID có trong catalogTags.");
         var alternative = context.Request.Command == "alternative" || input.Alternative;
         if (alternative && !context.AlternativeScopes.Contains(scope)) context.AlternativeScopes.Add(scope);
         // Ngày/bữa có khẩu vị hoặc yêu cầu món khác nhau được backend tự tách thành các phạm vi đồng nhất ngay trong lượt gọi này.
@@ -336,6 +351,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
 
     private async Task<object> SearchAsync(AgentContext context, AgentCatalogInput input, CancellationToken ct)
     {
+        if (input.Kind is not ("dish" or "restaurant") || string.IsNullOrWhiteSpace(input.Name) || input.Name.Length > 200 ||
+            input.Province is not null && (string.IsNullOrWhiteSpace(input.Province) || input.Province.Length > 100) || input.SelectedId is <= 0)
+            return ArgumentError(context, "Tên món/quán cần tra cứu không hợp lệ.");
         var result = await LookupAsync(context, input, ct);
         context.ToolNotice = Describe(result);
         return new { result.Status, result.Message, result.Matches };
@@ -368,6 +386,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         return new("found", "Đã tìm thấy kết quả đúng tên trong catalog.", exact);
     }
 
+    /// <summary>Returns a model-argument error to the model as a tool result so it can correct the call; never a user-visible notice.</summary>
+    private object ArgumentError(AgentContext context, string message)
+    {
+        telemetry.Record("tool_argument_error", context.ConversationId, context.TurnId, context.AttemptId, new { message });
+        return new { status = "invalid_arguments", rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>(), warnings = new[] { message } };
+    }
+
     private static object Notice(AgentContext context, string message, string status)
     {
         context.ToolNotice = message;
@@ -392,14 +417,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (!context.State.NumDays.HasValue || input.DayNumber < 1 || input.DayNumber > context.State.NumDays || input.OrderedItems is null || input.OrderedItems.Length > 24 ||
             input.OrderedItems.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0) ||
             input.OrderedItems.Select(x => x.ItemKey).Distinct().Count() != input.OrderedItems.Length || input.Profile is not ("driving" or "walking" or "cycling"))
-            throw Invalid("Tham số tuyến không hợp lệ.");
+            return ArgumentError(context, "Tham số tuyến không hợp lệ (ngày, danh sách món hoặc phương tiện).");
         // Chỉ nhận ID từ candidates đã cấp cho ngày này hoặc từ các món nguồn thuộc ngày đó.
         // Không cho model gửi tọa độ tùy ý; tọa độ luôn tra từ quán của dishId trong catalog.
         var allowed = context.Grants.Where(g => !g.DayNumber.HasValue || g.DayNumber == input.DayNumber).SelectMany(g => g.DishIds)
             .Concat((context.Source?.Items ?? []).Where(x => x.DayNumber == input.DayNumber).Select(x => x.DishId)).ToHashSet();
-        if (input.OrderedItems.Any(x => !allowed.Contains(x.DishId))) throw Invalid("Tuyến chứa món chưa được backend cấp.");
+        if (input.OrderedItems.Any(x => !allowed.Contains(x.DishId))) return ArgumentError(context, "Tuyến chứa món chưa được backend cấp cho ngày này.");
         var catalog = (await dishes.GetCardDishesAsync(input.OrderedItems.Select(x => x.DishId).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
-        if (input.OrderedItems.Any(x => !catalog.ContainsKey(x.DishId))) throw Invalid("Món trong tuyến không còn khả dụng.");
+        if (input.OrderedItems.Any(x => !catalog.ContainsKey(x.DishId))) return ArgumentError(context, "Món trong tuyến không còn khả dụng.");
         // "lunch" chỉ là giá trị tạm để dựng AgentItem cho route; thứ tự chặng theo OrderedItems.
         // Không dùng giá trị bữa tạm này để thay lịch proposal hoặc ghi roadmap.
         var items = input.OrderedItems.Select((x, i) => new AgentItem(x.ItemKey, null, input.DayNumber, "lunch", (short)i, x.DishId,
@@ -412,9 +437,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     // Roadmap đã được ContextBuilder nạp sau kiểm tra ownership. Tool chỉ trả đúng roadmap đó.
     // Viết "sửa roadmap 88" trong chat không tự gắn conversation vào 88; frontend phải mở đúng context.
     // Hiện chưa có tool liệt kê/tìm/chuyển sang roadmap khác chỉ bằng lời chat.
-    private static object GetRoadmap(AgentContext context, AgentRoadmapInput input) =>
+    // ID khác (hoặc hội thoại chưa gắn roadmap) không trả dữ liệu nào; model nhận lỗi tham số để dùng bản xem trước trong ngữ cảnh,
+    // thay vì làm hỏng cả lượt chat thành 404 như trước.
+    private object GetRoadmap(AgentContext context, AgentRoadmapInput input) =>
         input.RoadmapId > 0 && input.RoadmapId == context.Roadmap?.Id ? AgentJson.FromRoadmap(context.Roadmap, context.State)
-            : throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
+            : ArgumentError(context, context.Roadmap is null
+                ? "Hội thoại này chưa gắn roadmap đã lưu; lịch hiện tại là bản xem trước có sẵn trong ngữ cảnh."
+                : "Chỉ đọc được roadmap đang gắn với hội thoại này.");
 
     /// <summary>Combines optional upper bounds without relaxing an existing bound.</summary>
     // Một bên chưa đặt giới hạn thì dùng bên còn lại; cả hai có thì giữ mức chặt hơn.

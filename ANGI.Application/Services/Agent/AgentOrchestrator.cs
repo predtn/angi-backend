@@ -128,6 +128,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     }
                     // Giữ liên kết call ID -> result để lần gọi LLM kế tiếp nhận đúng dữ liệu vừa lấy.
                     context.Exchanges.Add(new(step.Tools, results));
+                    // Model xin gợi ý khi còn thiếu tỉnh/số ngày/ngân sách: hỏi ngay bằng câu cố định, giữ state vừa nhận
+                    // (kể cả khẩu vị người dùng vừa trả lời) và không gọi thêm LLM.
+                    if (context.TripDetailsMissing)
+                    {
+                        var question = AgentReplyBuilder.TripDetailsQuestion(context.State)!;
+                        telemetry.Record("trip_details_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+                        return new(question, context.State with { PendingQuestion = question }, null, null);
+                    }
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
                     // ở các lần gọi sau, vì thông báo cũ khiến model lặp lại đúng tool call vừa chạy.
                     repaired = false;

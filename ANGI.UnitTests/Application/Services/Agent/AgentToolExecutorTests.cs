@@ -149,26 +149,15 @@ public sealed class AgentToolExecutorTests
         context.Grants.Single().RequestId.Should().BeNull(); context.Grants.Single().DishIds.Should().Equal(2);
     }
 
-    // TEST-05: Reject unknown tools, injected user identity and malformed numeric or scope arguments before ranking.
+    // TEST-05: Reject unknown tools, injected user identity and a scope outside the schema enum before ranking; covers all three.
     /// <summary>Checks the backend allowlist independently of provider strict-mode promises.</summary>
     [Theory]
-    [InlineData("unknown")][InlineData("identity")][InlineData("top-zero")][InlineData("top-large")][InlineData("scope")]
-    [InlineData("day-missing")][InlineData("slot-missing")][InlineData("province")][InlineData("radius")][InlineData("price")]
-    [InlineData("excluded-id")][InlineData("unknown-tag")][InlineData("budget")]
+    [InlineData("unknown")][InlineData("identity")][InlineData("scope")]
     public async Task ExecuteAsync_InvalidTool_RejectsBeforeRanking(string area)
     {
         var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>();
         var context = AgentTestData.Context();
-        var input = area switch
-        {
-            "top-zero" => Input() with { TopK = 0 }, "top-large" => Input() with { TopK = 201 },
-            "scope" => Input() with { Scope = "unknown" }, "day-missing" => Input() with { Scope = "day" },
-            "slot-missing" => Input() with { Scope = "slot", DayNumber = 1 }, "province" => Input() with { Province = "Other" },
-            "radius" => Input() with { RadiusKm = 51 }, "price" => Input() with { MaxPricePerMeal = 1.5m },
-            "excluded-id" => Input() with { ExcludeDishIds = [-1] }, "unknown-tag" => Input() with { TagIds = [99] }, _ => Input()
-        };
-        if (area == "budget") context.State = context.State with { BudgetAmount = null };
-        var call = area == "unknown" ? new AgentToolCall("c", "delete_roadmap", JsonSerializer.SerializeToElement(new { })) : Call(input);
+        var call = area == "unknown" ? new AgentToolCall("c", "delete_roadmap", JsonSerializer.SerializeToElement(new { })) : Call(area == "scope" ? Input() with { Scope = "unknown" } : Input());
         if (area == "identity") call = call with { Arguments = JsonSerializer.SerializeToElement(new { userId = 99, roadmapId = 1 }) };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
         await ((Func<Task>)(async () => await tools.ExecuteAsync(context, call, CancellationToken.None))).Should().ThrowAsync<AppException>();
@@ -241,17 +230,24 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("items").GetArrayLength().Should().Be(0); context.Grants.Should().BeEmpty(); reco.VerifyNoOtherCalls();
     }
 
-    // TEST-09: Reject routing arbitrary dish IDs and reading a roadmap not bound to the conversation.
-    /// <summary>Verifies ownership and candidate-source restrictions on the other two read-only tools.</summary>
+    // TEST-09: Routing arbitrary dish IDs and reading a roadmap not bound to the conversation return invalid_arguments to the model without
+    // any route call or roadmap data, instead of failing the chat turn; covers both tools.
+    /// <summary>Keeps ownership and candidate-source restrictions while letting the model recover from a bad read-only tool call.</summary>
     [Fact]
     public async Task ExecuteAsync_RouteAndRoadmap_RequireTrustedSources()
     {
         var fixture = AgentTestData.Validator();
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
         var route = new AgentToolCall("r", "estimate_day_route", JsonSerializer.SerializeToElement(new AgentRouteInput(1, [new("x", 999)]), AgentJson.Options));
-        await ((Func<Task>)(async () => await tools.ExecuteAsync(AgentTestData.Context(), route, CancellationToken.None))).Should().ThrowAsync<ServiceUnavailableException>();
         var roadmap = new AgentToolCall("m", "get_roadmap", JsonSerializer.SerializeToElement(new AgentRoadmapInput(99), AgentJson.Options));
-        await ((Func<Task>)(async () => await tools.ExecuteAsync(AgentTestData.Context(), roadmap, CancellationToken.None))).Should().ThrowAsync<NotFoundException>();
+
+        var routeResult = await tools.ExecuteAsync(AgentTestData.Context(), route, CancellationToken.None);
+        var roadmapResult = await tools.ExecuteAsync(AgentTestData.Context(), roadmap, CancellationToken.None);
+
+        routeResult.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        roadmapResult.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        roadmapResult.TryGetProperty("days", out _).Should().BeFalse();
+        fixture.Routes.VerifyNoOtherCalls();
     }
 
     // TEST-10: When every declared meal has no candidate, the search returns the no-candidate notice, records zero coverage and never ranks.
@@ -361,6 +357,35 @@ public sealed class AgentToolExecutorTests
         context.Grants.Should().BeEmpty();
     }
 
+    // TEST-15: A recommendation requested before the budget, duration or province is known returns missing_trip_details, flags the turn,
+    // keeps the taste the model just accepted and never queries the catalog or reco; covers budget, days and province.
+    /// <summary>Ensures missing trip values become a user question instead of a contract failure that turns the chat into HTTP 503.</summary>
+    [Theory]
+    [InlineData("budget")][InlineData("days")][InlineData("province")]
+    public async Task ExecuteAsync_TripDetailsMissing_ReturnsNoticeWithoutRanking(string missing)
+    {
+        var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>();
+        var context = AgentTestData.Context();
+        context.State = missing switch
+        {
+            "budget" => context.State with { BudgetAmount = null },
+            "days" => context.State with { NumDays = null },
+            _ => context.State with { Province = null }
+        };
+        var input = Input() with { State = context.State with { TasteTargets = [new("sour", .5)] } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("missing_trip_details");
+        result.GetProperty("items").GetArrayLength().Should().Be(0);
+        context.TripDetailsMissing.Should().BeTrue();
+        context.State.TasteTargets.Should().Equal(new AgentTasteTarget("sour", .5));
+        context.Grants.Should().BeEmpty();
+        fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        reco.VerifyNoOtherCalls();
+    }
+
     // TEST-17: A per-meal search grants the meal quota to the model and keeps the rest of the ranked distinct names as a reserve grant
     // for the same position, which is never returned to the model.
     /// <summary>Keeps unused ranked dishes available for backend repeat repair without enlarging the model's payload.</summary>
@@ -400,6 +425,38 @@ public sealed class AgentToolExecutorTests
         await tools.ExecuteAsync(context, Call(Input() with { Scope = "slot", DayNumber = 2, MealSlot = "lunch" }), CancellationToken.None);
 
         context.Grants.Single().DishIds.Should().Equal(4);
+    }
+
+    // TEST-19: Malformed recommendation arguments from the model come back as invalid_arguments with the reason, without ranking or failing
+    // the turn; covers topK 0 and 201, missing day, missing meal, another province, radius, fractional price, a negative
+    // excluded ID, an unknown tag and a day beyond the trip.
+    /// <summary>Lets the model correct a bad tool call within the turn instead of turning the chat into HTTP 503 or 409.</summary>
+    [Theory]
+    [InlineData("top-zero")][InlineData("top-large")][InlineData("day-missing")][InlineData("slot-missing")]
+    [InlineData("province")][InlineData("radius")][InlineData("price")][InlineData("excluded-id")][InlineData("unknown-tag")][InlineData("day-beyond-trip")]
+    public async Task ExecuteAsync_InvalidArguments_ReturnsErrorToModelWithoutRanking(string area)
+    {
+        var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>(); var telemetry = new Mock<IAgentTelemetry>();
+        var context = AgentTestData.Context();
+        var input = area switch
+        {
+            "top-zero" => Input() with { TopK = 0 }, "top-large" => Input() with { TopK = 201 },
+            "day-missing" => Input() with { Scope = "day" },
+            "slot-missing" => Input() with { Scope = "slot", DayNumber = 1 }, "province" => Input() with { Province = "Other" },
+            "radius" => Input() with { RadiusKm = 51 }, "price" => Input() with { MaxPricePerMeal = 1.5m },
+            "excluded-id" => Input() with { ExcludeDishIds = [-1] }, "unknown-tag" => Input() with { TagIds = [99] },
+            _ => Input() with { Scope = "day", DayNumber = 9 }
+        };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), telemetry.Object);
+
+        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        result.GetProperty("warnings")[0].GetString().Should().NotBeNullOrWhiteSpace();
+        if (area == "unknown-tag") result.GetProperty("warnings")[0].GetString().Should().Contain("Tag 99");
+        context.ToolNotice.Should().BeNull(); context.Grants.Should().BeEmpty();
+        reco.VerifyNoOtherCalls();
+        telemetry.Verify(x => x.Record("tool_argument_error", 7, It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<object?>()), Times.Once);
     }
 
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>

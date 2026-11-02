@@ -63,15 +63,21 @@ public static class AgentReplyBuilder
         _ => "Chưa có bản xem trước sẵn sàng để lưu. Hãy yêu cầu tạo lịch trước."
     };
 
+    /// <summary>Names the required trip values still unknown, or null when none is missing; province is optional for wording-only checks.</summary>
+    public static string? TripDetailsQuestion(AgentState state, bool askProvince = true)
+    {
+        var missing = new List<string>();
+        if (askProvince && string.IsNullOrWhiteSpace(state.Province)) missing.Add("tỉnh/thành phố");
+        if (!state.NumDays.HasValue) missing.Add("số ngày");
+        if (state.BudgetAmount is null && !state.BudgetUnrestricted) missing.Add("ngân sách cho một người (tổng chuyến hoặc mỗi ngày)");
+        return missing.Count == 0 ? null : $"Bạn cho mình biết {string.Join(", ", missing)} để lập lịch nhé?";
+    }
+
     /// <summary>Asks only unresolved required values or the model's allowlisted clarification intent.</summary>
     public static string Clarify(AgentContext context, string? kind)
     {
         if (context.ToolNotice is { } notice) return notice;
-        var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(context.State.Province)) missing.Add("tỉnh/thành phố");
-        if (!context.State.NumDays.HasValue) missing.Add("số ngày");
-        if (context.State.BudgetAmount is null && !context.State.BudgetUnrestricted) missing.Add("ngân sách cho một người");
-        if (missing.Count > 0) return $"Bạn cho mình biết {string.Join(", ", missing)} để lập lịch nhé?";
+        if (TripDetailsQuestion(context.State) is { } tripQuestion) return tripQuestion;
         return kind switch
         {
             "taste_scope" => "Bạn muốn áp dụng khẩu vị này cho toàn chuyến hay ngày/bữa cụ thể? Bạn muốn cập nhật các bữa đã có hay chỉ các gợi ý tiếp theo?",

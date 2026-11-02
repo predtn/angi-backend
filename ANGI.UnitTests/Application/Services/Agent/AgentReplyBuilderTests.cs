@@ -162,6 +162,26 @@ public sealed class AgentReplyBuilderTests
         if (situation == "no-plan") reply.Should().Contain("lập lịch ngay");
     }
 
+    // TEST-11: The trip question names exactly the missing required values, skips the province when asked to, and is null when nothing is missing;
+    // covers nothing known, only the budget missing, an unrestricted budget and a province-free check.
+    /// <summary>Verifies the fixed question shared by clarifications, the recommendation tool and the taste question.</summary>
+    [Theory]
+    [InlineData("none", true, "Bạn cho mình biết tỉnh/thành phố, số ngày, ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
+    [InlineData("budget", true, "Bạn cho mình biết ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
+    [InlineData("unrestricted", true, null)]
+    [InlineData("none", false, "Bạn cho mình biết số ngày, ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
+    public void TripDetailsQuestion_NamesOnlyMissingValues(string known, bool askProvince, string? expected)
+    {
+        var state = known switch
+        {
+            "budget" => AgentTestData.State() with { BudgetAmount = null },
+            "unrestricted" => AgentTestData.State() with { BudgetAmount = null, BudgetUnrestricted = true },
+            _ => new AgentState()
+        };
+
+        AgentReplyBuilder.TripDetailsQuestion(state, askProvince).Should().Be(expected);
+    }
+
     // TEST-14: A bare save intent is answered with the plan size, total and exact save wording, a saved-plan notice, or a no-preview notice;
     // covers ready, committed and missing proposals.
     /// <summary>Verifies "lưu" never saves or replans, but tells the user what would be saved and how to save it.</summary>
