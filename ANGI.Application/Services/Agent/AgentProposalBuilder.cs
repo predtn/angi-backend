@@ -28,8 +28,14 @@ public sealed class AgentProposalBuilder
             // Model đôi khi gửi phạm vi hẹp (ví dụ ngày 4) nhưng chép kèm các món ngày khác y nguyên. Bản sao không đổi đó vô hại:
             // backend vốn giữ nguyên mọi món ngoài phạm vi, nên bỏ chúng thay vì từ chối cả đề xuất. Món ngoài phạm vi bị đổi vẫn bị từ chối.
             if (output.Items is not null)
+            {
+                var supplied = output.Items.Length;
                 output = output with { Items = output.Items.Where(item => output.Scope.Contains(item) || !original.Any(old =>
                     old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot && old.DishId == item.DishId)).ToArray() };
+                // Chỉ chép lại món ngoài phạm vi mà quên món thay thế: nói đúng lỗi để lần sửa duy nhất không phải đoán.
+                if (supplied > 0 && output.Items.Length == 0)
+                    throw Invalid($"Đề xuất chỉ gồm các món ngoài phạm vi {(output.Scope.DayNumber is { } day ? $"ngày {day}" : "đã chọn")}{(output.Scope.MealSlot is { } slot ? $", bữa {slot}" : "")}. Chỉ gửi món thay thế thuộc đúng phạm vi đó.");
+            }
             if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
             if (output.Items.Where(item => !output.Scope.Contains(item)).Select(item => $"ngày {item.DayNumber} {AgentReplyBuilder.Meal(item.MealSlot)}")
                 .Distinct().ToArray() is { Length: > 0 } outOfScope)
