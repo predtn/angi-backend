@@ -57,7 +57,7 @@ public sealed class AgentPendingPlanningPolicyTests
         draft.Messages.Should().ContainSingle().Which.Should().Be(text);
     }
 
-    // TEST-07: An amount followed by a single trip day or a duration is a total budget, not a daily one; covers ngày đầu, ngày cuối, ngày 1 and 4 ngày.
+    // TEST-04: An amount followed by a single trip day or a duration is a total budget, not a daily one; covers ngày đầu, ngày cuối, ngày 1 and 4 ngày.
     /// <summary>Keeps "ngày" that names one day of the trip or its length from turning a total budget into a per-day budget.</summary>
     [Theory]
     [InlineData("ngân sách 500k ngày đầu, sau đó tính tiếp")]
@@ -70,7 +70,7 @@ public sealed class AgentPendingPlanningPolicyTests
         draft.TotalBudget.Should().Be(500000); draft.DailyBudget.Should().BeNull();
     }
 
-    // TEST-04: Many partial replies keep the original request and its parsed values while the stored message history stays bounded to 6 entries.
+    // TEST-05: Many partial replies keep the original request and its parsed values while the stored message history stays bounded to 6 entries.
     /// <summary>Ensures long clarification exchanges keep the original request while stored history stays bounded.</summary>
     [Fact]
     public void Capture_ManyPartialReplies_KeepsOriginalRequestAndBoundsMemory()
@@ -82,7 +82,7 @@ public sealed class AgentPendingPlanningPolicyTests
         draft.NumDays.Should().Be(4); draft.DailyBudget.Should().Be(500000);
     }
 
-    // TEST-05: The model can neither invent a navigation focus from a taste scope nor clear a focus the backend already holds.
+    // TEST-06: The model can neither invent a navigation focus from a taste scope nor clear a focus the backend already holds.
     /// <summary>Keeps navigation focus under backend control so model output cannot move or reset it.</summary>
     [Fact]
     public void Accept_ModelTasteScopeCannotInventOrClearNavigationFocus()
@@ -95,7 +95,7 @@ public sealed class AgentPendingPlanningPolicyTests
         accepted.FocusDay.Should().Be(2); accepted.FocusMeal.Should().Be("lunch");
     }
 
-    // TEST-06: The model can neither forge a pending planning request nor clear the one the backend stored.
+    // TEST-07: The model can neither forge a pending planning request nor clear the one the backend stored.
     /// <summary>Keeps the pending planning request under backend control so model output cannot forge or drop it.</summary>
     [Fact]
     public void Accept_ModelCannotForgeOrClearBackendPendingRequest()
