@@ -192,6 +192,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (!context.ReplanAfterConfirmation)
                     context.State = statePolicy.Accept(context.State,
                         AgentMealScopePolicy.Narrow(output.State, context.State, AgentMealScopePolicy.Evidence(context)), confirmedState);
+                // Đã có lịch mà người dùng không yêu cầu đổi gì ("ăn vui vui", "ok") và model cũng không trích được ràng buộc mới:
+                // không nhận đề xuất đổi món. Giữ nguyên lịch và state đầu lượt, hỏi lại bằng câu chung; lịch hiện tại vẫn lưu được.
+                if (output.Action is "create_proposal" or "patch_proposal" && context.Source is not null && !context.ReplanAfterConfirmation &&
+                    AgentChangeRequestPolicy.IsUnrequested(context.Request.Content, confirmedState, context.State, context.CatalogTagNames))
+                {
+                    telemetry.Record("unrequested_change", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope });
+                    return new(AgentReplyBuilder.Clarify(context, "general"), confirmedState, null, null);
+                }
                 if (output.Action is "clarify" or "answer")
                 {
                     // clarify: thiếu tỉnh/ngày/ngân sách, chưa rõ món hoặc nội dung cần sửa thì hỏi lại.

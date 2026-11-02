@@ -886,6 +886,31 @@ public sealed class AgentOrchestratorTests
         seen.Should().Be(keepsQuestion ? question : null);
     }
 
+    // TEST-44: Over an existing plan, a proposal answering "ăn vui vui" is not accepted: the plan and the turn-start state stay unchanged,
+    // the general question is asked and no pending question blocks saving the current plan.
+    /// <summary>Prevents a vague message from silently replacing meals the user never asked to change.</summary>
+    [Fact]
+    public async Task RunAsync_UnrequestedChangeOverPlan_KeepsPlanAndAsks()
+    {
+        var source = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2));
+        var context = AgentTestData.Context(source); context.Request.Content = "ăn vui vui";
+        var start = context.State;
+        context.Grants.Add(new(null, "lunch", [3, 4], Guid.NewGuid(), start));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Draft", State = start with { Note = "ăn vui vẻ" },
+                Items = [AgentTestData.Item(3, "a", 1), AgentTestData.Item(4, "b", 2)] }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3), AgentTestData.Dish(4)])
+            .RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().Be("Bạn muốn xem lại lịch hiện tại hay thay đổi ngày/bữa hoặc món nào?");
+        result.State.Should().BeSameAs(start);
+        result.State.PendingQuestion.Should().BeNull();
+        context.Source.Should().BeSameAs(source);
+    }
+
     // TEST-45: When the model asks the taste level again after a complete answer, it gets one repair carrying the resolved value instead of
     // the user being asked again; a second repeated question is then returned as usual.
     /// <summary>Removes the flaky re-ask of "Ít, toàn chuyến đi" without letting the backend loop on a model that keeps asking.</summary>

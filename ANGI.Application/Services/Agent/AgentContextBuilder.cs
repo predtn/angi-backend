@@ -42,13 +42,15 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         // A legacy ready preview can still be committed unchanged. Other turns initialize lazily.
         if (preferences is not null && proposal?.Status != AgentProposalStatus.Ready)
             state = await preferences.EnsureAsync(state, conversation.UserId, ct);
+        var catalogTags = await tags.GetTagsAsync(null, ct);
         return new AgentContext
         {
             ConversationId = conversation.Id, UserId = conversation.UserId, State = state, Source = source,
             ProposalVersion = proposal?.Status == AgentProposalStatus.Ready ? proposal.ProposalVersion : null,
             CurrentProposal = proposal is null ? null : MapProposal(proposal),
             Roadmap = roadmap, Request = request,
-            CatalogTags = (await tags.GetTagsAsync(null, ct)).Select(tag => (object)new { tag.Id, tag.Code, tag.Name, type = AgentJson.Name(tag.TagType) }).ToArray(),
+            CatalogTags = catalogTags.Select(tag => (object)new { tag.Id, tag.Code, tag.Name, type = AgentJson.Name(tag.TagType) }).ToArray(),
+            CatalogTagNames = catalogTags.ToDictionary(tag => tag.Id, tag => tag.Name),
             History = history.Where(x => x.Role != AgentMessageRole.Tool && x.SequenceNo >= (state.HistoryStartSequence ?? 0)).Select(x => new AgentTranscript(
                 AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToList()
         };

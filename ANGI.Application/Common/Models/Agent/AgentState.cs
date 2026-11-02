@@ -119,6 +119,8 @@ public sealed class AgentContext
     public bool ReplanAfterConfirmation { get; set; }
     public AgentState? ConstraintBaseline { get; set; }
     public object[] CatalogTags { get; set; } = [];
+    /// <summary>Catalog tag names by ID, used to check that a tag the model adds is grounded in the user's wording.</summary>
+    public IReadOnlyDictionary<short, string> CatalogTagNames { get; set; } = new Dictionary<short, string>();
     /// <summary>Trusted tool failures/coverage hints used to construct the user-visible reply.</summary>
     public string? ToolNotice { get; set; }
     /// <summary>The last unmatched catalog lookup of the turn (name not found, near matches); kept when later rankings reset ToolNotice.</summary>
