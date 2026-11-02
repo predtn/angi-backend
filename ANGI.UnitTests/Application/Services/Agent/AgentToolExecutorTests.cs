@@ -386,6 +386,22 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2, 3);
     }
 
+    // TEST-18: A dish with the same name as a dish kept outside the edited slot is not offered again, even at another restaurant.
+    /// <summary>Prevents "món khác" from returning the same dish name from a different restaurant.</summary>
+    [Fact]
+    public async Task ExecuteAsync_EditedSlot_ExcludesSameNameAtOtherRestaurant()
+    {
+        var lunchTag = new ANGI.Domain.Entities.Tag { Id = 2, Code = "lunch", Name = "Bữa trưa", TagType = ANGI.Domain.Enums.TagType.MealTime };
+        var fixture = AgentTestData.Validator(Named(1, "Phở", lunchTag), Named(2, "Phở", lunchTag), Named(4, "Bún", lunchTag));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 4 });
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1) with { DishName = "Phở" }, AgentTestData.Item(3, "b", 2) with { DishName = "Cơm" }));
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Call(Input() with { Scope = "slot", DayNumber = 2, MealSlot = "lunch" }), CancellationToken.None);
+
+        context.Grants.Single().DishIds.Should().Equal(4);
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {

@@ -169,10 +169,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (tagIds.Concat(excludeTags).Except(catalogTags.Select(x => x.Id)).Any()) throw Invalid("Bộ lọc chứa tag không có trong catalog.");
         // Khi thay món, tránh chọn lại món đang giữ ở ngoài scope model yêu cầu.
         // Với command alternative, loại cả món cũ trong scope để phương án mới khác bản trước.
-        var excluded = (context.Source?.Items ?? []).Where(item => !requested.Contains(item) || alternative)
-            .Select(x => x.DishId).Concat(input.ExcludeDishIds!).Distinct().ToArray();
-        if (mealRequest.DifferentFromPlan)
-            excluded = excluded.Concat((context.Source?.Items ?? []).Select(x => x.DishId)).Distinct().ToArray();
+        var excludedItems = (context.Source?.Items ?? []).Where(item => !requested.Contains(item) || alternative || mealRequest.DifferentFromPlan).ToArray();
+        var excluded = excludedItems.Select(x => x.DishId).Concat(input.ExcludeDishIds!).Distinct().ToArray();
+        // Cùng món ở quán khác vẫn là món cũ: loại theo tên để "món khác" không trả lại đúng món vừa đổi đi.
+        var excludedNames = excludedItems.Select(x => AgentScopedPlanning.Normalize(x.DishName)).OfType<string>().ToHashSet(StringComparer.Ordinal);
         long? restaurantId = null;
         int[] namedDishIds = [];
         if (mealRequest.RestaurantName is { } restaurantName)
@@ -232,7 +232,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
             // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
             var qualified = pool.Where(cards.ContainsKey).Select(id => cards[id])
-                .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot));
+                .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot) &&
+                    (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
             if (distinctNames) qualified = qualified.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name));
             IReadOnlyList<int> candidates = qualified.Select(dish => dish.Id).Take(limits.MaxCandidates).ToArray();
             candidateTotal += candidates.Count;
