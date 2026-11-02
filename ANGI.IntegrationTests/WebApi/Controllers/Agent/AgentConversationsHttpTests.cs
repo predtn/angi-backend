@@ -1503,6 +1503,29 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
+    // TEST-58: After the attached roadmap is deleted, a message answers 404 naming the way forward, and a reset detaches it and starts empty.
+    /// <summary>Verifies through HTTP and PostgreSQL that a conversation whose roadmap was deleted is not left permanently failing.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_RoadmapDeleted_ResetDetachesConversation()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+        await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
+        using var deleted = await client.DeleteAsync($"/api/v1/roadmaps/{saved.Commit!.RoadmapId}");
+        deleted.EnsureSuccessStatusCode();
+
+        using var missing = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "đổi bữa trưa ngày 1" });
+        var reset = await SendPromptAsync(client, conversation.ConversationId, "làm lại từ đầu");
+        var current = await GetAsync(client, conversation.ConversationId);
+
+        await ErrorAsync(missing, HttpStatusCode.NotFound, "ROADMAP_NOT_FOUND");
+        reset.Reply.Should().StartWith("Đã bắt đầu kế hoạch mới.");
+        current.State.Province.Should().BeNull(); current.CurrentProposal.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).RoadmapId.Should().BeNull();
+    }
+
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>
     private static async Task<AgentTurnDto> SendPromptAsync(HttpClient client, long id, string content)
     {

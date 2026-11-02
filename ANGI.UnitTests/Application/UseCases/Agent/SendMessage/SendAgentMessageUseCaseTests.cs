@@ -350,6 +350,24 @@ public sealed class SendAgentMessageUseCaseTests
         result.Reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
     }
 
+    // TEST-19: A reset on a conversation whose roadmap was deleted starts empty and detaches it instead of failing with 404.
+    /// <summary>Gives a conversation attached to a deleted roadmap a way forward; every other message would be 404.</summary>
+    [Fact]
+    public async Task ExecuteAsync_ResetAfterRoadmapDeleted_DetachesAndStartsEmpty()
+    {
+        var fixture = new AgentUseCaseFixture();
+        fixture.Conversation.RoadmapId = 38;
+        fixture.Conversation.State = AgentJson.Write(AgentTestData.State());
+        var request = Request(); request.Content = "làm lại từ đầu";
+
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        result.Reply.Should().StartWith("Đã bắt đầu kế hoạch mới.");
+        fixture.Conversation.RoadmapId.Should().BeNull();
+        AgentJson.Read<AgentState>(fixture.Conversation.State).Province.Should().BeNull();
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),
         fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object, fixture.Clock, fixture.Limits,
         new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object), fixture.Orchestrator(), fixture.Telemetry, fixture.Committer());

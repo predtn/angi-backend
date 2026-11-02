@@ -188,10 +188,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
 
     private async Task<AgentState> ResetStateAsync(AgentConversation conversation, long sequence, CancellationToken ct)
     {
-        var state = conversation.RoadmapId is { } id
-            ? AgentContextBuilder.StateFromRoadmap(await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct)
-                ?? throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap."))
-            : new AgentState();
+        // Roadmap đã bị xóa: "làm lại từ đầu" là lối thoát duy nhất của hội thoại này, nên bắt đầu trống thay vì trả 404; FinishAsync gỡ liên kết.
+        var roadmap = conversation.RoadmapId is { } id ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) : null;
+        var state = roadmap is not null ? AgentContextBuilder.StateFromRoadmap(roadmap) : new AgentState();
         return state with { HistoryStartSequence = sequence };
     }
 
@@ -230,7 +229,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             if (previous?.Status == AgentProposalStatus.Ready) previous.Status = AgentProposalStatus.Discarded;
             conversation.CurrentProposalId = null;
             conversation.CurrentProposal = null;
-            // Reset clears chat context, never the attached roadmap identity.
+            // Reset clears chat context, never the attached roadmap identity, unless that roadmap no longer exists.
+            if (prepared.Action == "reset" && conversation.RoadmapId is { } attached && await roadmaps.GetOwnedDetailAsync(attached, userId, ct) is null)
+                conversation.RoadmapId = null;
         }
         else if (prepared.Snapshot is not null)
         {

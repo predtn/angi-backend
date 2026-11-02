@@ -101,7 +101,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
     }
 
     /// <summary>Returns the existing ownership-safe roadmap error.</summary>
-    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
+    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Roadmap của hội thoại này không còn tồn tại. Nhắn ‘làm lại từ đầu’ để lập lịch mới.");
 }
 
 /// <summary>Safe stored message content and per-attempt admission timestamps used by persistent quotas.</summary>
