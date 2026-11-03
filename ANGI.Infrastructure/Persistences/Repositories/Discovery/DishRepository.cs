@@ -60,7 +60,7 @@ public sealed class DishRepository : IDishRepository
 
         if (!string.IsNullOrWhiteSpace(filter.Province))
         {
-            var term = $"%{filter.Province.Trim()}%";
+            var term = ProvinceSearch.Pattern(filter.Province);
             query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
         }
 
@@ -178,7 +178,7 @@ public sealed class DishRepository : IDishRepository
         var query = Candidates();
         if (!string.IsNullOrWhiteSpace(province))
         {
-            var term = $"%{province.Trim()}%";
+            var term = ProvinceSearch.Pattern(province);
             query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
         }
 

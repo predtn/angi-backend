@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Restaurant;
 using ANGI.Application.Common.Models;
+using ANGI.Application.Common.Models.Discovery;
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
@@ -186,7 +187,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
 
         if (!string.IsNullOrWhiteSpace(request.Province))
         {
-            var provinceTerm = $"%{request.Province.Trim()}%";
+            var provinceTerm = ProvinceSearch.Pattern(request.Province);
             query = query.Where(r => r.ProvinceName != null && EF.Functions.ILike(r.ProvinceName, provinceTerm));
         }
 
