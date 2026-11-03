@@ -30,8 +30,7 @@ public static class AgentModule
             if (Uri.TryCreate(ai.BaseUrl, UriKind.Absolute, out var address)) client.BaseAddress = address;
             client.Timeout = TimeSpan.FromSeconds(Math.Min(limits.LlmTimeoutSeconds, limits.TimeoutSeconds));
             client.MaxResponseContentBufferSize = 2_000_000;
-        }).AddHttpMessageHandler<AiBudgetGatewayHandler>()
-          .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHostedService<AgentCleanupWorker>();
         return services;
     }

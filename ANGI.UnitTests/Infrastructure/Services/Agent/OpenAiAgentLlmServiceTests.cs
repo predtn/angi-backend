@@ -351,16 +351,14 @@ public sealed class OpenAiAgentLlmServiceTests
         AgentJson.Write(result).Should().NotContain("private-key");
     }
 
-    // TEST-17: Budget gateway denials map to a non-retryable configuration failure with a quota message; covers budget exhausted, spending stopped, ledger unavailable and gateway required.
-    /// <summary>Keeps spending-control failures distinct from provider outages so they are never retried.</summary>
+    // TEST-17: OpenAI hard spend limits map to a non-retryable configuration failure with a quota message; covers the project and the organization limit.
+    /// <summary>Keeps spending-limit failures distinct from rate limits and provider outages so they are never retried.</summary>
     [Theory]
-    [InlineData(429, "gateway_budget_exhausted")]
-    [InlineData(503, "gateway_spending_stopped")]
-    [InlineData(503, "gateway_ledger_unavailable")]
-    [InlineData(503, "ai_budget_gateway_required")]
-    public async Task RunAsync_BudgetControlFailure_IsNotARetryableProviderOutage(int status, string code)
+    [InlineData("project_spend_limit_exceeded")]
+    [InlineData("organization_spend_limit_exceeded")]
+    public async Task RunAsync_SpendLimitFailure_IsNotARetryableProviderOutage(string code)
     {
-        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status) {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests) {
             Content = new StringContent(JsonSerializer.Serialize(new { error = new { code, message = "private diagnostic" } })) }));
         var result = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
         result!.Failure!.Kind.Should().Be(AgentLlmFailureKind.Configuration);
@@ -452,18 +450,18 @@ public sealed class OpenAiAgentLlmServiceTests
         public override DateTimeOffset GetUtcNow() => new(2026, 10, 28, 0, 0, 0, TimeSpan.Zero);
     }
 
-    // TEST-23: Gateway rate and concurrency limits are temporary rate limits that keep the gateway's Retry-After, never spending-control
-    // failures; covers gateway_rate_limit and gateway_concurrency_limit.
-    /// <summary>Lets the orchestrator wait and retry a per-minute or in-flight gateway limit instead of telling the user to contact an administrator.</summary>
+    // TEST-23: An OpenAI per-minute rate limit stays a temporary rate limit that keeps its Retry-After, never a spending-limit
+    // failure; covers rate_limit_exceeded with two retry hints.
+    /// <summary>Lets the orchestrator wait and retry a per-minute limit instead of telling the user to contact an administrator.</summary>
     [Theory]
-    [InlineData("gateway_rate_limit", 7)]
-    [InlineData("gateway_concurrency_limit", 3)]
-    public async Task RunAsync_GatewayTemporaryLimit_IsRetryableRateLimit(string code, int retryAfter)
+    [InlineData("rate_limit_exceeded", 7)]
+    [InlineData("rate_limit_exceeded", 3)]
+    public async Task RunAsync_ProviderTemporaryLimit_IsRetryableRateLimit(string code, int retryAfter)
     {
         var handler = new Handler(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests) {
-                Content = new StringContent(JsonSerializer.Serialize(new { error = new { message = "AI request blocked by spending controls.", type = "budget_control", code } })) };
+                Content = new StringContent(JsonSerializer.Serialize(new { error = new { message = "Rate limit reached for requests.", type = "requests", code } })) };
             response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(retryAfter));
             return Task.FromResult(response);
         });
