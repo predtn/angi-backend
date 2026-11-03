@@ -269,6 +269,7 @@ public sealed class RegisterRestaurantUseCase : IRegisterRestaurantUseCase
             Images = (request.ImageMediaIds ?? Array.Empty<long>())
                 .Select(id => mediaById[id].Url)
                 .ToArray(),
+            ImageMediaIds = (request.ImageMediaIds ?? Array.Empty<long>()).ToArray(),
             BusinessHours = hours,
             Menu = null,
             MyReview = null,

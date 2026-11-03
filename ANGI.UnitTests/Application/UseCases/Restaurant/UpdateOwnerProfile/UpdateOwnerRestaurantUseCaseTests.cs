@@ -53,6 +53,7 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
         restaurant.Name.Should().Be("Bún Bò Bà Diệu - Lê Duẩn");
         restaurant.Images.Select(item => item.MediaId).Should().Equal(102);
         result.Images.Should().Equal("https://cdn.test/new.jpg");
+        result.ImageMediaIds.Should().Equal(102);
         audit.Should().NotBeNull();
         audit!.Action.Should().Be(AuditActions.RestaurantUpdated);
         audit.EntityType.Should().Be(AuditEntityTypes.Restaurant);
@@ -142,7 +143,7 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
             new Mock<IAuditLogService>(),
             new Mock<IUnitOfWork>());
 
-        await useCase.ExecuteAsync(
+        var result = await useCase.ExecuteAsync(
             new UpdateRestaurantRequestDto { ImageMediaIds = [102, 101] },
             CancellationToken.None);
 
@@ -150,6 +151,8 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
         restaurant.Images.Should().Contain(firstImage);
         restaurant.Images.Should().Contain(secondImage);
         restaurant.Images.OrderBy(item => item.SortOrder).Select(item => item.MediaId).Should().Equal(102, 101);
+        result.ImageMediaIds.Should().Equal(102, 101);
+        result.Images.Should().Equal("https://cdn.test/second.jpg", "https://cdn.test/old.jpg");
     }
 
     // TEST-05: Reject an owned PDF when it is used as the restaurant cover.
@@ -312,6 +315,47 @@ public sealed class UpdateOwnerRestaurantUseCaseTests
     }
 
     /// <summary>Creates OWN-03 with an authenticated owner and default response dependencies.</summary>
+    // TEST-10: Keep one saved photo, drop another and append a new upload in a single list sent back from OWN-02.
+    /// <summary>Verifies partial gallery edits built from the imageMediaIds returned by OWN-02.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenGalleryKeepsDropsAndAddsPhotos_ShouldApplyTheSentOrder()
+    {
+        var restaurant = CreateRestaurant();
+        var keptImage = restaurant.Images.Single();
+        restaurant.Images.Add(new RestaurantImage
+        {
+            MediaId = 102,
+            SortOrder = 1,
+            Media = new MediaFile { Id = 102, Url = "https://cdn.test/dropped.jpg" }
+        });
+        var repository = new Mock<IRestaurantRepository>();
+        repository.Setup(item => item.GetTrackedOwnerProfileAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(restaurant);
+        var mediaRepository = new Mock<IMediaRepository>();
+        mediaRepository.Setup(item => item.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new MediaFile { Id = 101, MimeType = "image/jpeg", Url = "https://cdn.test/old.jpg" },
+                new MediaFile { Id = 103, MimeType = "image/webp", Url = "https://cdn.test/added.webp" }
+            ]);
+        var auditService = new Mock<IAuditLogService>();
+        AuditLogEntry? audit = null;
+        auditService.Setup(item => item.Add(It.IsAny<AuditLogEntry>()))
+            .Callback<AuditLogEntry>(entry => audit = entry);
+        var useCase = CreateUseCase(repository, mediaRepository, auditService, new Mock<IUnitOfWork>());
+
+        var result = await useCase.ExecuteAsync(
+            new UpdateRestaurantRequestDto { ImageMediaIds = [103, 101] },
+            CancellationToken.None);
+
+        restaurant.Images.Should().HaveCount(2).And.Contain(keptImage);
+        restaurant.Images.OrderBy(item => item.SortOrder).Select(item => item.MediaId).Should().Equal(103, 101);
+        result.ImageMediaIds.Should().Equal(103, 101);
+        result.Images.Should().Equal("https://cdn.test/added.webp", "https://cdn.test/old.jpg");
+        audit.Should().NotBeNull();
+        ((IDictionary<string, object?>)audit!.OldValues!)["image_media_ids"].Should().BeEquivalentTo(new[] { 101L, 102L }, options => options.WithStrictOrdering());
+        ((IDictionary<string, object?>)audit.NewValues!)["image_media_ids"].Should().BeEquivalentTo(new[] { 103L, 101L }, options => options.WithStrictOrdering());
+    }
+
     private static UpdateOwnerRestaurantUseCase CreateUseCase(
         Mock<IRestaurantRepository> repository,
         Mock<IMediaRepository> mediaRepository,

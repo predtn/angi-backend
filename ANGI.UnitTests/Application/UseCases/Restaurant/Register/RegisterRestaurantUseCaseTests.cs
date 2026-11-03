@@ -63,6 +63,7 @@ public sealed class RegisterRestaurantUseCaseTests
         result.ModerationStatus.Should().Be("visible");
         result.CoverUrl.Should().Be("https://cdn.test/cover.jpg");
         result.Images.Should().ContainSingle().Which.Should().Be("https://cdn.test/gallery.jpg");
+        result.ImageMediaIds.Should().Equal(101);
         result.BusinessHours.Should().ContainSingle();
         result.IsOpenNow.Should().BeTrue();
         result.CreatedAt.Should().Be(Now);

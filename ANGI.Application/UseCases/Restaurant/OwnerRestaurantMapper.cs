@@ -52,6 +52,10 @@ internal static class OwnerRestaurantMapper
                 .OrderBy(image => image.SortOrder)
                 .Select(image => GetMediaUrl(image.MediaId, image.Media, mediaUrlOverrides) ?? string.Empty)
                 .ToArray(),
+            ImageMediaIds = restaurant.Images
+                .OrderBy(image => image.SortOrder)
+                .Select(image => image.MediaId)
+                .ToArray(),
             BusinessHours = restaurant.BusinessHours
                 .OrderBy(hour => hour.DayOfWeek)
                 .ThenBy(hour => hour.OpenTime)

@@ -48,7 +48,7 @@ Current end-to-end coverage for the tracked tasks:
 | ANGI-23 | Exception middleware response and uniqueness state in PostgreSQL |
 | ANGI-29, ANGI-58 | Registration, verification email token, activation response, and persisted user/token state |
 | ANGI-33 | Login, refresh rotation, logout, and persisted session revocation |
-| ANGI-39, ANGI-42 | Restaurant registration, retrieval, update, audit log, and persisted profile |
+| ANGI-39, ANGI-42 | Restaurant registration, retrieval, update, audit log, persisted profile, and gallery edits sent back from the returned `imageMediaIds` |
 | ANGI-53, ANGI-76 | Dish availability and complete menu-submission lifecycle |
 | ANGI-62 | Google login with a deterministic identity boundary and persisted account/link/session |
 | ANGI-66, ANGI-70 | Forgot/reset password, consumed token, changed password, and revoked sessions |
