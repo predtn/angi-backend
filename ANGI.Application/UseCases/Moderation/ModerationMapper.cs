@@ -119,7 +119,7 @@ internal static class ModerationMapper
             RatingAvg = source.RatingAvg, RatingCount = source.RatingCount, OperatingStatus = source.OperatingStatus,
             IsOpenNow = source.IsOpenNow, DistanceKm = source.DistanceKm, Description = source.Description,
             Phone = source.Phone, Email = source.Email, Website = source.Website, Ward = source.Ward,
-            Images = source.Images, BusinessHours = source.BusinessHours, Menu = source.Menu, MyReview = source.MyReview,
+            Images = source.Images, ImageMediaIds = source.ImageMediaIds, BusinessHours = source.BusinessHours, Menu = source.Menu, MyReview = source.MyReview,
             VerificationStatus = source.VerificationStatus, ModerationStatus = source.ModerationStatus,
             LatestVerification = source.LatestVerification, OpenMenuSubmission = source.OpenMenuSubmission,
             CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt,
