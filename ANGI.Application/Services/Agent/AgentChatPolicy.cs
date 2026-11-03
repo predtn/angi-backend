@@ -9,6 +9,12 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Authorizes explicit chat controls independently of model output, quoted data or generic agreement.</summary>
 public static class AgentChatPolicy
 {
+    // Cách trả lời có/không thường gặp, kể cả viết tắt và tiếng lóng. Chỉ có hiệu lực khi đang có đúng một câu hỏi chờ trả lời, nên không tốn lượt gọi LLM.
+    private const string Yes = @"ok|oke|okay|okie|oki|okla|okela|u|uh|uhm|um|uk|o|vang|da|co|dung|dung roi|dung vay|duoc|dc|dong y|xac nhan|yes|yep|yeah|yup|chuan|chuan roi|cung duoc|sao cung duoc|tuyet|👍";
+    private const string No = @"khong|ko|k|kg|hong|hok|khum|no|nope|thoi|khoi|thoi khoi|khoan|chua|huy|giu nguyen|khong dong y|khong doi|khong can";
+    private const string YesTail = @"(?: (?:roi|nhe|nha|nhen|luon|lun|di|a|nao|the|vay|do|ban))*";
+    private const string NoTail = @"(?: (?:da|luu|nua|nhe|nha|di|dau|a|thoi|ban))*";
+
     /// <summary>Recognizes a complete save instruction; negation, quotes, questions and generic yes never commit.</summary>
     public static bool IsSaveRequest(string content) => Regex.IsMatch(Normalize(content),
         @"^(?:(?:toi (?:muon|xac nhan)|hay|dong y) )?(?:luu (?:lich trinh|lich|ban nhap|de xuat)(?: nay| hien tai)?|chot (?:lich trinh|lich|de xuat)(?: nay| hien tai)?|xac nhan luu(?: lich trinh| lich)?(?: nay)?|save (?:this )?(?:itinerary|plan))(?: giup toi| cho toi| nhe| di)?$",
@@ -30,12 +36,10 @@ public static class AgentChatPolicy
         RegexOptions.CultureInvariant);
 
     /// <summary>A short yes to "Mình lưu lịch này nhé?"; it saves only because that question named this exact proposal version.</summary>
-    public static bool AcceptsSave(string content) => IsShortSaveRequest(content) || IsGoAheadRequest(content) || Regex.IsMatch(Normalize(content),
-        @"^(?:ok|oke|okay|okie|u|uh|vang|da|co|dung|dung roi|duoc|dong y|xac nhan|yes)(?: (?:roi|nhe|nha|luon|di|a))*$", RegexOptions.CultureInvariant);
+    public static bool AcceptsSave(string content) => IsShortSaveRequest(content) || IsGoAheadRequest(content) || IsYes(content);
 
     /// <summary>Backs out of an open save question; the proposal stays as it is.</summary>
-    public static bool DeclinesSave(string content) => Regex.IsMatch(Normalize(content),
-        @"^(?:khong|thoi|khoan|chua|huy|no)(?: (?:da|luu|nua|nhe|nha|di))*$|^dung luu(?: (?:nhe|nha|nua))*$", RegexOptions.CultureInvariant);
+    public static bool DeclinesSave(string content) => IsNo(content) || Regex.IsMatch(Normalize(content), @"^dung luu(?: (?:nhe|nha|nua))*$", RegexOptions.CultureInvariant);
 
     /// <summary>Saves without a start date because the user does not know it yet; the roadmap's date stays open.</summary>
     public static bool DefersStartDate(string content) => Regex.IsMatch(Normalize(content),
@@ -47,13 +51,21 @@ public static class AgentChatPolicy
         RegexOptions.CultureInvariant);
 
     /// <summary>Allows a short affirmative only when a validated pending constraint change exists.</summary>
-    public static bool AcceptsChange(string content) => Normalize(content) is "dong y" or "xac nhan thay doi" or "dong y thay doi" or "xac nhan" or "ok" or "yes" or "dung roi";
+    public static bool AcceptsChange(string content) => IsYes(content) ||
+        Regex.IsMatch(Normalize(content), $@"^(?:(?:xac nhan|dong y) thay doi|doi|quat|trien|tien hanh|lam|thay doi){YesTail}$", RegexOptions.CultureInvariant);
 
     /// <summary>Rejects the pending constraint change without discarding the previously valid preview.</summary>
-    public static bool RejectsChange(string content) => Normalize(content) is "khong" or "khong dong y" or "giu nguyen" or "huy thay doi" or "no";
+    public static bool RejectsChange(string content) => IsNo(content) ||
+        Regex.IsMatch(Normalize(content), $@"^huy thay doi{NoTail}$", RegexOptions.CultureInvariant);
 
     /// <summary>Declines an open clarification over an existing plan: nothing changes and the plan stays savable.</summary>
-    public static bool DismissesQuestion(string content) => Normalize(content) is "khong" or "thoi" or "giu nguyen" or "khong doi" or "khong doi nua" or "khong can" or "no";
+    public static bool DismissesQuestion(string content) => IsNo(content);
+
+    /// <summary>A whole-message yes. "Dừng" loses its accents to the same letters as "đúng" and is the opposite answer, so it is told apart before normalizing.</summary>
+    private static bool IsYes(string content) => !content.Contains("dừng", StringComparison.OrdinalIgnoreCase) &&
+        Regex.IsMatch(Normalize(content), $@"^(?:{Yes}){YesTail}$", RegexOptions.CultureInvariant);
+
+    private static bool IsNo(string content) => Regex.IsMatch(Normalize(content), $@"^(?:{No}){NoTail}$", RegexOptions.CultureInvariant);
 
     /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
     public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
@@ -82,7 +94,7 @@ public static class AgentChatPolicy
         if (current.RadiusKm != proposed.RadiusKm || current.OriginMode != proposed.OriginMode || current.OriginLatitude != proposed.OriginLatitude || current.OriginLongitude != proposed.OriginLongitude)
             changes.Add("điểm xuất phát hoặc bán kính tìm món");
         // Chưa có lịch xem trước/đã lưu thì không nhắc "bản lịch chưa thay đổi" để người dùng không tưởng đã có lịch.
-        var reply = $"Bạn xác nhận thay đổi {string.Join("; ", changes)}? Nhắn ‘xác nhận thay đổi’ để áp dụng hoặc ‘giữ nguyên’ để hủy." +
+        var reply = $"Mình đổi {string.Join("; ", changes)} nhé? Bạn nhắn “ok” để đổi hoặc “thôi” để giữ nguyên." +
             (hasPlan ? " Bản lịch hiện tại chưa thay đổi." : "");
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
             FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,

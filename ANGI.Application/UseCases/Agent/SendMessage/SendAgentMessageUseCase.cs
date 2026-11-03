@@ -117,7 +117,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 if (control == "reset") state = await ResetStateAsync(conversation, message.SequenceNo, ct);
                 prepared = new(control == "reset" ? "Đã bắt đầu kế hoạch mới. Bạn muốn ăn ở đâu, trong mấy ngày và với ngân sách bao nhiêu? Lịch đã lưu vẫn được giữ nguyên."
                     : "Đã bỏ bản đề xuất đang chỉnh sửa. Lịch đã lưu vẫn được giữ nguyên.",
-                    state with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null }, null, null, control);
+                    state with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, PlanningIntake = null, FocusDay = null, FocusMeal = null }, null, null, control);
             }
             else
             {
@@ -175,7 +175,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 }
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with
-                    { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null } };
+                    { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, PlanningIntake = null, FocusDay = null, FocusMeal = null } };
             }
             // Mọi đường tạo bản nháp, kể cả không qua model, đều đi qua đây nên phần giới thiệu luôn khớp với món cuối cùng.
             if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentProposalNotes.Attach(drafted, context) };

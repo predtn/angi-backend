@@ -177,4 +177,62 @@ public sealed class AgentPendingPlanningPolicyTests
     {
         AgentPendingPlanningPolicy.ApplyStated(null, "ngân sách 2 triệu").Should().BeNull();
     }
+
+    // TEST-13: An answer to a trip question is read whole; covers both values in one clause, a place before the duration, a per-day amount on either side and a bare number when budget was asked.
+    /// <summary>Ensures replies Capture ignores on ordinary edit messages still count once the question is about the trip.</summary>
+    [Theory]
+    [InlineData("3 ngày 1 triệu", true, 3, 1000000, null)]
+    [InlineData("Hà Nội 3 ngày", false, 3, null, null)]
+    [InlineData("500k 3 ngày", true, 3, 500000, null)]
+    [InlineData("500k 1 ngày", true, null, null, 500000)]
+    [InlineData("mỗi ngày 300k", true, null, null, 300000)]
+    [InlineData("1 ngày 200k", true, null, null, 200000)]
+    [InlineData("1500000", true, null, 1500000, null)]
+    [InlineData("1.500.000", true, null, 1500000, null)]
+    public void CaptureAnswer_ReadsTripReply(string content, bool budgetAsked, int? days, int? total, int? daily)
+    {
+        var request = AgentPendingPlanningPolicy.CaptureAnswer(null, content, budgetAsked);
+
+        request.NumDays.Should().Be(days is null ? null : (short)days);
+        request.TotalBudget.Should().Be(total);
+        request.DailyBudget.Should().Be(daily);
+    }
+
+    // TEST-14: Other amounts are not a trip budget; covers a dish price cap, a meal price cap, a negated amount and a bare number nobody asked for.
+    /// <summary>Protects the hard budget from price caps and from numbers that answer nothing.</summary>
+    [Theory]
+    [InlineData("món dưới 50k", true)]
+    [InlineData("50k mỗi món", true)]
+    [InlineData("không phải 500k", true)]
+    [InlineData("1500000", false)]
+    [InlineData("150", true)]
+    public void CaptureAnswer_OtherAmounts_AreNotBudget(string content, bool budgetAsked)
+    {
+        var request = AgentPendingPlanningPolicy.CaptureAnswer(null, content, budgetAsked);
+
+        request.TotalBudget.Should().BeNull();
+        request.DailyBudget.Should().BeNull();
+    }
+
+    // TEST-15: A previous answer survives a later reply that repeats nothing, so answers can arrive across several turns.
+    /// <summary>Ensures the second question does not lose the first answer.</summary>
+    [Fact]
+    public void CaptureAnswer_KeepsEarlierAnswers()
+    {
+        var first = AgentPendingPlanningPolicy.CaptureAnswer(null, "3 ngày", false);
+
+        var second = AgentPendingPlanningPolicy.CaptureAnswer(first, "1 triệu", true);
+
+        second.NumDays.Should().Be(3);
+        second.TotalBudget.Should().Be(1000000);
+        second.Messages.Should().Equal("3 ngày", "1 triệu");
+    }
+
+    // TEST-16: No-limit wording is recognized only as a whole answer or next to the word budget; covers both and an unrelated use of "thoải mái".
+    /// <summary>Ensures a casual sentence cannot lift the budget.</summary>
+    [Theory]
+    [InlineData("không giới hạn", true)][InlineData("thoải mái nhé", true)][InlineData("ngân sách không giới hạn", true)][InlineData("bao nhiêu cũng được", true)]
+    [InlineData("ăn thoải mái ở quán", false)][InlineData("500k", false)]
+    public void StatesUnrestricted_RecognizesWholeAnswer(string content, bool expected) =>
+        AgentPendingPlanningPolicy.StatesUnrestricted(content).Should().Be(expected);
 }

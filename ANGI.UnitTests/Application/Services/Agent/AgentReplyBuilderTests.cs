@@ -163,7 +163,7 @@ public sealed class AgentReplyBuilderTests
     // covers nothing known, only the budget missing, an unrestricted budget and a province-free check.
     /// <summary>Verifies the fixed question shared by clarifications, the recommendation tool and the taste question.</summary>
     [Theory]
-    [InlineData("none", true, "Bạn cho mình biết tỉnh/thành phố, số ngày, ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
+    [InlineData("none", true, AgentIntakePolicy.PlaceQuestion)]
     [InlineData("budget", true, "Bạn cho mình biết ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]
     [InlineData("unrestricted", true, null)]
     [InlineData("none", false, "Bạn cho mình biết số ngày, ngân sách cho một người (tổng chuyến hoặc mỗi ngày) để lập lịch nhé?")]

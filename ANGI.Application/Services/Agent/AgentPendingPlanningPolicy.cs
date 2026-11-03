@@ -44,6 +44,45 @@ public static class AgentPendingPlanningPolicy
         return new(messages, days, total, daily);
     }
 
+    /// <summary>
+    /// Reads a reply to a trip question: the wording is known to be about the trip, so "3 ngày 1 triệu" and "Hà Nội 3 ngày" count,
+    /// which <see cref="Capture"/> leaves out because it also runs on ordinary edit messages.
+    /// </summary>
+    public static AgentPendingPlanningRequest CaptureAnswer(AgentPendingPlanningRequest? previous, string content, bool budgetAsked)
+    {
+        var request = Capture(previous, content);
+        var text = Normalize(content).Trim();
+        var dailyFirst = Regex.Match(text, @"\b(?:moi|1|mot)\s+ngay\s*(?:(?:khoang|tam|toi da|la)\s+)?" + MoneyWithUnit, RegexOptions.CultureInvariant);
+        // "1 ngày 200k" là ngân sách theo ngày, không phải chuyến đi một ngày như Capture đọc.
+        if (dailyFirst.Success) request = request with { NumDays = previous?.NumDays };
+        if (request.NumDays == previous?.NumDays)
+        {
+            var days = Regex.Matches(text, MentionedDays + @"|\b(?:[2-9]|[12]\d|30)\s+ngay\b(?!\s+(?:dau|cuoi))", RegexOptions.CultureInvariant).Cast<Match>()
+                .LastOrDefault(match => !Negated(text, match.Index) && !(dailyFirst.Success && match.Index == dailyFirst.Index));
+            if (days is not null && short.TryParse(new string(days.Value.Where(char.IsDigit).ToArray()), out var parsed)) request = request with { NumDays = parsed };
+        }
+        if (request.TotalBudget != previous?.TotalBudget || request.DailyBudget != previous?.DailyBudget) return request;
+        if (dailyFirst.Success && ParseMoney(dailyFirst, out var perDay)) return request with { DailyBudget = perDay, TotalBudget = null };
+        // Số tiền nằm trong câu ("3 ngày 1 triệu"); "dưới 50k mỗi món" là trần giá món nên không tính.
+        var budget = Regex.Matches(text, MoneyWithUnit + Daily + @"(?!\s*(?:/\s*)?(?:(?:moi|1|mot)\s+)?(?:mon|bua)\b)", RegexOptions.CultureInvariant).Cast<Match>()
+            .LastOrDefault(match => !Negated(text, match.Index) && !Regex.IsMatch(text[..match.Index], @"\b(?:mon|bua)\b", RegexOptions.CultureInvariant));
+        if (budget is not null && ParseMoney(budget, out var amount))
+            return budget.Groups["daily"].Success ? request with { DailyBudget = amount, TotalBudget = null } : request with { TotalBudget = amount, DailyBudget = null };
+        // Trả lời đúng câu hỏi ngân sách bằng một con số trần ("1500000").
+        if (budgetAsked && Regex.IsMatch(text, @"^(?:\d{4,}|\d{1,3}(?:[.,]\d{3})+)$", RegexOptions.CultureInvariant) &&
+            decimal.TryParse(text.Replace(".", "").Replace(",", ""), NumberStyles.None, CultureInfo.InvariantCulture, out var plain) && plain <= AgentStateValidator.MaxMoney)
+            return request with { TotalBudget = plain, DailyBudget = null };
+        return request;
+    }
+
+    /// <summary>True when the reply gives no budget limit on purpose; state policy still asks for its separate confirmation.</summary>
+    public static bool StatesUnrestricted(string content)
+    {
+        var text = Normalize(content).Trim();
+        return Regex.IsMatch(text, Unrestricted, RegexOptions.CultureInvariant) ||
+            Regex.IsMatch(text, @"(?:^|[,;.!?\n])\s*(?:khong gioi han|thoai mai|tuy y|bao nhieu cung duoc|sao cung duoc|xa lang|tha ga|vo tu|khong lo)(?:\s+(?:nhe|nha|di|luon))?\s*(?=[,;.!?\n]|$)", RegexOptions.CultureInvariant);
+    }
+
     /// <summary>Explicit facts awaiting clarification take precedence over a model's copy of the old confirmed state.</summary>
     public static AgentState Apply(AgentState proposed, AgentPendingPlanningRequest request)
     {

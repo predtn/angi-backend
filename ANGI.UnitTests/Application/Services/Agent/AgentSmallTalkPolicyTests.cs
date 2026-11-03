@@ -127,6 +127,15 @@ public sealed class AgentSmallTalkPolicyTests
     public void GreetingFor_UsesKnownPlaceOnly(string? province, string expected) =>
         AgentSmallTalkPolicy.GreetingFor(new AgentState { Province = province }).Should().Be(expected);
 
+    // TEST-13: A bare request for help gets the fixed guide; covers accents, no accents and politeness words. A message naming a topic is left to the model.
+    /// <summary>Ensures "hướng dẫn tôi" is free and helpful, while "hướng dẫn tôi gọt vỏ cam" is still classified as off-topic by the model.</summary>
+    [Theory]
+    [InlineData("huong dan toi", true)][InlineData("Hướng dẫn tôi", true)][InlineData("hãy hướng dẫn mình với", true)][InlineData("giúp tôi", true)]
+    [InlineData("giup do minh nhe", true)][InlineData("chỉ tôi cách dùng", true)][InlineData("help", true)]
+    [InlineData("huong dan toi got vo cam", false)][InlineData("giúp tôi tìm quán phở", false)][InlineData("chị ơi", false)]
+    public void FixedReply_BareHelp_ReturnsGuide(string content, bool expected) =>
+        (AgentSmallTalkPolicy.FixedReply(Context(content)) == AgentSmallTalkPolicy.Help).Should().Be(expected);
+
     /// <summary>Builds a context holding the given user message over a complete trip state.</summary>
     private static AgentContext Context(string content)
     {

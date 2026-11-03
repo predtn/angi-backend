@@ -7,6 +7,55 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 /// <summary>Checks explicit chat authorization separately from unconstrained natural-language model output.</summary>
 public sealed class AgentChatPolicyTests
 {
+    /// <summary>A staged change or a save question accepts how people really say yes, so nobody has to type a set phrase.</summary>
+    [Theory]
+    [InlineData("ok")] [InlineData("Oke nhé")] [InlineData("được")] [InlineData("được rồi")] [InlineData("ừ")] [InlineData("uh")] [InlineData("ờ")]
+    [InlineData("vâng")] [InlineData("dạ")] [InlineData("có")] [InlineData("đúng rồi")] [InlineData("đồng ý")] [InlineData("dc")] [InlineData("oki")]
+    [InlineData("yes")] [InlineData("chuẩn")] [InlineData("sao cũng được")] [InlineData("xác nhận thay đổi")] [InlineData("👍")]
+    public void Yes_CommonSlang_IsAccepted(string text)
+    {
+        AgentChatPolicy.AcceptsChange(text).Should().BeTrue();
+    }
+
+    /// <summary>Short commands that only make sense for a change do not count as agreeing to save.</summary>
+    [Theory]
+    [InlineData("đổi đi")] [InlineData("quất")] [InlineData("triển đi")] [InlineData("làm đi")]
+    public void ChangeCommands_AcceptChangeButNotSave(string text)
+    {
+        AgentChatPolicy.AcceptsChange(text).Should().BeTrue();
+        AgentChatPolicy.AcceptsSave(text).Should().BeFalse();
+    }
+
+    /// <summary>The same common wording declines, in any of the places a yes/no question is open.</summary>
+    [Theory]
+    [InlineData("không")] [InlineData("ko")] [InlineData("k")] [InlineData("khum")] [InlineData("thôi")] [InlineData("thôi khỏi")] [InlineData("khỏi")]
+    [InlineData("giữ nguyên")] [InlineData("no")] [InlineData("không đồng ý")] [InlineData("chưa đâu")] [InlineData("hủy")]
+    public void No_CommonSlang_IsRejected(string text)
+    {
+        AgentChatPolicy.RejectsChange(text).Should().BeTrue();
+        AgentChatPolicy.DeclinesSave(text).Should().BeTrue();
+        AgentChatPolicy.DismissesQuestion(text).Should().BeTrue();
+        AgentChatPolicy.AcceptsChange(text).Should().BeFalse();
+    }
+
+    /// <summary>Only a whole-message answer counts: a longer sentence or "dừng" (not "đúng") goes on to be read properly.</summary>
+    [Theory]
+    [InlineData("dừng")] [InlineData("Dừng lại")] [InlineData("ok nhưng đổi món")] [InlineData("không ok")] [InlineData("được không")] [InlineData("có món chay không")]
+    public void Yes_OnlyAWholeMessageAnswer_Counts(string text)
+    {
+        AgentChatPolicy.AcceptsChange(text).Should().BeFalse();
+        AgentChatPolicy.AcceptsSave(text).Should().BeFalse();
+    }
+
+    /// <summary>The question itself tells people a plain answer is enough.</summary>
+    [Fact]
+    public void StageChange_InvitesAPlainAnswer()
+    {
+        var current = new AgentState { NumDays = 3 };
+        AgentChatPolicy.StageChange(current, current with { NumDays = 4 }).Reply
+            .Should().Contain("“ok”").And.Contain("“thôi”").And.NotContain("xác nhận thay đổi");
+    }
+
     // TEST-01: Whole-message save instructions support Vietnamese accents and polite variants.
     /// <summary>Allows explicit saving without requiring a frontend command or proposal identifier.</summary>
     [Theory]

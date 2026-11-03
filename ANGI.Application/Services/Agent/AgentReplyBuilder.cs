@@ -167,8 +167,9 @@ public static class AgentReplyBuilder
     /// <summary>Names the required trip values still unknown, or null when none is missing; province is optional for wording-only checks.</summary>
     public static string? TripDetailsQuestion(AgentState state, bool askProvince = true)
     {
+        // Địa điểm được hỏi riêng và trước tiên: số ngày và ngân sách chỉ có nghĩa khi đã biết sẽ ăn ở đâu.
+        if (askProvince && string.IsNullOrWhiteSpace(state.Province)) return AgentIntakePolicy.PlaceQuestion;
         var missing = new List<string>();
-        if (askProvince && string.IsNullOrWhiteSpace(state.Province)) missing.Add("tỉnh/thành phố");
         if (!state.NumDays.HasValue) missing.Add("số ngày");
         if (state.BudgetAmount is null && !state.BudgetUnrestricted) missing.Add("ngân sách cho một người (tổng chuyến hoặc mỗi ngày)");
         return missing.Count == 0 ? null : $"Bạn cho mình biết {string.Join(", ", missing)} để lập lịch nhé?";

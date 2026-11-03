@@ -55,6 +55,9 @@ public sealed record AgentState
     /// <summary>Backend-owned save question awaiting a reply; it never blocks the proposal and clients or the model cannot set it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentPendingSave? PendingSave { get; init; }
+    /// <summary>Backend-owned stage of the questions asked before a new plan ("details", "preferences"); clients and the model cannot set it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PlanningIntake { get; init; }
     /// <summary>Last observed exact UTC roadmap timestamp; unchanged timestamps preserve chat planning constraints.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? SourceRoadmapUpdatedAt { get; init; }
@@ -153,6 +156,8 @@ public sealed class AgentContext
     public bool ToolsClosed { get; set; }
     /// <summary>Set when a recommendation was requested before province, duration and budget were known; the turn asks for them.</summary>
     public bool TripDetailsMissing { get; set; }
+    /// <summary>Set when the user just finished the pre-plan questions; this turn plans, and a short reply such as "không" adds no requirement.</summary>
+    public bool IntakeComplete { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>

@@ -46,8 +46,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     public async Task UnscopedTaste_Conversation10PromptsAskBeforePlanning()
     {
         string[] prompts = [
-            "Tôi muốn lên lịch ăn uống Hà Nội 3 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn chua",
-            "Tôi muốn lên lịch ăn uống Hà Nội 5 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn cay"
+            "Tôi muốn lên lịch ăn uống Ho Chi Minh City 3 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn chua",
+            "Tôi muốn lên lịch ăn uống Ho Chi Minh City 5 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn cay"
         ];
         foreach (var prompt in prompts)
         {
@@ -132,7 +132,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
                 .Select(day => new AgentItem($"day-{day}", null, (short)day, "lunch", 0,
                     context.Exchanges[0].Results[0].GetProperty("items")[0].GetProperty("dishId").GetInt32())).ToArray() });
         var conversation = await OpenAsync(client);
-        var first = await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày tại Ho Chi Minh City, tổng ngân sách 1500000 đồng.");
+        await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày tại Ho Chi Minh City, tổng ngân sách 1500000 đồng.");
+        var first = await SendPromptAsync(client, conversation.ConversationId, "không");
         first.Proposal.Should().NotBeNull();
         var modelCalls = scenario.Llm.Calls; var rankingCalls = vectors.Count;
 
@@ -215,7 +216,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             return new([], new AgentOutput { Action = "create_proposal", Reply = "Quán bịa nổi tiếng mở 24/24", Items = items.ToArray() });
         };
         var conversation = await OpenAsync(client);
-        var preview = await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày: ngày 1 cay, ngày 2 đặc sản, ngày 3 khác món trong lịch, chỉ bữa trưa.");
+        var preview = await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày tại Ho Chi Minh City, ngân sách 500000 đồng: ngày 1 cay, ngày 2 đặc sản, ngày 3 khác món trong lịch, chỉ bữa trưa.");
         preview.Proposal.Should().NotBeNull(); preview.Proposal!.Snapshot.Items.Should().HaveCount(3);
         preview.Reply.Should().NotContain("bịa").And.NotContain("24/24");
         vectors.Should().HaveCount(3); vectors[0]![5].Should().Be(1); vectors[1]![5].Should().Be(.25); vectors[2]![5].Should().Be(.25);
@@ -268,7 +269,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             return new([], new AgentOutput { Action = "create_proposal", Reply = "Selected items", Items = items.ToArray() });
         };
         var conversation = await OpenAsync(client);
-        var first = await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày, ngân sách 1500000 đồng.");
+        await SendPromptAsync(client, conversation.ConversationId, "Lập lịch 3 ngày tại Ho Chi Minh City, ngân sách 1500000 đồng.");
+        var first = await SendPromptAsync(client, conversation.ConversationId, "không");
         first.Proposal.Should().NotBeNull(AgentJson.Write(new { first.Reply, first.Validation }));
         first.Proposal!.Snapshot.Items.Should().HaveCount(12).And.OnlyContain(item => item.RequestId == null);
         recovering = true;
@@ -1188,7 +1190,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
         EnableChatPlanning(scenario);
         var conversation = await OpenAsync(client);
-        var preview = await SendPromptAsync(client, conversation.ConversationId, "Lên lịch ăn trưa");
+        var preview = await SendPromptAsync(client, conversation.ConversationId, "Gợi ý bữa ăn trưa");
         preview.Proposal!.Status.Should().Be("ready");
         var calls = scenario.Llm.Calls;
         var saved = await SendPromptAsync(client, conversation.ConversationId, "lưu lịch trình này");
@@ -1617,6 +1619,59 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         roadmap.Id.Should().Be(commit.RoadmapId);
         roadmap.StartDate.Should().Be(new DateOnly(2099, 6, 15));
         (await GetAsync(client, conversation.ConversationId)).State.StartDate.Should().Be(new DateOnly(2099, 6, 15));
+    }
+
+    // TEST-63: A new plan asks the place, budget and preferences in that order with no provider call, then plans once; covers answers split across turns and an unknown place.
+    /// <summary>Verifies the reported conversation end to end: "lap lich cho toi" asks where first and "không" starts the plan.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_NewPlan_AsksPlaceBudgetPreferencesThenPlans()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        EnableChatPlanning(scenario);
+        var conversation = await OpenAsync(client);
+
+        var place = await SendPromptAsync(client, conversation.ConversationId, "lap lich cho toi");
+        place.Reply.Should().Be(AgentIntakePolicy.PlaceQuestion);
+        var unknown = await SendPromptAsync(client, conversation.ConversationId, "Đà Nẵng");
+        unknown.Reply.Should().Contain("Ho Chi Minh City");
+        var details = await SendPromptAsync(client, conversation.ConversationId, "ho chi minh city");
+        details.Reply.Should().Contain("số ngày").And.Contain("ngân sách");
+        var preferences = await SendPromptAsync(client, conversation.ConversationId, "1 ngày, ngân sách 500000 đồng");
+        preferences.Reply.Should().Be(AgentIntakePolicy.PreferencesQuestion);
+        scenario.Llm.Calls.Should().Be(0);
+
+        var plan = await SendPromptAsync(client, conversation.ConversationId, "không");
+
+        plan.Proposal!.Status.Should().Be("ready");
+        var restored = await GetAsync(client, conversation.ConversationId);
+        restored.State.Province.Should().Be("Ho Chi Minh City");
+        restored.State.PendingQuestion.Should().BeNull();
+    }
+
+    // TEST-64: Current location sent as confirmed state resolves the nearest catalog province; a far location asks for a place and keeps no coordinates.
+    /// <summary>Verifies geographic planning over the real HTTP contract and PostgreSQL coordinates, without any map provider.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_CurrentLocation_ResolvesProvinceFromCoordinates()
+    {
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        var conversation = await OpenAsync(client);
+        var far = Message(1);
+        far.Content = "Dùng vị trí hiện tại của mình";
+        far.ConfirmedState = new AgentState { OriginMode = "gps", OriginLatitude = 21.03m, OriginLongitude = 105.85m, OriginLabel = "Vị trí hiện tại" };
+        var refused = await SendAsync(client, conversation.ConversationId, far);
+        refused.Reply.Should().Contain("chưa có quán nào");
+        (await GetAsync(client, conversation.ConversationId)).State.OriginLatitude.Should().BeNull();
+
+        var near = Message(refused.ConversationVersion);
+        near.Content = far.Content;
+        near.ConfirmedState = far.ConfirmedState with { OriginLatitude = 10.775m, OriginLongitude = 106.7m };
+        var located = await SendAsync(client, conversation.ConversationId, near);
+
+        located.Reply.Should().StartWith("Bạn đang ở gần Ho Chi Minh City");
+        var state = (await GetAsync(client, conversation.ConversationId)).State;
+        state.Province.Should().Be("Ho Chi Minh City");
+        state.RadiusKm.Should().Be(AgentIntakePolicy.DefaultRadiusKm);
+        scenario.Llm.Calls.Should().Be(0);
     }
 
     /// <summary>Sends only the prompt; no live provider is used by the scripted HTTP test host.</summary>

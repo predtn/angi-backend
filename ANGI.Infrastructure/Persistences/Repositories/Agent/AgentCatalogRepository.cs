@@ -28,4 +28,38 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
                 x.Restaurant.AddressLine, x.Status == DishStatus.Active && x.IsAvailable && x.Restaurant.OperatingStatus == RestaurantOperatingStatus.Open))
             .ToArrayAsync(ct);
     }
+
+    /// <inheritdoc />
+    public async Task<string[]> GetProvincesAsync(CancellationToken ct) =>
+        (await Public().Where(x => x.ProvinceName != null).Select(x => x.ProvinceName!).Distinct().ToArrayAsync(ct))
+            .Where(name => !string.IsNullOrWhiteSpace(name)).Order(StringComparer.Ordinal).ToArray();
+
+    /// <inheritdoc />
+    public async Task<string?> NearestProvinceAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken ct)
+    {
+        // Lọc thô theo khung vĩ độ/kinh độ trong SQL rồi tính khoảng cách đúng trong bộ nhớ; không gọi dịch vụ bản đồ nên không tốn phí.
+        const double KmPerDegree = 111.32;
+        var latitudeSpan = (decimal)((double)radiusKm / KmPerDegree);
+        var longitudeSpan = (decimal)((double)radiusKm / (KmPerDegree * Math.Max(0.01, Math.Cos((double)latitude * Math.PI / 180))));
+        var nearby = await Public().Where(x => x.ProvinceName != null &&
+                x.Latitude >= latitude - latitudeSpan && x.Latitude <= latitude + latitudeSpan &&
+                x.Longitude >= longitude - longitudeSpan && x.Longitude <= longitude + longitudeSpan)
+            .Select(x => new { x.ProvinceName, x.Latitude, x.Longitude }).ToArrayAsync(ct);
+        return nearby.Select(x => (x.ProvinceName, Km: DistanceKm((double)latitude, (double)longitude, (double)x.Latitude, (double)x.Longitude)))
+            .Where(x => x.Km <= (double)radiusKm).OrderBy(x => x.Km).Select(x => x.ProvinceName).FirstOrDefault();
+    }
+
+    /// <summary>Restricts every catalog read to verified restaurants that moderation has not hidden.</summary>
+    private IQueryable<Domain.Entities.Restaurant> Public() => context.Restaurants.AsNoTracking().Where(x =>
+        x.VerificationStatus == RestaurantVerificationStatus.Verified && x.ModerationStatus == RestaurantModerationStatus.Visible);
+
+    /// <summary>Great-circle distance between two coordinates.</summary>
+    private static double DistanceKm(double lat1, double lng1, double lat2, double lng2)
+    {
+        const double EarthRadiusKm = 6371;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLng = (lng2 - lng1) * Math.PI / 180;
+        var a = Math.Pow(Math.Sin(dLat / 2), 2) + Math.Cos(lat1 * Math.PI / 180) * Math.Cos(lat2 * Math.PI / 180) * Math.Pow(Math.Sin(dLng / 2), 2);
+        return 2 * EarthRadiusKm * Math.Asin(Math.Min(1, Math.Sqrt(a)));
+    }
 }

@@ -34,6 +34,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         suggestedDish exactly as the user wrote it ('cách nấu phở' gives 'phở'); otherwise suggestedDish is null.
         Finding where to eat a dish stays in scope. Both actions call no tools and return state=null, items=[], changes=[],
         clarification=null. Never use answer or clarify for these messages. Every other action has suggestedDish=null.
+        Always write a short non-empty reply, including for actions whose reply the backend replaces.
         Conversation tasteTargets are soft targets on the fixed 12-dimensional food ontology. Preserve existing
         targets unless the user changes them. Use only 0, 0.25, 0.5, 0.75, 1 for an explicitly resolved intensity;
         ask a concise question before ranking whenever a requested intensity is unresolved. A bare preference such
@@ -122,11 +123,14 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         maxPricePerMeal yourself; only the user may change them.
         Targets never imply verified dietary guarantees or hard tag filters.
         The backend authenticates and enforces ownership. Only get_recommendation, estimate_day_route and get_roadmap
-        and search_catalog are allowed. Ask for province, number of days, and budget when missing.
+        and search_catalog are allowed. Ask for province first, then number of days and budget, when missing.
+        Take province only from the user's own words: never infer it from state.title or a roadmap name.
+        intakeComplete=true means the human just finished the pre-plan questions, so the trip details are confirmed and the
+        current message holds only optional preferences; 'không' adds none. Issue one get_recommendation scope=full now.
         StartDate is optional while planning: a duration such as '3 days' fully resolves numDays. Never ask for calendar
         dates yourself, because the backend asks for them when the user saves; never ask again for known values. Write
         startDate only when the user states it, and otherwise preserve its current value.
-        Ask all missing required trip values together. On such a clarify, return state holding every trip value the
+        Once the province is known, ask the other missing required trip values together. On such a clarify, return state holding every trip value the
         human has stated so far (e.g. province from 'Hà Nội'), never state=null, so the next question asks only what is
         still missing. Vague wording ('vài ngày', 'vừa phải') states nothing. Once province, numDays and budget are resolved, produce a
         complete preview after resolving requested taste intensity and scope. Taste clarification takes precedence
@@ -403,7 +407,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             currentProposal = context.CurrentProposal is null ? null : new { context.CurrentProposal.ProposalId, context.CurrentProposal.Version, context.CurrentProposal.Status },
             proposalVersion = context.ProposalVersion, history = context.History, request = context.Request,
             proposalMode = context.Source is null ? "create" : "update",
-            catalogTags = context.CatalogTags, replanAfterConfirmation = context.ReplanAfterConfirmation,
+            catalogTags = context.CatalogTags, replanAfterConfirmation = context.ReplanAfterConfirmation, intakeComplete = context.IntakeComplete,
             issuedCandidateScopes = context.Grants.Select(grant => new { grant.DayNumber, grant.MealSlot, grant.DishIds }),
             currentDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
             limits = new { limits.MaxRanked, limits.MaxCandidates, limits.MaxToolRounds, limits.MaxToolCalls } }, PromptJson) });

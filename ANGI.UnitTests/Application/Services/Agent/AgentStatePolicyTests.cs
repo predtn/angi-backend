@@ -54,4 +54,16 @@ public sealed class AgentStatePolicyTests
         policy.Accept(current, null).Should().BeSameAs(current);
         policy.Accept(current, current with { BudgetAmount = 100000, MaxPricePerMeal = 40000 }).BudgetAmount.Should().Be(100000);
     }
+
+    // TEST-04: The model or a client cannot open, advance or close the pre-plan questions.
+    /// <summary>Verifies the intake stage stays backend-owned, like the other pending metadata.</summary>
+    [Fact]
+    public void Accept_IntakeStage_StaysBackendOwned()
+    {
+        var policy = new AgentStatePolicy();
+        var current = AgentTestData.State() with { PlanningIntake = AgentIntakePolicy.Details };
+
+        policy.Accept(current, AgentTestData.State()).PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+        policy.Accept(AgentTestData.State(), current).PlanningIntake.Should().BeNull();
+    }
 }

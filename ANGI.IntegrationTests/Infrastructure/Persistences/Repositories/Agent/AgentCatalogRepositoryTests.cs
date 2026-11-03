@@ -65,4 +65,28 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
             named.Should().Equal(correct.Id);
         });
     }
+
+    // TEST-03: Provinces and the nearest province come only from public restaurants; covers inside and outside the radius, the nearer of two and a hidden restaurant.
+    /// <summary>Verifies current-location planning resolves a place from real catalog coordinates without any map provider.</summary>
+    [PostgresEndToEndFact]
+    public async Task Provinces_ComeFromPublicRestaurantsAndNearestWins()
+    {
+        await factory.ResetDatabaseAsync();
+        var seed = await DiscoverySeed.PublicDishAsync(factory);
+        await factory.ExecuteDbAsync(async db =>
+        {
+            var repository = new AgentCatalogRepository(db);
+            var restaurant = await db.Restaurants.SingleAsync(x => x.Id == seed.RestaurantId);
+            var province = restaurant.ProvinceName!;
+            (await repository.GetProvincesAsync(default)).Should().Equal(province);
+            (await repository.NearestProvinceAsync(restaurant.Latitude, restaurant.Longitude, 1m, default)).Should().Be(province);
+            (await repository.NearestProvinceAsync(restaurant.Latitude + 0.2m, restaurant.Longitude, 50m, default)).Should().Be(province);
+            (await repository.NearestProvinceAsync(restaurant.Latitude + 2m, restaurant.Longitude, 50m, default)).Should().BeNull();
+
+            restaurant.ModerationStatus = RestaurantModerationStatus.Hidden;
+            await db.SaveChangesAsync();
+            (await repository.GetProvincesAsync(default)).Should().BeEmpty();
+            (await repository.NearestProvinceAsync(restaurant.Latitude, restaurant.Longitude, 1m, default)).Should().BeNull();
+        });
+    }
 }

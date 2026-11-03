@@ -7,7 +7,8 @@ namespace ANGI.Application.Services.Agent;
 
 /// <summary>Runs bounded LLM/tool rounds outside a database transaction and prepares validated immutable output.</summary>
 public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor tools, AgentStatePolicy statePolicy,
-    AgentProposalBuilder builder, AgentProposalValidator validator, AgentLimits limits, IAgentTelemetry telemetry)
+    AgentProposalBuilder builder, AgentProposalValidator validator, AgentLimits limits, IAgentTelemetry telemetry,
+    Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalog = null)
 {
     /// <summary>Bounds schema, proposal and unsupported-coverage repairs within the same call and timeout limits.</summary>
     public async Task<AgentPreparedTurn> RunAsync(AgentContext context, CancellationToken ct)
@@ -20,6 +21,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         {
             telemetry.Record("small_talk", context.ConversationId, context.TurnId, context.AttemptId);
             return new(smallTalk, turnState, null, null, "chat");
+        }
+        // Lịch mới: hỏi lần lượt địa điểm, số ngày và ngân sách, rồi khẩu vị/yêu cầu; không tốn lần gọi LLM cho tới khi đủ điều kiện lập lịch.
+        if (await IntakeAsync(context, ct) is { } intake)
+        {
+            telemetry.Record("intake", context.ConversationId, context.TurnId, context.AttemptId, new { stage = intake.State.PlanningIntake });
+            return intake;
         }
         if (AgentTasteClarificationPolicy.Question(context) is { } tasteQuestion)
         {
@@ -86,6 +93,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var coverageRepaired = false;
         var budgetRepaired = false;
         var tasteRepaired = false;
+        var intakeRepaired = false;
         AgentValidation? lastValidation = null;
         var transientRetries = 0;
         var executedTools = new HashSet<string>(StringComparer.Ordinal);
@@ -186,7 +194,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     {
                         var question = AgentReplyBuilder.TripDetailsQuestion(context.State)!;
                         telemetry.Record("trip_details_clarification", context.ConversationId, context.TurnId, context.AttemptId);
-                        return new(question, context.State with { PendingQuestion = question }, null, null);
+                        return new(question, context.State with { PendingQuestion = question, PlanningIntake = AgentIntakePolicy.HasPlan(context) ? null : AgentIntakePolicy.Details }, null, null);
                     }
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
                     // ở các lần gọi sau, vì thông báo cũ khiến model lặp lại đúng tool call vừa chạy.
@@ -197,12 +205,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // Action do LLM chọn theo Instructions trong adapter; hợp đồng chỉ cho phép các action
                 // được khai báo ở AgentLlmSchema.Output, đồng thời kiểm tra lại allowlist tại đây.
                 // Đây là quy tắc xử lý của ANGI, không có điểm số confidence/threshold phân loại intent riêng.
-                if (string.IsNullOrWhiteSpace(output.Reply) || output.Reply.Length > limits.MaxMessageLength ||
+                // Reply rỗng không phải lỗi: backend có câu cố định cho mọi action. Model hay để rỗng với out_of_scope vì câu từ chối là của backend;
+                // từng coi đó là output hỏng khiến "hướng dẫn tôi" tốn 2-4 lần gọi LLM rồi trả 503 cho người dùng.
+                if (output.Reply is null || output.Reply.Length > limits.MaxMessageLength ||
                     output.Clarification is not null && !AgentReplyBuilder.Clarifications.Contains(output.Clarification) ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
                     output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation" or "chat" or "out_of_scope"))
                 {
-                    if (schemaRepaired) throw Unavailable();
+                    // Chỉ ghi tên trường và độ dài, không ghi nội dung model trả về.
+                    telemetry.Record("invalid_output", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { output.Action, output.Clarification, replyLength = output.Reply?.Length, schemaRepaired });
+                    if (schemaRepaired) return Misunderstood(context, turnState);
                     schemaRepaired = repaired = true;
                     continue;
                 }
@@ -217,17 +230,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // Cờ ConstraintsChangeConfirmed không cấp quyền; backend giữ pending change để người dùng xác nhận.
                 if (output.Action is "discard_proposal" or "reset_conversation")
                 {
-                    if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) throw Unavailable();
+                    if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) return Misunderstood(context, turnState);
                     return new(output.Action == "discard_proposal" ? "Mình đã bỏ bản nháp này rồi. Lịch đã lưu vẫn được giữ nguyên."
                         : "Mình bắt đầu lại từ đầu nhé. Lịch đã lưu vẫn được giữ nguyên.", context.State, null, null,
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 if (!context.ReplanAfterConfirmation)
                     context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(AgentNamedRequestPolicy.Retain(
-                        AgentMealScopePolicy.Narrow(output.State, context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
+                        AgentMealScopePolicy.Narrow(AgentIntakePolicy.WithoutUnstatedProvince(output.State, context), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
                 // Đã có lịch mà người dùng không yêu cầu đổi gì ("ăn vui vui", "ok") và model cũng không trích được ràng buộc mới:
                 // không nhận đề xuất đổi món. Giữ nguyên lịch và state đầu lượt, hỏi lại bằng câu chung; lịch hiện tại vẫn lưu được.
-                if (output.Action is "create_proposal" or "patch_proposal" && context.Source is not null && !context.ReplanAfterConfirmation &&
+                if (output.Action is "create_proposal" or "patch_proposal" && context.Source is { Items.Length: > 0 } && !context.ReplanAfterConfirmation &&
                     AgentChangeRequestPolicy.IsUnrequested(context.Request.Content, confirmedState, context.State, context.CatalogTagNames))
                 {
                     telemetry.Record("unrequested_change", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope });
@@ -240,7 +253,21 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // answer: giải thích bằng ngữ cảnh sẵn có. Cả hai không được kèm items/changes để sửa lịch.
                     // Với prompt "sửa roadmap cho tôi" mà chưa rõ sửa gì, Instructions hướng dẫn clarify;
                     // code ở đây kiểm tra hợp đồng output, không tự hiểu/chấm đúng sai ngữ nghĩa câu hỏi.
-                    if (output.Items.Length != 0 || output.Changes.Length != 0) throw Unavailable();
+                    if (output.Items.Length != 0 || output.Changes.Length != 0)
+                    {
+                        // Câu hỏi/trả lời không bao giờ sửa lịch: bỏ phần món kèm theo thay vì làm hỏng cả lượt chat.
+                        telemetry.Record("ignored_items", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, itemCount = output.Items.Length, changeCount = output.Changes.Length });
+                        output = output with { Items = [], Changes = [] };
+                    }
+                    // Người dùng vừa trả lời xong phần hỏi trước khi lập lịch: model không hỏi lại chung chung, cho một lần sửa để lập lịch.
+                    if (context.IntakeComplete && !intakeRepaired && calls + 1 < limits.MaxLlmCalls && output.Clarification is null or "general" or "trip_details" &&
+                        AgentReplyBuilder.TripDetailsQuestion(context.State) is null)
+                    {
+                        telemetry.Record("intake_repair", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Clarification });
+                        context.RepairFeedback = "Người dùng đã trả lời đủ địa điểm, số ngày, ngân sách và yêu cầu riêng. Không hỏi lại; hãy gọi get_recommendation scope=full rồi gửi create_proposal đủ món.";
+                        intakeRepaired = repaired = true;
+                        continue;
+                    }
                     // Tên món/quán catalog chưa xác nhận (không thấy, nhiều kết quả, ngoài tỉnh) chưa phải ràng buộc: không giữ trong state,
                     // nếu không lượt sau người dùng chọn quán khác sẽ bị hỏi "xác nhận thay đổi yêu cầu món/quán".
                     if (context.CatalogNotice is not null) context.State = AgentChangeRequestPolicy.WithoutUnsettledNames(context.State, confirmedState);
@@ -313,6 +340,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     var reply = AgentGroundedReply.Choose(context, output);
                     // Model đã trả lời thay vì hỏi tiếp nghĩa là câu hỏi cũ không còn mở; câu hỏi khẩu vị còn gắn với yêu cầu đang lập nên giữ.
                     context.State = context.State with { PendingQuestion = output.Action == "clarify" ? reply[..Math.Min(reply.Length, 1000)] : ClearedQuestion(context.State) };
+                    // Model hỏi thông tin chuyến đi: các câu trả lời tiếp theo được đọc theo thứ tự cố định, không cần gọi LLM.
+                    if (output.Action == "clarify" && !AgentIntakePolicy.HasPlan(context) && AgentReplyBuilder.TripDetailsQuestion(context.State) is not null)
+                        context.State = context.State with { PlanningIntake = AgentIntakePolicy.Details };
                     return new(reply, context.State, null, null);
                 }
                 // create_proposal supplies a scoped selection; backend creates or updates from the owned source.
@@ -435,7 +465,49 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         { return AgentChatPolicy.StageChange(confirmedState, change.Proposed, context.Source is not null || context.Roadmap is not null); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
-        catch (FluentValidation.ValidationException) { throw Unavailable(); }
+        // State do model đề xuất sai luật: lỗi của model, không phải của người dùng. Giữ state đầu lượt và hỏi lại.
+        catch (FluentValidation.ValidationException) { return Misunderstood(context, turnState); }
+    }
+
+    /// <summary>Runs the pre-plan questions; null means the turn continues through the normal flow, possibly with the intake just closed.</summary>
+    private async Task<AgentPreparedTurn?> IntakeAsync(AgentContext context, CancellationToken ct)
+    {
+        if (catalog is null || !AgentIntakePolicy.Eligible(context)) return null;
+        var provinces = await catalog.GetProvincesAsync(ct);
+        var nearby = AgentIntakePolicy.NeedsNearby(context)
+            ? await catalog.NearestProvinceAsync(context.State.OriginLatitude!.Value, context.State.OriginLongitude!.Value, AgentIntakePolicy.MaxNearbyKm, ct) : null;
+        if (AgentIntakePolicy.Read(context, provinces, nearby) is not { } read) return null;
+        if (read.Reply is { } fixedReply)
+        {
+            // Tọa độ không dùng được thì không giữ lại: state không được mang điểm xuất phát mà chuyến đi không dùng.
+            var kept = AgentIntakePolicy.NeedsNearby(context) ? read.Current with { OriginMode = "none", OriginLatitude = null, OriginLongitude = null, OriginLabel = null, RadiusKm = null } : read.Current;
+            return new(fixedReply, kept with { PendingQuestion = AgentIntakePolicy.PlaceQuestion }, null, null);
+        }
+        AgentState accepted;
+        try { accepted = statePolicy.Accept(read.Current, read.Proposed, context.State); }
+        // Chưa có lịch nào bị ảnh hưởng và giá trị đến từ chính câu của người dùng (không qua model), nên không cần hỏi xác nhận lại.
+        catch (AgentStateChangeRequiredException change)
+        {
+            accepted = change.Proposed with { PendingStateChange = read.Current.PendingStateChange, SourceRoadmapUpdatedAt = read.Current.SourceRoadmapUpdatedAt,
+                HistoryStartSequence = read.Current.HistoryStartSequence };
+        }
+        catch (FluentValidation.ValidationException error)
+        {
+            var problem = error.Errors.FirstOrDefault()?.ErrorMessage ?? "Thông tin chuyến đi chưa hợp lệ.";
+            return new($"{problem} Bạn nhắn lại giúp mình nhé.", context.State with { PlanningIntake = AgentIntakePolicy.Details }, null, null);
+        }
+        var step = AgentIntakePolicy.Next(context, accepted, read, provinces);
+        if (!step.Closed) return new(step.Reply!, step.State, null, null);
+        context.State = step.State;
+        context.IntakeComplete = step.Plan;
+        return null;
+    }
+
+    /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>
+    private AgentPreparedTurn Misunderstood(AgentContext context, AgentState state)
+    {
+        telemetry.Record("misunderstood", context.ConversationId, context.TurnId, context.AttemptId);
+        return new(AgentReplyBuilder.TripDetailsQuestion(state) is { } question && !AgentIntakePolicy.HasPlan(context) ? question : AgentSmallTalkPolicy.NotUnderstood, state, null, null);
     }
 
     /// <summary>Removes the named items from the source, validates the remainder and returns it as a new preview without a provider call.</summary>

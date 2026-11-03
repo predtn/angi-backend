@@ -392,15 +392,20 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(expectedCalls));
     }
 
-    // TEST-18: Structurally valid model state with invalid business bounds reports an Agent failure instead of blaming user input.
-    /// <summary>Verifies invalid model-enriched state cannot escape as user validation or create ready state.</summary>
+    // TEST-18: Structurally valid model state with invalid business bounds asks the user again, keeping the turn's state, instead of a service error.
+    /// <summary>Verifies invalid model-enriched state cannot escape as user validation, a 503 or a ready state.</summary>
     [Fact]
-    public async Task RunAsync_InvalidModelState_ProducesControlledUnavailable()
+    public async Task RunAsync_InvalidModelState_AsksAgainWithoutChangingState()
     {
         var llm = new Mock<IAgentLlmService>();
         llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
             AgentTestData.Answer() with { State = AgentTestData.State() with { NumDays = 0 } }));
-        await ((Func<Task>)(async () => await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None))).Should().ThrowAsync<ServiceUnavailableException>();
+
+        var result = await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None);
+
+        result.Reply.Should().Be(AgentSmallTalkPolicy.NotUnderstood);
+        result.State.NumDays.Should().Be(2);
+        result.Snapshot.Should().BeNull();
     }
 
     // TEST-19: A model may request draft controls but cannot use those actions to also mutate state or items.
@@ -1209,13 +1214,320 @@ public sealed class AgentOrchestratorTests
         if (!listed) result.Reply.Should().Be(AgentReplyBuilder.AnswerUnavailable);
     }
 
+    // TEST-60: An empty reply is not a failure: refusals and social messages use the backend's fixed text in one call; this was the "hướng dẫn tôi" 503.
+    /// <summary>Reproduces conversation 88: the model left reply empty because the backend owns the refusal, which cost repairs and ended in a 503.</summary>
+    [Theory]
+    [InlineData("out_of_scope", AgentSmallTalkPolicy.OutOfScope)]
+    [InlineData("chat", AgentSmallTalkPolicy.ChatFallback)]
+    public async Task RunAsync_EmptyReply_UsesFixedReplyInOneCall(string action, string expected)
+    {
+        var context = AgentTestData.Context();
+        context.Request.Content = "hướng dẫn tôi gọt vỏ cam";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "" }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(expected);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-61: An empty reply on a clarify or answer turn also falls back to the fixed wording without a repair call.
+    /// <summary>Ensures no paid repair call is spent on wording the backend can supply itself.</summary>
+    [Theory]
+    [InlineData("clarify")][InlineData("answer")]
+    public async Task RunAsync_EmptyReplyOnQuestion_UsesFixedWordingWithoutRepair(string action)
+    {
+        var context = AgentTestData.Context();
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "   " }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Trim().Should().NotBeEmpty();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-62: Output still unusable after its one repair asks the user again; the state is unchanged and telemetry never holds the model's text.
+    /// <summary>Bounds paid calls at two and replaces the old 503 with a question the user can answer.</summary>
+    [Fact]
+    public async Task RunAsync_UnusableOutputAfterRepair_AsksAgainWithoutLeakingText()
+    {
+        var context = AgentTestData.Context();
+        var secret = new string('x', new AgentLimits().MaxMessageLength + 1);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = secret }));
+        var telemetry = new Mock<IAgentTelemetry>();
+
+        var result = await Create(llm.Object, telemetry: telemetry.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(AgentSmallTalkPolicy.NotUnderstood);
+        result.State.Should().Be(context.State);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        telemetry.Verify(x => x.Record("invalid_output", 7, It.IsAny<long?>(), It.IsAny<long?>(), It.Is<object?>(data => !System.Text.Json.JsonSerializer.Serialize(data, (System.Text.Json.JsonSerializerOptions?)null).Contains("xxx"))), Times.Exactly(2));
+    }
+
+    // TEST-63: Items attached to a question are dropped rather than failing the turn, and never reach a proposal.
+    /// <summary>A clarify or answer can never edit a plan, so its stray items are simply ignored.</summary>
+    [Fact]
+    public async Task RunAsync_QuestionWithItems_IgnoresItems()
+    {
+        var context = AgentTestData.Context();
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer() with { Items = [AgentTestData.Item()] }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Snapshot.Should().BeNull();
+        result.Reply.Should().NotBeNullOrWhiteSpace();
+    }
+
+    // TEST-64: Discard or reset carrying a state or items is refused without a service error and without discarding anything.
+    /// <summary>Keeps draft controls from also mutating the plan, while the user still gets an answer.</summary>
+    [Fact]
+    public async Task RunAsync_ControlWithPayload_AsksAgain()
+    {
+        var context = AgentTestData.Context();
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "reset_conversation", Reply = "ok", Items = [AgentTestData.Item()] }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Action.Should().BeNull();
+        result.Reply.Should().Be(AgentSmallTalkPolicy.NotUnderstood);
+    }
+
+    // TEST-65: The reported flow: "lap lich cho toi" asks the place first, then budget, then preferences, with no provider call; a title holding a place does not answer it.
+    /// <summary>Walks the whole intake over an empty three-day roadmap whose title names Hà Nội.</summary>
+    [Fact]
+    public async Task RunAsync_NewPlan_AsksPlaceThenBudgetThenPreferences()
+    {
+        var llm = new Mock<IAgentLlmService>(MockBehavior.Strict);
+        var sut = Create(llm.Object, intakeCatalog: IntakeCatalog());
+        var state = new AgentState { NumDays = 3, Title = "3 ngày ăn ngon Hà Nội" };
+
+        var place = await sut.RunAsync(IntakeContext("lap lich cho toi", state), default);
+        place.Reply.Should().Be(AgentIntakePolicy.PlaceQuestion);
+        place.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+        place.State.Province.Should().BeNull();
+
+        var budget = await sut.RunAsync(IntakeContext("Hà Nội", place.State), default);
+        budget.Reply.Should().StartWith("Mình ghi nhận Hà Nội.").And.Contain("ngân sách").And.NotContain("số ngày");
+        budget.State.Province.Should().Be("Hà Nội");
+
+        var preferences = await sut.RunAsync(IntakeContext("ngân sách 500k 1 ngày", budget.State), default);
+        preferences.Reply.Should().Be(AgentIntakePolicy.PreferencesQuestion);
+        preferences.State.BudgetAmount.Should().Be(1500000);
+        preferences.State.PlanningIntake.Should().Be(AgentIntakePolicy.Preferences);
+        preferences.State.PendingQuestion.Should().Be(AgentIntakePolicy.PreferencesQuestion);
+    }
+
+    // TEST-66: Answering the preference question closes the intake and plans in the same turn; "không" reaches the model marked as adding no requirement.
+    /// <summary>Ensures "không" is not read as a dismissal and that the plan is not blocked as an unrequested change on an empty roadmap.</summary>
+    [Fact]
+    public async Task RunAsync_PreferenceAnswer_ClosesIntakeAndPlans()
+    {
+        var state = new AgentState { Province = "Da Nang", NumDays = 1, BudgetAmount = 500000, MealSlots = ["lunch"], PlanningIntake = AgentIntakePolicy.Preferences,
+            PendingQuestion = AgentIntakePolicy.PreferencesQuestion, PendingPlanningRequest = new(["lap lich cho toi"]) };
+        var context = IntakeContext("không", state, AgentTestData.Snapshot());
+        context.Grants.Add(new(null, null, [1], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Xong rồi nhé!", Items = [AgentTestData.Item()] }));
+
+        var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(context, default);
+
+        context.IntakeComplete.Should().BeTrue();
+        result.Snapshot.Should().NotBeNull();
+        result.State.PlanningIntake.Should().BeNull();
+        result.State.PendingQuestion.Should().BeNull();
+    }
+
+    // TEST-67: A model that asks again right after the intake gets one repair and then plans; a second question is shown without a third call.
+    /// <summary>Bounds the extra paid call to one while protecting the user from being asked what they just answered.</summary>
+    [Fact]
+    public async Task RunAsync_ModelAsksAgainAfterIntake_RepairsOnce()
+    {
+        var state = new AgentState { Province = "Da Nang", NumDays = 1, BudgetAmount = 500000, PlanningIntake = AgentIntakePolicy.Preferences, PendingPlanningRequest = new(["lap lich"]) };
+        var context = IntakeContext("không", state);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "clarify", Clarification = "general", Reply = "Bạn muốn gì?" }));
+
+        var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(context, default);
+
+        result.Reply.Should().NotBeNullOrWhiteSpace();
+        context.RepairFeedback.Should().Contain("Không hỏi lại");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-68: Current location resolves the province from the nearest restaurant and limits candidates to 10 km; covers a covered and an uncovered location.
+    /// <summary>Keeps recommendations geographic without a map provider call, and never keeps coordinates the trip cannot use.</summary>
+    [Theory]
+    [InlineData("Hà Nội")]
+    [InlineData(null)]
+    public async Task RunAsync_CurrentLocation_ResolvesNearestProvince(string? nearest)
+    {
+        var state = new AgentState { NumDays = 3, OriginMode = "gps", OriginLatitude = 21.03m, OriginLongitude = 105.85m, OriginLabel = "Vị trí hiện tại" };
+        var llm = new Mock<IAgentLlmService>(MockBehavior.Strict);
+
+        var result = await Create(llm.Object, intakeCatalog: IntakeCatalog(nearest)).RunAsync(IntakeContext("Dùng vị trí hiện tại của mình", state), default);
+
+        if (nearest is null)
+        {
+            result.Reply.Should().Contain("chưa có quán nào").And.Contain("Hà Nội").And.EndWith(AgentIntakePolicy.PlaceQuestion);
+            result.State.Province.Should().BeNull();
+            result.State.OriginMode.Should().Be("none");
+            result.State.OriginLatitude.Should().BeNull();
+            result.State.RadiusKm.Should().BeNull();
+        }
+        else
+        {
+            result.Reply.Should().StartWith("Bạn đang ở gần Hà Nội").And.Contain("10 km");
+            result.State.Province.Should().Be("Hà Nội");
+            result.State.RadiusKm.Should().Be(AgentIntakePolicy.DefaultRadiusKm);
+        }
+    }
+
+    // TEST-69: Asking for "current location" as plain text, without coordinates from the browser, says how to share it instead of guessing a place.
+    /// <summary>Covers a denied browser permission, where the client falls back to sending only the text.</summary>
+    [Theory]
+    [InlineData("vị trí hiện tại")][InlineData("gần đây thôi")][InlineData("quanh day")]
+    public async Task RunAsync_HereWordsWithoutCoordinates_ExplainsHow(string content)
+    {
+        var state = new AgentState { PlanningIntake = AgentIntakePolicy.Details, PendingQuestion = AgentIntakePolicy.PlaceQuestion };
+
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog()).RunAsync(IntakeContext(content, state), default);
+
+        result.Reply.Should().Be(AgentIntakePolicy.LocationNeeded);
+        result.State.Province.Should().BeNull();
+    }
+
+    // TEST-70: A short unknown place asks again naming the covered provinces; a long unrelated sentence closes the intake and goes to the model.
+    /// <summary>Ensures the questions never trap a user who changed the subject.</summary>
+    [Fact]
+    public async Task RunAsync_UnansweredPlace_RepeatsOrStepsAside()
+    {
+        var state = new AgentState { PlanningIntake = AgentIntakePolicy.Details, PendingQuestion = AgentIntakePolicy.PlaceQuestion };
+        var strict = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog());
+
+        var unknown = await strict.RunAsync(IntakeContext("Đà Nẵng", state), default);
+        unknown.Reply.Should().Contain("Hiện ANGI có dữ liệu ở Hà Nội").And.EndWith(AgentIntakePolicy.PlaceQuestion);
+
+        var aside = IntakeContext("vì sao bạn lại hỏi mình nhiều câu như vậy", state);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(aside, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Mình cần biết địa điểm.")));
+
+        var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(aside, default);
+
+        result.State.PlanningIntake.Should().BeNull();
+        llm.Verify(x => x.RunAsync(aside, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-71: Facts in one message are all taken, and only what is missing is asked; covers everything at once and a stated preference skipping the preference question.
+    /// <summary>Ensures nobody is asked again for what they already wrote in one sentence.</summary>
+    [Fact]
+    public async Task RunAsync_AllFactsInOneMessage_AsksOnlyWhatIsMissing()
+    {
+        var strict = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog());
+
+        var all = await strict.RunAsync(IntakeContext("lập lịch Hà Nội 3 ngày 1 triệu", new AgentState()), default);
+        all.Reply.Should().EndWith(AgentIntakePolicy.PreferencesQuestion);
+        all.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.NumDays == 3 && x.BudgetAmount == 1000000);
+
+        var noBudget = await strict.RunAsync(IntakeContext("lập lịch Hà Nội 3 ngày", new AgentState()), default);
+        noBudget.Reply.Should().Contain("ngân sách").And.NotContain("số ngày");
+
+        var taste = await strict.RunAsync(IntakeContext("lập lịch Hà Nội 3 ngày 1 triệu, thích ăn cay", new AgentState()), default);
+        taste.Reply.Should().StartWith("Bạn muốn mức cay");
+        taste.State.PlanningIntake.Should().BeNull();
+    }
+
+    // TEST-72: With no plan to disturb, the user's own answer is applied without asking them to confirm what they just said, and no paid call is made.
+    /// <summary>Answering the questions with a new duration or "no limit", including slang, moves straight on.</summary>
+    [Theory]
+    [InlineData("lập lịch Hà Nội 5 ngày", 5, false)]
+    [InlineData("Hà Nội, không giới hạn", 3, true)]
+    [InlineData("Hà Nội, xả láng", 3, true)]
+    public async Task RunAsync_AnswerWithoutAPlan_AppliesWithoutConfirmation(string content, short numDays, bool unrestricted)
+    {
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog())
+            .RunAsync(IntakeContext(content, new AgentState { NumDays = 3, PlanningIntake = AgentIntakePolicy.Details }), default);
+
+        result.State.PendingStateChange.Should().BeNull();
+        result.State.NumDays.Should().Be(numDays);
+        result.State.BudgetUnrestricted.Should().Be(unrestricted);
+        result.State.Province.Should().Be("Hà Nội");
+    }
+
+    // TEST-73: An invalid duration in an answer repeats the validator's message and keeps the question open.
+    /// <summary>Ensures a bad answer is explained to the user instead of failing the turn.</summary>
+    [Fact]
+    public async Task RunAsync_InvalidAnswer_ExplainsLimit()
+    {
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog())
+            .RunAsync(IntakeContext("lập lịch Hà Nội 45 ngày", new AgentState()), default);
+
+        result.Reply.Should().StartWith("Số ngày phải từ 1 đến 30.");
+        result.State.NumDays.Should().BeNull();
+        result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+    }
+
+    // TEST-74: A plan already on screen skips the questions without querying the catalog.
+    /// <summary>Ensures edits keep their existing path and cost nothing extra.</summary>
+    [Fact]
+    public async Task RunAsync_ExistingPlan_SkipsIntake()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.Request.Content = "lập lịch lại";
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>(MockBehavior.Strict);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: catalog.Object).RunAsync(context, default);
+
+        llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-75: A bare request for help gets the fixed guide with no provider call, and repeats an open question; this was the other half of the "hướng dẫn tôi" failure.
+    /// <summary>Answers the reported short message for free, whatever stage the conversation is in.</summary>
+    [Fact]
+    public async Task RunAsync_BareHelp_AnswersWithoutProvider()
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog());
+
+        (await sut.RunAsync(IntakeContext("huong dan toi", new AgentState()), default)).Reply.Should().Be(AgentSmallTalkPolicy.Help);
+        var open = new AgentState { PlanningIntake = AgentIntakePolicy.Details, PendingQuestion = AgentIntakePolicy.PlaceQuestion };
+        var result = await sut.RunAsync(IntakeContext("hướng dẫn tôi", open), default);
+        result.Reply.Should().Be($"{AgentSmallTalkPolicy.Help}\n{AgentIntakePolicy.PlaceQuestion}");
+        result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+    }
+
+    /// <summary>Builds a turn with the given message over the given state.</summary>
+    private static AgentContext IntakeContext(string content, AgentState state, AgentSnapshot? source = null)
+    {
+        var context = AgentTestData.Context(source);
+        context.State = state;
+        context.Request.Content = content;
+        return context;
+    }
+
+    /// <summary>Returns a catalog covering only Hà Nội, like the current local data, with a fixed nearest-province answer.</summary>
+    private static ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository IntakeCatalog(string? nearest = "Hà Nội")
+    {
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetProvincesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(["Hà Nội"]);
+        catalog.Setup(x => x.NearestProvinceAsync(It.IsAny<decimal>(), It.IsAny<decimal>(), AgentIntakePolicy.MaxNearbyKm, It.IsAny<CancellationToken>())).ReturnsAsync(nearest);
+        return catalog.Object;
+    }
+
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
-        ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null)
+        ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null,
+        ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? intakeCatalog = null)
     {
         var fixture = AgentTestData.Validator(catalog ?? [AgentTestData.Dish()]);
         telemetry ??= Mock.Of<IAgentTelemetry>(); var limits = configuredLimits ?? new AgentLimits(); var state = new AgentStatePolicy();
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), state,
             new AgentRouteEstimator(fixture.Routes.Object), limits, telemetry, catalogSearch: catalogSearch);
-        return new(llm, tools, state, new(), fixture.Validator, limits, telemetry);
+        return new(llm, tools, state, new(), fixture.Validator, limits, telemetry, intakeCatalog);
     }
 }

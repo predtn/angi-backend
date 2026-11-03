@@ -10,7 +10,9 @@ public static class AgentSmallTalkPolicy
 {
     public const string Greeting = "Chào bạn, mình là ANGI, trợ lý ăn uống của bạn. Bạn muốn tìm món, tìm quán hay lập lịch ăn uống nào?";
     public const string Introduction = "Mình là ANGI, trợ lý ăn uống của bạn. Mình giúp bạn tìm món, tìm quán và lập lịch ăn uống cho chuyến đi.";
+    public const string Help = "Mình có thể lập lịch ăn uống cho chuyến đi, tìm món hoặc quán trên ANGI và đổi món trong lịch của bạn. Bạn thử nhắn “lập lịch cho tôi” để bắt đầu nhé.";
     public const string Thanks = "Không có gì nha! Cần đổi món hay tìm quán nào cứ nhắn mình.";
+    public const string NotUnderstood = "Mình chưa hiểu rõ ý bạn. Bạn muốn lập lịch ăn uống, tìm món, tìm quán hay đổi món trong lịch?";
     public const string ChatFallback = "Mình luôn sẵn sàng! Bạn muốn tìm món, tìm quán hay lập lịch ăn uống nào?";
     // Câu từ chối do chủ dự án chốt: giữ nguyên văn, không để model viết lại.
     public const string OutOfScope = "Việc này nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi.";
@@ -22,6 +24,9 @@ public static class AgentSmallTalkPolicy
     private static readonly Regex ThanksWords = new(@"^(?:(?:xin |rat |da )?cam on|thanks?(?: you)?|tks|thx)" + Addressee + "$", RegexOptions.CultureInvariant);
     private static readonly Regex IntroductionWords = new(
         @"^(?:(?:ban|em|angi) la (?:ai|gi)|(?:ban|em|angi)(?: co the)? lam(?: duoc)? (?:nhung )?gi)(?: (?:vay|the|day|nhi|a|cho toi|cho minh))*$", RegexOptions.CultureInvariant);
+    // Chỉ lời nhờ trống ("hướng dẫn tôi", "giúp mình với"). Có chủ đề ("hướng dẫn tôi gọt vỏ cam") thì model phân loại như thường.
+    private static readonly Regex HelpWords = new(
+        @"^(?:(?:hay|xin|lam on|ban) )?(?:huong dan|giup(?: do)?|ho tro|chi dan|help|chi (?:toi|minh|em))(?: (?:toi|minh|em|voi|nhe|nha|di|cach dung|cach su dung|su dung))*$", RegexOptions.CultureInvariant);
     // Cam kết thay đổi và số liệu chỉ backend được nói; thuật ngữ nội bộ trong câu chào là dấu hiệu model đang lộ prompt.
     private static readonly Regex UnsafeChatWords = new(
         @"\d|https?:|www\.|\b(?:da|vua) (?:luu|doi|thay|them|xoa|bo|cap nhat|chot|dat)\b|\b(?:dong|vnd|usd)\b|\b(?:catalog|roadmap|proposal|backend|schema|llm|api|prompt|tag)\b", RegexOptions.CultureInvariant);
@@ -35,6 +40,7 @@ public static class AgentSmallTalkPolicy
         var text = Words(context.Request.Content);
         if (GreetingWords.IsMatch(text) && !NamesPorridge(context.Request.Content)) return WithOpenQuestion(GreetingFor(context.State), context.State);
         if (ThanksWords.IsMatch(text)) return WithOpenQuestion(Thanks, context.State);
+        if (HelpWords.IsMatch(text)) return WithOpenQuestion(Help, context.State);
         return IntroductionWords.IsMatch(text) ? WithOpenQuestion(Introduction, context.State) : null;
     }
 

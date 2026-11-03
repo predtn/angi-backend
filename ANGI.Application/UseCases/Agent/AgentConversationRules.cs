@@ -60,7 +60,7 @@ public static class AgentConversationRules
         MealSlots = state.MealSlots.Order(StringComparer.Ordinal).ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
-        PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+        PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, PlanningIntake = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
         ReplacedDishNames = null
     };
 

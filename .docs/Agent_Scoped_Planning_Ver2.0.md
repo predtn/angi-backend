@@ -241,3 +241,21 @@ Verified locally: 2591 backend unit tests; 50 existing Agent/PostgreSQL integrat
 5 new scoped planning/catalog integration tests. The real reco HTTP group requires a separately
 configured reco service and was skipped. Provider interpretation is covered with deterministic stubs,
 not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_20261030.
+
+## Pre-plan questions and empty replies (2026-11-03)
+
+- A new plan (no ready proposal and no saved item) asks in a fixed order without a provider call: place, then
+  duration and budget, then optional taste and day/meal requests. Values already known are skipped, and values in
+  one message are all taken. `AgentState.planningIntake` holds the stage; it is backend-owned JSONB metadata like
+  `pendingPlanningRequest`, so there is no migration.
+- The place comes from the user's words or from coordinates, never from a roadmap title. Coordinates arrive through
+  the existing `confirmedState` (`originMode=gps`); the nearest public restaurant within 50 km names the province,
+  and candidates are limited to 10 km. No map provider is called. A location with no restaurant nearby keeps no
+  coordinates and asks for a place.
+- A long reply that answers nothing closes the questions and goes to the model. Changing a duration the roadmap
+  holds, or a budget with no limit, still needs the existing separate confirmation.
+- `reply` may be empty for any action: the backend has fixed wording for all of them. Treating it as malformed made
+  `out_of_scope` (`huong dan toi`) spend 2-4 calls and end in a 503. A bare request for help is answered without a
+  call. Output still unusable after its repair, and invalid model state, ask again instead of returning 503.
+  AGENT_UNAVAILABLE remains for provider failures, oversized context and exhausted tool or call limits.
+- `Agent:MessagesPerMinute` is now 60. `MessagesPerDay` stays 100.
