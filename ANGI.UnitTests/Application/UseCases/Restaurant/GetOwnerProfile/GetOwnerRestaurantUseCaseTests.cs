@@ -31,6 +31,7 @@ public sealed class GetOwnerRestaurantUseCaseTests
 
         result.Id.Should().Be(7);
         result.Images.Should().Equal("https://cdn.test/gallery.jpg");
+        result.ImageMediaIds.Should().Equal(101);
         result.LatestVerification.Should().NotBeNull();
         result.LatestVerification!.Id.Should().Be(21);
         result.LatestVerification.Documents.Should().ContainSingle()

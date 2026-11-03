@@ -15,6 +15,8 @@ public sealed class GetModRestaurantUseCaseTests
     public async Task MapsCompleteDetail()
     {
         var world = new ModerationTestContext();
+        world.Restaurant.Images.Add(new RestaurantImage { MediaId = 101, SortOrder = 1, Media = new MediaFile { Id = 101, Url = "https://cdn.test/b.jpg" } });
+        world.Restaurant.Images.Add(new RestaurantImage { MediaId = 102, SortOrder = 0, Media = new MediaFile { Id = 102, Url = "https://cdn.test/a.jpg" } });
         world.Repository.Setup(x => x.GetDetailAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(world.Restaurant);
         world.Repository.Setup(x => x.GetRecentReportsAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync([]);
         world.Repository.Setup(x => x.GetRecentAuditAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -26,6 +28,8 @@ public sealed class GetModRestaurantUseCaseTests
         result.Reports.Should().BeEmpty();
         result.RecentAudit.Should().BeEmpty();
         result.LatestVerification.Should().BeNull();
+        result.Images.Should().Equal("https://cdn.test/a.jpg", "https://cdn.test/b.jpg");
+        result.ImageMediaIds.Should().Equal(102, 101);
     }
 
     // TEST-02: Return RESTAURANT_NOT_FOUND and avoid loading child data for missing restaurants.

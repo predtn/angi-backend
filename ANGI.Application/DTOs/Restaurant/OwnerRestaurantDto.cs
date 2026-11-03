@@ -23,6 +23,7 @@ public class OwnerRestaurantDto
     public string? Website { get; set; }
     public string? Ward { get; set; }
     public IReadOnlyList<string> Images { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<long> ImageMediaIds { get; set; } = Array.Empty<long>();
     public IReadOnlyList<BusinessHourDto> BusinessHours { get; set; } = Array.Empty<BusinessHourDto>();
     public object? Menu { get; set; }
     public object? MyReview { get; set; }

@@ -478,6 +478,48 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         });
     }
 
+    // TEST-12: Read gallery media ids from OWN-02 and send an edited list back through OWN-03 to drop, reorder and add photos.
+    /// <summary>Covers ANGI-42 partial gallery edits: imageMediaIds follow images, and the patched order is what PostgreSQL stores.</summary>
+    [PostgresEndToEndFact]
+    public async Task UpdateRestaurant_WithGalleryIdsFromProfile_ShouldDropReorderAndAddPhotos()
+    {
+        await _factory.ResetDatabaseAsync();
+        using var client = _factory.CreateClient();
+        var auth = await RegisterOwnerAndLoginAsync(client, "gallery-owner@integration.test");
+        Authorize(client, auth.AccessToken);
+        var photos = new List<MediaFileDto>();
+        foreach (var name in new[] { "first.png", "second.png", "third.png" })
+        {
+            using var upload = await UploadAsync(client, "restaurant", name, "image/png", [1, 2, 3, 4]);
+            photos.Add(await SuccessDataAsync<MediaFileDto>(upload));
+        }
+
+        var request = RegistrationRequest("Gallery Restaurant", "0901234567");
+        request.ImageMediaIds = [photos[0].Id, photos[1].Id];
+        using var register = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
+        register.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await SuccessDataAsync<OwnerRestaurantDto>(register)).ImageMediaIds.Should().Equal(photos[0].Id, photos[1].Id);
+        using var get = await client.GetAsync("/api/v1/owner/restaurant");
+        var profile = await SuccessDataAsync<OwnerRestaurantDto>(get);
+        profile.ImageMediaIds.Should().Equal(photos[0].Id, photos[1].Id);
+        profile.Images.Should().Equal(photos[0].Url, photos[1].Url);
+
+        var edited = profile.ImageMediaIds.Where(id => id != photos[0].Id).Prepend(photos[2].Id).ToArray();
+        using var patch = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { ImageMediaIds = edited });
+
+        patch.StatusCode.Should().Be(HttpStatusCode.OK);
+        var updated = await SuccessDataAsync<OwnerRestaurantDto>(patch);
+        updated.ImageMediaIds.Should().Equal(photos[2].Id, photos[1].Id);
+        updated.Images.Should().Equal(photos[2].Url, photos[1].Url);
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var stored = await context.Restaurants.Include(value => value.Images)
+                .SingleAsync(value => value.Id == updated.Id);
+            stored.Images.OrderBy(image => image.SortOrder).Select(image => image.MediaId)
+                .Should().Equal(photos[2].Id, photos[1].Id);
+        });
+    }
+
     /// <summary>Provides invalid phone regions shared by registration and update HTTP regression scenarios.</summary>
     private static string?[] InvalidPhones() =>
     [
