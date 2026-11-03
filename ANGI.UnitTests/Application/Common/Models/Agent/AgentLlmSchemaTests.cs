@@ -120,7 +120,7 @@ public sealed class AgentLlmSchemaTests
         ["action"] = "answer", ["reply"] = "Explanation", ["suggestedDish"] = null, ["clarification"] = null, ["state"] = null,
         ["constraintsChangeConfirmed"] = false, ["baseProposalVersion"] = null,
         ["scope"] = new JsonObject { ["dayNumber"] = null, ["mealSlot"] = null },
-        ["items"] = new JsonArray(), ["changes"] = new JsonArray()
+        ["items"] = new JsonArray(), ["changes"] = new JsonArray(), ["dishNotes"] = new JsonArray(), ["daySummaries"] = new JsonArray()
     };
 
     /// <summary>Builds one strict proposal item for array-path cases.</summary>

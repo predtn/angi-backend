@@ -177,6 +177,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 else if (prepared.Action == "discard") prepared = prepared with
                     { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, FocusDay = null, FocusMeal = null } };
             }
+            // Mọi đường tạo bản nháp, kể cả không qua model, đều đi qua đây nên phần giới thiệu luôn khớp với món cuối cùng.
+            if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentProposalNotes.Attach(drafted, context) };
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
         }

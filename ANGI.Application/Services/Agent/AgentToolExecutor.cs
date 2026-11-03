@@ -228,6 +228,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     private static IEnumerable<object> Items(ScopedRanking ranking) => ranking.Picked.Select(x => (object)new
     {
         dishId = x.Id, x.Name, x.Price, restaurantName = x.Restaurant.Name,
+        // Căn cứ để model viết giới thiệu món; cắt ngắn vì trường này được gửi lại ở mọi vòng gọi tiếp theo trong lượt.
+        description = x.Description is { Length: > 160 } ? x.Description[..160] : x.Description,
         allowedMealSlots = ranking.PerMeal
             ? AgentStateValidator.Meals.Where(slot => ranking.ChosenByMeal.GetValueOrDefault(slot)?.Any(d => d.Id == x.Id) == true).ToArray()
             : AgentStateValidator.Meals.Where(slot => (ranking.Scope.MealSlot is null || ranking.Scope.MealSlot == slot) && FitsMeal(x, slot)).ToArray(),

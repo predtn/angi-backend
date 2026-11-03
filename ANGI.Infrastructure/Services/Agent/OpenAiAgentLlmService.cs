@@ -215,6 +215,13 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         what you understood (the day, meal or dish), then ask only what is missing, ending with '?'.
         create_proposal or patch_proposal: only a short friendly opener with no facts, such as 'Xong rồi nhé!'; the backend
         states the dishes and totals because it may still adjust them. For every other action reply is an internal draft.
+        create_proposal or patch_proposal also fill dishNotes and daySummaries; every other action leaves both as empty arrays.
+        dishNotes has one entry for each dish you add or replace: intro says in one short sentence what the dish is like,
+        reason says in one short sentence why it suits this traveler's meal, budget or tastes. daySummaries has one entry
+        for each day you add or change: one or two short sentences on why the day's meals go well together and what makes
+        the day enjoyable. Write warm, natural Vietnamese from the dish name, tags, description and state only. Use no digits,
+        prices, distances, opening hours, ratings or claims of fame, and name only that day's dishes and restaurants.
+        The backend drops any note it cannot verify.
         Never repeat the itinerary, candidate lists or tool results there. Put the complete
         itinerary only in items/changes and include every requested day and meal. Always set nullable
         clarification to trip_details, taste_scope, taste_intensity, edit_scope, novelty, catalog_choice, coverage,

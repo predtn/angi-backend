@@ -58,7 +58,9 @@ public static class AgentLlmSchema
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
         {
             ["type"] = Choice("add", "replace", "remove", "move"), ["targetItemKey"] = Nullable(Scalar("string")), ["item"] = Nullable(Item)
-        }))
+        })),
+        ["dishNotes"] = ArrayOf(Obj(new() { ["dishId"] = Scalar("integer"), ["intro"] = Scalar("string"), ["reason"] = Scalar("string") })),
+        ["daySummaries"] = ArrayOf(Obj(new() { ["dayNumber"] = Scalar("integer"), ["summary"] = Scalar("string") }))
     });
     public static readonly IReadOnlyDictionary<string, object> Tools = new Dictionary<string, object>
     {

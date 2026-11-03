@@ -421,6 +421,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
+                context.PreviewOutput = output;
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null,
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentRemovalPolicy.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };

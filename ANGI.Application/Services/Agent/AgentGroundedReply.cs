@@ -61,6 +61,18 @@ public static class AgentGroundedReply
         return Capitalized(text).All(word => GenericNames.Contains(word) || names.Contains(word));
     }
 
+    /// <summary>
+    /// The stricter check for text written about a dish or a day: no number at all, because the card already shows the checked ones,
+    /// and proper names only from <paramref name="trusted"/>. A note that fails is dropped without the user noticing.
+    /// </summary>
+    public static bool IsGroundedNote(string? note, string trusted, int maxLength)
+    {
+        var text = (note ?? "").Trim();
+        if (text.Length == 0 || text.Length > maxLength || text.Any(char.IsDigit) || !IsWellFormed(text) || Unbacked.IsMatch(Plain(text))) return false;
+        var names = Words(trusted).Split(' ').ToHashSet();
+        return Capitalized(text).All(word => GenericNames.Contains(word) || names.Contains(word));
+    }
+
     private static bool IsWellFormed(string text) =>
         // Tiếng Việt có dấu là dấu hiệu model trả lời đúng ngôn ngữ; câu tiếng Anh hay câu nháp không bao giờ tới người dùng.
         text.Any(character => character > 127 && char.IsLetter(character)) && !text.Any(character => char.IsControl(character) && character != '\n') &&

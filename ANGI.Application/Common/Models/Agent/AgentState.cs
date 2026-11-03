@@ -83,7 +83,13 @@ public sealed record AgentCandidateGrant(short? DayNumber, string? MealSlot, int
 /// <summary>Full immutable itinerary and trusted provenance, independent of any saved roadmap.</summary>
 public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCandidateGrant[] Grants,
     long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
-    AgentItem[]? RetainedItems = null);
+    AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null);
+
+/// <summary>Model-worded text about one dish in a preview; shown only after AgentProposalNotes checked it. Never saved to the roadmap.</summary>
+public sealed record AgentDishNote(int DishId, string? Intro, string? Reason);
+
+/// <summary>Model-worded conclusion about one day of a preview, checked the same way.</summary>
+public sealed record AgentDaySummary(short DayNumber, string Summary);
 
 /// <summary>Explicit mutation scope; null day and meal mean the whole trip.</summary>
 public sealed record AgentScope(short? DayNumber = null, string? MealSlot = null)
@@ -123,6 +129,8 @@ public sealed class AgentContext
     /// <summary>The rest of each ranked list, never sent to the model; only the backend uses it to replace an avoidable repeat.</summary>
     public List<AgentCandidateGrant> ReserveGrants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
+    /// <summary>The model's wording for the preview this turn produced, for AgentProposalNotes to check against the final dishes.</summary>
+    public AgentOutput? PreviewOutput { get; set; }
     /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
     public List<AgentMealCoverage> MealCoverage { get; } = [];
     public string? RepairFeedback { get; set; }
@@ -188,6 +196,8 @@ public sealed record AgentOutput
     public AgentScope Scope { get; init; } = new();
     public AgentItem[] Items { get; init; } = [];
     public AgentChange[] Changes { get; init; } = [];
+    public AgentDishNote[]? DishNotes { get; init; } = [];
+    public AgentDaySummary[]? DaySummaries { get; init; } = [];
 }
 
 /// <summary>One bounded delta operation referencing a stable source item key.</summary>
