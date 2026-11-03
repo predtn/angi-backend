@@ -15,7 +15,7 @@ public sealed class AgentLimits
     public int LlmTimeoutSeconds { get; set; } = 60;
     public int TimeoutSeconds { get; set; } = 90;
     public int LeaseSeconds { get; set; } = 120;
-    public int MessagesPerMinute { get; set; } = 10;
+    public int MessagesPerMinute { get; set; } = 60;
     public int MessagesPerDay { get; set; } = 100;
     public int ActiveDays { get; set; } = 7;
     public int RetentionDays { get; set; } = 30;

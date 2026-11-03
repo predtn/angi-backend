@@ -148,7 +148,7 @@ public sealed class SendAgentMessageUseCaseTests
     {
         var fixture = new AgentUseCaseFixture();
         fixture.Repository.Setup(x => x.CountAttemptsAsync(3, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((int _, DateTime since, CancellationToken _) => daily ? (since == AgentUseCaseFixture.Now.AddDays(-1) ? 100 : 0) : 10);
+            .ReturnsAsync((int _, DateTime since, CancellationToken _) => daily ? (since == AgentUseCaseFixture.Now.AddDays(-1) ? 100 : 0) : 60);
         var act = () => Create(fixture).ExecuteAsync(7, Request(), CancellationToken.None);
         (await act.Should().ThrowAsync<AgentRateLimitedException>()).Which.RetryAfterSeconds.Should().Be(retryAfter);
         fixture.Llm.VerifyNoOtherCalls();
