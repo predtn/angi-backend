@@ -287,12 +287,14 @@ public sealed class VerificationsApiFactory : WebApplicationFactory<Program>
         };
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     private sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows authenticated contract requests without a database account lookup.</summary>
         public Task ExecuteAsync(int userId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>MOD-V1 stub that records the bound request and returns a sample page.</summary>
     public sealed class StubListUseCase : IListVerificationsUseCase
     {
         public ListVerificationsRequestDto? LastRequest { get; private set; }
@@ -314,6 +316,7 @@ public sealed class VerificationsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>MOD-V2 stub that returns a sample flattened review.</summary>
     private sealed class StubGetUseCase : IGetVerificationReviewUseCase
     {
         /// <summary>Returns a deterministic flattened MOD-V2 response.</summary>
@@ -328,6 +331,7 @@ public sealed class VerificationsApiFactory : WebApplicationFactory<Program>
             });
     }
 
+    /// <summary>MOD-V3 stub that records the route id and body and returns a sample result.</summary>
     public sealed class StubReviewUseCase : IReviewVerificationUseCase
     {
         public long? LastVerificationId { get; private set; }

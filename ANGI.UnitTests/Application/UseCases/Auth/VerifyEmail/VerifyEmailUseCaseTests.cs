@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
 {
+    /// <summary>Verifies VerifyEmailUseCase activates an account only for a valid, unused, unexpired verification token.</summary>
     public sealed class VerifyEmailUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 11, 3, 0, 0, DateTimeKind.Utc);
@@ -272,6 +273,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
             return new VerifyEmailRequestDto { Token = "raw-token" };
         }
 
+        /// <summary>Clock fixed at one instant so the token expiry boundary can be tested exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

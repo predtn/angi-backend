@@ -4,10 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Account;
 
+/// <summary>Verifies UpdateProfileRequestDtoValidator enforces the profile field length limits.</summary>
 public sealed class UpdateProfileRequestDtoValidatorTests
 {
     private readonly UpdateProfileRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate with empty display name; should have validation error.
+    /// <summary>Verify Validate with empty display name; should have validation error.</summary>
     [Fact]
     public void Validate_WithEmptyDisplayName_ShouldHaveValidationError()
     {
@@ -17,6 +20,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.DisplayName));
     }
 
+    // TEST-02: Verify Validate with short display name; should have validation error.
+    /// <summary>Verify Validate with short display name; should have validation error.</summary>
     [Fact]
     public void Validate_WithShortDisplayName_ShouldHaveValidationError()
     {
@@ -26,6 +31,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.DisplayName));
     }
 
+    // TEST-03: Verify Validate with long display name; should have validation error.
+    /// <summary>Verify Validate with long display name; should have validation error.</summary>
     [Fact]
     public void Validate_WithLongDisplayName_ShouldHaveValidationError()
     {
@@ -35,6 +42,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.DisplayName));
     }
 
+    // TEST-04: Verify Validate with too long phone; should have validation error.
+    /// <summary>Verify Validate with too long phone; should have validation error.</summary>
     [Fact]
     public void Validate_WithTooLongPhone_ShouldHaveValidationError()
     {
@@ -44,6 +53,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.Phone));
     }
 
+    // TEST-05: Verify Validate with too long bio; should have validation error.
+    /// <summary>Verify Validate with too long bio; should have validation error.</summary>
     [Fact]
     public void Validate_WithTooLongBio_ShouldHaveValidationError()
     {
@@ -53,6 +64,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.Bio));
     }
 
+    // TEST-06: Verify Validate with negative avatar media id; should have validation error.
+    /// <summary>Verify Validate with negative avatar media id; should have validation error.</summary>
     [Fact]
     public void Validate_WithNegativeAvatarMediaId_ShouldHaveValidationError()
     {
@@ -62,6 +75,8 @@ public sealed class UpdateProfileRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProfileRequestDto.AvatarMediaId));
     }
 
+    // TEST-07: Verify Validate with valid fields; should pass validation.
+    /// <summary>Verify Validate with valid fields; should pass validation.</summary>
     [Fact]
     public void Validate_WithValidFields_ShouldPassValidation()
     {

@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Media;
 
+/// <summary>Verifies MediaController maps the multipart upload to the use case and returns 201.</summary>
 public sealed class MediaControllerTests
 {
     // TEST-01: Return the MEDIA-01 payload in ApiResponse with HTTP 201.

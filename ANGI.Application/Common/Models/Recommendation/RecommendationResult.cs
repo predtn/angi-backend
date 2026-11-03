@@ -9,5 +9,6 @@ namespace ANGI.Application.Common.Models.Recommendation
         Guid? RequestId,
         IReadOnlyList<int> DishIds,
         IReadOnlyList<int> IgnoredDishIds,
-        IReadOnlyList<double>? Scores = null);
+        IReadOnlyList<double>? Scores = null,
+        string? VectorSource = null);
 }

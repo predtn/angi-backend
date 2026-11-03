@@ -4,11 +4,13 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies LoginRequestDtoValidator requires a well-formed email and a password.</summary>
     public sealed class LoginRequestDtoValidatorTests
     {
         private readonly LoginRequestDtoValidator _validator = new();
 
         // TEST-01: Accept a well-formed email with a password.
+        /// <summary>Ensures a normal login request is not blocked by validation.</summary>
         [Fact]
         public void Validate_WithValidRequest_ShouldHaveNoErrors()
         {
@@ -18,6 +20,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         }
 
         // TEST-02: Reject a missing email.
+        /// <summary>Ensures the error is reported on the email field when it is missing.</summary>
         [Fact]
         public void Validate_WithEmptyEmail_ShouldFailOnEmail()
         {
@@ -27,6 +30,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         }
 
         // TEST-03: Reject an email that is not an email address.
+        /// <summary>Ensures a value that is not an email is rejected on the email field.</summary>
         [Fact]
         public void Validate_WithMalformedEmail_ShouldFailOnEmail()
         {
@@ -36,6 +40,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         }
 
         // TEST-04: Reject an email longer than users.email allows (255).
+        /// <summary>Ensures an email longer than the column allows is rejected before querying.</summary>
         [Fact]
         public void Validate_WithEmailOver255Characters_ShouldFailOnEmail()
         {
@@ -47,6 +52,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         }
 
         // TEST-05: Reject a missing password.
+        /// <summary>Ensures the error is reported on the password field when it is missing.</summary>
         [Fact]
         public void Validate_WithEmptyPassword_ShouldFailOnPassword()
         {

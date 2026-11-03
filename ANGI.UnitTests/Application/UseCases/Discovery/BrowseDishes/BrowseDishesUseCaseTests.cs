@@ -16,6 +16,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.BrowseDishes;
 
+/// <summary>Verifies BrowseDishesUseCase ranks candidates once through reco, pages the cached list by cursor and rejects invalid cursors.</summary>
 public sealed class BrowseDishesUseCaseTests
 {
     private const int TravelerId = 12;
@@ -25,6 +26,7 @@ public sealed class BrowseDishesUseCaseTests
     private readonly Mock<ICurrentUserService> _currentUserService = new();
     private readonly InMemoryCache _cache = new();
 
+    /// <summary>Creates the use case with the real validator, the in-memory list cache and the shared mocks.</summary>
     private BrowseDishesUseCase CreateUseCase() => new(
         new BrowseDishesRequestDtoValidator(),
         _dishRepository.Object,
@@ -32,16 +34,19 @@ public sealed class BrowseDishesUseCaseTests
         _cache,
         _currentUserService.Object);
 
+    /// <summary>Signs the current user in as the default traveler.</summary>
     private void AsTraveler()
     {
         _currentUserService.SetupGet(x => x.UserId).Returns(TravelerId);
         _currentUserService.SetupGet(x => x.Role).Returns("TRAVELER");
     }
 
+    /// <summary>Makes the repository return the given candidate dish ids for the 2000-candidate query.</summary>
     private void Candidates(params int[] ids) =>
         _dishRepository.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ids);
 
+    /// <summary>Makes reco return the given ranking and request id for the list context.</summary>
     private void Ranked(Guid? requestId, params int[] ids) =>
         _recommendationService.Setup(x => x.RecommendAsync(
                 It.IsAny<int?>(), It.IsAny<IReadOnlyList<int>>(), 200, RecommendationContext.List, It.IsAny<CancellationToken>()))
@@ -53,6 +58,7 @@ public sealed class BrowseDishesUseCaseTests
             .ReturnsAsync((IReadOnlyCollection<int> ids, CancellationToken _) =>
                 ids.Where(availableIds.Contains).Select(Dish).ToArray());
 
+    /// <summary>Creates a minimal available dish with its restaurant for page mapping.</summary>
     private static Dish Dish(int id) => new()
     {
         Id = id,
@@ -63,6 +69,7 @@ public sealed class BrowseDishesUseCaseTests
     };
 
     // TEST-01: Build the filter, let reco rank at most 200 of the candidates for the Traveler, return page 1 with ranks.
+    /// <summary>Ensures the first page is built from one reco ranking of the filtered candidates.</summary>
     [Fact]
     public async Task ExecuteAsync_FirstPage_ShouldRankCandidatesAndReturnRankedPage()
     {
@@ -103,6 +110,7 @@ public sealed class BrowseDishesUseCaseTests
     }
 
     // TEST-02: The next page reuses the cached list: no new candidates, no new reco call, ranks continue.
+    /// <summary>Ensures later pages are stable and cost no extra candidate query or reco call.</summary>
     [Fact]
     public async Task ExecuteAsync_WithCursor_ShouldPageTheCachedListWithoutCallingRecoAgain()
     {
@@ -126,6 +134,7 @@ public sealed class BrowseDishesUseCaseTests
     }
 
     // TEST-03: Guests and non-Traveler roles are ranked without a user id, and still page with a backend list key.
+    /// <summary>Ensures guests and other roles get unpersonalized ranking but the same paging.</summary>
     [Theory]
     [InlineData(null, null)]
     [InlineData(21, "RESTAURANT_OWNER")]
@@ -147,6 +156,7 @@ public sealed class BrowseDishesUseCaseTests
     }
 
     // TEST-04: A dish hidden or sold out since the list was ranked is skipped; the others keep their rank.
+    /// <summary>Ensures dishes that became unavailable after ranking are not shown and ranks stay consistent.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenDishIsNoLongerACandidate_ShouldSkipItAndKeepRanks()
     {
@@ -161,6 +171,7 @@ public sealed class BrowseDishesUseCaseTests
     }
 
     // TEST-05: Malformed, unknown, expired or another user's cursors are 400 INVALID_CURSOR.
+    /// <summary>Ensures a cursor cannot be forged, reused after expiry or borrowed from another user.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidCursor_ShouldThrowInvalidCursor()
     {
@@ -182,6 +193,7 @@ public sealed class BrowseDishesUseCaseTests
     }
 
     // TEST-06: Validate before anything is loaded.
+    /// <summary>Ensures an invalid filter costs no database or reco work.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidFilter_ShouldThrowValidationBeforeLoading()
     {
@@ -192,12 +204,15 @@ public sealed class BrowseDishesUseCaseTests
         _recommendationService.VerifyNoOtherCalls();
     }
 
+    /// <summary>Dictionary-backed ranked list cache so paging can be tested without Redis.</summary>
     private sealed class InMemoryCache : IRankedDishListCache
     {
         private readonly Dictionary<Guid, RankedDishList> _lists = [];
 
+        /// <summary>Stores the list under its key, replacing any earlier list.</summary>
         public void Store(RankedDishList list) => _lists[list.Key] = list;
 
+        /// <summary>Returns the list stored under the key, or null when there is none.</summary>
         public RankedDishList? Get(Guid key) => _lists.GetValueOrDefault(key);
     }
 }

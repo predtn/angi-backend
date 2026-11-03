@@ -71,6 +71,7 @@ public sealed class RecoOutboxSender : IOutboxSender
             OutboxEventType.DishUpserted => JsonPost("dishes/upsert", message.Payload),
             OutboxEventType.DishDeactivated => Deactivate(message.Payload),
             OutboxEventType.FeedbackCreated => JsonPost("feedback", message.Payload),
+            OutboxEventType.AgentImpressionRecorded => JsonPost("impressions", message.Payload),
             _ => throw new InvalidOperationException($"Unknown event type {message.EventType}.")
         };
         request.Headers.Add("X-Api-Key", _settings.ApiKey);

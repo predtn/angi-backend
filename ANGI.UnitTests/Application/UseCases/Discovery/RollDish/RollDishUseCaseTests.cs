@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.RollDish;
 
+/// <summary>Verifies RollDishUseCase draws a dish from reco's top list by score, stores the roll and reports the impression.</summary>
 public sealed class RollDishUseCaseTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 3, 0, 0, TimeSpan.Zero);
@@ -41,6 +42,7 @@ public sealed class RollDishUseCaseTests
             .ReturnsAsync(1);
     }
 
+    /// <summary>Creates the use case with the real validator, a fixed clock and the given random source.</summary>
     private RollDishUseCase CreateUseCase(Random random) => new(
         new RollDishRequestDtoValidator(),
         _dishRepository.Object,
@@ -50,11 +52,13 @@ public sealed class RollDishUseCaseTests
         new FixedTimeProvider(Now),
         random);
 
+    /// <summary>Makes reco return the given request id, ranking and optional scores.</summary>
     private void RecoReturns(Guid? requestId, int[] dishIds, double[]? scores) =>
         _recommendationService.Setup(x => x.RecommendAsync(
                 It.IsAny<int?>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<int?>(), It.IsAny<RecommendationContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RecommendationResult(requestId, dishIds, [], scores));
 
+    /// <summary>Creates a minimal dish whose restaurant has coordinates for distance checks.</summary>
     private static Dish Dish(int id) => new()
     {
         Id = id,
@@ -63,6 +67,7 @@ public sealed class RollDishUseCaseTests
     };
 
     // TEST-01: Build the candidate filter from the request (3 km default radius), ask reco for its top 10 with context = roll.
+    /// <summary>Ensures the roll uses the documented filter, default radius and reco roll context.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldFilterCandidatesAndAskRecoForTopTenRoll()
     {
@@ -101,6 +106,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-02: The draw is weighted by recommend_score: with scores 1, 3 the point 0.5 of 4 lands on the second dish.
+    /// <summary>Ensures a higher reco score gives a proportionally higher chance of being rolled.</summary>
     [Theory]
     [InlineData(0.2, 1)]
     [InlineData(0.5, 2)]
@@ -116,6 +122,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-03: Without scores (reco fallback) or with no positive score, every dish of the top list is equally likely.
+    /// <summary>Ensures the roll stays fair when reco provides no usable scores.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -132,6 +139,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-04: Store the roll with reco's request id, report only the rolled dish to reco and return the stored id.
+    /// <summary>Ensures only the rolled dish is reported to reco and the stored roll id is returned.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldStoreRollAndReportImpression()
     {
@@ -149,6 +157,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-05: When reco failed (request id null) the roll is still stored but nothing is reported to reco.
+    /// <summary>Ensures a fallback roll is kept but never reported against a reco request that does not exist.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutRequestId_ShouldNotReportImpression()
     {
@@ -163,6 +172,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-06: distanceKm is the rounded distance to the sent point, and null without coordinates.
+    /// <summary>Ensures distance is shown only when the caller sent a location.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldReturnDistanceOnlyWithCoordinates()
     {
@@ -177,6 +187,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-07: No candidate, an empty reco list, or a dish gone before loading all end in 404 NO_CANDIDATE without a roll.
+    /// <summary>Ensures every empty step ends in NO_CANDIDATE without storing a roll.</summary>
     [Theory]
     [InlineData("candidates")]
     [InlineData("reco")]
@@ -203,6 +214,7 @@ public sealed class RollDishUseCaseTests
     }
 
     // TEST-08: Reject an invalid request before touching the database or reco.
+    /// <summary>Ensures an invalid request costs no database or reco work.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidation()
     {
@@ -217,8 +229,10 @@ public sealed class RollDishUseCaseTests
     {
         public int? LastMaxValue { get; private set; }
 
+        /// <summary>Returns the configured draw so weighted picks are deterministic.</summary>
         public override double NextDouble() => nextDouble;
 
+        /// <summary>Records the requested range and returns the configured index so uniform picks are deterministic.</summary>
         public override int Next(int maxValue)
         {
             LastMaxValue = maxValue;
@@ -226,8 +240,10 @@ public sealed class RollDishUseCaseTests
         }
     }
 
+    /// <summary>Clock fixed at one instant so the stored roll time is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

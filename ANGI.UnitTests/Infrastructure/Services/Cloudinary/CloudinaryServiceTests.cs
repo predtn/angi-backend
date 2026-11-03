@@ -6,9 +6,11 @@ using Microsoft.Extensions.Configuration;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Cloudinary;
 
+/// <summary>Verifies CloudinaryService validates uploads, maps provider results and builds public or signed delivery URLs.</summary>
 public class CloudinaryServiceTests
 {
     // TEST-01: Reject a null configuration dependency. Area: Cloudinary service configuration.
+    /// <summary>Ensures the service cannot be created without configuration.</summary>
     [Fact]
     public void Constructor_RejectsNullConfiguration()
     {
@@ -17,6 +19,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-02: Reject any missing required Cloudinary credential. Area: Cloudinary service configuration.
+    /// <summary>Ensures a missing credential fails at startup instead of on the first upload.</summary>
     [Theory]
     [InlineData("Cloudinary:CloudName")]
     [InlineData("Cloudinary:ApiKey")]
@@ -31,6 +34,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-03: Reject a null upload stream before contacting Cloudinary. Area: Upload input validation.
+    /// <summary>Ensures a missing stream never reaches Cloudinary.</summary>
     [Fact]
     public async Task UploadAsync_RejectsNullFileBeforeProviderCall()
     {
@@ -43,6 +47,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-04: Reject a blank file name before contacting Cloudinary. Area: Upload input validation.
+    /// <summary>Ensures a blank file name never reaches Cloudinary.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -58,6 +63,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-05: Reject a blank MIME type before contacting Cloudinary. Area: Upload input validation.
+    /// <summary>Ensures a blank MIME type never reaches Cloudinary.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -73,6 +79,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-06: Reject an empty folder after trimming separators and whitespace. Area: Upload input validation.
+    /// <summary>Ensures uploads always land in a real folder.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("/")]
@@ -90,6 +97,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-07: Honor caller cancellation before contacting Cloudinary. Area: Upload cancellation handling.
+    /// <summary>Ensures a cancelled request does not start an upload.</summary>
     [Fact]
     public async Task UploadAsync_PropagatesCallerCancellationBeforeProviderCall()
     {
@@ -105,6 +113,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-08: Map a public image upload to the image endpoint and a persistent storage key. Area: Image upload mapping.
+    /// <summary>Ensures images use the image endpoint and return a persistent storage key.</summary>
     [Fact]
     public async Task UploadAsync_MapsPublicImageUploadAndResult()
     {
@@ -132,6 +141,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-09: Map a private PDF upload to the raw authenticated endpoint. Area: Document upload mapping.
+    /// <summary>Ensures PDFs are stored privately behind authenticated delivery.</summary>
     [Fact]
     public async Task UploadAsync_MapsPrivatePdfUploadAndResult()
     {
@@ -158,6 +168,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-10: Treat media types as case-insensitive at the provider boundary.
+    /// <summary>Ensures letter case cannot route a PDF to the public image endpoint.</summary>
     [Fact]
     public async Task UploadAsync_WithMixedCasePdfMimeType_ShouldUseRawUpload()
     {
@@ -181,6 +192,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-11: Convert an unexpected Cloudinary failure into the application service-unavailable error. Area: Provider error handling.
+    /// <summary>Ensures provider failures surface as the documented 503.</summary>
     [Fact]
     public async Task UploadAsync_ConvertsProviderExceptionToServiceUnavailable()
     {
@@ -198,6 +210,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-12: Preserve cancellation raised while the provider call is running. Area: Upload cancellation handling.
+    /// <summary>Ensures cancellation during the upload is not reported as an outage.</summary>
     [Fact]
     public async Task UploadAsync_PropagatesCancellationRaisedByProvider()
     {
@@ -215,6 +228,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-13: Reject provider responses that contain errors or omit required asset metadata. Area: Provider response validation.
+    /// <summary>Ensures an incomplete provider response is never stored as media.</summary>
     [Theory]
     [MemberData(nameof(InvalidImageResults))]
     public async Task UploadAsync_RejectsInvalidProviderResult(UploadResult providerResult)
@@ -230,6 +244,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-14: Reject a provider response whose asset URL is not absolute HTTPS. Area: Provider response validation.
+    /// <summary>Ensures stored media URLs are always absolute HTTPS.</summary>
     [Theory]
     [InlineData("http://cdn.example.com/photo.png")]
     [InlineData("relative/photo.png")]
@@ -252,6 +267,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-15: Build a stable HTTPS delivery URL for a public image key. Area: Public media URL generation.
+    /// <summary>Ensures public image URLs are stable for caching.</summary>
     [Fact]
     public void GetUrl_BuildsStablePublicImageUrl()
     {
@@ -263,6 +279,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-16: Build a stable HTTPS delivery URL for a public raw document key. Area: Public media URL generation.
+    /// <summary>Ensures public document URLs are stable for caching.</summary>
     [Fact]
     public void GetUrl_BuildsStablePublicRawUrl()
     {
@@ -274,6 +291,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-17: Create a signed URL that expires in about five minutes for private media. Area: Private media URL generation.
+    /// <summary>Ensures private documents are only reachable through short-lived signed URLs.</summary>
     [Theory]
     [InlineData("raw/authenticated/angi/verification_doc/example.pdf")]
     [InlineData("image/authenticated/angi/avatar/example.png")]
@@ -290,6 +308,7 @@ public class CloudinaryServiceTests
     }
 
     // TEST-18: Reject malformed or unsupported storage keys. Area: Media storage-key validation.
+    /// <summary>Ensures malformed storage keys cannot produce delivery URLs.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("invalid")]
@@ -304,6 +323,7 @@ public class CloudinaryServiceTests
         Assert.ThrowsAny<ArgumentException>(() => service.GetUrl(storageKey));
     }
 
+    /// <summary>Supplies provider results that carry an error or miss required asset metadata.</summary>
     public static TheoryData<UploadResult> InvalidImageResults() => new()
     {
         new ImageUploadResult
@@ -327,6 +347,7 @@ public class CloudinaryServiceTests
         }
     };
 
+    /// <summary>Creates the service with valid test credentials and an optional clock.</summary>
     private static CloudinaryService CreateService(TimeProvider? timeProvider = null)
     {
         var configuration = new ConfigurationBuilder()
@@ -335,6 +356,7 @@ public class CloudinaryServiceTests
         return new CloudinaryService(configuration, timeProvider);
     }
 
+    /// <summary>Returns a complete set of placeholder Cloudinary settings.</summary>
     private static Dictionary<string, string?> ValidConfigurationValues() => new()
     {
         ["Cloudinary:CloudName"] = "test-cloud",
@@ -342,11 +364,14 @@ public class CloudinaryServiceTests
         ["Cloudinary:ApiSecret"] = "unit-test-placeholder"
     };
 
+    /// <summary>Clock fixed at one instant so signed URL expiry is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 
+    /// <summary>Cloudinary client double that records upload parameters and returns configured results or failures.</summary>
     private sealed class FakeCloudinaryClient : ICloudinaryClient
     {
         public UploadResult ImageResult { get; init; } = new ImageUploadResult();
@@ -359,6 +384,7 @@ public class CloudinaryServiceTests
         public int RawUploadCallCount { get; private set; }
         public int UploadCallCount => ImageUploadCallCount + RawUploadCallCount;
 
+        /// <summary>Records the image upload parameters and completes with the configured image result.</summary>
         public Task<UploadResult> UploadImageAsync(
             ImageUploadParams parameters,
             CancellationToken cancellationToken)
@@ -368,6 +394,7 @@ public class CloudinaryServiceTests
             return CompleteUpload(ImageResult);
         }
 
+        /// <summary>Records the raw upload parameters and completes with the configured raw result.</summary>
         public Task<UploadResult> UploadRawAsync(
             RawUploadParams parameters,
             CancellationToken cancellationToken)
@@ -377,6 +404,7 @@ public class CloudinaryServiceTests
             return CompleteUpload(RawResult);
         }
 
+        /// <summary>Not used by these tests; throws if called.</summary>
         public string DownloadPrivate(
             string publicId,
             string? format,
@@ -384,9 +412,11 @@ public class CloudinaryServiceTests
             long expiresAt,
             string resourceType) => throw new NotSupportedException();
 
+        /// <summary>Not used by these tests; throws if called.</summary>
         public string BuildPublicUrl(string resourceType, string type, string publicId) =>
             throw new NotSupportedException();
 
+        /// <summary>Runs the before-upload hook, then returns the result or the configured exception.</summary>
         private Task<UploadResult> CompleteUpload(UploadResult result)
         {
             BeforeUpload?.Invoke();

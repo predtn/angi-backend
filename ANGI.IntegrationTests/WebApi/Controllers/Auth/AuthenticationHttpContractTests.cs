@@ -21,7 +21,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace ANGI.IntegrationTests.WebApi.Controllers
+namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
 {
     /// <summary>Exercises the AuthenticationController through the complete HTTP pipeline.</summary>
     public sealed class AuthenticationHttpContractTests : IClassFixture<AuthenticationApiFactory>
@@ -44,7 +44,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             "/api/v1/auth/reset-password"
         };
 
-        // TEST-11: Reject a missing JSON body with the canonical validation envelope.
+        // TEST-01: Reject a missing JSON body with the canonical validation envelope.
         /// <summary>Verifies body-required Auth endpoints reject an absent request payload.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
@@ -56,7 +56,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-12: Reject malformed JSON with the canonical validation envelope.
+        // TEST-02: Reject malformed JSON with the canonical validation envelope.
         /// <summary>Verifies malformed Auth JSON is converted to the standard validation error.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
@@ -70,7 +70,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-13: Reject a literal null JSON body with the canonical validation envelope.
+        // TEST-03: Reject a literal null JSON body with the canonical validation envelope.
         /// <summary>Verifies a JSON null cannot bypass required Auth request models.</summary>
         [Theory]
         [MemberData(nameof(BodyEndpoints))]
@@ -83,7 +83,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
 
-        // TEST-14: Map documented AUTH-02 application failures to their HTTP envelopes.
+        // TEST-04: Map documented AUTH-02 application failures to their HTTP envelopes.
         /// <summary>Verifies every AUTH-02 token failure keeps its documented status and error code.</summary>
         [Theory]
         [InlineData("invalid-token", HttpStatusCode.BadRequest, "TOKEN_INVALID")]
@@ -102,7 +102,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, expectedCode);
         }
 
-        // TEST-15: Map every documented AUTH-09 token failure to its HTTP envelope.
+        // TEST-05: Map every documented AUTH-09 token failure to its HTTP envelope.
         /// <summary>Verifies reset-token failures preserve the AUTH-09 status and error code.</summary>
         [Theory]
         [InlineData("invalid-token", "TOKEN_INVALID")]
@@ -119,7 +119,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, expectedCode);
         }
 
-        // TEST-16: Map email-provider failure to the documented 503 envelope.
+        // TEST-06: Map email-provider failure to the documented 503 envelope.
         /// <summary>Verifies an email delivery failure is wrapped as SERVICE_UNAVAILABLE.</summary>
         [Fact]
         public async Task ResendVerificationEmail_WhenEmailProviderFails_ShouldReturnServiceUnavailableEnvelope()
@@ -132,7 +132,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(response, "SERVICE_UNAVAILABLE");
         }
 
-        // TEST-17: Return 429, Retry-After, and the canonical envelope on a repeated sensitive request.
+        // TEST-07: Return 429, Retry-After, and the canonical envelope on a repeated sensitive request.
         /// <summary>Verifies AUTH-03 and AUTH-08 share the documented per-email fixed-window limit.</summary>
         [Theory]
         [InlineData("/api/v1/auth/verify-email/resend")]
@@ -156,7 +156,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             await AssertErrorEnvelope(second, "TOO_MANY_REQUESTS");
         }
 
-        // TEST-18: Admit a sensitive email request after the configured fixed window replenishes.
+        // TEST-08: Admit a sensitive email request after the configured fixed window replenishes.
         /// <summary>Verifies AUTH-03 and AUTH-08 replenish their permits after the configured fixed window.</summary>
         [Theory]
         [InlineData("/api/v1/auth/verify-email/resend")]
@@ -179,7 +179,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             replenished.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // TEST-19: Expose implemented Auth request and success schemas to API Explorer/OpenAPI.
+        // TEST-09: Expose implemented Auth request and success schemas to API Explorer/OpenAPI.
         /// <summary>Verifies Scalar can discover each implemented Auth request and success schema.</summary>
         [Fact]
         public void ApiExplorer_ShouldExposeAuthenticationVerificationSchemas()
@@ -207,7 +207,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
                 "api/v1/auth/google");
         }
 
-        // TEST-20: Map both AUTH-05 application errors to their documented HTTP envelopes.
+        // TEST-10: Map both AUTH-05 application errors to their documented HTTP envelopes.
         /// <summary>Verifies Google token and first-login role failures preserve their status and error code.</summary>
         [Theory]
         [InlineData("invalid-token", "TRAVELER", HttpStatusCode.Unauthorized, "GOOGLE_TOKEN_INVALID")]
@@ -343,6 +343,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             });
         }
 
+        /// <summary>AUTH-02 stub that returns a fixed outcome for each test token.</summary>
         private sealed class StubVerifyEmailUseCase : IVerifyEmailUseCase
         {
             /// <summary>Returns deterministic AUTH-02 outcomes for HTTP error mapping tests.</summary>
@@ -363,6 +364,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             }
         }
 
+        /// <summary>AUTH-03 stub that returns success or an email delivery failure.</summary>
         private sealed class StubResendVerificationEmailUseCase : IResendVerificationEmailUseCase
         {
             /// <summary>Returns deterministic AUTH-03 success and delivery-failure outcomes.</summary>
@@ -377,12 +379,14 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             }
         }
 
+        /// <summary>AUTH-08 stub that always succeeds without email or database access.</summary>
         private sealed class StubForgotPasswordUseCase : IForgotPasswordUseCase
         {
             /// <summary>Returns a deterministic AUTH-08 success without contacting email or PostgreSQL.</summary>
             public Task ExecuteAsync(ForgotPasswordRequestDto request, CancellationToken ct) => Task.CompletedTask;
         }
 
+        /// <summary>AUTH-09 stub that returns a fixed outcome for each test token.</summary>
         private sealed class StubResetPasswordUseCase : IResetPasswordUseCase
         {
             /// <summary>Returns deterministic AUTH-09 outcomes for HTTP error mapping tests.</summary>
@@ -397,6 +401,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers
             }
         }
 
+        /// <summary>AUTH-05 stub that returns a fixed outcome for each test token without calling Google.</summary>
         private sealed class StubGoogleLoginUseCase : IGoogleLoginUseCase
         {
             /// <summary>Returns deterministic AUTH-05 outcomes without contacting Google or PostgreSQL.</summary>

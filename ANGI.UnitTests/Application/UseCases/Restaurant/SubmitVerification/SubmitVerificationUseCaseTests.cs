@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.SubmitVerification;
 
+/// <summary>Verifies SubmitVerificationUseCase creates a pending verification with owned private documents for an eligible restaurant.</summary>
 public sealed class SubmitVerificationUseCaseTests
 {
     private static readonly DateTime SubmittedAt = new(2026, 10, 17, 3, 0, 0, DateTimeKind.Utc);

@@ -170,6 +170,7 @@ public sealed class RoadmapGenerationEndToEndTests : IClassFixture<PostgresApiFa
         await ShouldFailAsync(foreignRoadmap, HttpStatusCode.NotFound, "ROADMAP_NOT_FOUND");
     }
 
+    /// <summary>Ids of the public dish and the extra dishes seeded for generation.</summary>
     private sealed record Seed(int PublicDishId, IReadOnlyList<int> ExtraDishIds);
 
     /// <summary>The public dish of <see cref="DiscoverySeed"/> plus three more dishes of the same restaurant.</summary>
@@ -188,6 +189,7 @@ public sealed class RoadmapGenerationEndToEndTests : IClassFixture<PostgresApiFa
         return new Seed(publicDish.DishId, extraIds);
     }
 
+    /// <summary>Creates a one-day pinned roadmap through HTTP and returns its detail.</summary>
     private static async Task<RoadmapDetailDto> CreatePinnedRoadmapAsync(HttpClient client)
     {
         using var response = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
@@ -222,6 +224,7 @@ public sealed class RoadmapGenerationEndToEndTests : IClassFixture<PostgresApiFa
         }
     }
 
+    /// <summary>Reads the roadmap detail through HTTP.</summary>
     private static async Task<RoadmapDetailDto> GetDetailAsync(HttpClient client, long roadmapId)
     {
         using var response = await client.GetAsync($"/api/v1/roadmaps/{roadmapId}");
@@ -229,6 +232,7 @@ public sealed class RoadmapGenerationEndToEndTests : IClassFixture<PostgresApiFa
         return await SuccessDataAsync<RoadmapDetailDto>(response);
     }
 
+    /// <summary>Asserts the response has the given status and errorCode.</summary>
     private static async Task ShouldFailAsync(HttpResponseMessage response, HttpStatusCode status, string errorCode)
     {
         response.StatusCode.Should().Be(status, await response.Content.ReadAsStringAsync());

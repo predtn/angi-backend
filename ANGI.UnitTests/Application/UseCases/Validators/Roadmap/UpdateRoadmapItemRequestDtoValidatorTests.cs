@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies UpdateRoadmapItemRequestDtoValidator accepts partial patches and rejects invalid ids and meal slots.</summary>
 public sealed class UpdateRoadmapItemRequestDtoValidatorTests
 {
     private readonly UpdateRoadmapItemRequestDtoValidator _validator = new();

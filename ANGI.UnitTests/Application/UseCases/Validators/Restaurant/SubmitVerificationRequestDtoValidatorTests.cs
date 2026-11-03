@@ -5,6 +5,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies SubmitVerificationRequestDtoValidator checks legal fields, length limits and the required documents.</summary>
 public sealed class SubmitVerificationRequestDtoValidatorTests
 {
     private readonly SubmitVerificationRequestDtoValidator _validator = new();

@@ -10,18 +10,22 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Notification;
 
+/// <summary>Verifies MeNotificationController requires authorization and wraps notification results in ApiResponse.</summary>
 public sealed class MeNotificationControllerTests
 {
     private readonly Mock<IGetNotificationsUseCase> _getNotificationsUseCase = new();
     private readonly Mock<IGetUnreadNotificationCountUseCase> _getUnreadNotificationCountUseCase = new();
     private readonly Mock<IMarkNotificationAsReadUseCase> _markNotificationAsReadUseCase = new();
 
+    /// <summary>Creates the controller over the shared notification use case mocks.</summary>
     private MeNotificationController CreateController() =>
         new(
             _getNotificationsUseCase.Object,
             _getUnreadNotificationCountUseCase.Object,
             _markNotificationAsReadUseCase.Object);
 
+    // TEST-01: Verify Controller should require authorization.
+    /// <summary>Verify Controller should require authorization.</summary>
     [Fact]
     public void Controller_ShouldRequireAuthorization()
     {
@@ -29,6 +33,8 @@ public sealed class MeNotificationControllerTests
         attributes.Should().NotBeEmpty();
     }
 
+    // TEST-02: Verify GetNotifications should call use case and return ok.
+    /// <summary>Verify GetNotifications should call use case and return ok.</summary>
     [Fact]
     public async Task GetNotifications_ShouldCallUseCaseAndReturnOk()
     {
@@ -73,6 +79,8 @@ public sealed class MeNotificationControllerTests
         apiResponse.Data.Should().BeEquivalentTo(responseData);
     }
 
+    // TEST-03: Verify GetUnreadCount should call use case and return ok.
+    /// <summary>Verify GetUnreadCount should call use case and return ok.</summary>
     [Fact]
     public async Task GetUnreadCount_ShouldCallUseCaseAndReturnOk()
     {
@@ -97,6 +105,8 @@ public sealed class MeNotificationControllerTests
         apiResponse.Data.Should().BeEquivalentTo(responseData);
     }
 
+    // TEST-04: Verify MarkAsRead with valid request; returns ok with api response.
+    /// <summary>Verify MarkAsRead with valid request; returns ok with api response.</summary>
     [Fact]
     public async Task MarkAsRead_WithValidRequest_ReturnsOkWithApiResponse()
     {

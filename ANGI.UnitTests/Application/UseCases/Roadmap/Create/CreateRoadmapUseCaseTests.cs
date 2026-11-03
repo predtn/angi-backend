@@ -12,6 +12,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Create;
 
+/// <summary>Verifies CreateRoadmapUseCase creates a blank roadmap with consecutive days and the documented origin defaults.</summary>
 public sealed class CreateRoadmapUseCaseTests
 {
     // TEST-01: Create consecutive empty days and return the complete blank-roadmap detail.

@@ -10,15 +10,18 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetRestaurantReviews;
 
+/// <summary>Verifies GetRestaurantReviewsUseCase returns paged public reviews with the rating breakdown.</summary>
 public sealed class GetRestaurantReviewsUseCaseTests
 {
     private readonly Mock<IRestaurantRepository> _repositoryMock = new();
     private readonly GetRestaurantReviewsRequestDtoValidator _validator = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository mock.</summary>
     private GetRestaurantReviewsUseCase CreateUseCase() =>
         new(_repositoryMock.Object, _validator);
 
     // TEST-01: Happy Path - Paginated reviews and rating breakdown returned
+    /// <summary>Ensures reviews and the rating breakdown are returned for an existing restaurant.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantExists_ShouldReturnRestaurantReviews()
     {
@@ -91,6 +94,7 @@ public sealed class GetRestaurantReviewsUseCaseTests
     }
 
     // TEST-02: Exception Path - Restaurant does not exist, throw 404 RESTAURANT_NOT_FOUND
+    /// <summary>Ensures a missing restaurant returns RESTAURANT_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantNotFound_ShouldThrowNotFoundException()
     {

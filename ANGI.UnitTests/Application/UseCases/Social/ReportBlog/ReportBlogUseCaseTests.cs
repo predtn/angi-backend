@@ -33,9 +33,12 @@ public sealed class ReportBlogUseCaseTests
                 ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, media and unit-of-work mocks.</summary>
     private ReportBlogUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
+    // TEST-01: Verify ExecuteAsync happy path; should create report.
+    /// <summary>Verify ExecuteAsync happy path; should create report.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReport()
     {
@@ -90,6 +93,8 @@ public sealed class ReportBlogUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: Verify ExecuteAsync when reporting own content; should throw bad request exception.
+    /// <summary>Verify ExecuteAsync when reporting own content; should throw bad request exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReportingOwnContent_ShouldThrowBadRequestException()
     {
@@ -118,6 +123,8 @@ public sealed class ReportBlogUseCaseTests
         ex.Which.ErrorCode.Should().Be("CANNOT_REPORT_OWN_CONTENT");
     }
 
+    // TEST-03: Verify ExecuteAsync when report already pending; should throw conflict exception.
+    /// <summary>Verify ExecuteAsync when report already pending; should throw conflict exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReportAlreadyPending_ShouldThrowConflictException()
     {
@@ -148,6 +155,8 @@ public sealed class ReportBlogUseCaseTests
         ex.Which.ErrorCode.Should().Be("REPORT_ALREADY_PENDING");
     }
 
+    // TEST-04: Verify ExecuteAsync when blog does not exist; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when blog does not exist; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -168,6 +177,8 @@ public sealed class ReportBlogUseCaseTests
         ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
     }
 
+    // TEST-05: Verify ExecuteAsync when reason is other without description; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when reason is other without description; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReasonIsOtherWithoutDescription_ShouldThrowValidationException()
     {
@@ -186,6 +197,8 @@ public sealed class ReportBlogUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
+    // TEST-06: Evidence media not uploaded by the reporter throws a validation error and no report is created.
+    /// <summary>Prevents attaching someone else's uploads as report evidence.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
     {

@@ -15,6 +15,7 @@ namespace ANGI.UnitTests.WebApi.Controllers.Social;
 public sealed class MeBlogControllerTests
 {
     // TEST-01: Require TRAVELER role on MeBlogController.
+    /// <summary>Ensures only travelers can list their own blogs.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -27,6 +28,7 @@ public sealed class MeBlogControllerTests
     }
 
     // TEST-02: Delegate to use case and return 200 OK wrapped in ApiResponse.
+    /// <summary>Ensures the personal blog page is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetMyBlogs_ShouldDelegateAndReturnOkResponse()
     {

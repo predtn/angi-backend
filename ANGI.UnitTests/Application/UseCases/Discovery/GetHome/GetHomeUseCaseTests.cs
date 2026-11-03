@@ -17,6 +17,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.GetHome;
 
+/// <summary>Verifies GetHomeUseCase builds the trending, top restaurant, blog and recommended blocks of the home screen.</summary>
 public sealed class GetHomeUseCaseTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 3, 0, 0, TimeSpan.Zero);
@@ -44,6 +45,7 @@ public sealed class GetHomeUseCaseTests
             .ReturnsAsync(new RecommendationResult(null, [], []));
     }
 
+    /// <summary>Creates the use case with the real validator, a fixed clock and the shared repository and reco mocks.</summary>
     private GetHomeUseCase CreateUseCase() => new(
         new GetHomeRequestDtoValidator(),
         _dishRepository.Object,
@@ -53,6 +55,7 @@ public sealed class GetHomeUseCaseTests
         _currentUserService.Object,
         new FixedTimeProvider(Now));
 
+    /// <summary>Creates a minimal dish with its restaurant for block mapping.</summary>
     private static Dish Dish(int id) => new()
     {
         Id = id,
@@ -61,6 +64,7 @@ public sealed class GetHomeUseCaseTests
     };
 
     // TEST-01: Trending keeps the repository order without ranks, over the 7-day window, filtered by province.
+    /// <summary>Ensures trending keeps the repository order over the 7-day window and is not ranked.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldReturnTrendingInOrderWithoutRank()
     {
@@ -73,6 +77,7 @@ public sealed class GetHomeUseCaseTests
     }
 
     // TEST-02: Top restaurants reuse REST-01 sorted by rating; blogs take the 30-day window and become BlogCards.
+    /// <summary>Ensures the restaurant and blog blocks reuse the documented queries and card shapes.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldBuildTopRestaurantsAndFeaturedBlogs()
     {
@@ -112,6 +117,7 @@ public sealed class GetHomeUseCaseTests
     }
 
     // TEST-03: A Traveler's recommended block goes through reco with context = home and keeps reco's order and request id.
+    /// <summary>Ensures a traveler's recommended block follows reco's order and keeps its request id for impressions.</summary>
     [Fact]
     public async Task ExecuteAsync_ForTraveler_ShouldRankRecommendedThroughReco()
     {
@@ -132,6 +138,7 @@ public sealed class GetHomeUseCaseTests
     }
 
     // TEST-04: Guests and other roles are ranked without a user id.
+    /// <summary>Ensures guests and other roles never get personalized ranking.</summary>
     [Theory]
     [InlineData(null, null)]
     [InlineData(21, "RESTAURANT_OWNER")]
@@ -147,6 +154,7 @@ public sealed class GetHomeUseCaseTests
     }
 
     // TEST-05: Reject a limit outside 1..50 before loading anything.
+    /// <summary>Ensures an out-of-range limit costs no database or reco work.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(51)]
@@ -158,8 +166,10 @@ public sealed class GetHomeUseCaseTests
         _dishRepository.Verify(x => x.GetTrendingIdsAsync(It.IsAny<string?>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>Clock fixed at one instant so the 7-day and 30-day windows are deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

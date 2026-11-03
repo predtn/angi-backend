@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Social.DeleteBlog;
 
+/// <summary>Verifies DeleteBlogUseCase soft-deletes only the caller's own blog and rejects every other target.</summary>
 public sealed class DeleteBlogUseCaseTests
 {
     // TEST-01: Soft-delete an owned blog at the injected UTC time and commit exactly once.
@@ -120,6 +121,7 @@ public sealed class DeleteBlogUseCaseTests
             transaction);
     }
 
+    /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
     private sealed record Fixture(
         DeleteBlogUseCase UseCase,
         Mock<IBlogRepository> Repository,

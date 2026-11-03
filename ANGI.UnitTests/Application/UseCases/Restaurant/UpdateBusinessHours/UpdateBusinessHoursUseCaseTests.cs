@@ -12,6 +12,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.UpdateBusinessHours;
 
+/// <summary>Verifies UpdateBusinessHoursUseCase replaces the weekly schedule and detects real overlaps, including overnight ones.</summary>
 public sealed class UpdateBusinessHoursUseCaseTests
 {
     // Monday 2026-10-12 10:00 in Vietnam (03:00 UTC).
@@ -28,6 +29,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
         _currentUserService.SetupGet(x => x.UserId).Returns(OwnerId);
     }
 
+    /// <summary>Creates the use case with the real validator and a clock fixed on Monday 10:00.</summary>
     private UpdateBusinessHoursUseCase CreateUseCase() => new(
         new UpdateBusinessHoursRequestDtoValidator(),
         _restaurantRepository.Object,
@@ -35,9 +37,11 @@ public sealed class UpdateBusinessHoursUseCaseTests
         _unitOfWork.Object,
         new FixedTimeProvider(MondayTenAm));
 
+    /// <summary>Creates a requested business hour interval.</summary>
     private static BusinessHourDto Hour(short day, string open, string close) =>
         new() { DayOfWeek = day, OpenTime = open, CloseTime = close };
 
+    /// <summary>Creates a stored business hour row of the test restaurant.</summary>
     private static RestaurantBusinessHour Row(long id, short day, string open, string close) => new()
     {
         Id = id,
@@ -47,6 +51,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
         CloseTime = TimeOnly.Parse(close)
     };
 
+    /// <summary>Makes the repository return the owner's restaurant with the given stored hours.</summary>
     private Domain.Entities.Restaurant SetupRestaurant(params RestaurantBusinessHour[] hours)
     {
         var restaurant = new Domain.Entities.Restaurant { Id = RestaurantId, OwnerId = OwnerId };
@@ -62,6 +67,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-01: Keep, update, remove and add rows so the saved schedule equals the request.
+    /// <summary>Ensures the saved schedule equals the request with minimal row changes.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNewSchedule_ShouldReplaceTheWholeWeekAndSaveOnce()
     {
@@ -88,6 +94,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-02: An empty list clears the schedule; the restaurant is then closed.
+    /// <summary>Ensures an owner can clear the schedule entirely.</summary>
     [Fact]
     public async Task ExecuteAsync_WithEmptyList_ShouldRemoveEveryRowAndReportClosed()
     {
@@ -101,6 +108,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-03: Overlapping intervals return INVALID_BUSINESS_HOURS before anything is loaded or saved.
+    /// <summary>Ensures overlapping hours are rejected before any database work.</summary>
     [Fact]
     public async Task ExecuteAsync_WithOverlappingIntervals_ShouldThrowInvalidBusinessHours()
     {
@@ -115,6 +123,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
 
     // TEST-04: Overnight intervals overlap the next day's intervals, Saturday wraps into Sunday, and back-to-back
     // intervals (13:30 close, 13:30 open) do not overlap.
+    /// <summary>Ensures overnight, week-wrap and back-to-back intervals are judged correctly.</summary>
     [Theory]
     [InlineData((short)1, "22:00", "02:00", (short)2, "01:00", "05:00", true)]
     [InlineData((short)6, "22:00", "03:00", (short)0, "02:00", "08:00", true)]
@@ -145,6 +154,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-05: A malformed interval is a field error (VALIDATION_FAILED), not INVALID_BUSINESS_HOURS.
+    /// <summary>Ensures a malformed time is reported as a field error, not as an overlap.</summary>
     [Fact]
     public async Task ExecuteAsync_WithMalformedTime_ShouldThrowValidationException()
     {
@@ -157,6 +167,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-06: An owner without a restaurant gets RESTAURANT_NOT_FOUND and nothing is saved.
+    /// <summary>Ensures an owner without a restaurant cannot save hours.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutRestaurant_ShouldThrowRestaurantNotFound()
     {
@@ -173,6 +184,7 @@ public sealed class UpdateBusinessHoursUseCaseTests
     }
 
     // TEST-07: An overnight interval of the previous day keeps the restaurant open after midnight.
+    /// <summary>Ensures the open-now flag honours intervals that started the previous day.</summary>
     [Fact]
     public async Task ExecuteAsync_WithOvernightIntervalFromYesterday_ShouldReportOpen()
     {
@@ -191,8 +203,10 @@ public sealed class UpdateBusinessHoursUseCaseTests
         result.IsOpenNow.Should().BeTrue();
     }
 
+    /// <summary>Clock fixed at one instant so the open-now flag is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

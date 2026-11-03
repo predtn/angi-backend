@@ -19,11 +19,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.Login
 {
+    /// <summary>Verifies LoginUseCase issues sessions only for active accounts with a matching password and returns the survey requirement.</summary>
     public sealed class LoginUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
         // TEST-01: Create a session and return the documented authentication result for valid credentials.
+        /// <summary>Ensures a valid login creates exactly one session and returns the documented auth payload.</summary>
         [Fact]
         public async Task ExecuteAsync_WithValidCredentials_ShouldCreateSessionAndReturnAuthResult()
         {
@@ -85,6 +87,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-02: Reject an incorrect password without creating a session or saving changes.
+        /// <summary>Ensures a wrong password leaves no session or saved change behind.</summary>
         [Fact]
         public async Task ExecuteAsync_WithIncorrectPassword_ShouldThrowInvalidCredentials()
         {
@@ -113,6 +116,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-03: Reject a suspended account with the endpoint-specific error code.
+        /// <summary>Ensures a suspended account cannot sign in and receives the login-specific code.</summary>
         [Fact]
         public async Task ExecuteAsync_WithSuspendedAccount_ShouldThrowAccountSuspended()
         {
@@ -142,6 +146,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-04: Reject an unknown email without verifying a password or persisting login data.
+        /// <summary>Prevents account enumeration by answering an unknown email like a wrong password.</summary>
         [Fact]
         public async Task ExecuteAsync_WithUnknownEmail_ShouldThrowInvalidCredentials()
         {
@@ -161,6 +166,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-05: Reject a password-only login for an account that has no password hash.
+        /// <summary>Ensures a Google-only account cannot be entered through the password login.</summary>
         [Fact]
         public async Task ExecuteAsync_WithoutPasswordHash_ShouldThrowInvalidCredentials()
         {
@@ -184,6 +190,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-06: Map every non-active account status to its documented login error code.
+        /// <summary>Ensures each blocked account status maps to the error code clients rely on.</summary>
         [Theory]
         [InlineData(UserStatus.PendingVerification, "EMAIL_NOT_VERIFIED")]
         [InlineData(UserStatus.Banned, "ACCOUNT_BANNED")]
@@ -212,6 +219,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-07: Stop before repository access when the login request fails FluentValidation.
+        /// <summary>Ensures malformed input is rejected before any database work.</summary>
         [Fact]
         public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationExceptionFirst()
         {
@@ -233,6 +241,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-08: Return an unknown survey requirement when the recommendation service is unavailable.
+        /// <summary>Ensures a reco outage does not block login and the survey state is reported as unknown.</summary>
         [Fact]
         public async Task ExecuteAsync_WhenSurveyStatusIsUnavailable_ShouldReturnNullPreferenceRequirement()
         {
@@ -255,6 +264,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         }
 
         // TEST-09: Skip the recommendation survey lookup for a non-traveler account.
+        /// <summary>Avoids a reco call for roles that never take the preference survey.</summary>
         [Fact]
         public async Task ExecuteAsync_WithNonTravelerRole_ShouldNotRequestSurveyStatus()
         {
@@ -278,6 +288,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 Times.Never);
         }
 
+        /// <summary>Creates the use case from the given mocks with a fixed clock and deterministic token issuance.</summary>
         private static LoginUseCase CreateUseCase(
             Mock<IAuthenticationRepository> repository,
             Mock<IPasswordService> passwordService,
@@ -307,6 +318,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 new FixedTimeProvider(Now));
         }
 
+        /// <summary>Creates an active, verified traveler with a password hash for the login scenarios.</summary>
         private static User CreateUser()
         {
             return new User
@@ -321,6 +333,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             };
         }
 
+        /// <summary>Creates a login request that matches the default user's credentials.</summary>
         private static LoginRequestDto ValidRequest()
         {
             return new LoginRequestDto
@@ -330,6 +343,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             };
         }
 
+        /// <summary>Clock fixed at one instant so session expiry and login timestamps are deterministic.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;
@@ -339,6 +353,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 _now = new DateTimeOffset(now);
             }
 
+            /// <summary>Returns the fixed instant supplied to the constructor.</summary>
             public override DateTimeOffset GetUtcNow() => _now;
         }
     }

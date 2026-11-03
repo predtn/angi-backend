@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.DeleteMenuSubmissionItem;
 
+/// <summary>Verifies DeleteMenuSubmissionItemUseCase removes items only from the caller's own draft menu.</summary>
 public sealed class DeleteMenuSubmissionItemUseCaseTests
 {
     // TEST-01: Reject item deletion after the menu draft has been submitted.
@@ -45,6 +46,7 @@ public sealed class DeleteMenuSubmissionItemUseCaseTests
     }
 
     // TEST-02: Remove an owned draft item and commit the transaction.
+    /// <summary>Ensures an owner can remove a dish from their draft.</summary>
     [Fact]
     public async Task ExecuteAsync_WithOwnedDraftItem_ShouldRemoveAndCommit()
     {
@@ -68,6 +70,7 @@ public sealed class DeleteMenuSubmissionItemUseCaseTests
     }
 
     // TEST-03: Hide missing and unowned items behind the not-found response.
+    /// <summary>Ensures another owner's item is indistinguishable from a missing one.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnknownOrOtherOwnerItem_ShouldThrowNotFound()
     {
@@ -86,6 +89,7 @@ public sealed class DeleteMenuSubmissionItemUseCaseTests
     }
 
     // TEST-04: Reject deletion for every non-draft submission status.
+    /// <summary>Ensures a menu already sent for review cannot be changed.</summary>
     [Theory]
     [InlineData(MenuSubmissionStatus.Pending)]
     [InlineData(MenuSubmissionStatus.Approved)]
@@ -106,6 +110,7 @@ public sealed class DeleteMenuSubmissionItemUseCaseTests
         await act.Should().ThrowAsync<ConflictException>();
     }
 
+    /// <summary>Creates the use case for owner 12 over the given repository and unit of work.</summary>
     private static DeleteMenuSubmissionItemUseCase CreateUseCase(
         Mock<IRestaurantMenuRepository> repository,
         Mock<IUnitOfWork> unitOfWork)

@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Moderation;
 
+/// <summary>Verifies ReviewVerificationRequestDtoValidator checks the decision and requires a bounded note for non-approvals.</summary>
 public sealed class ReviewVerificationRequestDtoValidatorTests
 {
     private readonly ReviewVerificationRequestDtoValidator _validator = new();

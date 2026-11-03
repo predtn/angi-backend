@@ -5,6 +5,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies ResubmitVerificationRequestDtoValidator checks legal fields, length limits and the document list.</summary>
 public sealed class ResubmitVerificationRequestDtoValidatorTests
 {
     private readonly ResubmitVerificationRequestDtoValidator _validator = new();

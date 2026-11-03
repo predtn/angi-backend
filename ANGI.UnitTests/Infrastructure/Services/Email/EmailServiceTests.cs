@@ -12,9 +12,11 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Email
 {
+    /// <summary>Verifies EmailService sends Brevo emails with safe content and maps every failure to the documented 503.</summary>
     public sealed class EmailServiceTests
     {
         // TEST-01: Send the verification email to Brevo with the API key, sender, recipient and frontend link.
+        /// <summary>Ensures the verification email reaches Brevo with the right sender, recipient and link.</summary>
         [Fact]
         public async Task SendEmailVerificationAsync_WithValidInput_ShouldPostBrevoEmailWithVerifyLink()
         {
@@ -52,6 +54,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-02: Send the password-reset email with the reset-password link and its validity.
+        /// <summary>Ensures the reset email carries the reset link and its validity.</summary>
         [Fact]
         public async Task SendPasswordResetAsync_WithValidInput_ShouldPostResetLink()
         {
@@ -74,6 +77,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-03: HTML-encode the display name in the HTML part so it cannot inject markup.
+        /// <summary>Prevents a display name from injecting HTML into the email.</summary>
         [Fact]
         public async Task SendEmailVerificationAsync_WithMarkupInDisplayName_ShouldEncodeItInHtml()
         {
@@ -94,6 +98,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-04: Return SERVICE_UNAVAILABLE when Brevo rejects the email.
+        /// <summary>Ensures a Brevo rejection surfaces as the documented 503.</summary>
         [Theory]
         [InlineData(HttpStatusCode.BadRequest)]
         [InlineData(HttpStatusCode.Unauthorized)]
@@ -113,6 +118,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-05: Return SERVICE_UNAVAILABLE when Brevo cannot be reached or does not answer in time.
+        /// <summary>Ensures network failures and timeouts surface as the documented 503.</summary>
         [Fact]
         public async Task SendPasswordResetAsync_WhenBrevoIsUnreachableOrTimesOut_ShouldThrowServiceUnavailable()
         {
@@ -127,6 +133,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-06: Let the caller's cancellation pass through instead of reporting the service as unavailable.
+        /// <summary>Ensures cancellation is not reported as an outage.</summary>
         [Fact]
         public async Task SendEmailVerificationAsync_WhenCallerCancels_ShouldThrowOperationCanceled()
         {
@@ -144,6 +151,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-07: Return SERVICE_UNAVAILABLE without calling Brevo when a required setting is missing.
+        /// <summary>Ensures missing settings fail fast without a network call.</summary>
         [Theory]
         [InlineData("", "no-reply@angi.test", "https://app.angi.test")]
         [InlineData("test-brevo-key", "", "https://app.angi.test")]
@@ -170,6 +178,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-08: Reject a missing recipient, display name or token and a non-positive validity.
+        /// <summary>Ensures programming errors in the arguments fail loudly.</summary>
         [Theory]
         [InlineData("", "An", "token", 60)]
         [InlineData("an@gmail.com", " ", "token", 60)]
@@ -189,6 +198,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
         }
 
         // TEST-09: Register IEmailService with the Brevo base address (trailing slash added) and timeout.
+        /// <summary>Ensures dependency injection wires the typed client with the configured base address and timeout.</summary>
         [Fact]
         public void AddEmailInfrastructure_ShouldRegisterTypedClientWithBrevoSettings()
         {
@@ -214,6 +224,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
             provider.GetRequiredService<IOptions<FrontendSettings>>().Value.BaseUrl.Should().Be("https://app.angi.test");
         }
 
+        /// <summary>Creates the service over the given handler with overridable Brevo settings.</summary>
         private static EmailService CreateService(
             HttpMessageHandler handler,
             string apiKey = "test-brevo-key",
@@ -238,6 +249,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
                 NullLogger<EmailService>.Instance);
         }
 
+        /// <summary>Handler that answers each request with the supplied function.</summary>
         private sealed class StubHttpMessageHandler : HttpMessageHandler
         {
             private readonly Func<HttpRequestMessage, HttpResponseMessage> _send;
@@ -247,6 +259,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Email
                 _send = send;
             }
 
+            /// <summary>Returns the response produced by the supplied function.</summary>
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
                 CancellationToken cancellationToken)

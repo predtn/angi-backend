@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Account.ChangePassword;
 
+/// <summary>Verifies ChangePasswordUseCase checks the current password, supports first-time Google passwords and revokes every other session.</summary>
 public sealed class ChangePasswordUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc);
@@ -24,6 +25,7 @@ public sealed class ChangePasswordUseCaseTests
 
     // TEST-01: Happy Path - Change password and revoke other sessions, keeping the session named by the sid claim even
     // when another session has the same User-Agent and is newer.
+    /// <summary>Ensures the session to keep is identified by the sid claim, not by a guess from the User-Agent.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidCurrentAndNewPassword_ShouldUpdatePasswordHashAndRevokeOtherSessions()
     {
@@ -108,6 +110,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-02: Exception Path - Throws WRONG_CURRENT_PASSWORD when oldPassword does not match.
+    /// <summary>Ensures a wrong current password never lets the password be replaced.</summary>
     [Fact]
     public async Task ExecuteAsync_WithIncorrectOldPassword_ShouldThrowBadRequestException()
     {
@@ -159,6 +162,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-03: Exception Path - Throws WRONG_CURRENT_PASSWORD when user has password but request omits it.
+    /// <summary>Ensures an account with a password cannot skip proving it by omitting the field.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserHasPasswordButRequestOmitsIt_ShouldThrowBadRequestException()
     {
@@ -200,6 +204,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-04: Happy Path - Google-only user setting password for the first time without current password.
+    /// <summary>Ensures a Google-only account can add its first password without a current one.</summary>
     [Fact]
     public async Task ExecuteAsync_ForGoogleUserWithoutExistingPassword_ShouldSetPasswordSuccessfully()
     {
@@ -258,6 +263,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-05: Exception Path - Throws ValidationException when newPassword matches currentPassword in DTO.
+    /// <summary>Ensures a password change actually changes the password.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNewPasswordEqualsCurrentPassword_ShouldThrowValidationException()
     {
@@ -285,6 +291,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-06: Exception Path - Throws UNAUTHORIZED when user is not authenticated.
+    /// <summary>Ensures an anonymous caller cannot change any password.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -316,6 +323,7 @@ public sealed class ChangePasswordUseCaseTests
     }
 
     // TEST-07: Revoke every session when the access token has no sid claim, since the current session is unknown.
+    /// <summary>Fails safe by revoking every session when the current session cannot be identified.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenTokenHasNoSessionId_ShouldRevokeAllSessions()
     {
@@ -349,6 +357,7 @@ public sealed class ChangePasswordUseCaseTests
         sessions.Should().OnlyContain(session => session.RevokedAt == Now);
     }
 
+    /// <summary>Clock fixed at one instant so revocation timestamps can be asserted exactly.</summary>
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;
@@ -358,6 +367,7 @@ public sealed class ChangePasswordUseCaseTests
             _now = new DateTimeOffset(now);
         }
 
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => _now;
     }
 }

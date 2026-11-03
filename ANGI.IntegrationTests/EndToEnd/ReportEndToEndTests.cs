@@ -92,6 +92,7 @@ public sealed class ReportEndToEndTests : IClassFixture<PostgresApiFactory>
         (rating.RatingCount, rating.RatingAvg).Should().Be((2, 4.50m));
     }
 
+    /// <summary>Creates a media row for the uploader whose MIME type follows the storage key extension.</summary>
     private static MediaFile Media(int uploaderId, string storageKey) => new()
     {
         UploaderId = uploaderId,

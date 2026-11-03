@@ -6,6 +6,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.GetPermissionCatalog;
 
+/// <summary>Verifies GetPermissionCatalogUseCase maps the full permission catalog, including the ADMIN wildcard.</summary>
 public sealed class GetPermissionCatalogUseCaseTests
 {
     // TEST-01: Map every catalog field and the documented ADMIN wildcard.

@@ -18,7 +18,9 @@ public static class OpenApiConfig
         {
             options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
             options.AddOperationTransformer<BearerSecurityRequirementTransformer>();
+            options.AddOperationTransformer<AgentChatOperationTransformer>();
             options.AddSchemaTransformer<RestaurantContractSchemaTransformer>();
+            options.AddSchemaTransformer<AgentChatSchemaTransformer>();
         });
 
         return services;

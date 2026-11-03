@@ -1,0 +1,158 @@
+using System.Text.Json;
+
+namespace ANGI.Application.Common.Models.Agent;
+
+/// <summary>Defines the strict provider-independent output and tool allowlist contracts.</summary>
+public static class AgentLlmSchema
+{
+    public static readonly object State = Obj(new()
+    {
+        ["schemaVersion"] = Scalar("integer"), ["province"] = Nullable(Scalar("string")),
+        ["numDays"] = Nullable(Scalar("integer")), ["title"] = Scalar("string"),
+        ["startDate"] = Nullable(Scalar("string")), ["budgetAmount"] = Nullable(Scalar("number")),
+        ["budgetUnrestricted"] = Scalar("boolean"), ["maxPricePerMeal"] = Nullable(Scalar("number")),
+        ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")),
+        ["originMode"] = Choice("none", "pinned", "gps"), ["originLatitude"] = Nullable(Scalar("number")),
+        ["originLongitude"] = Nullable(Scalar("number")), ["originLabel"] = Nullable(Scalar("string")),
+        ["radiusKm"] = Nullable(Scalar("number")), ["note"] = Nullable(Scalar("string")),
+        ["tasteTargets"] = ArrayOf(Obj(new()
+        {
+            ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number")
+        })),
+        ["tasteOverrides"] = ArrayOf(Obj(new()
+        {
+            ["dayNumber"] = Scalar("integer"), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["targets"] = ArrayOf(Obj(new() { ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number") }))
+        })),
+        ["mealRequests"] = ArrayOf(Obj(new()
+        {
+            ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["dishName"] = Nullable(Scalar("string")), ["restaurantName"] = Nullable(Scalar("string")),
+            ["restaurantId"] = Nullable(Scalar("integer")),
+            ["tagIds"] = ArrayOf(Scalar("integer")), ["differentFromPlan"] = Scalar("boolean")
+        })),
+        ["preferenceApplication"] = Choice("replan", "future"),
+        ["mealSlots"] = ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+        ["pendingQuestion"] = Nullable(Scalar("string")), ["focusDay"] = Nullable(Scalar("integer")),
+        ["focusMeal"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night"))
+    });
+    public static readonly object Scope = Obj(new()
+    {
+        ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night"))
+    });
+    public static readonly object Item = Obj(new()
+    {
+        ["itemKey"] = Scalar("string"), ["sourceItemId"] = Nullable(Scalar("integer")), ["dayNumber"] = Scalar("integer"),
+        ["mealSlot"] = Choice("breakfast", "lunch", "dinner", "snack", "late_night"), ["sortOrder"] = Scalar("integer"), ["dishId"] = Scalar("integer")
+    });
+    // create_proposal supplies a complete scoped selection; backend decides create/update from the source.
+    // patch_proposal supplies explicit changes to an existing source. Other actions remain conversational.
+    // Điều kiện được phép tạo/sửa và tính hợp lệ dữ liệu còn được Builder/StatePolicy/Validator kiểm tra.
+    public static readonly object Output = Obj(new()
+    {
+        ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation", "chat", "out_of_scope"), ["reply"] = Scalar("string"),
+        ["suggestedDish"] = Nullable(Scalar("string")),
+        ["clarification"] = Nullable(Choice("trip_details", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general")),
+        ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
+        ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
+        ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
+        {
+            ["type"] = Choice("add", "replace", "remove", "move"), ["targetItemKey"] = Nullable(Scalar("string")), ["item"] = Nullable(Item)
+        })),
+        ["dishNotes"] = ArrayOf(Obj(new() { ["dishId"] = Scalar("integer"), ["intro"] = Scalar("string"), ["reason"] = Scalar("string") })),
+        ["daySummaries"] = ArrayOf(Obj(new() { ["dayNumber"] = Scalar("integer"), ["summary"] = Scalar("string") }))
+    });
+    public static readonly IReadOnlyDictionary<string, object> Tools = new Dictionary<string, object>
+    {
+        ["search_catalog"] = Obj(new()
+        {
+            ["kind"] = Choice("dish", "restaurant"), ["name"] = Scalar("string"), ["province"] = Nullable(Scalar("string")),
+            ["selectedId"] = Nullable(Scalar("integer"))
+        }),
+        ["get_recommendation"] = Obj(new()
+        {
+            ["state"] = Nullable(State), ["province"] = Nullable(Scalar("string")), ["scope"] = Choice("full", "day", "slot"),
+            ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
+            ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
+            ["alternative"] = Scalar("boolean")
+        }),
+        ["estimate_day_route"] = Obj(new()
+        {
+            ["dayNumber"] = Scalar("integer"), ["profile"] = Choice("driving", "walking", "cycling"),
+            ["orderedItems"] = ArrayOf(Obj(new() { ["itemKey"] = Scalar("string"), ["dishId"] = Scalar("integer") }))
+        }),
+        ["get_roadmap"] = Obj(new() { ["roadmapId"] = Scalar("integer") })
+    };
+
+    /// <summary>Builds an object schema whose properties are all required and whose extra fields are rejected.</summary>
+    private static object Obj(Dictionary<string, object> properties) => new { type = "object", properties, required = properties.Keys.ToArray(), additionalProperties = false };
+    /// <summary>Builds a primitive schema.</summary>
+    private static object Scalar(string type) => new { type };
+    /// <summary>Builds an allowlisted string enum.</summary>
+    private static object Choice(params string[] values) => new Dictionary<string, object> { ["type"] = "string", ["enum"] = values };
+    /// <summary>Builds a structured array schema.</summary>
+    private static object ArrayOf(object items) => new { type = "array", items };
+    /// <summary>Allows an optional value without omitting the required property in strict mode.</summary>
+    private static object Nullable(object schema) => new { anyOf = new[] { schema, Scalar("null") } };
+
+    /// <summary>Checks the strict schema again in backend code rather than trusting an upstream 200 response.</summary>
+    public static bool IsValid(JsonElement value, object schema) => Match(value, JsonSerializer.SerializeToElement(schema));
+
+    /// <summary>Returns the first mismatching path for diagnostics; model-invented field names are masked.</summary>
+    public static string? FindMismatch(JsonElement value, object schema) => Mismatch(value, JsonSerializer.SerializeToElement(schema), "$");
+
+    /// <summary>Walks objects and arrays to the first failing node; leaf types reuse <see cref="Match"/>.</summary>
+    private static string? Mismatch(JsonElement value, JsonElement schema, string path)
+    {
+        if (Match(value, schema)) return null;
+        if (schema.TryGetProperty("anyOf", out var options))
+        {
+            // Nullable object: report inside the non-null branch, otherwise the value has the wrong type.
+            var branch = options.EnumerateArray().FirstOrDefault(option => option.TryGetProperty("type", out var type) && type.GetString() != "null");
+            return value.ValueKind == JsonValueKind.Null || branch.ValueKind != JsonValueKind.Object ? path : Mismatch(value, branch, path);
+        }
+        var kind = schema.GetProperty("type").GetString();
+        if (kind == "array" && value.ValueKind == JsonValueKind.Array && value.GetArrayLength() <= 2000)
+        {
+            var index = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                if (Mismatch(item, schema.GetProperty("items"), $"{path}[{index}]") is { } inner) return inner;
+                index++;
+            }
+            return path;
+        }
+        if (kind != "object" || value.ValueKind != JsonValueKind.Object) return path;
+        var properties = schema.GetProperty("properties");
+        foreach (var field in value.EnumerateObject())
+            if (!properties.TryGetProperty(field.Name, out _)) return $"{path}.{SafeName(field.Name)}(unexpected)";
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (!value.TryGetProperty(property.Name, out var child)) return $"{path}.{property.Name}(missing)";
+            if (Mismatch(child, property.Value, $"{path}.{property.Name}") is { } inner) return inner;
+        }
+        return $"{path}(duplicate)";
+    }
+
+    /// <summary>Keeps only short identifier-like names so provider text cannot enter logs through a field name.</summary>
+    private static string SafeName(string name) => name.Length is > 0 and <= 40 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? name : "?";
+
+    /// <summary>Recursively checks required fields, primitive types, arrays and enum membership.</summary>
+    private static bool Match(JsonElement value, JsonElement schema)
+    {
+        if (schema.TryGetProperty("anyOf", out var options)) return options.EnumerateArray().Any(option => Match(value, option));
+        var type = schema.GetProperty("type").GetString();
+        if (type == "null") return value.ValueKind == JsonValueKind.Null;
+        if (type == "string") return value.ValueKind == JsonValueKind.String && (!schema.TryGetProperty("enum", out var choices) || choices.EnumerateArray().Any(x => x.GetString() == value.GetString()));
+        if (type == "integer") return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _);
+        if (type == "number") return value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out _);
+        if (type == "boolean") return value.ValueKind is JsonValueKind.True or JsonValueKind.False;
+        if (type == "array") return value.ValueKind == JsonValueKind.Array && value.GetArrayLength() <= 2000 && value.EnumerateArray().All(x => Match(x, schema.GetProperty("items")));
+        if (type != "object" || value.ValueKind != JsonValueKind.Object) return false;
+        var properties = schema.GetProperty("properties");
+        var fields = value.EnumerateObject().ToArray();
+        return fields.Length == fields.Select(x => x.Name).Distinct().Count() && fields.Length == properties.EnumerateObject().Count() &&
+            properties.EnumerateObject().All(x => value.TryGetProperty(x.Name, out var child) && Match(child, x.Value));
+    }
+}

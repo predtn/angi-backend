@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Ai;
 
+/// <summary>Verifies OpenAiRoadmapPlannerService asks the AI for a strict day plan and falls back silently when it cannot answer.</summary>
 public sealed class OpenAiRoadmapPlannerServiceTests
 {
     private static readonly RoadmapPlanRequest Request = new(
@@ -23,6 +24,7 @@ public sealed class OpenAiRoadmapPlannerServiceTests
         "Ít cay");
 
     // TEST-01: Post the day with a strict schema limited to the requested meals and the cluster dishes, then map the plan.
+    /// <summary>Ensures the AI can only choose among the requested meals and cluster dishes.</summary>
     [Fact]
     public async Task PlanDayAsync_WithSuccessfulCompletion_ShouldSendSchemaAndMapPlan()
     {
@@ -32,14 +34,14 @@ public sealed class OpenAiRoadmapPlannerServiceTests
         var result = await CreateService(handler).PlanDayAsync(Request, CancellationToken.None);
 
         result.Should().BeEquivalentTo(new RoadmapPlanResult(
-            "gpt-5.6-luna",
+            "gpt-6-luna",
             [new RoadmapPlanAssignment(MealSlot.Breakfast, 1501), new RoadmapPlanAssignment(MealSlot.LateNight, 1502)]));
         var request = handler.Requests.Should().ContainSingle().Subject;
         request.Method.Should().Be(HttpMethod.Post);
         request.Uri.Should().Be(new Uri("https://ai.angi.test/v1/chat/completions"));
         request.Authorization.Should().Be("Bearer test-ai-key");
         using var body = JsonDocument.Parse(request.Body!);
-        body.RootElement.GetProperty("model").GetString().Should().Be("gpt-5.6-luna");
+        body.RootElement.GetProperty("model").GetString().Should().Be("gpt-6-luna");
         body.RootElement.TryGetProperty("temperature", out _).Should().BeFalse("newer models reject any non-default temperature");
         var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema");
         schema.GetProperty("strict").GetBoolean().Should().BeTrue();
@@ -53,6 +55,7 @@ public sealed class OpenAiRoadmapPlannerServiceTests
     }
 
     // TEST-02: Return no plan, without throwing, whenever the AI cannot answer usefully or is not configured.
+    /// <summary>Ensures any AI failure falls back to the deterministic planner instead of failing the job.</summary>
     [Theory]
     [InlineData("server-error")]
     [InlineData("rate-limited")]
@@ -88,6 +91,7 @@ public sealed class OpenAiRoadmapPlannerServiceTests
     }
 
     // TEST-03: Let the caller's cancellation stop the job instead of falling back.
+    /// <summary>Ensures cancellation stops the job instead of being treated as an AI failure.</summary>
     [Fact]
     public async Task PlanDayAsync_WhenCallerCancels_ShouldRethrow()
     {
@@ -103,23 +107,28 @@ public sealed class OpenAiRoadmapPlannerServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    /// <summary>Creates the service over the given handler with test AI settings.</summary>
     private static OpenAiRoadmapPlannerService CreateService(HttpMessageHandler handler, string apiKey = "test-ai-key") =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://ai.angi.test/v1/") },
-            Options.Create(new AiSettings { BaseUrl = "https://ai.angi.test/v1/", ApiKey = apiKey, Model = "gpt-5.6-luna", TimeoutSeconds = 30 }),
+            Options.Create(new AiSettings { BaseUrl = "https://ai.angi.test/v1/", ApiKey = apiKey, Model = "gpt-6-luna", TimeoutSeconds = 30 }),
             NullLogger<OpenAiRoadmapPlannerService>.Instance);
 
+    /// <summary>Creates a chat completion response whose assistant message has the given content.</summary>
     private static HttpResponseMessage Completion(string content) => Json(JsonSerializer.Serialize(new
     {
-        model = "gpt-5.6-luna",
+        model = "gpt-6-luna",
         choices = new[] { new { message = new { role = "assistant", content } } }
     }));
 
+    /// <summary>Creates a 200 response with the given JSON body.</summary>
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    /// <summary>Snapshot of an outgoing request so method, URL, auth header and body can be asserted.</summary>
     private sealed record CapturedRequest(HttpMethod Method, Uri? Uri, string? Authorization, string? Body);
 
+    /// <summary>Handler that records each request and answers with the supplied function.</summary>
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _send;
@@ -131,6 +140,7 @@ public sealed class OpenAiRoadmapPlannerServiceTests
 
         public List<CapturedRequest> Requests { get; } = [];
 
+        /// <summary>Captures the request, including its body, then returns the configured response.</summary>
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)

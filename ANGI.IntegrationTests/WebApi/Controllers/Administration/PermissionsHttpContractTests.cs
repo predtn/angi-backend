@@ -22,6 +22,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ANGI.IntegrationTests.WebApi.Controllers.Administration;
 
+/// <summary>Verifies the permission endpoints' auth, binding and serialization through the real HTTP pipeline.</summary>
 public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiFactory>
 {
     private readonly PermissionsApiFactory _factory;
@@ -216,6 +217,7 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     }
 }
 
+/// <summary>Test host with JWT settings and stub use cases for the permission endpoints.</summary>
 public sealed class PermissionsApiFactory : WebApplicationFactory<Program>
 {
     public const string Issuer = "ANGI.PermissionsHttpTests";
@@ -284,12 +286,14 @@ public sealed class PermissionsApiFactory : WebApplicationFactory<Program>
         });
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     private sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows contract tests to bypass database-backed account status checks.</summary>
         public Task ExecuteAsync(int userId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>ADM-P1 stub that returns a sample catalog.</summary>
     private sealed class StubGetPermissionCatalogUseCase : IGetPermissionCatalogUseCase
     {
         /// <summary>Returns a representative ADM-P1 payload for serialization checks.</summary>
@@ -300,6 +304,7 @@ public sealed class PermissionsApiFactory : WebApplicationFactory<Program>
         });
     }
 
+    /// <summary>ADM-P2 stub that records the route id and returns sample permissions or MOD_NOT_FOUND.</summary>
     public sealed class StubGetModPermissionsUseCase : IGetModPermissionsUseCase
     {
         public int? LastUserId { get; private set; }
@@ -322,6 +327,7 @@ public sealed class PermissionsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>ADM-P3 stub that validates and records the input and emits sample business failures.</summary>
     public sealed class StubReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
     {
         public (int UserId, ReplaceModPermissionsRequestDto Request)? LastCall { get; private set; }
@@ -348,6 +354,7 @@ public sealed class PermissionsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>ADM-P4 stub that validates the input and emits the restricted-permission failure.</summary>
     private sealed class StubReplaceModRolePermissionsUseCase : IReplaceModRolePermissionsUseCase
     {
         /// <summary>Validates ADM-P4 input and emits its restricted-permission business failure.</summary>

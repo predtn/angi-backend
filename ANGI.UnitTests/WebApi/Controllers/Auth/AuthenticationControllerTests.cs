@@ -22,6 +22,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Auth
 {
+    /// <summary>Verifies AuthenticationController wraps each auth use case result in the documented status and envelope.</summary>
     public sealed class AuthenticationControllerTests
     {
         // TEST-01: Return the documented 201 response after registering an account.

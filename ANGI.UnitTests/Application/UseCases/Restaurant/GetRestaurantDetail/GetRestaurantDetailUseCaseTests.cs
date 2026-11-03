@@ -11,6 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetRestaurantDetail;
 
+/// <summary>Verifies GetRestaurantDetailUseCase returns the public restaurant detail and the caller's own review.</summary>
 public sealed class GetRestaurantDetailUseCaseTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 12, 8, 0, 0, TimeSpan.Zero);
@@ -24,10 +25,12 @@ public sealed class GetRestaurantDetailUseCaseTests
         _timeProviderMock.Setup(t => t.GetUtcNow()).Returns(FixedNow);
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, current-user and clock mocks.</summary>
     private GetRestaurantDetailUseCase CreateUseCase() =>
         new(_repositoryMock.Object, _validator, _currentUserMock.Object, _timeProviderMock.Object);
 
     // TEST-01: Happy Path - Restaurant exists, return detail DTO
+    /// <summary>Ensures an existing restaurant is mapped to the documented detail.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantExists_ShouldReturnRestaurantDetail()
     {
@@ -82,6 +85,7 @@ public sealed class GetRestaurantDetailUseCaseTests
     }
 
     // TEST-02: Exception Path - Restaurant does not exist, throw 404 RESTAURANT_NOT_FOUND
+    /// <summary>Ensures a missing restaurant returns RESTAURANT_NOT_FOUND.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantNotFound_ShouldThrowNotFoundException()
     {
@@ -100,6 +104,7 @@ public sealed class GetRestaurantDetailUseCaseTests
     }
 
     // TEST-03: Authenticated Traveler has reviewed restaurant, include myReview
+    /// <summary>Ensures a traveler sees their own review on the detail page.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenTravelerHasReviewed_ShouldIncludeMyReview()
     {

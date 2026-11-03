@@ -26,14 +26,18 @@ public sealed class LikeBlogUseCaseTests
         _unitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_transaction.Object);
     }
 
+    /// <summary>Creates the use case over the shared repository, current-user and unit-of-work mocks and the fixed clock.</summary>
     private LikeBlogUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object, _unitOfWork.Object, _timeProvider);
 
+    /// <summary>Clock fixed at one instant so like timestamps can be asserted exactly.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => new(now);
     }
 
+    /// <summary>Creates published blog 45 of another author with five likes.</summary>
     private static Blog PublishedBlog() => new()
     {
         Id = 45,
@@ -44,6 +48,7 @@ public sealed class LikeBlogUseCaseTests
     };
 
     // TEST-01: A first like inserts the row and adds 1 to like_count in SQL, in one transaction.
+    /// <summary>A first like inserts the row and adds 1 to like_count in SQL, in one transaction.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldAddLikeAndIncrementLikeCount()
     {
@@ -59,6 +64,7 @@ public sealed class LikeBlogUseCaseTests
     }
 
     // TEST-02: Liking again (or losing a concurrent race) keeps the count and still answers liked.
+    /// <summary>Liking again (or losing a concurrent race) keeps the count and still answers liked.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenAlreadyLiked_ShouldBeIdempotentAndNotIncrementCount()
     {
@@ -74,6 +80,7 @@ public sealed class LikeBlogUseCaseTests
     }
 
     // TEST-03: A missing blog is BLOG_NOT_FOUND and writes nothing.
+    /// <summary>A missing blog is BLOG_NOT_FOUND and writes nothing.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -84,6 +91,7 @@ public sealed class LikeBlogUseCaseTests
     }
 
     // TEST-04: A blog that is not published cannot be liked.
+    /// <summary>A blog that is not published cannot be liked.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogIsNotPublished_ShouldThrowNotFoundException()
     {
@@ -98,6 +106,7 @@ public sealed class LikeBlogUseCaseTests
     }
 
     // TEST-05: An anonymous call is rejected before any read.
+    /// <summary>An anonymous call is rejected before any read.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {

@@ -54,6 +54,7 @@ namespace ANGI.Infrastructure
             services.AddSocialInfrastructure();
             services.AddAuditInfrastructure();
             services.AddNotificationInfrastructure();
+            ANGI.Infrastructure.Services.Agent.AgentModule.AddAgentInfrastructure(services, configuration);
 
             return services;
         }

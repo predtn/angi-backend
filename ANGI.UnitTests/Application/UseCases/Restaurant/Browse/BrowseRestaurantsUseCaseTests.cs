@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.Browse;
 
+/// <summary>Verifies BrowseRestaurantsUseCase returns paged restaurant cards to any caller and validates the query.</summary>
 public sealed class BrowseRestaurantsUseCaseTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 12, 8, 0, 0, TimeSpan.Zero);

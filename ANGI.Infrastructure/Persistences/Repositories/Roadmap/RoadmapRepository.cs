@@ -121,6 +121,9 @@ public sealed class RoadmapRepository : IRoadmapRepository
             FOR UPDATE
             """, ct);
 
+        var tracked = _context.Roadmaps.Local.FirstOrDefault(roadmap => roadmap.Id == roadmapId);
+        if (tracked is not null) await _context.Entry(tracked).ReloadAsync(ct);
+
         return await _context.Roadmaps
             .IgnoreQueryFilters()
             .Where(roadmap => roadmap.Id == roadmapId &&
@@ -401,6 +404,8 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int userId,
         CancellationToken ct)
     {
+        // Use the same parent-before-child lock order as Agent confirmation and all other roadmap mutations.
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM core.roadmaps WHERE id = {roadmapId} AND user_id = {userId} AND deleted_at IS NULL FOR UPDATE", ct);
         await _context.Database.ExecuteSqlInterpolatedAsync($$"""
             SELECT 1
             FROM core.roadmap_items AS item

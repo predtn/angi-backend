@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
 {
+    /// <summary>Verifies ResendVerificationEmailUseCase replaces the verification token and never reveals account existence or state.</summary>
     public sealed class ResendVerificationEmailUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 11, 3, 0, 0, DateTimeKind.Utc);
@@ -166,6 +167,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
             };
         }
 
+        /// <summary>Clock fixed at one instant so token expiry can be asserted exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

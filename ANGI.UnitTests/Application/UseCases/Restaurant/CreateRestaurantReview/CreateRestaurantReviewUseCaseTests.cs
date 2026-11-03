@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.CreateRestaurantReview;
 
+/// <summary>Verifies CreateRestaurantReviewUseCase stores one valid review per user, recomputes the rating and notifies the owner.</summary>
 public sealed class CreateRestaurantReviewUseCaseTests
 {
     private readonly Mock<IRestaurantRepository> _repositoryMock = new();
@@ -28,6 +29,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
             .ReturnsAsync(_transactionMock.Object);
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository and unit-of-work mocks.</summary>
     private CreateRestaurantReviewUseCase CreateUseCase() =>
         new(
             _repositoryMock.Object,
@@ -36,6 +38,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
             _validator);
 
     // TEST-01: Happy Path - Submits review successfully, recalculates restaurant rating metrics, notifies owner
+    /// <summary>Ensures a valid review is stored, the rating refreshed and the owner notified.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenValidRequest_ShouldCreateReviewAndRecalculateRating()
     {
@@ -122,6 +125,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-02: Exception Path 1 - Rating outside [1, 5] throws ValidationException (400)
+    /// <summary>Ensures only ratings from 1 to 5 are accepted.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(6)]
@@ -141,6 +145,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-03: Exception Path 2 - RestaurantId does not exist throws NotFoundException (404 RESTAURANT_NOT_FOUND)
+    /// <summary>Ensures reviews can only target existing restaurants.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantNotFound_ShouldThrowNotFoundException()
     {
@@ -162,6 +167,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-04: Exception Path 3 - User has already reviewed restaurant throws ConflictException (409 REVIEW_ALREADY_EXISTS)
+    /// <summary>Ensures each user reviews a restaurant at most once.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserAlreadyReviewed_ShouldThrowConflictException()
     {
@@ -185,6 +191,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-05: Exception Path 4 - User not logged in throws UnauthorizedException (401 UNAUTHORIZED)
+    /// <summary>Ensures an anonymous caller cannot post a review.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -199,6 +206,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-06: Exception Path 5 - Roadmap item is invalid throws BadRequestException (400 VALIDATION_FAILED)
+    /// <summary>Ensures a review can only cite a roadmap item that qualifies it.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRoadmapItemInvalid_ShouldThrowBadRequestException()
     {
@@ -227,6 +235,7 @@ public sealed class CreateRestaurantReviewUseCaseTests
     }
 
     // TEST-07: Exception Path 6 - Uploaded image does not belong to user throws BadRequestException (400 VALIDATION_FAILED)
+    /// <summary>Prevents attaching someone else's uploads to a review.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenImageDoesNotBelongToUser_ShouldThrowBadRequestException()
     {
@@ -255,7 +264,8 @@ public sealed class CreateRestaurantReviewUseCaseTests
         exception.Which.ErrorCode.Should().Be("VALIDATION_FAILED");
     }
 
-    // The aggregate is recomputed from the visible reviews, so a stale or rounded stored value never carries over.
+    // TEST-08: The rating aggregate is recomputed from the visible reviews, so a stale or rounded stored value never carries over.
+    /// <summary>Ensures the stored rating always reflects the visible reviews exactly.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldRecomputeRatingFromVisibleReviews()
     {

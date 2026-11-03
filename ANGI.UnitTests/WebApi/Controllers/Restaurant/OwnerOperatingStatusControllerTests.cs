@@ -10,9 +10,11 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies OwnerOperatingStatusController is owner-only and returns the new status in a 200 envelope.</summary>
 public sealed class OwnerOperatingStatusControllerTests
 {
     // TEST-01: Allow only restaurant owners, as column "Auth / Role" of OWN-05 says.
+    /// <summary>Ensures only restaurant owners can change the operating status.</summary>
     [Fact]
     public void Controller_ShouldAllowOnlyRestaurantOwners()
     {
@@ -24,6 +26,7 @@ public sealed class OwnerOperatingStatusControllerTests
     }
 
     // TEST-02: Wrap the OWN-05 result in a 200 ApiResponse.
+    /// <summary>Ensures the new status is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task Update_ShouldReturnOkWithUseCaseResult()
     {

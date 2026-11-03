@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies CreateRoadmapRequestDtoValidator enforces numeric limits and origin data consistent with the origin mode.</summary>
 public sealed class CreateRoadmapRequestDtoValidatorTests
 {
     private readonly CreateRoadmapRequestDtoValidator _validator = new();

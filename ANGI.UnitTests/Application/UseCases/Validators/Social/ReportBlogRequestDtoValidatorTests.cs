@@ -9,6 +9,8 @@ public sealed class ReportBlogRequestDtoValidatorTests
 {
     private readonly ReportBlogRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate when valid reason; should be valid.
+    /// <summary>Verify Validate when valid reason; should be valid.</summary>
     [Theory]
     [InlineData("spam")]
     [InlineData("offensive")]
@@ -21,6 +23,8 @@ public sealed class ReportBlogRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate when reason is other with description; should be valid.
+    /// <summary>Verify Validate when reason is other with description; should be valid.</summary>
     [Fact]
     public void Validate_WhenReasonIsOtherWithDescription_ShouldBeValid()
     {
@@ -29,6 +33,8 @@ public sealed class ReportBlogRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-03: Verify Validate when reason is other without description; should have error.
+    /// <summary>Verify Validate when reason is other without description; should have error.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -41,6 +47,8 @@ public sealed class ReportBlogRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(ReportBlogRequestDto.Description));
     }
 
+    // TEST-04: Verify Validate when reason is invalid; should have error.
+    /// <summary>Verify Validate when reason is invalid; should have error.</summary>
     [Fact]
     public void Validate_WhenReasonIsInvalid_ShouldHaveError()
     {
@@ -50,6 +58,8 @@ public sealed class ReportBlogRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == nameof(ReportBlogRequestDto.ReasonCode));
     }
 
+    // TEST-05: Verify Validate when evidence media ids exceeds5; should have error.
+    /// <summary>Verify Validate when evidence media ids exceeds5; should have error.</summary>
     [Fact]
     public void Validate_WhenEvidenceMediaIdsExceeds5_ShouldHaveError()
     {

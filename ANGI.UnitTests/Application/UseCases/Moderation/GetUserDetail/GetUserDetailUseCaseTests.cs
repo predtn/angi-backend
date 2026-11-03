@@ -11,6 +11,8 @@ namespace ANGI.UnitTests.Application.UseCases.Moderation.GetUserDetail;
 /// <summary>Verifies MOD-U2 user detail retrieval and error handling.</summary>
 public sealed class GetUserDetailUseCaseTests
 {
+    // TEST-01: An existing user returns the full moderation detail with role, status, content counts and sanctions.
+    /// <summary>Ensures MOD-U2 maps every detail field the moderation screen shows.</summary>
     [Fact]
     public async Task GetUserDetail_HappyPath_ReturnsCompleteDetail()
     {
@@ -76,6 +78,8 @@ public sealed class GetUserDetailUseCaseTests
         result.Sanctions[0].Reason.Should().Be("Spam bình luận quảng cáo");
     }
 
+    // TEST-02: An unknown user id returns 404 USER_NOT_FOUND.
+    /// <summary>Checks a missing account is reported with the documented error code.</summary>
     [Fact]
     public async Task GetUserDetail_UserNotFound_ThrowsNotFoundException()
     {
@@ -96,6 +100,8 @@ public sealed class GetUserDetailUseCaseTests
         exception.Which.ErrorCode.Should().Be("USER_NOT_FOUND");
     }
 
+    // TEST-03: A non-positive user id returns 404 USER_NOT_FOUND without querying the repository.
+    /// <summary>Prevents an invalid id from reaching the database.</summary>
     [Fact]
     public async Task GetUserDetail_InvalidUserId_ThrowsNotFoundException()
     {

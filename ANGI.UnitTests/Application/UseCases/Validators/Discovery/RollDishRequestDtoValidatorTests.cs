@@ -4,11 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Discovery;
 
+/// <summary>Verifies RollDishRequestDtoValidator accepts the documented roll filters and rejects each invalid value on its field.</summary>
 public sealed class RollDishRequestDtoValidatorTests
 {
     private readonly RollDishRequestDtoValidator _validator = new();
 
     // TEST-01: Accept an empty body and every documented filter at its limits.
+    /// <summary>Ensures an empty body and valid filters at their limits are accepted.</summary>
     [Fact]
     public void Validate_WithDocumentedFilters_ShouldPass()
     {
@@ -29,6 +31,7 @@ public sealed class RollDishRequestDtoValidatorTests
     }
 
     // TEST-02: Reject each out-of-contract value on its own field.
+    /// <summary>Ensures clients learn exactly which filter is wrong.</summary>
     [Theory]
     [MemberData(nameof(InvalidRequests))]
     public void Validate_WithInvalidValue_ShouldFailOnThatField(RollDishRequestDto request, string field)
@@ -36,6 +39,7 @@ public sealed class RollDishRequestDtoValidatorTests
         _validator.Validate(request).Errors.Should().Contain(error => error.PropertyName == field);
     }
 
+    /// <summary>Supplies each out-of-contract roll filter with the field expected to report it.</summary>
     public static TheoryData<RollDishRequestDto, string> InvalidRequests() => new()
     {
         { new RollDishRequestDto { Latitude = 10 }, "Longitude" },

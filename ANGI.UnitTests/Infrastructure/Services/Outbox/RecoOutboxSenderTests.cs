@@ -9,10 +9,12 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Outbox;
 
+/// <summary>Verifies RecoOutboxSender calls the documented reco endpoints and classifies each failure as retry or dead.</summary>
 public sealed class RecoOutboxSenderTests
 {
     private static readonly Guid EventUuid = Guid.Parse("6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00");
 
+    /// <summary>Creates the sender over a stub handler that answers with the given function.</summary>
     private static (RecoOutboxSender Sender, StubHandler Handler) Create(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var handler = new StubHandler(respond);
@@ -21,6 +23,7 @@ public sealed class RecoOutboxSenderTests
         return (new RecoOutboxSender(client, settings), handler);
     }
 
+    /// <summary>Creates an outbox message of the given type and payload.</summary>
     private static OutboxMessage Message(OutboxEventType type, string payload) => new()
     {
         Id = 1,
@@ -30,10 +33,12 @@ public sealed class RecoOutboxSenderTests
         Payload = payload
     };
 
+    /// <summary>Creates a response with the given status and JSON body.</summary>
     private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
     // TEST-01: Each event type goes to its RECO endpoint with the payload as body and both headers.
+    /// <summary>Ensures each event type reaches its documented endpoint with the idempotency headers.</summary>
     [Theory]
     [InlineData(OutboxEventType.DishUpserted, """{"dish_id":105,"name":"Bún bò"}""", "POST", "http://reco.test/dishes/upsert", true)]
     [InlineData(OutboxEventType.FeedbackCreated, """{"event_uuid":"x","dish_id":105}""", "POST", "http://reco.test/feedback", true)]
@@ -58,6 +63,7 @@ public sealed class RecoOutboxSenderTests
     }
 
     // TEST-02: 4xx is dead with the reco error code; 5xx is retried, with Retry-After when reco sends it.
+    /// <summary>Ensures permanent errors stop retrying while temporary ones are retried as reco asks.</summary>
     [Theory]
     [InlineData(HttpStatusCode.UnprocessableEntity, """{"error_code":"VALIDATION_FAILED"}""", OutboxDeliveryOutcome.Dead, "HTTP 422 VALIDATION_FAILED")]
     [InlineData(HttpStatusCode.NotFound, """{"error_code":"DISH_NOT_FOUND"}""", OutboxDeliveryOutcome.Dead, "HTTP 404 DISH_NOT_FOUND")]
@@ -74,6 +80,8 @@ public sealed class RecoOutboxSenderTests
         result.Error.Should().Be(error);
     }
 
+    // TEST-03: Verify SendAsync with503 retry after; should retry after that delay.
+    /// <summary>Verify SendAsync with503 retry after; should retry after that delay.</summary>
     [Fact]
     public async Task SendAsync_With503RetryAfter_ShouldRetryAfterThatDelay()
     {
@@ -89,7 +97,8 @@ public sealed class RecoOutboxSenderTests
         result.Should().Be(new OutboxDeliveryResult(OutboxDeliveryOutcome.Retry, "HTTP 503 DISH_VECTOR_NOT_READY", TimeSpan.FromSeconds(30)));
     }
 
-    // TEST-03: Timeouts and network errors are retried; an unreadable payload is dead without any call.
+    // TEST-04: Timeouts and network errors are retried; an unreadable payload is dead without any call.
+    /// <summary>Ensures transient transport failures are retried rather than dropped.</summary>
     [Fact]
     public async Task SendAsync_WithTimeoutOrNetworkError_ShouldRetry()
     {
@@ -102,6 +111,8 @@ public sealed class RecoOutboxSenderTests
             .Outcome.Should().Be(OutboxDeliveryOutcome.Retry);
     }
 
+    // TEST-05: Verify SendAsync with unreadable payload; should be dead without calling.
+    /// <summary>Verify SendAsync with unreadable payload; should be dead without calling.</summary>
     [Theory]
     [InlineData(OutboxEventType.DishUpserted, "{not json")]
     [InlineData(OutboxEventType.DishDeactivated, """{"occurred_at":"x"}""")]
@@ -115,7 +126,8 @@ public sealed class RecoOutboxSenderTests
         handler.Method.Should().BeNull();
     }
 
-    // TEST-04: Backoff doubles from 5 s and stops at 15 min.
+    // TEST-06: Backoff doubles from 5 s and stops at 15 min.
+    /// <summary>Ensures retries back off exponentially but never wait longer than 15 minutes.</summary>
     [Theory]
     [InlineData(1, 5)]
     [InlineData(2, 10)]
@@ -126,6 +138,7 @@ public sealed class RecoOutboxSenderTests
         OutboxDispatcher.Backoff(attempts).Should().Be(TimeSpan.FromSeconds(seconds));
     }
 
+    /// <summary>Handler that records the method, URL, body and headers of the request it receives.</summary>
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         public string? Method { get; private set; }
@@ -133,6 +146,7 @@ public sealed class RecoOutboxSenderTests
         public string? Body { get; private set; }
         public Dictionary<string, string> Headers { get; } = [];
 
+        /// <summary>Captures the request details, then returns the configured response.</summary>
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Method = request.Method.Method;

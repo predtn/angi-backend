@@ -11,11 +11,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
 {
+    /// <summary>Verifies LogoutUseCase revokes only the caller's own session and stays idempotent for every other token.</summary>
     public sealed class LogoutUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
         // TEST-01: Revoke the refresh-token session that belongs to the authenticated user.
+        /// <summary>Ensures logout ends the caller's refresh-token session.</summary>
         [Fact]
         public async Task ExecuteAsync_WithOwnedSession_ShouldRevokeSession()
         {
@@ -36,6 +38,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         }
 
         // TEST-02: Keep logout idempotent when the token does not belong to the authenticated user.
+        /// <summary>Prevents one user from revoking another user's session through logout.</summary>
         [Fact]
         public async Task ExecuteAsync_WithAnotherUsersSession_ShouldNotModifySession()
         {
@@ -55,6 +58,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         }
 
         // TEST-03: Keep logout idempotent when the supplied refresh token is unknown.
+        /// <summary>Keeps logout idempotent and free of writes for an unknown token.</summary>
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldReturnWithoutSaving()
         {
@@ -70,6 +74,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         }
 
         // TEST-04: Keep logout idempotent when the matching session has already been revoked.
+        /// <summary>Keeps repeated logouts idempotent and free of writes.</summary>
         [Fact]
         public async Task ExecuteAsync_WithRevokedSession_ShouldReturnWithoutSaving()
         {
@@ -92,6 +97,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         }
 
         // TEST-05: Stop before token hashing and repository access when the logout request is empty.
+        /// <summary>Ensures an empty request is rejected before hashing or database access.</summary>
         [Fact]
         public async Task ExecuteAsync_WithEmptyToken_ShouldThrowValidationExceptionFirst()
         {
@@ -116,6 +122,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
                 Times.Never);
         }
 
+        /// <summary>Creates the use case for the given user with a token service that hashes the default refresh token.</summary>
         private static LogoutUseCase CreateUseCase(
             Mock<IAuthenticationRepository> repository,
             Mock<IUnitOfWork> unitOfWork,
@@ -135,11 +142,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
                 new FixedTimeProvider(Now));
         }
 
+        /// <summary>Creates a logout request carrying the default refresh token.</summary>
         private static LogoutRequestDto ValidRequest()
         {
             return new LogoutRequestDto { RefreshToken = "refresh-token" };
         }
 
+        /// <summary>Clock fixed at one instant so revocation timestamps can be asserted exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;
@@ -149,6 +158,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
                 _now = new DateTimeOffset(now);
             }
 
+            /// <summary>Returns the fixed instant supplied to the constructor.</summary>
             public override DateTimeOffset GetUtcNow() => _now;
         }
     }

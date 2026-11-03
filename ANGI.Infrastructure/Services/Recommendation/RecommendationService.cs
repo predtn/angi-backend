@@ -109,6 +109,17 @@ namespace ANGI.Infrastructure.Services.Recommendation
             int? topK,
             RecommendationContext context,
             CancellationToken ct)
+            => await RankAsync(userId, candidateDishIds, topK, context, null, ct);
+
+        public Task<RecommendationResult> RecommendConversationAsync(int userId, IReadOnlyList<int> candidates,
+            int topK, RecommendationVector vector, CancellationToken ct) =>
+            RankAsync(userId, candidates, topK, RecommendationContext.RoadmapAi, vector, ct);
+
+        /// <summary>Uses a positive configured timeout, or the documented default when it is missing or invalid.</summary>
+        internal static int Milliseconds(int configured, int fallback) => configured > 0 ? configured : fallback;
+
+        private async Task<RecommendationResult> RankAsync(int? userId, IReadOnlyList<int> candidateDishIds,
+            int? topK, RecommendationContext context, RecommendationVector? vector, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(candidateDishIds);
             if (topK is not null)
@@ -131,8 +142,10 @@ namespace ANGI.Infrastructure.Services.Recommendation
                 return Fallback(candidates, topK);
             }
 
-            var body = new RecommendRequest(userId, candidates, topK, context);
-            var outcome = await SendAsync(HttpMethod.Post, "recommendations", body, "RECO-05", ct);
+            var body = new RecommendRequest(userId, candidates, topK, context, vector?.VectorSource, vector?.UserVectorOverride);
+            // Agent ranking waits longer: a short reco pause should not silently turn a chat meal into rating fallback.
+            var outcome = await SendAsync(HttpMethod.Post, "recommendations", body, "RECO-05", ct,
+                vector is null ? null : Milliseconds(_settings.AgentTimeoutMilliseconds, 3000));
             if (outcome.Failed)
             {
                 return Fallback(candidates, topK);
@@ -142,8 +155,10 @@ namespace ANGI.Infrastructure.Services.Recommendation
             if (response.IsSuccessStatusCode)
             {
                 var result = await ReadAsync<RecommendResponse>(response, "RECO-05", ct);
-                if (result?.Items is null)
+                if (result?.Items is null || vector is not null && result.VectorSource != vector.VectorSource)
                 {
+                    if (vector is not null && result?.VectorSource != vector.VectorSource)
+                        _logger.LogWarning("RECO-05 did not confirm vector source {VectorSource}; using rating fallback.", vector.VectorSource);
                     return Fallback(candidates, topK);
                 }
 
@@ -152,7 +167,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
                     result.RequestId,
                     items.Select(item => item.DishId).ToArray(),
                     result.IgnoredDishIds ?? Array.Empty<int>(),
-                    items.Select(item => item.RecommendScore).ToArray());
+                    items.Length == 0 && !result.RequestId.HasValue
+                        ? null
+                        : items.Select(item => item.RecommendScore).ToArray(), result.VectorSource);
             }
 
             var errorCode = await ReadErrorCodeAsync(response, ct);
@@ -221,6 +238,22 @@ namespace ANGI.Infrastructure.Services.Recommendation
                 : new SurveyStatus(result.Completed, result.SurveyAt, result.SurveyAnswerCount);
         }
 
+        public async Task<UserPreferenceSnapshot?> GetPreferencesAsync(int userId, CancellationToken ct)
+        {
+            if (!IsConfigured) return null;
+            var outcome = await SendAsync(HttpMethod.Get, $"users/{userId}/preferences", (object?)null, "RECO-PREFERENCES", ct);
+            if (outcome.Failed) return null;
+            using var response = outcome.Response!;
+            if (!response.IsSuccessStatusCode)
+            {
+                LogFailure("RECO-PREFERENCES", response.StatusCode, await ReadErrorCodeAsync(response, ct));
+                return null;
+            }
+            var snapshot = await ReadAsync<UserPreferenceSnapshot>(response, "RECO-PREFERENCES", ct);
+            return snapshot is not null && snapshot.UserId == userId && snapshot.OntologyVersion == 1 &&
+                (snapshot.Vec is null || snapshot.Vec.Length == 12 && snapshot.Vec.All(double.IsFinite)) ? snapshot : null;
+        }
+
         /// <summary>
         /// Sends one request. A timeout or network error is logged and reported as Failed; the caller's own
         /// cancellation is rethrown.
@@ -230,8 +263,12 @@ namespace ANGI.Infrastructure.Services.Recommendation
             string path,
             object? body,
             string endpointId,
-            CancellationToken ct)
+            CancellationToken ct,
+            int? timeoutMilliseconds = null)
         {
+            var limit = timeoutMilliseconds ?? Milliseconds(_settings.TimeoutMilliseconds, 800);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(limit);
             using var request = new HttpRequestMessage(method, path);
             if (body is not null)
             {
@@ -245,11 +282,11 @@ namespace ANGI.Infrastructure.Services.Recommendation
 
             try
             {
-                return new SendOutcome(await _httpClient.SendAsync(request, ct));
+                return new SendOutcome(await _httpClient.SendAsync(request, timeout.Token));
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                _logger.LogWarning("{EndpointId} did not answer within {TimeoutMilliseconds} ms.", endpointId, _settings.TimeoutMilliseconds);
+                _logger.LogWarning("{EndpointId} did not answer within {TimeoutMilliseconds} ms.", endpointId, limit);
             }
             catch (HttpRequestException exception)
             {
@@ -331,7 +368,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
             int? UserId,
             IReadOnlyList<int> CandidateDishIds,
             int? TopK,
-            RecommendationContext Context);
+            RecommendationContext Context,
+            string? VectorSource = null,
+            double[]? UserVectorOverride = null);
 
         private sealed record RecommendItem(int DishId, int Rank, double RecommendScore);
 
@@ -339,7 +378,8 @@ namespace ANGI.Infrastructure.Services.Recommendation
             Guid? RequestId,
             int ConfigVersion,
             IReadOnlyList<RecommendItem>? Items,
-            IReadOnlyList<int>? IgnoredDishIds);
+            IReadOnlyList<int>? IgnoredDishIds,
+            string? VectorSource = null);
 
         private sealed record ImpressionsRequest(int UserId, Guid RequestId, IReadOnlyList<int> DishIds, DateTime? ShownAt);
 

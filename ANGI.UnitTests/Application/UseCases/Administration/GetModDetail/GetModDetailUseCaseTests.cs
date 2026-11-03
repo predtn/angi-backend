@@ -8,6 +8,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.GetModDetail;
 
+/// <summary>Verifies GetModDetailUseCase combines a MOD's account, permissions and handled work, and hides non-MOD accounts.</summary>
 public sealed class GetModDetailUseCaseTests
 {
     // TEST-01: Combine account, permission, and all handled-work data.

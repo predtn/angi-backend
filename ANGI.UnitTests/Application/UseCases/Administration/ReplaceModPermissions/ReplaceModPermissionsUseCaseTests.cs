@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Administration.ReplaceModPermissions;
 
+/// <summary>Verifies ReplaceModPermissionsUseCase replaces a MOD's override set atomically and rejects unknown or admin-only permissions.</summary>
 public sealed class ReplaceModPermissionsUseCaseTests
 {
     private static readonly DateTime Now = new(2026, 10, 21, 8, 0, 0, DateTimeKind.Utc);
@@ -257,6 +258,7 @@ public sealed class ReplaceModPermissionsUseCaseTests
         return unitOfWork;
     }
 
+    /// <summary>Clock fixed at one instant so granted_at values can be asserted exactly.</summary>
     private sealed class FixedTimeProvider(DateTime now) : TimeProvider
     {
         /// <summary>Returns the deterministic UTC timestamp used for granted_at assertions.</summary>

@@ -26,10 +26,12 @@ public sealed class UnlikeBlogUseCaseTests
             .ReturnsAsync(new Blog { Id = 45, AuthorId = 99, Title = "Blog", Status = BlogStatus.Published, LikeCount = 6 });
     }
 
+    /// <summary>Creates the use case over the shared repository, current-user and unit-of-work mocks.</summary>
     private UnlikeBlogUseCase CreateUseCase() =>
         new(_blogRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
     // TEST-01: Removing an existing like subtracts 1 from like_count in SQL, in one transaction.
+    /// <summary>Removing an existing like subtracts 1 from like_count in SQL, in one transaction.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldRemoveLikeAndDecrementLikeCount()
     {
@@ -44,6 +46,7 @@ public sealed class UnlikeBlogUseCaseTests
     }
 
     // TEST-02: Unliking a blog that is not liked (or losing a concurrent race) keeps the count.
+    /// <summary>Unliking a blog that is not liked (or losing a concurrent race) keeps the count.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenNotLiked_ShouldBeIdempotentAndNotDecrement()
     {
@@ -58,6 +61,7 @@ public sealed class UnlikeBlogUseCaseTests
     }
 
     // TEST-03: A missing blog is BLOG_NOT_FOUND and writes nothing.
+    /// <summary>A missing blog is BLOG_NOT_FOUND and writes nothing.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {

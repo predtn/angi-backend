@@ -4,10 +4,13 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Notification;
 
+/// <summary>Verifies MarkNotificationAsReadRequestDtoValidator requires either valid ids or the all flag.</summary>
 public sealed class MarkNotificationAsReadRequestDtoValidatorTests
 {
     private readonly MarkNotificationAsReadRequestDtoValidator _validator = new();
 
+    // TEST-01: Verify Validate with valid ids; should be valid.
+    /// <summary>Verify Validate with valid ids; should be valid.</summary>
     [Fact]
     public void Validate_WithValidIds_ShouldBeValid()
     {
@@ -22,6 +25,8 @@ public sealed class MarkNotificationAsReadRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-02: Verify Validate with all true and no ids; should be valid.
+    /// <summary>Verify Validate with all true and no ids; should be valid.</summary>
     [Fact]
     public void Validate_WithAllTrueAndNoIds_ShouldBeValid()
     {
@@ -35,6 +40,8 @@ public sealed class MarkNotificationAsReadRequestDtoValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    // TEST-03: Verify Validate with neither ids nor all true; should be invalid.
+    /// <summary>Verify Validate with neither ids nor all true; should be invalid.</summary>
     [Fact]
     public void Validate_WithNeitherIdsNorAllTrue_ShouldBeInvalid()
     {
@@ -50,6 +57,8 @@ public sealed class MarkNotificationAsReadRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == "ids");
     }
 
+    // TEST-04: Verify Validate with empty ids and all false; should be invalid.
+    /// <summary>Verify Validate with empty ids and all false; should be invalid.</summary>
     [Fact]
     public void Validate_WithEmptyIdsAndAllFalse_ShouldBeInvalid()
     {
@@ -65,6 +74,8 @@ public sealed class MarkNotificationAsReadRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == "ids");
     }
 
+    // TEST-05: Verify Validate with more than100 ids; should be invalid.
+    /// <summary>Verify Validate with more than100 ids; should be invalid.</summary>
     [Fact]
     public void Validate_WithMoreThan100Ids_ShouldBeInvalid()
     {
@@ -80,6 +91,8 @@ public sealed class MarkNotificationAsReadRequestDtoValidatorTests
         result.Errors.Should().Contain(e => e.PropertyName == "Ids");
     }
 
+    // TEST-06: Verify Validate with zero or negative id; should be invalid.
+    /// <summary>Verify Validate with zero or negative id; should be invalid.</summary>
     [Fact]
     public void Validate_WithZeroOrNegativeId_ShouldBeInvalid()
     {

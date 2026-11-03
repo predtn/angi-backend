@@ -10,14 +10,17 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Discovery;
 
+/// <summary>Verifies PreferenceSurveyController is traveler-only and returns 201 envelopes for submit and skip.</summary>
 public sealed class PreferenceSurveyControllerTests
 {
     private readonly Mock<ISubmitPreferenceSurveyUseCase> _submitUseCase = new();
     private readonly Mock<ISkipPreferenceSurveyUseCase> _skipUseCase = new();
 
+    /// <summary>Creates the controller over the shared submit and skip use case mocks.</summary>
     private PreferenceSurveyController CreateController() => new(_submitUseCase.Object, _skipUseCase.Object);
 
     // TEST-01: Allow only Travelers, as column "Auth / Role" of PREF-02 and PREF-03 says.
+    /// <summary>Ensures only travelers can submit or skip the survey.</summary>
     [Fact]
     public void Controller_ShouldAllowOnlyTravelers()
     {
@@ -30,6 +33,7 @@ public sealed class PreferenceSurveyControllerTests
     }
 
     // TEST-02: Wrap the PREF-02 result in a 201 ApiResponse.
+    /// <summary>Ensures a submitted survey returns 201 with the stored result.</summary>
     [Fact]
     public async Task Submit_ShouldReturnCreatedWithUseCaseResult()
     {
@@ -50,6 +54,7 @@ public sealed class PreferenceSurveyControllerTests
     }
 
     // TEST-03: Wrap the PREF-03 result in a 201 ApiResponse.
+    /// <summary>Ensures a skipped survey returns 201 with the stored result.</summary>
     [Fact]
     public async Task Skip_ShouldReturnCreatedWithUseCaseResult()
     {

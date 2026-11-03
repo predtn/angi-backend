@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Auth
 {
+    /// <summary>Verifies AuthenticationTokenService issues signed access tokens and random tokens stored only as hashes.</summary>
     public sealed class AuthenticationTokenServiceTests
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
@@ -87,6 +88,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
                 new FixedTimeProvider(Now));
         }
 
+        /// <summary>Clock fixed at one instant so token lifetimes can be asserted exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

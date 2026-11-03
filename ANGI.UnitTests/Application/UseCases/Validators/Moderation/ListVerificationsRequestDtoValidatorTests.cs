@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Moderation;
 
+/// <summary>Verifies ListVerificationsRequestDtoValidator accepts only documented statuses and paging ranges.</summary>
 public sealed class ListVerificationsRequestDtoValidatorTests
 {
     private readonly ListVerificationsRequestDtoValidator _validator = new();

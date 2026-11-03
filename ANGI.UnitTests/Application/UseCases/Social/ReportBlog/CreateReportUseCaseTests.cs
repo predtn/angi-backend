@@ -33,9 +33,12 @@ public sealed class CreateReportUseCaseTests
                 ids.Select(id => new MediaFile { Id = id }).ToArray());
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, media and unit-of-work mocks.</summary>
     private CreateReportUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
 
+    // TEST-01: A valid report for another user's published blog is created and saved.
+    /// <summary>Ensures a valid report on another user's blog is stored once.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateReportSuccessfully()
     {
@@ -92,6 +95,8 @@ public sealed class CreateReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: Reporting your own blog throws CANNOT_REPORT_OWN_CONTENT.
+    /// <summary>Prevents authors from reporting their own content.</summary>
     [Fact]
     public async Task ExecuteAsync_ExceptionPath1_WhenReportingOwnBlog_ShouldThrowCannotReportOwnContent()
     {
@@ -129,6 +134,8 @@ public sealed class CreateReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-03: A reporter with a pending report on the same blog gets ConflictException.
+    /// <summary>Prevents duplicate open reports from the same user.</summary>
     [Fact]
     public async Task ExecuteAsync_ExceptionPath2_WhenReportAlreadyPending_ShouldThrowConflictException()
     {
@@ -169,6 +176,8 @@ public sealed class CreateReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-04: A blog that does not exist throws NotFoundException.
+    /// <summary>Ensures a missing blog returns not found.</summary>
     [Fact]
     public async Task ExecuteAsync_ExceptionPath3_WhenBlogNotFound_ShouldThrowNotFoundException()
     {
@@ -196,6 +205,8 @@ public sealed class CreateReportUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // TEST-05: A blog that is not published is treated as not found.
+    /// <summary>Ensures hidden or removed blogs look the same as missing ones.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogNotPublished_ShouldThrowNotFoundException()
     {
@@ -224,6 +235,8 @@ public sealed class CreateReportUseCaseTests
         ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
     }
 
+    // TEST-06: An unauthenticated caller gets UnauthorizedException.
+    /// <summary>Ensures an anonymous caller cannot report a blog.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUnauthenticated_ShouldThrowUnauthorizedException()
     {
@@ -241,6 +254,8 @@ public sealed class CreateReportUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
+    // TEST-07: Reason other without a description fails validation.
+    /// <summary>Ensures an other-reason report explains itself.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenReasonIsOtherAndDescriptionMissing_ShouldThrowValidationException()
     {

@@ -16,11 +16,13 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
 {
+    /// <summary>Verifies RefreshTokenUseCase rotates refresh tokens once, detects reuse and rejects expired or blocked sessions.</summary>
     public sealed class RefreshTokenUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 7, 0, 0, 0, DateTimeKind.Utc);
 
         // TEST-01: Revoke the current session, persist a new session, and issue the access token with the new session id.
+        /// <summary>Ensures refresh replaces the session and binds the new access token to the new session id.</summary>
         [Fact]
         public async Task ExecuteAsync_WithActiveSession_ShouldRotateRefreshToken()
         {
@@ -56,6 +58,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-02: Revoke every active session when a previously revoked refresh token is reused.
+        /// <summary>Treats reuse of a revoked token as theft and ends every active session.</summary>
         [Fact]
         public async Task ExecuteAsync_WithReusedToken_ShouldRevokeActiveSessionsAndRejectRequest()
         {
@@ -83,6 +86,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-03: Reject an unknown refresh token without writing to the database.
+        /// <summary>Ensures an unknown token is rejected without any write.</summary>
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldRejectWithoutSaving()
         {
@@ -102,6 +106,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-04: Revoke and reject an expired refresh-token session without issuing replacement tokens.
+        /// <summary>Ensures an expired session is closed and cannot mint new tokens.</summary>
         [Fact]
         public async Task ExecuteAsync_WithExpiredSession_ShouldRevokeAndRejectRequest()
         {
@@ -124,6 +129,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-05: Reject refresh for a non-active user and revoke the presented session.
+        /// <summary>Ensures a blocked account cannot keep its access alive through refresh.</summary>
         [Fact]
         public async Task ExecuteAsync_WithInactiveUser_ShouldRevokeAndRejectRequest()
         {
@@ -144,6 +150,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-06: Stop before hashing or database access when the refresh request is empty.
+        /// <summary>Ensures an empty request is rejected before hashing or database access.</summary>
         [Fact]
         public async Task ExecuteAsync_WithEmptyToken_ShouldThrowValidationExceptionFirst()
         {
@@ -166,6 +173,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-07: Use a transaction and a row-locking repository query for single-use token rotation.
+        /// <summary>Ensures rotation runs under a row lock so a token can be used only once.</summary>
         [Fact]
         public async Task ExecuteAsync_WithActiveSession_ShouldUseLockedTransactionAndCommit()
         {
@@ -195,6 +203,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-08: Leave the refresh transaction uncommitted when persistence fails during rotation.
+        /// <summary>Ensures a failed save never commits a half-rotated session.</summary>
         [Fact]
         public async Task ExecuteAsync_WhenSaveFails_ShouldNotCommitTransaction()
         {
@@ -218,6 +227,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         }
 
         // TEST-09: Allow only one success when concurrent requests reuse the same refresh token.
+        /// <summary>Proves the locking design lets only one of two concurrent refreshes succeed.</summary>
         [Fact]
         public async Task ExecuteAsync_WithConcurrentReuse_ShouldAllowOnlyOneSuccessfulRotation()
         {
@@ -264,6 +274,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             }
         }
 
+        /// <summary>Creates the use case from the given mocks, a fixed clock and an optional transaction double.</summary>
         private static RefreshTokenUseCase CreateUseCase(
             Mock<IAuthenticationRepository> repository,
             Mock<IRecommendationService> recommendationService,
@@ -289,11 +300,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                 new FixedTimeProvider(Now));
         }
 
+        /// <summary>Creates a refresh request carrying the default old token.</summary>
         private static RefreshTokenRequestDto ValidRequest()
         {
             return new RefreshTokenRequestDto { RefreshToken = "old-token" };
         }
 
+        /// <summary>Creates an active, unexpired session for user 12 that matches the default token hash.</summary>
         private static UserSession CreateSession()
         {
             return new UserSession
@@ -313,6 +326,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             };
         }
 
+        /// <summary>Clock fixed at one instant so expiry and revocation boundaries are deterministic.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;
@@ -322,9 +336,11 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                 _now = new DateTimeOffset(now);
             }
 
+            /// <summary>Returns the fixed instant supplied to the constructor.</summary>
             public override DateTimeOffset GetUtcNow() => _now;
         }
 
+        /// <summary>Transaction double that holds a shared gate until commit or dispose, simulating a row lock between concurrent refreshes.</summary>
         private sealed class SerializingTransaction : IUnitOfWorkTransaction
         {
             private readonly SemaphoreSlim _gate;
@@ -335,18 +351,21 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                 _gate = gate;
             }
 
+            /// <summary>Releases the simulated row lock when the transaction commits.</summary>
             public Task CommitAsync(CancellationToken ct)
             {
                 Release();
                 return Task.CompletedTask;
             }
 
+            /// <summary>Releases the simulated row lock when the transaction is disposed without commit.</summary>
             public ValueTask DisposeAsync()
             {
                 Release();
                 return ValueTask.CompletedTask;
             }
 
+            /// <summary>Releases the gate at most once, whichever of commit or dispose happens first.</summary>
             private void Release()
             {
                 if (_released)

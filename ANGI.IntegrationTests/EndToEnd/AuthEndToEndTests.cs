@@ -129,7 +129,7 @@ public sealed class AuthEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
-    // TEST-03b: Someone registers a victim's email first; the victim's Google sign-in must lock that password out.
+    // TEST-04: Someone registers a victim's email first; the victim's Google sign-in must lock that password out.
     /// <summary>Covers the AUTH-05 rule for linking Google to a password account whose email was never verified.</summary>
     [PostgresEndToEndFact]
     public async Task GoogleLogin_OnUnverifiedPasswordAccount_ShouldRemoveThatPassword()
@@ -170,7 +170,7 @@ public sealed class AuthEndToEndTests : IClassFixture<PostgresApiFactory>
         });
     }
 
-    // TEST-04: Request and consume a reset token through HTTP, changing the password and revoking every session.
+    // TEST-05: Request and consume a reset token through HTTP, changing the password and revoking every session.
     /// <summary>Covers ANGI-66 and ANGI-70 through the complete reset-password persistence workflow.</summary>
     [PostgresEndToEndFact]
     public async Task ForgotAndResetPassword_ShouldConsumeTokenChangePasswordAndRevokeSessions()
@@ -210,7 +210,7 @@ public sealed class AuthEndToEndTests : IClassFixture<PostgresApiFactory>
         loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
-    // TEST-05: Surface a real database uniqueness conflict through the canonical middleware response.
+    // TEST-06: Surface a real database uniqueness conflict through the canonical middleware response.
     /// <summary>Covers ANGI-23 by proving application exceptions cross the hosted HTTP pipeline unchanged.</summary>
     [PostgresEndToEndFact]
     public async Task RegisterDuplicateEmail_ShouldReturnConflictEnvelopeWithoutSecondUser()

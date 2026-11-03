@@ -4,14 +4,17 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies UpdateBusinessHoursRequestDtoValidator checks each interval and leaves overlap detection to the use case.</summary>
 public sealed class UpdateBusinessHoursRequestDtoValidatorTests
 {
     private readonly UpdateBusinessHoursRequestDtoValidator _validator = new();
 
+    /// <summary>Creates a requested business hour interval.</summary>
     private static BusinessHourDto Hour(short day, string open, string close) =>
         new() { DayOfWeek = day, OpenTime = open, CloseTime = close };
 
     // TEST-01: Accept an empty schedule and the documented sample, including overnight and several intervals a day.
+    /// <summary>Ensures empty and documented schedules are accepted.</summary>
     [Fact]
     public void Validate_WithDocumentedSchedules_ShouldPass()
     {
@@ -23,6 +26,7 @@ public sealed class UpdateBusinessHoursRequestDtoValidatorTests
     }
 
     // TEST-02: Reject a missing hours array: an absent field is not "no hours declared".
+    /// <summary>Ensures a missing array is not mistaken for an empty schedule.</summary>
     [Fact]
     public void Validate_WithoutHours_ShouldFailOnHours()
     {
@@ -32,6 +36,7 @@ public sealed class UpdateBusinessHoursRequestDtoValidatorTests
     }
 
     // TEST-03: Reject a day outside 0..6, a time not in HH:mm, and an interval that opens and closes at once.
+    /// <summary>Ensures a malformed interval is rejected as a field error.</summary>
     [Theory]
     [InlineData((short)7, "06:00", "13:30")]
     [InlineData((short)-1, "06:00", "13:30")]
@@ -47,6 +52,7 @@ public sealed class UpdateBusinessHoursRequestDtoValidatorTests
     }
 
     // TEST-04: Leave overlaps to the use case, which reports INVALID_BUSINESS_HOURS.
+    /// <summary>Ensures overlaps reach the use case so it can return INVALID_BUSINESS_HOURS.</summary>
     [Fact]
     public void Validate_WithOverlappingIntervals_ShouldPass()
     {

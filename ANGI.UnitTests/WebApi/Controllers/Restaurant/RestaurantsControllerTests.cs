@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies RestaurantsController wraps each public restaurant endpoint result in the documented status.</summary>
 public sealed class RestaurantsControllerTests
 {
     private readonly Mock<IBrowseRestaurantsUseCase> _browseUseCaseMock = new();
@@ -18,6 +19,7 @@ public sealed class RestaurantsControllerTests
     private readonly Mock<IGetRestaurantReviewsUseCase> _getReviewsUseCaseMock = new();
     private readonly Mock<ICreateRestaurantReviewUseCase> _createReviewUseCaseMock = new();
 
+    /// <summary>Creates the controller over the shared restaurant use case mocks.</summary>
     private RestaurantsController CreateController() =>
         new(
             _browseUseCaseMock.Object,
@@ -27,6 +29,7 @@ public sealed class RestaurantsControllerTests
             _createReviewUseCaseMock.Object);
 
     // TEST-01: Return REST-01 payload wrapped in ApiResponse with HTTP 200 OK
+    /// <summary>Ensures the restaurant page is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task Browse_WithValidRequest_ShouldReturnOkApiResponse()
     {
@@ -76,6 +79,7 @@ public sealed class RestaurantsControllerTests
     }
 
     // TEST-02: Return REST-02 payload wrapped in ApiResponse with HTTP 200 OK
+    /// <summary>Ensures the restaurant detail is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetDetail_WithValidId_ShouldReturnOkApiResponse()
     {
@@ -107,6 +111,7 @@ public sealed class RestaurantsControllerTests
     }
 
     // TEST-03: Return REST-03 payload wrapped in ApiResponse with HTTP 200 OK
+    /// <summary>Ensures the public menu is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetMenu_WithValidId_ShouldReturnOkApiResponse()
     {
@@ -132,6 +137,7 @@ public sealed class RestaurantsControllerTests
     }
 
     // TEST-04: Return REST-04 payload wrapped in ApiResponse with HTTP 200 OK
+    /// <summary>Ensures the review page is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetReviews_WithValidId_ShouldReturnOkApiResponse()
     {
@@ -162,6 +168,7 @@ public sealed class RestaurantsControllerTests
     }
 
     // TEST-05: Return REV-01 payload wrapped in ApiResponse with HTTP 201 Created
+    /// <summary>Ensures a created review returns 201 with the use case result.</summary>
     [Fact]
     public async Task CreateReview_WithValidRequest_ShouldReturnCreatedApiResponse()
     {

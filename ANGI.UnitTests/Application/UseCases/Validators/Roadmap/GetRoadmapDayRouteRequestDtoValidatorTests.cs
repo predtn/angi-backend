@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies GetRoadmapDayRouteRequestDtoValidator checks the optional GPS pair and the travel profile.</summary>
 public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
 {
     private readonly GetRoadmapDayRouteRequestDtoValidator _validator = new();

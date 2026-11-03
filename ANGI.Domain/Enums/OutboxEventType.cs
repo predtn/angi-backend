@@ -4,6 +4,7 @@ namespace ANGI.Domain.Enums
     {
         DishUpserted,
         DishDeactivated,
-        FeedbackCreated
+        FeedbackCreated,
+        AgentImpressionRecorded
     }
 }

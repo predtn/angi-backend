@@ -12,6 +12,8 @@ namespace ANGI.UnitTests.Application.UseCases.Moderation.GetUsers;
 /// <summary>Verifies MOD-U1 user list logic, pagination, filtering and validation.</summary>
 public sealed class GetUsersUseCaseTests
 {
+    // TEST-01: A valid page request returns the paged user cards from the repository.
+    /// <summary>Ensures MOD-U1 returns the repository page unchanged.</summary>
     [Fact]
     public async Task ListUsers_HappyPath_ReturnsPagedUsers()
     {
@@ -61,6 +63,8 @@ public sealed class GetUsersUseCaseTests
         result.TotalPages.Should().Be(1);
     }
 
+    // TEST-02: Page 0 fails validation before the repository is queried.
+    /// <summary>Checks pagination is validated first, as the use case rules require.</summary>
     [Fact]
     public async Task ListUsers_InvalidPagination_ThrowsValidationException()
     {

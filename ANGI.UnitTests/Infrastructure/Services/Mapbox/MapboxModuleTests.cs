@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
 {
+    /// <summary>Verifies the Mapbox module binds its settings and configures the typed route client.</summary>
     public sealed class MapboxModuleTests
     {
         // TEST-01: Bind Mapbox settings and apply base address and timeout to the typed IRouteService client.
@@ -60,6 +61,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
             guard.IsCancellationRequested.Should().BeFalse();
         }
 
+        /// <summary>Handler that records the request and waits until cancelled, so the client timeout can be observed.</summary>
         private sealed class WaitingHttpMessageHandler : HttpMessageHandler
         {
             public Uri? RequestUri { get; private set; }

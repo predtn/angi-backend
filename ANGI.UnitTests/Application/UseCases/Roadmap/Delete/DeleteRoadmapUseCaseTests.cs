@@ -8,6 +8,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Delete;
 
+/// <summary>Verifies DeleteRoadmapUseCase soft-deletes only the caller's roadmap and hides every other target.</summary>
 public sealed class DeleteRoadmapUseCaseTests
 {
     // TEST-01: Soft-delete an owned roadmap at the injected UTC time and commit exactly once.
@@ -90,6 +91,7 @@ public sealed class DeleteRoadmapUseCaseTests
             transaction);
     }
 
+    /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
     private sealed record Fixture(
         DeleteRoadmapUseCase UseCase,
         Mock<IRoadmapRepository> Repository,

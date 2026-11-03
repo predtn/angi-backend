@@ -14,6 +14,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.UpdateItem;
 
+/// <summary>Verifies UpdateRoadmapItemUseCase edits schedule fields in place and replaces dishes atomically.</summary>
 public sealed class UpdateRoadmapItemUseCaseTests
 {
     private const int TravelerId = 12;
@@ -296,6 +297,7 @@ public sealed class UpdateRoadmapItemUseCaseTests
         }
     };
 
+    /// <summary>Groups the use case under test with the current item and the mocks each scenario verifies.</summary>
     private sealed record Fixture(
         UpdateRoadmapItemUseCase UseCase,
         RoadmapItem CurrentItem,

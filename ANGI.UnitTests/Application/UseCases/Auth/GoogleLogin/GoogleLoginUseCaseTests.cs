@@ -19,6 +19,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
 {
+    /// <summary>Verifies GoogleLoginUseCase signs in, links or registers Google identities safely and rejects blocked accounts.</summary>
     public sealed class GoogleLoginUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 14, 3, 0, 0, DateTimeKind.Utc);
@@ -142,7 +143,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.Repository.Verify(x => x.AddUser(It.IsAny<User>()), Times.Never);
         }
 
-        // TEST-03b: A verified password account keeps its password and sessions when Google is linked.
+        // TEST-04: A verified password account keeps its password and sessions when Google is linked.
         /// <summary>Verifies only unverified registrations lose their password on the first Google link.</summary>
         [Fact]
         public async Task ExecuteAsync_WithVerifiedPasswordAccount_ShouldKeepPasswordAndSessions()
@@ -160,7 +161,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.Repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-04: Require a role only when no linked or email-matching account exists.
+        // TEST-05: Require a role only when no linked or email-matching account exists.
         /// <summary>Verifies first-time sign-in returns ROLE_REQUIRED without writing partial data.</summary>
         [Fact]
         public async Task ExecuteAsync_WithNewIdentityAndNoRole_ShouldThrowRoleRequired()
@@ -179,7 +180,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-05: Reject every linked account state that must not receive a new session.
+        // TEST-06: Reject every linked account state that must not receive a new session.
         /// <summary>Verifies blocked account states retain the established authentication error codes.</summary>
         [Theory]
         [InlineData(UserStatus.Suspended, "ACCOUNT_SUSPENDED")]
@@ -209,7 +210,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-06: Validate the request before calling Google or opening a database transaction.
+        // TEST-07: Validate the request before calling Google or opening a database transaction.
         /// <summary>Verifies FluentValidation remains the first operation in AUTH-05.</summary>
         [Fact]
         public async Task ExecuteAsync_WithInvalidRequest_ShouldFailValidationFirst()
@@ -224,7 +225,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.UnitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-07: Skip preference lookup for Restaurant Owners while still returning a complete session.
+        // TEST-08: Skip preference lookup for Restaurant Owners while still returning a complete session.
         /// <summary>Verifies AUTH-05 applies the same role-specific survey behavior as password login.</summary>
         [Fact]
         public async Task ExecuteAsync_WithRestaurantOwner_ShouldNotRequestSurveyStatus()
@@ -246,7 +247,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
                 It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-08: Preserve successful login when the recommendation service cannot provide survey state.
+        // TEST-09: Preserve successful login when the recommendation service cannot provide survey state.
         /// <summary>Verifies an unavailable optional Reco dependency produces a nullable survey flag.</summary>
         [Fact]
         public async Task ExecuteAsync_WhenSurveyStatusIsUnavailable_ShouldReturnNullSurveyFlag()
@@ -270,7 +271,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             result.User.NeedsPreferenceSurvey.Should().BeNull();
         }
 
-        // TEST-09: Bound an oversized Google profile name to the users.display_name column length.
+        // TEST-10: Bound an oversized Google profile name to the users.display_name column length.
         /// <summary>Verifies external profile data cannot cause a database length violation during registration.</summary>
         [Fact]
         public async Task ExecuteAsync_WithOversizedGoogleName_ShouldTruncateDisplayName()
@@ -372,6 +373,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         /// <summary>Creates the seeded Traveler role used by first-login tests.</summary>
         private static Role TravelerRole() => new() { Id = 1, Code = "TRAVELER", Name = "Traveler" };
 
+        /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
         private sealed record Harness(
             GoogleLoginUseCase UseCase,
             Mock<IGoogleIdentityService> GoogleIdentityService,
@@ -383,6 +385,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             Mock<IUnitOfWork> UnitOfWork,
             Mock<IUnitOfWorkTransaction> Transaction);
 
+        /// <summary>Clock fixed at one instant so session and audit timestamps are deterministic.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

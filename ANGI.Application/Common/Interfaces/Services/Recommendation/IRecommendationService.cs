@@ -8,6 +8,12 @@ namespace ANGI.Application.Common.Interfaces.Services.Recommendation
     /// </summary>
     public interface IRecommendationService
     {
+        /// <summary>Returns a successful profile snapshot; null means the service is unavailable.</summary>
+        Task<UserPreferenceSnapshot?> GetPreferencesAsync(int userId, CancellationToken ct) => Task.FromResult<UserPreferenceSnapshot?>(null);
+
+        /// <summary>Ranks a conversation using its request vector; implementations must confirm support.</summary>
+        Task<RecommendationResult> RecommendConversationAsync(int userId, IReadOnlyList<int> candidates, int topK,
+            RecommendationVector vector, CancellationToken ct) => RecommendAsync(userId, candidates, topK, RecommendationContext.RoadmapAi, ct);
         /// <summary>
         /// RECO-03 (PREF-02, PREF-03 with no answers). Throws 409 SURVEY_ALREADY_SUBMITTED, 400 UNKNOWN_OPTION_CODE,
         /// or 503 SERVICE_UNAVAILABLE when reco fails.

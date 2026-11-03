@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.Generate;
 
+/// <summary>Verifies GetRoadmapGenerationJobUseCase maps a job's status and results for its owner only.</summary>
 public sealed class GetRoadmapGenerationJobUseCaseTests
 {
     private readonly Mock<IRoadmapGenerationRepository> _jobs = new();
@@ -20,9 +21,11 @@ public sealed class GetRoadmapGenerationJobUseCaseTests
         _currentUser.SetupGet(value => value.UserId).Returns(12);
     }
 
+    /// <summary>Creates the use case over the shared job repository and current-user mocks.</summary>
     private GetRoadmapGenerationJobUseCase CreateUseCase() => new(_jobs.Object, _currentUser.Object);
 
     // TEST-01: Map a finished job, reading created item ids from raw_output.
+    /// <summary>Ensures a finished job reports every field, including the created item ids.</summary>
     [Fact]
     public async Task ExecuteAsync_WithSucceededJob_ShouldMapEveryField()
     {
@@ -53,6 +56,7 @@ public sealed class GetRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-02: A queued job has no created item yet; a failed one carries its message.
+    /// <summary>Ensures unfinished and failed jobs report their state without invented results.</summary>
     [Fact]
     public async Task ExecuteAsync_WithUnfinishedOrFailedJob_ShouldMapStatus()
     {
@@ -75,6 +79,7 @@ public sealed class GetRoadmapGenerationJobUseCaseTests
     }
 
     // TEST-03: Hide a job of another traveler or roadmap behind JOB_NOT_FOUND.
+    /// <summary>Ensures a job of another user or roadmap cannot be read.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutOwnedJob_ShouldThrowNotFound()
     {

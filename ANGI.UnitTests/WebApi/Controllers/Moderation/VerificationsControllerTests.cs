@@ -12,6 +12,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Moderation;
 
+/// <summary>Verifies VerificationsController is MOD-only and wraps verification results in the success envelope.</summary>
 public sealed class VerificationsControllerTests
 {
     private readonly Mock<IListVerificationsUseCase> _list = new();

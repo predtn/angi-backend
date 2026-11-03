@@ -13,6 +13,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Roadmap.RateItem;
 
+/// <summary>Verifies RateRoadmapItemUseCase stores one feedback per item with reco attribution and updates the counters.</summary>
 public sealed class RateRoadmapItemUseCaseTests
 {
     private static readonly Guid RecoRequestId = Guid.Parse("6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00");
@@ -119,8 +120,10 @@ public sealed class RateRoadmapItemUseCaseTests
         fixture.UnitOfWork.Verify(unitOfWork => unitOfWork.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>Creates a like feedback request.</summary>
     private static RateRoadmapItemRequestDto Like() => new() { Value = "like" };
 
+    /// <summary>Wires the use case over the given item and user, optionally failing the insert as an existing feedback.</summary>
     private static Fixture CreateFixture(RoadmapItem? item, int? userId, bool alreadyRated = false)
     {
         var added = new List<DishFeedback>();
@@ -158,6 +161,7 @@ public sealed class RateRoadmapItemUseCaseTests
             added);
     }
 
+    /// <summary>Groups the use case under test with the mocks and captured feedback each scenario verifies.</summary>
     private sealed record Fixture(
         RateRoadmapItemUseCase UseCase,
         Mock<IRoadmapRepository> Repository,

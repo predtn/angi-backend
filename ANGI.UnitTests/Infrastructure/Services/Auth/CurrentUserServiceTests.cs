@@ -5,9 +5,11 @@ using Microsoft.AspNetCore.Http;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Auth
 {
+    /// <summary>Verifies CurrentUserService reads the user id, role and session id from the access token claims.</summary>
     public sealed class CurrentUserServiceTests
     {
-        // TEST-03: Read the session id from the sid claim; a missing or non-numeric sid gives null.
+        // TEST-01: Read the session id from the sid claim; a missing or non-numeric sid gives null.
+        /// <summary>Ensures only a numeric sid claim identifies the current session.</summary>
         [Theory]
         [InlineData("77", 77L)]
         [InlineData("not-a-number", null)]
@@ -27,7 +29,8 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
             service.SessionId.Should().Be(expected);
         }
 
-        // TEST-01: Read the user id and role from the sub and role claims of the access token.
+        // TEST-02: Read the user id and role from the sub and role claims of the access token.
+        /// <summary>Ensures the caller's identity comes from the token claims.</summary>
         [Fact]
         public void UserIdAndRole_WithAuthenticatedRequest_ShouldComeFromClaims()
         {
@@ -41,7 +44,8 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
             service.Role.Should().Be("MOD");
         }
 
-        // TEST-02: Return no user id or role for an anonymous request or outside a request.
+        // TEST-03: Return no user id or role for an anonymous request or outside a request.
+        /// <summary>Ensures anonymous requests and background work have no identity.</summary>
         [Fact]
         public void UserIdAndRole_WithoutToken_ShouldBeNull()
         {

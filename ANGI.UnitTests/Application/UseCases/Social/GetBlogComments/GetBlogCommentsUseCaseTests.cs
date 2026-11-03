@@ -19,10 +19,13 @@ public sealed class GetBlogCommentsUseCaseTests
     private readonly Mock<IBlogRepository> _blogRepository = new();
     private readonly Mock<ICurrentUserService> _currentUserService = new();
 
+    /// <summary>Creates the use case with the real validator and the shared repository and current-user mocks.</summary>
     private GetBlogCommentsUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _currentUserService.Object);
 
     // Happy Path 1: Lấy danh sách bình luận theo phân trang thành công
+    // TEST-01: Verify ExecuteAsync when blog exists; should return paginated comments.
+    /// <summary>Verify ExecuteAsync when blog exists; should return paginated comments.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogExists_ShouldReturnPaginatedComments()
     {
@@ -100,6 +103,8 @@ public sealed class GetBlogCommentsUseCaseTests
     }
 
     // Exception Path 1: Bắn lỗi 404 BLOG_NOT_FOUND khi blogId không tồn tại
+    // TEST-02: Verify ExecuteAsync when blog does not exist; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when blog does not exist; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -122,6 +127,8 @@ public sealed class GetBlogCommentsUseCaseTests
     }
 
     // Exception Path 2: Tham số phân trang không hợp lệ
+    // TEST-03: Verify ExecuteAsync when page is invalid; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when page is invalid; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenPageIsInvalid_ShouldThrowValidationException()
     {

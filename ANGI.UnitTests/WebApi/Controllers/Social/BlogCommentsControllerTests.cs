@@ -13,6 +13,7 @@ namespace ANGI.UnitTests.WebApi.Controllers.Social;
 public sealed class BlogCommentsControllerTests
 {
     // TEST-01: Verifies traveler role on controller level.
+    /// <summary>Ensures only travelers can manage blog comments.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -23,8 +24,8 @@ public sealed class BlogCommentsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
     }
 
-    // TEST-02: Receives BLOG-10, delegates to use case, and returns 201 Created with CommentDto.
-    // TEST-03: Receives BLOG-11, delegates to use case, and returns 200 OK with null Data.
+    // TEST-02: Receives BLOG-11, delegates to use case, and returns 200 OK with null Data.
+    /// <summary>Ensures a deleted comment returns 200 with null data and forwards the cancellation token.</summary>
     [Fact]
     public async Task DeleteComment_ShouldReturnOkResponseWithNullData()
     {

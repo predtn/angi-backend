@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies OwnerRestaurantController returns the documented status for each owner restaurant action.</summary>
 public sealed class OwnerRestaurantControllerTests
 {
     // TEST-01: Return the OWN-01 payload in ApiResponse with HTTP 201.

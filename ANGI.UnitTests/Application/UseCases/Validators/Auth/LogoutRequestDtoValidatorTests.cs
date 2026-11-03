@@ -4,11 +4,13 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies LogoutRequestDtoValidator requires a non-blank refresh token.</summary>
     public sealed class LogoutRequestDtoValidatorTests
     {
         private readonly LogoutRequestDtoValidator _validator = new();
 
         // TEST-01: Accept a non-empty refresh token.
+        /// <summary>Ensures a request with a token passes validation.</summary>
         [Fact]
         public void Validate_WithRefreshToken_ShouldHaveNoErrors()
         {
@@ -18,6 +20,7 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         }
 
         // TEST-02: Reject an empty or blank refresh token.
+        /// <summary>Ensures a blank token is rejected on the refreshToken field.</summary>
         [Theory]
         [InlineData("")]
         [InlineData("   ")]

@@ -14,8 +14,11 @@ public sealed class ReportsControllerTests
 {
     private readonly Mock<IReportBlogUseCase> _reportBlogUseCase = new();
 
+    /// <summary>Creates the controller over the shared blog report use case mock.</summary>
     private ReportsController CreateController() => new(_reportBlogUseCase.Object);
 
+    // TEST-01: Verify Controller should require traveler role.
+    /// <summary>Verify Controller should require traveler role.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -26,6 +29,8 @@ public sealed class ReportsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
     }
 
+    // TEST-02: Verify ReportBlog should return created with report response.
+    /// <summary>Verify ReportBlog should return created with report response.</summary>
     [Fact]
     public async Task ReportBlog_ShouldReturnCreatedWithReportResponse()
     {

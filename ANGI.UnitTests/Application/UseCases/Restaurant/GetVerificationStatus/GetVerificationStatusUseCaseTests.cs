@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Restaurant.GetVerificationStatus;
 
+/// <summary>Verifies GetVerificationStatusUseCase returns the owner's verification status and ordered history.</summary>
 public sealed class GetVerificationStatusUseCaseTests
 {
     private static readonly DateTime FirstSubmittedAt = new(2026, 10, 1, 3, 0, 0, DateTimeKind.Utc);
@@ -145,6 +146,7 @@ public sealed class GetVerificationStatusUseCaseTests
         exception.Which.ErrorCode.Should().Be("RESTAURANT_NOT_FOUND");
     }
 
+    /// <summary>Creates the owner's restaurant with several reviewed verifications out of order, including reviewer details.</summary>
     private static Domain.Entities.Restaurant CreateRestaurantWithVerifications(int ownerId)
     {
         var reviewer = new User

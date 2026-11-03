@@ -10,9 +10,11 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Discovery;
 
+/// <summary>Verifies DishesController applies the documented access rules and wraps dish results in ApiResponse.</summary>
 public sealed class DishesControllerTests
 {
     // TEST-01: DISH-02 is public ("Public (token tùy chọn)"): anonymous access and no role restriction.
+    /// <summary>Ensures dish detail stays reachable without signing in.</summary>
     [Fact]
     public void GetDetail_ShouldAllowAnonymousCallers()
     {
@@ -23,6 +25,7 @@ public sealed class DishesControllerTests
     }
 
     // TEST-02: Wrap the DISH-02 result in a 200 ApiResponse.
+    /// <summary>Ensures the dish detail is returned unchanged in a 200 envelope.</summary>
     [Fact]
     public async Task GetDetail_ShouldReturnOkWithUseCaseResult()
     {
@@ -40,6 +43,7 @@ public sealed class DishesControllerTests
     }
 
     // TEST-03: DISH-01 is public too and wraps its page in a 200 ApiResponse.
+    /// <summary>Ensures dish browsing is public and returns its page in a 200 envelope.</summary>
     [Fact]
     public async Task Browse_ShouldAllowAnonymousAndReturnOk()
     {
@@ -59,6 +63,7 @@ public sealed class DishesControllerTests
     }
 
     // TEST-04: DISH-03 is for Travelers only and wraps the roll in a 200 ApiResponse.
+    /// <summary>Ensures only travelers can roll a dish and the result is wrapped in a 200 envelope.</summary>
     [Fact]
     public async Task Roll_ShouldRequireTravelerAndReturnOk()
     {

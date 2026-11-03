@@ -5,6 +5,7 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies RegisterRestaurantRequestDtoValidator checks restaurant fields, media and overlapping business hours.</summary>
 public sealed class RegisterRestaurantRequestDtoValidatorTests
 {
     // TEST-01: Reject overlapping opening intervals on the same day.

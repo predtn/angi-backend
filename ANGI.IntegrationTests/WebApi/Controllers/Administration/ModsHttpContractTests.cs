@@ -279,12 +279,14 @@ public sealed class ModsApiFactory : WebApplicationFactory<Program>
         });
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     private sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows HTTP contract tests to bypass database-backed status checks.</summary>
         public Task ExecuteAsync(int userId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>ADM-M1 stub that validates and records the query and returns a sample page.</summary>
     public sealed class StubListModsUseCase : IListModsUseCase
     {
         public ListModsRequestDto? LastRequest { get; private set; }
@@ -305,6 +307,7 @@ public sealed class ModsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>ADM-M2 stub that validates and records the body and returns a sample card.</summary>
     public sealed class StubCreateModUseCase : ICreateModUseCase
     {
         public CreateModRequestDto? LastRequest { get; private set; }
@@ -323,6 +326,7 @@ public sealed class ModsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>ADM-M3 stub that records the route id and returns details or MOD_NOT_FOUND.</summary>
     public sealed class StubGetModDetailUseCase : IGetModDetailUseCase
     {
         public int? LastUserId { get; private set; }
@@ -351,6 +355,7 @@ public sealed class ModsApiFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>ADM-M4 stub that validates and records the route and body and returns a sample card.</summary>
     public sealed class StubUpdateModUseCase : IUpdateModUseCase
     {
         public (int UserId, UpdateModRequestDto Request)? LastCall { get; private set; }

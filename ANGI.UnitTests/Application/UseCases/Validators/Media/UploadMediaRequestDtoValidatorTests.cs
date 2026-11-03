@@ -4,10 +4,12 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Media;
 
+/// <summary>Verifies UploadMediaRequestDtoValidator checks the uploaded file, its metadata and its purpose.</summary>
 public sealed class UploadMediaRequestDtoValidatorTests
 {
     private readonly UploadMediaRequestDtoValidator _validator = new();
 
+    /// <summary>Creates a complete three-byte JPEG upload for the restaurant purpose.</summary>
     private static UploadMediaRequestDto ValidRequest() => new()
     {
         Content = new MemoryStream([1, 2, 3]),
@@ -18,6 +20,7 @@ public sealed class UploadMediaRequestDtoValidatorTests
     };
 
     // TEST-01: Accept a complete upload.
+    /// <summary>Ensures a complete upload is not blocked.</summary>
     [Fact]
     public void Validate_WithCompleteUpload_ShouldPass()
     {
@@ -25,6 +28,7 @@ public sealed class UploadMediaRequestDtoValidatorTests
     }
 
     // TEST-02: Report a missing file once, under the multipart field name "File", not as four errors.
+    /// <summary>Ensures a missing file yields one error on the multipart field, not a cascade.</summary>
     [Fact]
     public void Validate_WithoutFile_ShouldReportOnlyTheFile()
     {
@@ -38,6 +42,7 @@ public sealed class UploadMediaRequestDtoValidatorTests
     }
 
     // TEST-03: With a file present, still reject an empty file and a missing name or type.
+    /// <summary>Ensures empty content and missing metadata are each reported.</summary>
     [Fact]
     public void Validate_WithEmptyFileMetadata_ShouldReportEachField()
     {
@@ -53,6 +58,7 @@ public sealed class UploadMediaRequestDtoValidatorTests
     }
 
     // TEST-04: Reject a missing or unknown purpose.
+    /// <summary>Ensures only documented media purposes are accepted.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("menu")]

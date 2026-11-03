@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
 {
+    /// <summary>Verifies ForgotPasswordUseCase issues a single valid reset token and never reveals whether an email is registered.</summary>
     public sealed class ForgotPasswordUseCaseTests
     {
         private static readonly DateTime _now = new(2026, 10, 14, 3, 0, 0, DateTimeKind.Utc);
@@ -221,6 +222,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
             Status = UserStatus.Active
         };
 
+        /// <summary>Clock fixed at one instant so token expiry can be asserted exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

@@ -19,6 +19,7 @@ public sealed class BlogsControllerTests
     private readonly Mock<IUnlikeBlogUseCase> _unlikeBlogUseCase = new();
     private readonly Mock<ICreateBlogCommentUseCase> _createBlogCommentUseCase = new();
 
+    /// <summary>Creates the controller with the create use case mock and inert mocks for the other blog use cases.</summary>
     private BlogsController CreateController() =>
         new(
             Mock.Of<IGetPublicBlogsUseCase>(),
@@ -108,6 +109,7 @@ public sealed class BlogsControllerTests
     }
 
     // TEST-03: Allow anonymous callers on BLOG-02 and return a 200 ApiResponse<BlogDetailDto>.
+    /// <summary>Ensures blog detail is public and returned in a 200 envelope.</summary>
     [Fact]
     public async Task GetDetail_ShouldAllowAnonymousAndReturnOkResponse()
     {
@@ -140,6 +142,7 @@ public sealed class BlogsControllerTests
     }
 
     // TEST-04: Allow anonymous callers on BLOG-03 and return a 200 ApiResponse<Paged<CommentDto>>.
+    /// <summary>Ensures blog comments are public and returned in a 200 envelope.</summary>
     [Fact]
     public async Task GetComments_ShouldAllowAnonymousAndReturnOkResponse()
     {
@@ -180,6 +183,7 @@ public sealed class BlogsControllerTests
     }
 
     // TEST-05: Delegate BLOG-06 to IEditBlogUseCase and return 200 OK wrapped in ApiResponse.
+    /// <summary>Ensures an edit is delegated to the use case and its result returned in a 200 envelope.</summary>
     [Fact]
     public async Task Edit_ShouldDelegateToUseCaseAndReturnOkResponse()
     {
@@ -257,6 +261,8 @@ public sealed class BlogsControllerTests
         deleteUseCase.Verify(item => item.ExecuteAsync(45, source.Token), Times.Once);
     }
 
+    // TEST-07: Verify Controller should require traveler role.
+    /// <summary>Verify Controller should require traveler role.</summary>
     [Fact]
     public void Controller_ShouldRequireTravelerRole()
     {
@@ -267,6 +273,8 @@ public sealed class BlogsControllerTests
         authorize.Roles.Should().Be("TRAVELER");
     }
 
+    // TEST-08: Verify Like should return ok with like response.
+    /// <summary>Verify Like should return ok with like response.</summary>
     [Fact]
     public async Task Like_ShouldReturnOkWithLikeResponse()
     {
@@ -283,6 +291,8 @@ public sealed class BlogsControllerTests
         _likeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
     }
 
+    // TEST-09: Verify Unlike should return ok with like response.
+    /// <summary>Verify Unlike should return ok with like response.</summary>
     [Fact]
     public async Task Unlike_ShouldReturnOkWithLikeResponse()
     {
@@ -299,6 +309,8 @@ public sealed class BlogsControllerTests
         _unlikeBlogUseCase.Verify(item => item.ExecuteAsync(blogId, source.Token), Times.Once);
     }
 
+    // TEST-10: Verify Comment should return created with comment response.
+    /// <summary>Verify Comment should return created with comment response.</summary>
     [Fact]
     public async Task Comment_ShouldReturnCreatedWithCommentResponse()
     {

@@ -30,6 +30,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ANGI.IntegrationTests.WebApi.Controllers.Restaurant;
 
+/// <summary>Verifies the owner menu endpoints' auth, body handling and DI wiring through the real HTTP pipeline.</summary>
 public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFactory>
 {
     private readonly OwnerMenuApiFactory _factory;
@@ -295,12 +296,14 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    /// <summary>Account check that always passes, so contract tests need no database.</summary>
     internal sealed class NoOpAccountCheck : IEnsureActiveAccountUseCase
     {
         /// <summary>Allows HTTP contract tests to bypass database-backed account status checks.</summary>
         public Task ExecuteAsync(int userId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>OWN-17 stub that returns a sample submitted menu.</summary>
     internal sealed class StubSubmitMenuSubmissionUseCase : ISubmitMenuSubmissionUseCase
     {
         /// <summary>Returns a deterministic submitted menu for HTTP serialization tests.</summary>
@@ -322,6 +325,7 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     }
 }
 
+/// <summary>Test host with JWT settings and stubs for the owner menu endpoints.</summary>
 public sealed class OwnerMenuApiFactory : WebApplicationFactory<Program>
 {
     public const string Issuer = "ANGI.HttpTests";

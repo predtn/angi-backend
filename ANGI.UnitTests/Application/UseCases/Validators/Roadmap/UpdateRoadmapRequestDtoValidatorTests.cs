@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies UpdateRoadmapRequestDtoValidator applies PATCH null semantics and the RM-04 boundaries.</summary>
 public sealed class UpdateRoadmapRequestDtoValidatorTests
 {
     private readonly UpdateRoadmapRequestDtoValidator _validator = new();

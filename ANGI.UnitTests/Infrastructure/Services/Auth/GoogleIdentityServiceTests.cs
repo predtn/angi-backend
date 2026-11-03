@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Auth
 {
+    /// <summary>Verifies GoogleIdentityService trusts only validated Google tokens with a verified email.</summary>
     public sealed class GoogleIdentityServiceTests
     {
         // TEST-01: Return trusted identity claims after Google validates the configured audience.

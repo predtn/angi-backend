@@ -5,10 +5,10 @@ public sealed class AiSettings
 {
     public const string SectionName = "Ai";
 
-    /// <summary>OpenAI API base, ending with a slash.</summary>
-    public string BaseUrl { get; set; } = "https://api.openai.com/v1/";
+    /// <summary>Budget gateway base, ending with a slash; the transport also enforces gateway routing.</summary>
+    public string BaseUrl { get; set; } = "http://127.0.0.1:18080/v1/";
 
-    /// <summary>Secret; empty in appsettings.json. Without it the job schedules days itself.</summary>
+    /// <summary>Scoped angi-chat gateway secret. Never put a real provider API key here.</summary>
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Chat model with structured output (JSON schema) support.</summary>

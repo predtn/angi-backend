@@ -5,14 +5,17 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Discovery;
 
+/// <summary>Verifies SubmitPreferenceSurveyRequestDtoValidator enforces the answer count, option codes and scale range.</summary>
 public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
 {
     private readonly SubmitPreferenceSurveyRequestDtoValidator _validator = new();
 
+    /// <summary>Creates a survey request holding the given answers.</summary>
     private static SubmitPreferenceSurveyRequestDto WithAnswers(params SurveyAnswerDto[] answers) =>
         new() { Answers = [.. answers] };
 
     // TEST-01: Accept answers with and without a scale value, including both bounds of 0..1.
+    /// <summary>Ensures valid answers, with or without a scale, are accepted at both scale bounds.</summary>
     [Fact]
     public void Validate_WithDocumentedAnswers_ShouldPass()
     {
@@ -26,6 +29,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-02: Accept exactly 50 answers.
+    /// <summary>Ensures the maximum answer count is accepted.</summary>
     [Fact]
     public void Validate_WithFiftyAnswers_ShouldPass()
     {
@@ -35,6 +39,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-03: Reject an empty list and more than 50 answers (PREF-02 takes 1..50; skipping is PREF-03).
+    /// <summary>Ensures empty and oversized surveys are rejected; skipping uses its own endpoint.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(51)]
@@ -48,6 +53,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-04: Reject a missing option code.
+    /// <summary>Ensures every answer names an option.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -59,6 +65,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-05: Reject a scale value outside 0..1.
+    /// <summary>Ensures scale values stay within 0..1.</summary>
     [Theory]
     [InlineData(-0.01)]
     [InlineData(1.01)]
@@ -72,6 +79,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-06: Reject a null item instead of failing later in the use case.
+    /// <summary>Ensures a null answer is caught here instead of crashing the use case.</summary>
     [Fact]
     public void Validate_WithNullAnswer_ShouldFail()
     {
@@ -81,6 +89,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-07: Report a null answers array once, with the validator's Vietnamese message.
+    /// <summary>Ensures a null answer list produces one clear message.</summary>
     [Fact]
     public void Validate_WithNullAnswers_ShouldFailOnceOnAnswers()
     {
@@ -91,6 +100,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
     }
 
     // TEST-08: Report a null option code with the validator's message.
+    /// <summary>Ensures a null option code is reported with the validator's own message.</summary>
     [Fact]
     public void Validate_WithNullOptionCode_ShouldFailOnOptionCode()
     {
@@ -101,6 +111,7 @@ public sealed class SubmitPreferenceSurveyRequestDtoValidatorTests
 
     // TEST-09: Keep both fields nullable. MVC adds an implicit [Required] with an English message to non-nullable
     // reference properties and rejects an explicit null before the validator runs.
+    /// <summary>Guards against MVC's implicit English required message replacing the validator's message.</summary>
     [Theory]
     [InlineData(typeof(SubmitPreferenceSurveyRequestDto), nameof(SubmitPreferenceSurveyRequestDto.Answers))]
     [InlineData(typeof(SurveyAnswerDto), nameof(SurveyAnswerDto.OptionCode))]

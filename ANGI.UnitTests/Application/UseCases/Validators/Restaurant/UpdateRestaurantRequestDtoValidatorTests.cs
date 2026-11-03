@@ -5,6 +5,7 @@ using System.Text.Json;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies UpdateRestaurantRequestDtoValidator applies PATCH null semantics and the restaurant field limits.</summary>
 public sealed class UpdateRestaurantRequestDtoValidatorTests
 {
     private readonly UpdateRestaurantRequestDtoValidator _validator = new();

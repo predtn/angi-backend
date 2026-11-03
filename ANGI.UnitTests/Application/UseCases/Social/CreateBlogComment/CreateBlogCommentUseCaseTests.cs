@@ -32,9 +32,12 @@ public sealed class CreateBlogCommentUseCaseTests
             .Returns<string>(input => input);
     }
 
+    /// <summary>Creates the use case with the real validator and the shared repository, sanitizer and unit-of-work mocks.</summary>
     private CreateBlogCommentUseCase CreateUseCase() =>
         new(_validator, _blogRepository.Object, _contentSanitizer.Object, _currentUserService.Object, _unitOfWork.Object);
 
+    // TEST-01: Verify ExecuteAsync happy path; should create comment and increment blog comment count.
+    /// <summary>Verify ExecuteAsync happy path; should create comment and increment blog comment count.</summary>
     [Fact]
     public async Task ExecuteAsync_HappyPath_ShouldCreateCommentAndIncrementBlogCommentCount()
     {
@@ -96,6 +99,8 @@ public sealed class CreateBlogCommentUseCaseTests
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // TEST-02: Verify ExecuteAsync when blog does not exist; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when blog does not exist; should throw not found exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
     {
@@ -120,6 +125,8 @@ public sealed class CreateBlogCommentUseCaseTests
         ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
     }
 
+    // TEST-03: Verify ExecuteAsync when content is empty; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when content is empty; should throw validation exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenContentIsEmpty_ShouldThrowValidationException()
     {
@@ -134,6 +141,8 @@ public sealed class CreateBlogCommentUseCaseTests
         await act.Should().ThrowAsync<ValidationException>();
     }
 
+    // TEST-04: Verify ExecuteAsync when user not authenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when user not authenticated; should throw unauthorized exception.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenUserNotAuthenticated_ShouldThrowUnauthorizedException()
     {
@@ -150,6 +159,8 @@ public sealed class CreateBlogCommentUseCaseTests
         ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
 
+    // TEST-05: Verify ExecuteAsync on another travelers blog; should notify the author.
+    /// <summary>Verify ExecuteAsync on another travelers blog; should notify the author.</summary>
     [Fact]
     public async Task ExecuteAsync_OnAnotherTravelersBlog_ShouldNotifyTheAuthor()
     {
@@ -173,6 +184,8 @@ public sealed class CreateBlogCommentUseCaseTests
         notification.Data.Should().Be("{\"blog_id\":45}");
     }
 
+    // TEST-06: Verify ExecuteAsync on own blog; should not notify.
+    /// <summary>Verify ExecuteAsync on own blog; should not notify.</summary>
     [Fact]
     public async Task ExecuteAsync_OnOwnBlog_ShouldNotNotify()
     {

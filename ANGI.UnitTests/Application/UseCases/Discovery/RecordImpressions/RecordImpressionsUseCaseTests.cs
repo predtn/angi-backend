@@ -9,6 +9,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.RecordImpressions;
 
+/// <summary>Verifies RecordImpressionsUseCase forwards the caller's impressions to reco with a trustworthy timestamp.</summary>
 public sealed class RecordImpressionsUseCaseTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 2, 15, 0, TimeSpan.Zero);
@@ -20,6 +21,7 @@ public sealed class RecordImpressionsUseCaseTests
         _currentUserService.SetupGet(x => x.UserId).Returns(12);
     }
 
+    /// <summary>Creates the use case with the real validator, a fixed clock and the shared mocks.</summary>
     private RecordImpressionsUseCase CreateUseCase() => new(
         new RecordImpressionsRequestDtoValidator(),
         _currentUserService.Object,
@@ -27,6 +29,7 @@ public sealed class RecordImpressionsUseCaseTests
         new FixedTimeProvider(Now));
 
     // TEST-01: Forward the impressions of the caller to RECO-06, with the server time when shownAt is omitted.
+    /// <summary>Ensures impressions without shownAt are stamped with server time before reaching reco.</summary>
     [Fact]
     public async Task ExecuteAsync_ShouldForwardToRecoWithServerTimeByDefault()
     {
@@ -43,6 +46,7 @@ public sealed class RecordImpressionsUseCaseTests
     }
 
     // TEST-02: Keep the shownAt the app sent.
+    /// <summary>Ensures the time the app actually showed the dish is preserved.</summary>
     [Fact]
     public async Task ExecuteAsync_WithShownAt_ShouldForwardIt()
     {
@@ -57,6 +61,7 @@ public sealed class RecordImpressionsUseCaseTests
     }
 
     // TEST-03: Reject an invalid body before calling reco.
+    /// <summary>Ensures invalid impressions never reach reco.</summary>
     [Fact]
     public async Task ExecuteAsync_WithInvalidBody_ShouldNotCallReco()
     {
@@ -66,8 +71,10 @@ public sealed class RecordImpressionsUseCaseTests
         _recommendationService.VerifyNoOtherCalls();
     }
 
+    /// <summary>Clock fixed at one instant so the default shownAt can be asserted exactly.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }

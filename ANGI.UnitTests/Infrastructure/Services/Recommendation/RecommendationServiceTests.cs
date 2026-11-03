@@ -10,11 +10,13 @@ using Microsoft.Extensions.Options;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
 {
+    /// <summary>Verifies RecommendationService calls reco with the documented contracts and applies the right fallback for each failure.</summary>
     public sealed class RecommendationServiceTests
     {
         private static readonly Guid RequestId = Guid.Parse("6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00");
 
         // TEST-01: Read the RECO-09 survey status and send the configured internal API key.
+        /// <summary>Ensures the survey status is read with the internal API key.</summary>
         [Fact]
         public async Task GetSurveyStatusAsync_WithSuccessfulResponse_ShouldReturnStatus()
         {
@@ -32,6 +34,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-02: Return an unknown survey status when RECO-09 fails, times out or reco is not configured.
+        /// <summary>Ensures a reco problem never blocks login; the status is just unknown.</summary>
         [Theory]
         [InlineData("server-error")]
         [InlineData("client-error")]
@@ -49,6 +52,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-03: Send RECO-03 answers in snake_case and map the stored survey.
+        /// <summary>Ensures survey answers reach reco in its snake_case contract.</summary>
         [Fact]
         public async Task SubmitSurveyAsync_WithAnswers_ShouldPostSnakeCaseBodyAndMapResult()
         {
@@ -74,6 +78,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-04: Send an empty answer list for PREF-03 (skip).
+        /// <summary>Ensures a skip is sent as an empty answer list.</summary>
         [Fact]
         public async Task SubmitSurveyAsync_WithNoAnswers_ShouldPostEmptyList()
         {
@@ -91,6 +96,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-05: Map the RECO-03 error codes listed in the API Design to the backend error codes.
+        /// <summary>Ensures documented reco errors reach the client with backend error codes.</summary>
         [Theory]
         [InlineData(HttpStatusCode.Conflict, "SURVEY_ALREADY_SUBMITTED", typeof(ConflictException))]
         [InlineData(HttpStatusCode.UnprocessableEntity, "UNKNOWN_OPTION_CODE", typeof(BadRequestException))]
@@ -110,6 +116,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-06: Return 503 SERVICE_UNAVAILABLE when RECO-03 fails, times out or reco is not configured.
+        /// <summary>Ensures the client learns the survey was not stored and can retry.</summary>
         [Theory]
         [InlineData("server-error")]
         [InlineData("timeout")]
@@ -126,6 +133,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-07: Treat a RECO-03 4xx the API Design does not list (wrong X-Api-Key, VALIDATION_FAILED) as a bug: 500.
+        /// <summary>Treats an undocumented reco 4xx as a backend bug instead of hiding it.</summary>
         [Theory]
         [InlineData(HttpStatusCode.Unauthorized, "UNAUTHORIZED")]
         [InlineData(HttpStatusCode.UnprocessableEntity, "VALIDATION_FAILED")]
@@ -143,6 +151,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-08: Send RECO-05 in snake_case and return dish ids by rank with their scores, the request id and ignored ids.
+        /// <summary>Ensures reco's ranking, scores and request id are returned unchanged.</summary>
         [Fact]
         public async Task RecommendAsync_WithSuccessfulResponse_ShouldReturnDishesByRank()
         {
@@ -172,6 +181,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-09: Leave user_id and top_k out for a Guest request without top_k.
+        /// <summary>Ensures guest requests carry no user id or unset top_k.</summary>
         [Fact]
         public async Task RecommendAsync_ForGuest_ShouldOmitUserIdAndTopK()
         {
@@ -190,6 +200,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-10: Fall back to the candidates in the order sent, cut to top_k and without scores, when RECO-05 fails or reco is not configured.
+        /// <summary>Ensures dish lists still work when reco is down, just without personalization.</summary>
         [Theory]
         [InlineData("server-error")]
         [InlineData("timeout")]
@@ -209,6 +220,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-11: Cut the fallback to reco's default top_k of 50.
+        /// <summary>Ensures the fallback size matches reco's default.</summary>
         [Fact]
         public async Task RecommendAsync_FallbackWithoutTopK_ShouldReturnFiftyDishes()
         {
@@ -220,6 +232,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-12: Send only the first 2000 candidates, which RECO-05 accepts at most.
+        /// <summary>Ensures requests never exceed reco's candidate limit.</summary>
         [Fact]
         public async Task RecommendAsync_WithMoreThan2000Candidates_ShouldSendTheFirst2000()
         {
@@ -235,6 +248,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-13: Return an empty result without calling reco when there is no candidate.
+        /// <summary>Avoids a pointless reco call when there is nothing to rank.</summary>
         [Fact]
         public async Task RecommendAsync_WithNoCandidate_ShouldNotCallReco()
         {
@@ -249,6 +263,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-14: Turn a RECO-05 4xx (422 VALIDATION_FAILED, wrong X-Api-Key) into a 500 instead of hiding it with the fallback.
+        /// <summary>Ensures contract bugs are surfaced instead of hidden behind the fallback.</summary>
         [Theory]
         [InlineData(HttpStatusCode.UnprocessableEntity, "VALIDATION_FAILED")]
         [InlineData(HttpStatusCode.Unauthorized, "UNAUTHORIZED")]
@@ -263,6 +278,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-15: Reject a top_k outside 1..200.
+        /// <summary>Ensures top_k stays within reco's accepted range.</summary>
         [Theory]
         [InlineData(0)]
         [InlineData(201)]
@@ -276,6 +292,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-16: Send RECO-06 impressions in snake_case.
+        /// <summary>Ensures impressions reach reco in its snake_case contract.</summary>
         [Fact]
         public async Task RecordImpressionsAsync_ShouldPostSnakeCaseBody()
         {
@@ -295,6 +312,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-17: Only log RECO-06 failures, including 404 REQUEST_NOT_FOUND and 403 FORBIDDEN, and never throw.
+        /// <summary>Ensures impression logging never breaks the user's request.</summary>
         [Theory]
         [InlineData("server-error")]
         [InlineData("client-error")]
@@ -311,6 +329,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
         }
 
         // TEST-18: Rethrow the caller's own cancellation instead of falling back.
+        /// <summary>Ensures caller cancellation is not converted into a fallback result.</summary>
         [Fact]
         public async Task RecommendAsync_WhenCallerCancels_ShouldThrowOperationCanceled()
         {
@@ -326,6 +345,84 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             await act.Should().ThrowAsync<OperationCanceledException>();
         }
 
+        // TEST-19: A conversation recommendation sends the conversation vector source with a null override and confirms the source in the result.
+        /// <summary>Ensures conversation rankings declare their vector source and reco confirms it.</summary>
+        [Fact]
+        public async Task RecommendConversationAsync_ConfirmsSourceAndSendsNullOverride()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "vector_source":"conversation","items":[{"dish_id":105,"rank":1,"recommend_score":0.5}],"ignored_dish_ids":[]}
+                """));
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105], 1,
+                new RecommendationVector("conversation", null), CancellationToken.None);
+            result.VectorSource.Should().Be("conversation");
+            using var body = JsonDocument.Parse(handler.Requests.Single().Body!);
+            body.RootElement.GetProperty("vector_source").GetString().Should().Be("conversation");
+            result.RequestId.Should().NotBeNull();
+        }
+
+        // TEST-20: When reco ignores every candidate, the result is empty with no request id and no scores, and lists the ignored ids.
+        /// <summary>Ensures a fully ignored candidate list is reported honestly as empty.</summary>
+        [Fact]
+        public async Task RecommendConversationAsync_AllCandidatesIgnored_ReturnsEmptyResultWithoutScores()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":null,"config_version":1,"vector_source":"conversation",
+                 "items":[],"ignored_dish_ids":[105,120]}
+                """));
+
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105, 120], 2,
+                new RecommendationVector("conversation", null), CancellationToken.None);
+
+            result.RequestId.Should().BeNull();
+            result.DishIds.Should().BeEmpty();
+            result.Scores.Should().BeNull();
+            result.IgnoredDishIds.Should().Equal(105, 120);
+            result.VectorSource.Should().Be("conversation");
+        }
+
+        // TEST-21: An old reco response without vector_source is not trusted and falls back to rating order with no request id or scores.
+        /// <summary>Ensures a response that does not confirm the vector source is not trusted.</summary>
+        [Fact]
+        public async Task RecommendConversationAsync_OldRecoResponseUsesRatingFallback()
+        {
+            var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "items":[{"dish_id":120,"rank":1,"recommend_score":0.9}],"ignored_dish_ids":[]}
+                """));
+            var result = await CreateService(handler).RecommendConversationAsync(12, [105,120], 1,
+                new RecommendationVector("conversation", new double[12]), CancellationToken.None);
+            result.RequestId.Should().BeNull(); result.Scores.Should().BeNull(); result.DishIds.Should().Equal(105);
+        }
+
+        // TEST-22: A reco answer slower than the 100 ms list timeout but within the Agent timeout is used for a conversation ranking, while a regular
+        // ranking that reco never answers in time falls back; covers both calls.
+        /// <summary>Ensures a brief reco pause no longer turns an Agent meal into rating fallback, without lengthening list screens.</summary>
+        [Theory]
+        [InlineData(true)][InlineData(false)]
+        public async Task Ranking_SlowRecoAnswer_UsesAgentTimeoutOnlyForConversation(bool conversation)
+        {
+            // The regular call never gets an answer before its own timeout cancels it. A finite delay raced the 100 ms timer: when the thread pool
+            // was busy at the start of the parallel run, both timers fired in one batch and the reply sometimes won, so the test was flaky.
+            var handler = new DelayedHttpMessageHandler(conversation ? TimeSpan.FromMilliseconds(400) : Timeout.InfiniteTimeSpan, """
+                {"request_id":"6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00","config_version":1,
+                 "vector_source":"conversation","items":[{"dish_id":120,"rank":1,"recommend_score":0.9}],"ignored_dish_ids":[]}
+                """);
+            var service = new RecommendationService(new HttpClient(handler) { BaseAddress = new Uri("https://reco.angi.test/") },
+                Options.Create(new RecommendationSettings { BaseUrl = "https://reco.angi.test/", ApiKey = "test-api-key",
+                    TimeoutMilliseconds = 100, AgentTimeoutMilliseconds = 5000 }),
+                NullLogger<RecommendationService>.Instance);
+
+            var result = conversation
+                ? await service.RecommendConversationAsync(12, [105, 120], 1, new RecommendationVector("conversation", null), CancellationToken.None)
+                : await service.RecommendAsync(12, [105, 120], 1, RecommendationContext.RoadmapAi, CancellationToken.None);
+
+            if (conversation) { result.RequestId.Should().Be(RequestId); result.DishIds.Should().Equal(120); }
+            else { result.RequestId.Should().BeNull(); result.DishIds.Should().Equal(105); }
+        }
+
+        /// <summary>Creates a service whose reco calls fail in the named way: 5xx, 4xx, timeout, network, bad body or missing config.</summary>
         private static RecommendationService CreateFailingService(string failure) => failure switch
         {
             "server-error" => CreateService(new StubHttpMessageHandler(_ => Json(HttpStatusCode.ServiceUnavailable,
@@ -341,6 +438,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             _ => throw new ArgumentOutOfRangeException(nameof(failure))
         };
 
+        /// <summary>Creates the service over the given handler with the test API key and an optional base URL.</summary>
         private static RecommendationService CreateService(HttpMessageHandler handler, string baseUrl = "https://reco.angi.test/")
         {
             var client = new HttpClient(handler);
@@ -360,11 +458,14 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
                 NullLogger<RecommendationService>.Instance);
         }
 
+        /// <summary>Creates a response with the given status and JSON body.</summary>
         private static HttpResponseMessage Json(HttpStatusCode statusCode, string body) =>
             new(statusCode) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+        /// <summary>Snapshot of an outgoing request so method, URL, API key and body can be asserted.</summary>
         private sealed record CapturedRequest(HttpMethod Method, Uri? Uri, string? ApiKey, string? Body);
 
+        /// <summary>Handler that records each request and answers with the supplied function.</summary>
         private sealed class StubHttpMessageHandler : HttpMessageHandler
         {
             private readonly Func<HttpRequestMessage, HttpResponseMessage> _send;
@@ -376,6 +477,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
 
             public List<CapturedRequest> Requests { get; } = [];
 
+            /// <summary>Captures the request, including its body, then returns the configured response.</summary>
             protected override async Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
                 CancellationToken cancellationToken)
@@ -386,6 +488,17 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
                     request.Headers.TryGetValues("X-Api-Key", out var values) ? values.Single() : null,
                     request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken)));
                 return _send(request);
+            }
+        }
+
+        /// <summary>Handler that answers with a JSON body after a delay, honouring the per-call cancellation token.</summary>
+        private sealed class DelayedHttpMessageHandler(TimeSpan delay, string body) : HttpMessageHandler
+        {
+            /// <summary>Waits for the delay, or throws when the service cancels the call first, then returns 200 with the body.</summary>
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                await Task.Delay(delay, cancellationToken);
+                return Json(HttpStatusCode.OK, body);
             }
         }
     }

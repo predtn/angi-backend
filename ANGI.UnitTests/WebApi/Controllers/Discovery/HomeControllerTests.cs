@@ -9,9 +9,11 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Discovery;
 
+/// <summary>Verifies HomeController serves the home screen publicly in a 200 envelope.</summary>
 public sealed class HomeControllerTests
 {
     // TEST-01: HOME-01 is public (token optional) and wraps the blocks in a 200 ApiResponse.
+    /// <summary>Ensures the home screen works without signing in and returns its blocks unchanged.</summary>
     [Fact]
     public async Task Get_ShouldAllowAnonymousAndReturnOk()
     {

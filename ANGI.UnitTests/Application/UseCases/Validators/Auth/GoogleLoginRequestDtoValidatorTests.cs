@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
 {
+    /// <summary>Verifies GoogleLoginRequestDtoValidator requires an ID token and allows only self-registration roles.</summary>
     public sealed class GoogleLoginRequestDtoValidatorTests
     {
         private readonly GoogleLoginRequestDtoValidator _validator = new();

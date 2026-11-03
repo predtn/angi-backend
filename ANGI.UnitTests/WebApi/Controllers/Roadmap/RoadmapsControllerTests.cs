@@ -10,6 +10,7 @@ using Moq;
 
 namespace ANGI.UnitTests.WebApi.Controllers.Roadmap;
 
+/// <summary>Verifies RoadmapsController returns the documented status and envelope for each roadmap endpoint.</summary>
 public sealed class RoadmapsControllerTests
 {
     // TEST-01: Return the RM-01 payload in ApiResponse with HTTP 201.

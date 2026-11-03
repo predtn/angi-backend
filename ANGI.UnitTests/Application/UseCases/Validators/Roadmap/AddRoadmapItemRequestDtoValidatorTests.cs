@@ -4,6 +4,7 @@ using FluentAssertions;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Roadmap;
 
+/// <summary>Verifies AddRoadmapItemRequestDtoValidator requires valid ids and a documented meal slot.</summary>
 public sealed class AddRoadmapItemRequestDtoValidatorTests
 {
     private readonly AddRoadmapItemRequestDtoValidator _validator = new();

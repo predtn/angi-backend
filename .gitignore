@@ -77,3 +77,11 @@ coverage*.json
 
 # Claude Code local files
 .claude/
+
+# Local development and data import tools
+/tools/
+/artifacts/
+
+# Scraped source data: never commit (local seed input only)
+.docs/shopeefood_clean.xlsx
+*shopeefood*.xlsx

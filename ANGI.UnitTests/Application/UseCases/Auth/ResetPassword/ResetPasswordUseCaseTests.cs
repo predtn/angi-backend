@@ -15,6 +15,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
 {
+    /// <summary>Verifies ResetPasswordUseCase consumes only valid, unexpired reset tokens and revokes every session on success.</summary>
     public sealed class ResetPasswordUseCaseTests
     {
         private static readonly DateTime Now = new(2026, 10, 17, 3, 0, 0, DateTimeKind.Utc);
@@ -249,6 +250,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
             NewPassword = "Password2"
         };
 
+        /// <summary>Clock fixed at one instant so the token expiry boundary can be tested exactly.</summary>
         private sealed class FixedTimeProvider : TimeProvider
         {
             private readonly DateTimeOffset _now;

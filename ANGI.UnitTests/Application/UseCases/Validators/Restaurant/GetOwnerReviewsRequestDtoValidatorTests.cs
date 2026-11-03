@@ -4,10 +4,13 @@ using FluentValidation.TestHelper;
 
 namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
 
+/// <summary>Verifies GetOwnerReviewsRequestDtoValidator enforces the rating filter and paging ranges.</summary>
 public sealed class GetOwnerReviewsRequestDtoValidatorTests
 {
     private readonly GetOwnerReviewsRequestDtoValidator _validator = new();
 
+    // TEST-01: A request with valid paging and rating filters has no errors.
+    /// <summary>Ensures a request with valid filters is not blocked.</summary>
     [Fact]
     public void Validate_WhenRequestIsValid_ShouldNotHaveErrors()
     {
@@ -23,6 +26,8 @@ public sealed class GetOwnerReviewsRequestDtoValidatorTests
         result.ShouldNotHaveAnyValidationErrors();
     }
 
+    // TEST-02: A rating filter outside 1..5 fails; covers 0 (min - 1) and 6 (max + 1).
+    /// <summary>Ensures the rating filter is limited to 1..5 at both boundaries.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(6)]
@@ -33,6 +38,8 @@ public sealed class GetOwnerReviewsRequestDtoValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.Rating);
     }
 
+    // TEST-03: A page below 1 fails; covers 0 and -1.
+    /// <summary>Ensures pages start at 1.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -43,6 +50,8 @@ public sealed class GetOwnerReviewsRequestDtoValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.Page);
     }
 
+    // TEST-04: A page size outside 1..100 fails; covers 0 (min - 1) and 101 (max + 1).
+    /// <summary>Ensures the page size is limited to 1..100 at both boundaries.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(101)]

@@ -11,6 +11,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.UseCases.Discovery.SubmitPreferenceSurvey;
 
+/// <summary>Verifies SubmitPreferenceSurveyUseCase validates survey answers and forwards them to reco unchanged.</summary>
 public sealed class SubmitPreferenceSurveyUseCaseTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 2, 30, 0, TimeSpan.Zero);
@@ -24,12 +25,14 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
         _currentUserService.SetupGet(x => x.UserId).Returns(TravelerId);
     }
 
+    /// <summary>Creates the use case with the real validator, a fixed clock and the shared mocks.</summary>
     private SubmitPreferenceSurveyUseCase CreateUseCase() => new(
         new SubmitPreferenceSurveyRequestDtoValidator(),
         _currentUserService.Object,
         _recommendationService.Object,
         new FixedTimeProvider(Now));
 
+    /// <summary>Creates a survey with one scaled answer and one plain answer.</summary>
     private static SubmitPreferenceSurveyRequestDto ValidRequest() => new()
     {
         Answers =
@@ -40,6 +43,7 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
     };
 
     // TEST-01: Forward every answer of the caller to RECO-03 and return the counts reco stored.
+    /// <summary>Ensures every answer reaches reco and the counts reco stored are returned.</summary>
     [Fact]
     public async Task ExecuteAsync_WithValidAnswers_ShouldForwardThemToRecoAndReturnItsResult()
     {
@@ -65,6 +69,7 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
     }
 
     // TEST-02: Let the documented reco outcomes (409, 400, 503) reach the client unchanged.
+    /// <summary>Ensures reco's documented outcomes reach the client without being rewritten.</summary>
     [Fact]
     public async Task ExecuteAsync_WhenRecoRejectsTheSurvey_ShouldPropagateTheDocumentedError()
     {
@@ -82,6 +87,7 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
     }
 
     // TEST-03: Reject invalid answers before calling reco.
+    /// <summary>Ensures invalid answers never reach reco.</summary>
     [Fact]
     public async Task ExecuteAsync_WithNoAnswers_ShouldThrowValidationExceptionWithoutCallingReco()
     {
@@ -92,6 +98,7 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
     }
 
     // TEST-04: Refuse a request without a user id in the token.
+    /// <summary>Ensures a survey cannot be submitted without a signed-in user.</summary>
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
@@ -103,8 +110,10 @@ public sealed class SubmitPreferenceSurveyUseCaseTests
         _recommendationService.VerifyNoOtherCalls();
     }
 
+    /// <summary>Clock fixed at one instant so the submitted time is deterministic.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
+        /// <summary>Returns the fixed instant supplied to the constructor.</summary>
         public override DateTimeOffset GetUtcNow() => now;
     }
 }
