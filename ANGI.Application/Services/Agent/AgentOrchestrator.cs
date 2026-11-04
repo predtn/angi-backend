@@ -402,6 +402,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     proposalRepaired = repaired = true;
                     continue;
                 }
+                catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE")
+                {
+                    // Model vẫn gửi đề xuất sai sau lượt sửa: lỗi của model, không phải của người dùng, và không được thành lỗi 409 "bản nháp không đủ điều kiện".
+                    // Lịch mới thì backend tự ghép từ các món đã được cấp, không tốn thêm lần gọi LLM; còn lại giữ nguyên bản đang có.
+                    telemetry.Record("proposal_unusable", context.ConversationId, context.TurnId, context.AttemptId,
+                        new { output.Action, output.Scope, reason = error.Message });
+                    if (AgentProposalBuilder.Assemble(context) is not { } assembled)
+                        return new(AgentReplyBuilder.PlanningIncomplete, confirmedState with { PendingQuestion = ClearedQuestion(confirmedState) }, null, lastValidation);
+                    output = assembled;
+                    snapshot = builder.Build(context, output);
+                }
                 // Model xóa một bữa theo yêu cầu người dùng: bữa đó được phép trống, nếu không luật đủ bữa sẽ từ chối đúng điều người dùng vừa yêu cầu.
                 if (context.Source is { } removalSource && output.Changes.Any(change => change.Type == "remove") && AgentRemovalPolicy.StatesRemoval(context.Request.Content))
                 {

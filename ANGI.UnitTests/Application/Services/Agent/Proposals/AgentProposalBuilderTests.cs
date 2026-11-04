@@ -263,4 +263,39 @@ public sealed class AgentProposalBuilderTests
 
         act.Should().Throw<ConflictException>().Which.Message.Should().Contain("ngày 1 bữa trưa").And.Contain("Chỉ gửi các món thuộc phạm vi");
     }
+
+    // TEST-16: A new plan is filled from issued candidates in rank order, one dish per position, using only the grant issued for that day and meal.
+    /// <summary>Ensures the backend can finish a plan without another LLM call, and that the result passes the normal builder.</summary>
+    [Fact]
+    public void Assemble_NewPlan_FillsEveryPositionFromItsGrant()
+    {
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["dinner", "lunch"] };
+        context.Grants.Add(new(1, "lunch", [1, 2], null, context.State));
+        context.Grants.Add(new(1, "dinner", [3], null, context.State));
+        context.Grants.Add(new(2, "lunch", [1, 4], null, context.State));
+        context.Grants.Add(new(2, "dinner", [5], null, context.State));
+
+        var output = AgentProposalBuilder.Assemble(context)!;
+
+        output.Items.Select(item => (item.DayNumber, item.MealSlot, item.DishId)).Should().Equal(
+            ((short)1, "lunch", 1), ((short)1, "dinner", 3), ((short)2, "lunch", 4), ((short)2, "dinner", 5));
+        new AgentProposalBuilder().Build(context, output).Items.Should().HaveCount(4);
+    }
+
+    // TEST-17: Nothing is assembled when a position lacks a candidate, a grant is for other constraints, or the turn edits an existing plan, a focused day, a selected item or an alternative.
+    /// <summary>Ensures the fallback never replaces what the user is editing and never leaves a meal empty.</summary>
+    [Theory]
+    [InlineData("missing-position")][InlineData("other-constraints")][InlineData("existing-plan")][InlineData("focus")][InlineData("selected")][InlineData("alternative")]
+    public void Assemble_NotANewCompletePlan_ReturnsNull(string area)
+    {
+        var context = AgentTestData.Context(area == "existing-plan" ? AgentTestData.Snapshot(AgentTestData.Item()) : null);
+        context.State = context.State with { NumDays = 1, MealSlots = ["lunch"], FocusDay = area == "focus" ? (short)1 : null };
+        var issued = area == "other-constraints" ? context.State with { TasteTargets = [new("sour", .25)] } : context.State;
+        if (area != "missing-position") context.Grants.Add(new(1, "lunch", [1], null, issued));
+        if (area == "selected") context.Request.SelectedItemKey = "a";
+        if (area == "alternative") context.AlternativeScopes.Add(new(1, "lunch"));
+
+        AgentProposalBuilder.Assemble(context).Should().BeNull();
+    }
 }

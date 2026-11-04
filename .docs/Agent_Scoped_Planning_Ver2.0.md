@@ -285,6 +285,8 @@ not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_
   reply drops it and continues normally. A one-day trip moves without asking. `đổi sang <tên>` without `khu` or `hành trình`
   could be a dish, so only catalog addresses may confirm it. With no plan yet, the same short wording starts the pre-plan questions
   with that place as the area of the whole trip. A bare name with no such word still goes to the model.
+- A model output the builder rejects twice no longer leaves a chat turn as 409 `PROPOSAL_NOT_COMMITTABLE`. A new plan is
+  assembled from the issued candidates with no further call; an existing plan stays unchanged and savable.
 - A new plan whose user declined extra requests closes tools once one search covered every meal, which removes the
   repeated `get_recommendation` rounds seen in conversation 94.
 - `Agent:MessagesPerMinute` is now 60. `MessagesPerDay` stays 100.

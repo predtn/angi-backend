@@ -1550,7 +1550,46 @@ public sealed class AgentOrchestratorTests
         (await sut.RunAsync(IntakeContext(content, open), default)).Reply.Should().Contain(expected);
     }
 
-    // TEST-79: Moving a day of an existing plan updates the state before the model runs, and its proposal is not discarded as "unrequested" although the wording has no edit verb.
+    // TEST-79: A model that sends an unusable proposal twice on a new plan no longer fails the turn with PROPOSAL_NOT_COMMITTABLE: the backend assembles the plan for no further call.
+    /// <summary>Reproduces the "bản nháp không đủ điều kiện" error of conversation 94's failed turn, which forced a second paid attempt.</summary>
+    [Fact]
+    public async Task RunAsync_UnusableProposalTwiceOnNewPlan_BackendAssemblesPlan()
+    {
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 1, MealSlots = ["lunch"] };
+        context.Grants.Add(new(1, "lunch", [1], null, context.State));
+        var unusable = new AgentOutput { Action = "create_proposal", Reply = "Xong rồi", Items = [AgentTestData.Item()], Changes = [new("add", null, AgentTestData.Item())] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], unusable));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Snapshot!.Items.Should().ContainSingle(item => item.DishId == 1 && item.DayNumber == 1 && item.MealSlot == "lunch");
+        result.Validation!.Errors.Should().BeEmpty();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-80: The same failure on an edit keeps the plan on screen, savable and unchanged, instead of an error.
+    /// <summary>Ensures a model failure never destroys or blocks the plan the user already reviewed.</summary>
+    [Fact]
+    public async Task RunAsync_UnusableProposalTwiceOnExistingPlan_KeepsPlan()
+    {
+        var source = AgentTestData.Snapshot(AgentTestData.Item());
+        var context = AgentTestData.Context(source);
+        context.Request.Content = "đổi bữa trưa ngày 1 sang món khác";
+        var unusable = new AgentOutput { Action = "create_proposal", Reply = "Xong rồi", Items = [AgentTestData.Item(2, "b")], Changes = [new("add", null, AgentTestData.Item(2, "b"))] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], unusable));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Be(AgentReplyBuilder.PlanningIncomplete);
+        result.Snapshot.Should().BeNull();
+        result.State.PendingQuestion.Should().BeNull();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-81: Moving a day of an existing plan updates the state before the model runs, and its proposal is not discarded as "unrequested" although the wording has no edit verb.
     /// <summary>Ensures "Ngày 1 tôi ở Hoàn Kiếm" changes the plan, where it used to be searched as a restaurant.</summary>
     [Fact]
     public async Task RunAsync_ItineraryOnExistingPlan_MovesDayAndAcceptsProposal()
@@ -1577,7 +1616,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Items.Single().DishId.Should().Be(2);
     }
 
-    // TEST-80: A day past the trip, or naming the same place again, changes nothing and is not flagged as a move.
+    // TEST-82: A day past the trip, or naming the same place again, changes nothing and is not flagged as a move.
     /// <summary>Ensures an unchanged or impossible itinerary does not force a replan, and the duration still goes through confirmation.</summary>
     [Theory]
     [InlineData("Ngày 9 tôi ở Hoàn Kiếm", false)]
@@ -1595,7 +1634,7 @@ public sealed class AgentOrchestratorTests
         context.ItineraryChanged.Should().BeFalse();
     }
 
-    // TEST-81: A place with no day on an existing multi-day plan asks which day, free of charge, keeps the plan and holds the place for the answer.
+    // TEST-83: A place with no day on an existing multi-day plan asks which day, free of charge, keeps the plan and holds the place for the answer.
     /// <summary>Implements the user's rule: "đổi sang khu Cầu Giấy" must not guess days, in any of the short wordings.</summary>
     [Theory]
     [InlineData("đổi sang khu Cầu Giấy")]
@@ -1617,7 +1656,7 @@ public sealed class AgentOrchestratorTests
         result.State.DayAreas.Should().BeNull();
     }
 
-    // TEST-82: The answer moves exactly those days and then goes to the model for new dishes; covers one day, several days and the whole trip.
+    // TEST-84: The answer moves exactly those days and then goes to the model for new dishes; covers one day, several days and the whole trip.
     /// <summary>Ensures a short "ngày 2" finishes the change the previous message started, and clears the question so the plan can be saved afterwards.</summary>
     [Theory]
     [InlineData("ngày 2", new short[] { 2 })]
@@ -1639,7 +1678,7 @@ public sealed class AgentOrchestratorTests
         context.State.PendingDayArea.Should().BeNull();
     }
 
-    // TEST-83: Any other reply ends the wait and goes on normally, so the user is never stuck; nothing moves.
+    // TEST-85: Any other reply ends the wait and goes on normally, so the user is never stuck; nothing moves.
     /// <summary>Ensures "đổi bữa tối sang phở" after the question is treated as what it says, and that the place does not linger for a later "ngày 2".</summary>
     [Fact]
     public async Task RunAsync_OtherReplyToWhichDay_DropsThePlace()
@@ -1658,7 +1697,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-84: Answering with a day already there changes nothing and costs no model call.
+    // TEST-86: Answering with a day already there changes nothing and costs no model call.
     /// <summary>Ensures choosing the current place cannot trigger a paid replan.</summary>
     [Fact]
     public async Task RunAsync_AnswerToWhichDayWithSamePlace_KeepsPlanWithoutProvider()
@@ -1676,7 +1715,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingDayArea.Should().BeNull();
     }
 
-    // TEST-85: A one-day trip has nothing to ask: the place applies to that day and goes to the model.
+    // TEST-87: A one-day trip has nothing to ask: the place applies to that day and goes to the model.
     /// <summary>Ensures the question is not asked when there is only one possible answer.</summary>
     [Fact]
     public async Task RunAsync_AreaWithoutDayOnOneDayTrip_MovesThatDay()
@@ -1692,7 +1731,7 @@ public sealed class AgentOrchestratorTests
         context.MovedDays.Should().Equal((short)1);
     }
 
-    // TEST-86: With no plan yet, only naming a place starts the questions around it for free, whether a district or a landmark.
+    // TEST-88: With no plan yet, only naming a place starts the questions around it for free, whether a district or a landmark.
     /// <summary>Answers "ở Hoàn Kiếm" and "đi Lăng Bác" as the first message, which used to reach the model.</summary>
     [Theory]
     [InlineData("ở Hoàn Kiếm", "khu vực Hoàn Kiếm")]
@@ -1707,7 +1746,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.OriginMode == "pinned" && x.Province == "Hà Nội" && x.RadiusKm != null);
     }
 
-    // TEST-87: A trip only to a place with no restaurants says so, says where ANGI has data and asks again, free of charge and without inventing a province.
+    // TEST-89: A trip only to a place with no restaurants says so, says where ANGI has data and asks again, free of charge and without inventing a province.
     /// <summary>Ensures "Ngày 1 đi Đà Nẵng" is answered honestly instead of planning in Hà Nội or asking as if nothing was said.</summary>
     [Fact]
     public async Task RunAsync_OnlyPlaceOutsideCatalog_SaysWhereDataExistsAndAsks()
@@ -1721,7 +1760,7 @@ public sealed class AgentOrchestratorTests
         result.State.DayAreas.Should().BeNull();
     }
 
-    // TEST-88: The itinerary of conversation 121 reads Hồ Gươm at the lake, keeps a free day for the whole province and still asks about preferences, for free.
+    // TEST-90: The itinerary of conversation 121 reads Hồ Gươm at the lake, keeps a free day for the whole province and still asks about preferences, for free.
     /// <summary>Replays the message that put day 1 in Hà Đông, made day 3 a place called "Tự Do", and skipped the preferences question because of "tham quan".</summary>
     [Fact]
     public async Task RunAsync_Conversation121Itinerary_ReadsCorrectly()
@@ -1739,7 +1778,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("Những ngày còn lại trong 3 ngày, mình chọn trong toàn Hà Nội.").And.Contain(AgentIntakePolicy.PreferencesQuestion);
     }
 
-    // TEST-89: Both complaints of conversation 121 move day 1 to the right place and reach the model for new dishes; these were the turns that repeated the wrong area and gave up.
+    // TEST-91: Both complaints of conversation 121 move day 1 to the right place and reach the model for new dishes; these were the turns that repeated the wrong area and gave up.
     /// <summary>Ensures saying "ngày 1 sai" with the right place fixes the plan, whichever way the day is named.</summary>
     [Theory]
     [InlineData("Ngày 1 đang đề xuất sai, tôi đi Hồ Gươm nhưng sao roadmap lại chỉ sang Hà Đông nhỉ")]
@@ -1759,7 +1798,7 @@ public sealed class AgentOrchestratorTests
         context.State.DayAreas!.Single(area => area.DayNumber == 2).Label.Should().Be("Lăng Bác");
     }
 
-    // TEST-90: A complaint with no place explains where the plan searches and how to fix it, with no provider call and without blocking the save.
+    // TEST-92: A complaint with no place explains where the plan searches and how to fix it, with no provider call and without blocking the save.
     /// <summary>Covers the bare "ngày 1 sai" that used to confuse the model; the reply names the place it uses and its district.</summary>
     [Fact]
     public async Task RunAsync_ComplaintWithoutPlace_ExplainsWithoutProvider()
@@ -1775,7 +1814,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-91: A right place with no day to bind asks which day, and a place that cannot be located says so; neither reaches the model.
+    // TEST-93: A right place with no day to bind asks which day, and a place that cannot be located says so; neither reaches the model.
     /// <summary>Ensures a correction never guesses a day or claims to have fixed something it could not find.</summary>
     [Theory]
     [InlineData("sai rồi, tôi ở Cầu Giấy", "Bạn muốn đổi ngày nào sang khu vực Cầu Giấy?")]
@@ -1787,7 +1826,7 @@ public sealed class AgentOrchestratorTests
         (await sut.RunAsync(WrongDayOneContext(content), default)).Reply.Should().StartWith(expected);
     }
 
-    // TEST-92: Complaints about a dish, and any plan without itinerary places, keep the model's normal edit flow.
+    // TEST-94: Complaints about a dish, and any plan without itinerary places, keep the model's normal edit flow.
     /// <summary>Guards the rule that the new correction case does not take over edits handled before.</summary>
     [Theory]
     [InlineData("bữa trưa ngày 1 sai vị rồi", true)]
@@ -1805,7 +1844,7 @@ public sealed class AgentOrchestratorTests
         context.ItineraryChanged.Should().BeFalse();
     }
 
-    // TEST-93: Changing taste after a proposal replans with the new taste, keeps the itinerary places although the model's state cannot carry them, and accepts the new dishes.
+    // TEST-95: Changing taste after a proposal replans with the new taste, keeps the itinerary places although the model's state cannot carry them, and accepts the new dishes.
     /// <summary>Covers the question "người dùng bỗng đổi khẩu vị khi đã có đề xuất": every changed position needs a fresh search under the new taste.</summary>
     [Fact]
     public async Task RunAsync_TasteChangedOnProposalWithItinerary_ReplansAndKeepsPlaces()
@@ -1834,7 +1873,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("ngọt mức nhẹ");
     }
 
-    // TEST-94: A bare province now asks the scope once, for free; covers planning wording and the province alone.
+    // TEST-96: A bare province now asks the scope once, for free; covers planning wording and the province alone.
     /// <summary>Implements the decision that "ở Hà Nội" asks: whole city, an area, an itinerary or the current location.</summary>
     [Theory]
     [InlineData("lập lịch ở Hà Nội")]
@@ -1851,7 +1890,7 @@ public sealed class AgentOrchestratorTests
         result.State.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-95: A message that already gives days, a budget or a taste keeps the previous flow and does not ask the scope; these are the cases the question must not take over.
+    // TEST-97: A message that already gives days, a budget or a taste keeps the previous flow and does not ask the scope; these are the cases the question must not take over.
     /// <summary>Guards the rule that the scope question is only for a message naming nothing but the province.</summary>
     [Theory]
     [InlineData("Hà Nội 3 ngày 1 triệu")]
@@ -1868,7 +1907,7 @@ public sealed class AgentOrchestratorTests
         result.State.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-96: Each answer to the scope question leads to the next question; covers the whole city, no preference, an area, an itinerary, trip facts and an unknown name.
+    // TEST-98: Each answer to the scope question leads to the next question; covers the whole city, no preference, an area, an itinerary, trip facts and an unknown name.
     /// <summary>Ensures every reply moves on, so the question can never trap the user.</summary>
     [Theory]
     [InlineData("toàn thành phố", "Mình sẽ chọn quán trong toàn Hà Nội.")]
@@ -1890,7 +1929,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().NotBe(AgentIntakePolicy.Scope);
     }
 
-    // TEST-97: The current location answers the scope question with its coordinates and radius, without a map search or provider call.
+    // TEST-99: The current location answers the scope question with its coordinates and radius, without a map search or provider call.
     /// <summary>Ensures the location button works at this new question, where the province is already known.</summary>
     [Fact]
     public async Task RunAsync_ScopeAnsweredByLocation_KeepsCoordinates()
@@ -1904,7 +1943,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.OriginMode == "gps" && x.RadiusKm == 10m && x.PlanningIntake == AgentIntakePolicy.Details);
     }
 
-    // TEST-98: A message that already says where the trip goes is not asked again; covers an area, an itinerary and a province with an area.
+    // TEST-100: A message that already says where the trip goes is not asked again; covers an area, an itinerary and a province with an area.
     /// <summary>Ensures the new question only fires when the scope is really unknown.</summary>
     [Theory]
     [InlineData("lập lịch ở Cầu Giấy")]
@@ -1920,7 +1959,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotContain("Bạn muốn mình chọn quán");
     }
 
-    // TEST-99: The roadmap of conversation 138 has a pin and no province: the pin answers "ở đâu", gives the search circle and only the budget is asked, for free.
+    // TEST-101: The roadmap of conversation 138 has a pin and no province: the pin answers "ở đâu", gives the search circle and only the budget is asked, for free.
     /// <summary>This message used to ask for a place the user had already chosen on the map.</summary>
     [Fact]
     public async Task RunAsync_PinnedRoadmapWithoutProvince_UsesPinInsteadOfAskingPlace()
@@ -1934,7 +1973,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.RadiusKm == 10m && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
     }
 
-    // TEST-100: A pin far from every restaurant says so and asks for a place, keeping the pin; covers the only case where the place question remains.
+    // TEST-102: A pin far from every restaurant says so and asks for a place, keeping the pin; covers the only case where the place question remains.
     /// <summary>Ensures the question is honest instead of looking as if the pin was never seen.</summary>
     [Fact]
     public async Task RunAsync_PinOutsideCatalog_SaysSoAndAsksPlace()
@@ -1948,7 +1987,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.Province == null && x.OriginLatitude == 10m);
     }
 
-    // TEST-101: A trip that already has a province keeps its search as it is, so a user who widened the search is not narrowed again.
+    // TEST-103: A trip that already has a province keeps its search as it is, so a user who widened the search is not narrowed again.
     /// <summary>Only the first contact with a pin fills the circle.</summary>
     [Fact]
     public async Task RunAsync_PinWithProvince_KeepsSearch()
@@ -1961,7 +2000,7 @@ public sealed class AgentOrchestratorTests
         result.State.RadiusKm.Should().BeNull();
     }
 
-    // TEST-102: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-104: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]

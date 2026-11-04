@@ -146,6 +146,34 @@ public sealed class AgentProposalBuilder
                 items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
     }
 
+    /// <summary>
+    /// Fills a new plan from the candidates already issued this turn, best ranked first, when the model could not submit a usable one.
+    /// Null when an existing plan or a narrowed scope is involved, or when a position has no candidate; validation still checks the result.
+    /// </summary>
+    public static AgentOutput? Assemble(AgentContext context)
+    {
+        var state = context.State;
+        if (context.Source is { Items.Length: > 0 } || context.AlternativeScopes.Count > 0 || state.FocusDay.HasValue ||
+            context.Request.ConfirmedState?.FocusDay is not null || context.Request.SelectedItemKey is not null) return null;
+        var meals = state.MealSlots.Length > 0 ? AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray() : ["breakfast", "lunch", "dinner"];
+        AgentCandidateGrant[] grants = [.. context.Grants];
+        var used = new Dictionary<int, int>();
+        var items = new List<AgentItem>();
+        for (short day = 1; day <= (state.NumDays ?? 0); day++)
+            foreach (var meal in meals)
+            {
+                var fingerprint = AgentScopedPlanning.Fingerprint(state, day, meal);
+                var options = grants.Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == day) && (grant.MealSlot is null || grant.MealSlot == meal) &&
+                        AgentScopedPlanning.Fingerprint(grant.Constraints, day, meal) == fingerprint)
+                    .SelectMany(grant => grant.DishIds).ToArray();
+                var pick = options.Where(id => !used.ContainsKey(id)).Select(id => (int?)id).FirstOrDefault();
+                if (pick is not { } dishId) return null;
+                used[dishId] = used.GetValueOrDefault(dishId) + 1;
+                items.Add(new($"day{day}-{meal}", null, day, meal, 0, dishId));
+            }
+        return items.Count == 0 ? null : new AgentOutput { Action = "create_proposal", Reply = "", Items = items.ToArray() };
+    }
+
     /// <summary>Builds a backend-derived delta from validated source identity instead of storing untrusted model metadata.</summary>
     private static AgentChange[] Delta(AgentItem[] original, List<AgentItem> items)
     {
