@@ -8,6 +8,9 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
 {
     public static readonly string[] Meals = ["breakfast", "lunch", "dinner", "snack", "late_night"];
     public const decimal MaxMoney = 99999999999999m;
+    public const int MaxDays = Domain.Entities.Roadmap.MaxNumDays;
+    /// <summary>A day holds at most 24 items, the most one route can carry.</summary>
+    public const int MaxItems = MaxDays * 24;
 
     /// <summary>Defines bounds, monetary precision, origins and scope relationships.</summary>
     public AgentStateValidator()
@@ -16,11 +19,11 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
         RuleFor(x => x.PreferenceApplication).Must(x => x is "replan" or "future").WithMessage("Cách áp dụng khẩu vị không hợp lệ.");
         RuleFor(x => x.MealSlots).NotNull().Must(x => x is null || x.Length <= 5 && x.All(Meals.Contains) && x.Distinct().Count() == x.Length)
             .WithMessage("Danh sách bữa cần có không hợp lệ.");
-        RuleFor(x => x.TasteOverrides).NotNull().Must((state, values) => values is null || values.Length <= 180 &&
+        RuleFor(x => x.TasteOverrides).NotNull().Must((state, values) => values is null || values.Length <= MaxDays * 6 &&
             values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidTargets(x.Targets)) &&
             values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
             .WithMessage("Khẩu vị theo ngày/bữa không hợp lệ hoặc trùng phạm vi.");
-        RuleFor(x => x.MealRequests).NotNull().Must((state, values) => values is null || values.Length <= 181 &&
+        RuleFor(x => x.MealRequests).NotNull().Must((state, values) => values is null || values.Length <= MaxDays * 6 + 1 &&
             values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidName(x.DishName) && ValidName(x.RestaurantName) &&
                 (!x.RestaurantId.HasValue || x.RestaurantId > 0 && x.RestaurantName is not null) &&
                 x.TagIds is not null && x.TagIds.Length <= 100 && x.TagIds.All(id => id > 0) && x.TagIds.Distinct().Count() == x.TagIds.Length) &&
@@ -34,7 +37,7 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
             .WithMessage("Vector khẩu vị không hợp lệ.");
         RuleFor(x => x.Province).MaximumLength(100).WithMessage("Tên tỉnh không được vượt quá 100 ký tự.")
             .Must(x => x is null || !string.IsNullOrWhiteSpace(x)).WithMessage("Tỉnh không hợp lệ.");
-        RuleFor(x => x.NumDays).InclusiveBetween((short)1, (short)30).WithMessage("Số ngày phải từ 1 đến 30.").When(x => x.NumDays.HasValue);
+        RuleFor(x => x.NumDays).InclusiveBetween((short)1, (short)MaxDays).WithMessage($"Số ngày phải từ 1 đến {MaxDays}.").When(x => x.NumDays.HasValue);
         RuleFor(x => x.Title).NotEmpty().WithMessage("Vui lòng nhập tên lịch trình.")
             .MaximumLength(200).WithMessage("Tên lịch trình không được vượt quá 200 ký tự.");
         RuleFor(x => x.BudgetAmount).Must(ValidMoney).WithMessage("Ngân sách phải là số nguyên VND không âm.");

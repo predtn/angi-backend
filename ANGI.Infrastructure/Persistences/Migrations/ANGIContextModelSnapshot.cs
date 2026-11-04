@@ -1963,7 +1963,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         {
                             t.HasCheckConstraint("ck_roadmaps_budget_amount", "budget_amount >= 0");
 
-                            t.HasCheckConstraint("ck_roadmaps_num_days", "num_days BETWEEN 1 AND 30");
+                            t.HasCheckConstraint("ck_roadmaps_num_days", "num_days BETWEEN 1 AND 100");
 
                             t.HasCheckConstraint("ck_roadmaps_origin", "(origin_mode = 'pinned' AND origin_latitude IS NOT NULL AND origin_longitude IS NOT NULL) OR (origin_mode <> 'pinned' AND origin_latitude IS NULL AND origin_longitude IS NULL)");
 

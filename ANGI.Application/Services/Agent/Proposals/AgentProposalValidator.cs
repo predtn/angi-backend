@@ -34,7 +34,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         if (!emptyUpdate && (string.IsNullOrWhiteSpace(state.Province) || state.BudgetAmount is null && !state.BudgetUnrestricted) ||
             !state.NumDays.HasValue || state.PendingQuestion is not null || state.PendingPlanningRequest is not null)
             errors.Add("Chưa chốt đủ tỉnh, số ngày, ngân sách hoặc câu hỏi đang chờ.");
-        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > 720 || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
+        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItems || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
                 x.DayNumber < 1 || x.DayNumber > state.NumDays || !AgentStateValidator.Meals.Contains(x.MealSlot) || x.SortOrder < 0) ||
             snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
             snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||

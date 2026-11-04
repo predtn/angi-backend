@@ -118,7 +118,7 @@ public sealed class AgentProposalBuilder
 
         var outside = original.Where(item => !output.Scope.Contains(item)).OrderBy(x => x.ItemKey).ToArray();
         if (!outside.SequenceEqual(items.Where(item => !output.Scope.Contains(item)).OrderBy(x => x.ItemKey))) throw Invalid("Các món ngoài phạm vi phải được giữ nguyên.");
-        if (items.Count > 720 || items.Any(x => string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100) || items.Select(x => x.ItemKey).Distinct().Count() != items.Count)
+        if (items.Count > AgentStateValidator.MaxItems || items.Any(x => string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100) || items.Select(x => x.ItemKey).Distinct().Count() != items.Count)
             throw Invalid("Khóa món bị trùng hoặc số món vượt giới hạn.");
         if (context.Request.Command == "alternative")
         {

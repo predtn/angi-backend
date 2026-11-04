@@ -635,7 +635,7 @@ Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folde
 | Vùng | Biên và hành vi bắt buộc |
 | --- | --- |
 | Request/identity | Thiếu/null/sai kiểu JSON; ID 0/âm/tràn long/số thập phân/UUID cũ; ID dương trong hai conversation độc lập; JWT/role/ownership. |
-| State | NumDays 1..30, độ dài chuỗi, VND nguyên không âm đúng numeric(14,0), tag dương/không trùng/tồn tại, tọa độ đủ cặp/đúng miền, radius 1..50 và cần origin, ngày cuối không tràn, focus thuộc ngày/bữa hợp lệ. |
+| State | NumDays 1..100, độ dài chuỗi, VND nguyên không âm đúng numeric(14,0), tag dương/không trùng/tồn tại, tọa độ đủ cặp/đúng miền, radius 1..50 và cần origin, ngày cuối không tràn, focus thuộc ngày/bữa hợp lệ. |
 | Claim/retry | Completed replay trước version/expiry/quota; 202 retry đang chạy; 409 đổi nội dung cùng ID; hai message khác nhau; lease hết hạn/takeover; worker cũ không ghi; failed retry không nhân đôi logical message; quota/phút và ngày dùng chung giữa conversations. |
 | Context/policy | Chỉ history completed; giữ proposal hiện hành, latest roadmap/version và metadata sửa tay; không đoán tỉnh mơ hồ; state do model không được nới hard constraints; confirmedState từ người dùng mới cấp quyền. |
 | Tools/provider | Allowlist, strict schema/unknown/null/duplicate fields, ID ngoài candidates, score không hữu hạn/sai số lượng, topK/candidates/call/round/context/token caps, một lần repair, timeout/cancellation, no candidates, rating fallback và map estimate. |

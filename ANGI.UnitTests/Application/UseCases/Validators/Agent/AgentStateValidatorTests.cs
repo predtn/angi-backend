@@ -27,7 +27,7 @@ public sealed class AgentStateValidatorTests
         {
             "schema" => baseline with { SchemaVersion = 2 }, "province-empty" => baseline with { Province = " " },
             "province-long" => baseline with { Province = new('x', 101) }, "days-zero" => baseline with { NumDays = 0 },
-            "days-large" => baseline with { NumDays = 31 }, "title-null" => baseline with { Title = null! },
+            "days-large" => baseline with { NumDays = 101 }, "title-null" => baseline with { Title = null! },
             "title-empty" => baseline with { Title = " " }, "title-long" => baseline with { Title = new('x', 201) },
             "budget-negative" => baseline with { BudgetAmount = -1 }, "budget-fraction" => baseline with { BudgetAmount = 0.5m },
             "budget-large" => baseline with { BudgetAmount = AgentStateValidator.MaxMoney + 1 },

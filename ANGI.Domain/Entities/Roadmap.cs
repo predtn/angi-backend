@@ -5,6 +5,9 @@ namespace ANGI.Domain.Entities
 {
     public class Roadmap : BaseEntity<long>, IHasCreatedAt, IHasUpdatedAt, ISoftDelete
     {
+        /// <summary>Longest trip a roadmap can hold; ck_roadmaps_num_days enforces the same value.</summary>
+        public const short MaxNumDays = 100;
+
         public int UserId { get; set; }
         public string Title { get; set; } = null!;
         public DateOnly? StartDate { get; set; }

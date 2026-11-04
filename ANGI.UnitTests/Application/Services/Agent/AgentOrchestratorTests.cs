@@ -1469,9 +1469,9 @@ public sealed class AgentOrchestratorTests
     public async Task RunAsync_InvalidAnswer_ExplainsLimit()
     {
         var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog())
-            .RunAsync(IntakeContext("lập lịch Hà Nội 45 ngày", new AgentState()), default);
+            .RunAsync(IntakeContext("lập lịch Hà Nội 145 ngày", new AgentState()), default);
 
-        result.Reply.Should().StartWith("Số ngày phải từ 1 đến 30.");
+        result.Reply.Should().StartWith("Số ngày phải từ 1 đến 100.");
         result.State.NumDays.Should().BeNull();
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
     }
@@ -1504,6 +1504,19 @@ public sealed class AgentOrchestratorTests
         var result = await sut.RunAsync(IntakeContext("hướng dẫn tôi", open), default);
         result.Reply.Should().Be($"{AgentSmallTalkPolicy.Help}\n{AgentIntakePolicy.PlaceQuestion}");
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+    }
+
+    // TEST-76: The duration limit reads up to 100 days in a message and refuses just above it.
+    /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
+    [Theory]
+    [InlineData("lập lịch Hà Nội 30 ngày", 30)]
+    [InlineData("lập lịch Hà Nội 100 ngày", 100)]
+    public async Task RunAsync_DurationUpToMaximum_IsAccepted(string content, int days)
+    {
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog()).RunAsync(IntakeContext(content, new AgentState()), default);
+
+        result.State.NumDays.Should().Be((short)days);
+        result.Reply.Should().NotContain("Số ngày phải");
     }
 
     /// <summary>Builds a turn with the given message over the given state.</summary>

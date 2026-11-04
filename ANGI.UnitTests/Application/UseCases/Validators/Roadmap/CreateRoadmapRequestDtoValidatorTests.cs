@@ -38,7 +38,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = new string('a', 201),
-            NumDays = 31,
+            NumDays = 101,
             BudgetAmount = -1,
             OriginMode = "pinned",
             OriginLatitude = 90.000001m,

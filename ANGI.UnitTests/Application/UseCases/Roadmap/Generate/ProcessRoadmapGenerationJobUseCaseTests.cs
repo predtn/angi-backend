@@ -210,16 +210,37 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
     }
 
     /// <summary>Wires the use case with an in-memory roadmap, job, dish catalog and planner doubles for one scenario.</summary>
+    // TEST-10: A long trip makes no paid model call and fills every meal of every day, repeating dishes once the ranked list runs out; covers the first length past the threshold and the maximum.
+    /// <summary>One model call per day would make a single click cost up to a hundred calls, and the ranked list holds fewer dishes than a long trip has meals.</summary>
+    [Theory]
+    [InlineData(15)]
+    [InlineData(100)]
+    public async Task ExecuteAsync_WithLongTrip_ShouldNotCallModelAndShouldFillEveryMeal(int days)
+    {
+        var fixture = new Fixture(new GenerateRoadmapRequestDto { Scope = "full", Province = "Huế" }, days: days);
+
+        await fixture.UseCase.ExecuteAsync(77, CancellationToken.None);
+
+        fixture.Planner.Verify(value => value.PlanDayAsync(It.IsAny<RoadmapPlanRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Created.Should().HaveCount(days * 3);
+        fixture.Created.GroupBy(item => item.RoadmapDayId).Should().HaveCount(days).And.OnlyContain(day => day.Count() == 3);
+        fixture.Tracked.Status.Should().Be(GenerationJobStatus.Succeeded);
+    }
+
     private sealed class Fixture
     {
+        private readonly int _days;
+
         public Fixture(
             GenerateRoadmapRequestDto request,
             int? existingLunchDishId = null,
             RoadmapGenerationOrigin? origin = null,
             bool emptyInsideArea = false,
             bool noCandidate = false,
-            bool deleted = false)
+            bool deleted = false,
+            int days = 2)
         {
+            _days = days;
             var input = new RoadmapGenerationInput { Request = request, Origin = origin, RadiusKm = origin is null ? null : 10 };
             var scope = request.Scope switch { "day" => GenerationScope.Day, "slot" => GenerationScope.Slot, _ => GenerationScope.Full };
             var snapshot = new RoadmapGenerationJob
@@ -289,8 +310,8 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         public List<RoadmapItem> Removed { get; } = [];
         public List<Domain.Entities.Notification> Notifications { get; } = [];
 
-        /// <summary>Creates roadmap 88 with two days, optionally an existing lunch item and a deletion time.</summary>
-        private static Domain.Entities.Roadmap Roadmap(int? existingLunchDishId, DateTime? deletedAt)
+        /// <summary>Creates roadmap 88 with the given days, optionally an existing lunch item and a deletion time.</summary>
+        private Domain.Entities.Roadmap Roadmap(int? existingLunchDishId, DateTime? deletedAt)
         {
             var first = new RoadmapDay { Id = 301, RoadmapId = 88, DayNumber = 1 };
             if (existingLunchDishId is { } dishId)
@@ -298,14 +319,13 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
                 first.Items.Add(new RoadmapItem { Id = 900, RoadmapDayId = 301, DishId = dishId, MealSlot = MealSlot.Lunch, Source = RoadmapItemSource.Manual });
             }
 
-            return new Domain.Entities.Roadmap
+            var roadmap = new Domain.Entities.Roadmap { Id = 88, UserId = 12, Title = "Huế 2 ngày", DeletedAt = deletedAt, Days = { first } };
+            for (var number = 2; number <= _days; number++)
             {
-                Id = 88,
-                UserId = 12,
-                Title = "Huế 2 ngày",
-                DeletedAt = deletedAt,
-                Days = { first, new RoadmapDay { Id = 302, RoadmapId = 88, DayNumber = 2 } }
-            };
+                roadmap.Days.Add(new RoadmapDay { Id = 300 + number, RoadmapId = 88, DayNumber = (short)number });
+            }
+
+            return roadmap;
         }
     }
 

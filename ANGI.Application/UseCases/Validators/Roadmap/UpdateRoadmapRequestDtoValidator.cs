@@ -17,7 +17,7 @@ public sealed class UpdateRoadmapRequestDtoValidator : AbstractValidator<UpdateR
             .When(x => x.TitleSpecified);
         RuleFor(x => x.NumDays)
             .NotNull().WithMessage("Số ngày không được là null.")
-            .InclusiveBetween((short)1, (short)30).WithMessage("Số ngày phải từ 1 đến 30.")
+            .InclusiveBetween((short)1, Domain.Entities.Roadmap.MaxNumDays).WithMessage($"Số ngày phải từ 1 đến {Domain.Entities.Roadmap.MaxNumDays}.")
             .When(x => x.NumDaysSpecified);
         RuleFor(x => x.BudgetAmount)
             .GreaterThanOrEqualTo(0).WithMessage("Ngân sách không được nhỏ hơn 0.")

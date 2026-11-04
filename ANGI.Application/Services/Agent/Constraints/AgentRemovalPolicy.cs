@@ -14,9 +14,9 @@ public static class AgentRemovalPolicy
 {
     private static readonly Regex Removal = new(@"^(?:(?:hay|toi muon|minh muon|cho toi) )?(?:xoa|bo|huy)(?! sung\b) (?<target>.+?)(?: (?:di|nhe|nha|giup|giup toi|luon|voi))*$", RegexOptions.CultureInvariant);
     private static readonly Regex RemovalWord = new(@"\b(?:xoa|bo|huy)\b(?! sung\b)", RegexOptions.CultureInvariant);
-    private static readonly Regex MealReference = new(@"bua\s+\S+(?:\s+\S+)?\s*,?\s*(?:(?:cua|trong|vao)\s+)?ngay\s+(?:thu\s+)?\d{1,2}|ngay\s+(?:thu\s+)?\d{1,2}\s*,?\s*(?:(?:vao|o)\s+)?bua\s+\S+(?:\s+\S+)?", RegexOptions.CultureInvariant);
+    private static readonly Regex MealReference = new(@"bua\s+\S+(?:\s+\S+)?\s*,?\s*(?:(?:cua|trong|vao)\s+)?ngay\s+(?:thu\s+)?\d{1,3}|ngay\s+(?:thu\s+)?\d{1,3}\s*,?\s*(?:(?:vao|o)\s+)?bua\s+\S+(?:\s+\S+)?", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> TargetFillers = ["mon", "cac", "o", "cua", "trong", "va", "cai"];
-    private static readonly Regex WholeDay = new(@"^(?:(?:cac|tat ca(?: cac)?) mon (?:cua |trong )?)?ngay (?:thu )?(?<day>\d{1,2})$", RegexOptions.CultureInvariant);
+    private static readonly Regex WholeDay = new(@"^(?:(?:cac|tat ca(?: cac)?) mon (?:cua |trong )?)?ngay (?:thu )?(?<day>\d{1,3})$", RegexOptions.CultureInvariant);
     private static readonly Regex MealWithoutDay = new(@"^bua (?<meal>sang|trua|toi|phu|khuya)(?<all> (?:(?:cua |o |trong )?(?:ca chuyen|toan chuyen|toan bo|moi ngay|tat ca(?: cac)? ngay|cac ngay)))?$", RegexOptions.CultureInvariant);
 
     /// <summary>The source items a whole-message removal names, or null when the model must read the message.</summary>

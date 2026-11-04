@@ -16,7 +16,7 @@ public static class AgentPendingPlanningPolicy
     // "ngay" right after the amount ("500000 dong ngay", "500k ngay") is also per day, but not "ngay dau/cuoi/thu/2"
     // (a single day of the trip); "500k 4 ngay" stays a total because only 1/mot may sit between amount and "ngay".
     private const string Daily = @"(?<daily>\s*(?:/\s*|(?:cho\s+)?(?:moi|1|mot)\s+)?ngay\b(?!\s+(?:dau|cuoi|thu|\d)))?";
-    private const string MentionedDays = @"(?<!(?:\d|k|trieu|tr|nghin|ngan|dong|vnd)\s*)(?<!/\s*)\b\d{1,2}\s+ngay\b(?!\s+(?:dau|cuoi))";
+    private const string MentionedDays = @"(?<!(?:\d|k|trieu|tr|nghin|ngan|dong|vnd)\s*)(?<!/\s*)\b\d{1,3}\s+ngay\b(?!\s+(?:dau|cuoi))";
     private const string Unrestricted = @"\b(?:khong gioi han|thoai mai|tuy y)\s+(?:ve\s+)?ngan sach\b|\bngan sach\s*(?:la\s*)?(?:khong gioi han|thoai mai|tuy y)\b";
 
     public static AgentPendingPlanningRequest Capture(AgentPendingPlanningRequest? previous, string content)
@@ -27,7 +27,7 @@ public static class AgentPendingPlanningPolicy
         var total = previous?.TotalBudget;
         var daily = previous?.DailyBudget;
         var text = Normalize(content);
-        var duration = Regex.Matches(text, @"\b(?<days>\d{1,2})\s+ngay\b", RegexOptions.CultureInvariant)
+        var duration = Regex.Matches(text, @"\b(?<days>\d{1,3})\s+ngay\b", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => TripDuration(text, match));
         if (duration is not null && short.TryParse(duration.Groups["days"].Value, out var parsedDays)) days = parsedDays;
         var budget = Regex.Matches(text, @"\bngan sach\s*(?:(?:la|khoang|tam|toi da)\s*|:\s*)?" + Money + Daily, RegexOptions.CultureInvariant)
@@ -58,7 +58,7 @@ public static class AgentPendingPlanningPolicy
         if (dailyFirst.Success) request = request with { NumDays = previous?.NumDays };
         if (request.NumDays == previous?.NumDays)
         {
-            var days = Regex.Matches(text, MentionedDays + @"|\b(?:[2-9]|[12]\d|30)\s+ngay\b(?!\s+(?:dau|cuoi))", RegexOptions.CultureInvariant).Cast<Match>()
+            var days = Regex.Matches(text, MentionedDays + @"|\b(?:[2-9]|[1-9]\d|100)\s+ngay\b(?!\s+(?:dau|cuoi))", RegexOptions.CultureInvariant).Cast<Match>()
                 .LastOrDefault(match => !Negated(text, match.Index) && !(dailyFirst.Success && match.Index == dailyFirst.Index));
             if (days is not null && short.TryParse(new string(days.Value.Where(char.IsDigit).ToArray()), out var parsed)) request = request with { NumDays = parsed };
         }

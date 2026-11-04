@@ -13,7 +13,7 @@ public static class AgentMealScopePolicy
 {
     private static readonly string[] DefaultMeals = ["breakfast", "lunch", "dinner"];
     private const string Meal = @"bua\s+(?<meal>sang|trua|toi|phu|khuya|(?:thu\s+)?(?:\d{1,2}|nhat|hai|ba|bon|nam)|dau(?:\s+tien)?|cuoi(?:\s+cung)?)\b";
-    private const string Day = @"ngay\s+(?:thu\s+)?(?<day>\d{1,2})\b";
+    private const string Day = @"ngay\s+(?:thu\s+)?(?<day>\d{1,3})\b";
     private static readonly Regex MealThenDay = new(@"\b" + Meal + @"\s*,?\s*(?:(?:cua|trong|vao)\s+)?" + Day, RegexOptions.CultureInvariant);
     private static readonly Regex DayThenMeal = new(@"\b" + Day + @"\s*,?\s*(?:(?:vao|o)\s+)?" + Meal, RegexOptions.CultureInvariant);
     private static readonly Regex AnyMeal = new(@"\b" + Meal, RegexOptions.CultureInvariant);

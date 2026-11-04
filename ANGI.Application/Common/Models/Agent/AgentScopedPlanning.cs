@@ -56,6 +56,9 @@ public static class AgentScopedPlanning
             .Select(meal => ((short)day, meal))).Where(x => (!scope.DayNumber.HasValue || scope.DayNumber == x.Item1) &&
                 (scope.MealSlot is null || scope.MealSlot == x.meal));
 
+    /// <summary>Past this many days the backend assembles a new plan itself: the model would have to write hundreds of items, more than one reply can hold.</summary>
+    public const int LongTripDays = 14;
+
     /// <summary>Number of planned meals in the trip; legacy state without declared meals plans breakfast, lunch and dinner.</summary>
     public static int MealCount(AgentState state) => (state.NumDays ?? 0) * (state.MealSlots.Length > 0 ? state.MealSlots.Length : 3);
 
