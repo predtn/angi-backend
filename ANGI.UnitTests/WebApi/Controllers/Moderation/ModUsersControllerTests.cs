@@ -111,4 +111,46 @@ public sealed class ModUsersControllerTests
         attribute.Roles.Should().Contain("MOD");
         attribute.Roles.Should().Contain("ADMIN");
     }
+
+    // TEST-04: MOD-U5 delegates userId, query filters, and cancellation token to GetUserAuditLogsUseCase.
+    [Fact]
+    public async Task GetAuditLogs_DelegatesToUseCase_ReturnsOkEnvelope()
+    {
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        var getUserAuditLogs = new Mock<IGetUserAuditLogsUseCase>();
+        var request = new GetUserAuditLogsRequestDto { Page = 1, PageSize = 20 };
+        var expectedPage = new ANGI.Application.Common.Models.Paged<AuditLogDto>
+        {
+            Items = [new AuditLogDto { Id = 9921, Action = "USER_SUSPENDED" }],
+            Page = 1,
+            PageSize = 20,
+            TotalItems = 1,
+            TotalPages = 1
+        };
+
+        getUserAuditLogs
+            .Setup(x => x.ExecuteAsync(12, request, cts.Token))
+            .ReturnsAsync(expectedPage);
+
+        var controller = new ModUsersController(
+            Mock.Of<IGetUsersUseCase>(),
+            Mock.Of<IGetUserDetailUseCase>(),
+            Mock.Of<ICreateUserSanctionUseCase>(),
+            Mock.Of<IUnbanUserUseCase>(),
+            getUserAuditLogs.Object);
+
+        // Act
+        var actionResult = await controller.GetAuditLogs(12, request, cts.Token);
+
+        // Assert
+        var okResult = actionResult.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        var envelope = okResult.Value.Should().BeOfType<ApiResponse<ANGI.Application.Common.Models.Paged<AuditLogDto>>>().Subject;
+        envelope.Success.Should().BeTrue();
+        envelope.Data.Should().BeSameAs(expectedPage);
+
+        getUserAuditLogs.Verify(x => x.ExecuteAsync(12, request, cts.Token), Times.Once);
+    }
 }

@@ -15,7 +15,8 @@ public sealed class ModUsersController(
     IGetUsersUseCase getUsers,
     IGetUserDetailUseCase getUserDetail,
     ICreateUserSanctionUseCase createUserSanction,
-    IUnbanUserUseCase unbanUser) : ControllerBase
+    IUnbanUserUseCase unbanUser,
+    IGetUserAuditLogsUseCase? getUserAuditLogs = null) : ControllerBase
 {
     /// <summary>MOD-U1: lists user accounts using moderator filters and pagination.</summary>
     [HttpGet]
@@ -61,4 +62,14 @@ public sealed class ModUsersController(
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Unban(int userId, [FromBody] UnbanUserRequestDto request, CancellationToken ct) =>
         Ok(new ApiResponse<AdminUserCardDto> { Success = true, Data = await unbanUser.ExecuteAsync(userId, request, ct) });
+
+    /// <summary>MOD-U5: views paginated audit logs related to a user (as actor or subject).</summary>
+    [HttpGet("{userId:int}/audit-logs")]
+    [ProducesResponseType(typeof(ApiResponse<Paged<AuditLogDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetAuditLogs(int userId, [FromQuery] GetUserAuditLogsRequestDto request, CancellationToken ct) =>
+        Ok(new ApiResponse<Paged<AuditLogDto>> { Success = true, Data = await getUserAuditLogs!.ExecuteAsync(userId, request, ct) });
 }
