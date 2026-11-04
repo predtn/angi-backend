@@ -2,6 +2,10 @@ using System.Diagnostics;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Proposals;
 
 namespace ANGI.Application.Services.Agent;
 
@@ -74,7 +78,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             return new(AgentReplyBuilder.Clarify(context, "general") + " Ưng rồi thì cứ bảo mình chốt nhé.", context.State, null, null);
         }
         // "Món lạ/món mới/món chưa ăn" không có tag nào tương ứng: hỏi nghĩa trước, không để model tra nó như tên món.
-        if (AgentNoveltyPolicy.Question(context) is { } noveltyQuestion)
+        if (AgentTasteClarificationPolicy.NoveltyQuestion(context) is { } noveltyQuestion)
         {
             telemetry.Record("novelty_clarification", context.ConversationId, context.TurnId, context.AttemptId);
             return new(noveltyQuestion, context.State with { PendingQuestion = noveltyQuestion }, null, null);

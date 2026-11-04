@@ -1,6 +1,9 @@
 using ANGI.Application.Common.Interfaces.UseCases.Agent;
 using ANGI.Application.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Agent.CleanupConversations;
 using ANGI.Application.UseCases.Agent.ConfirmProposal;
 using ANGI.Application.UseCases.Agent.CreateConversation;

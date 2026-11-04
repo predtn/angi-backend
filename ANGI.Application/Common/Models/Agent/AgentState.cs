@@ -88,7 +88,7 @@ public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCan
     long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
     AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null);
 
-/// <summary>Model-worded text about one dish in a preview; shown only after AgentProposalNotes checked it. Never saved to the roadmap.</summary>
+/// <summary>Model-worded text about one dish in a preview; shown only after AgentGroundedReply checked it. Never saved to the roadmap.</summary>
 public sealed record AgentDishNote(int DishId, string? Intro, string? Reason);
 
 /// <summary>Model-worded conclusion about one day of a preview, checked the same way.</summary>
@@ -132,7 +132,7 @@ public sealed class AgentContext
     /// <summary>The rest of each ranked list, never sent to the model; only the backend uses it to replace an avoidable repeat.</summary>
     public List<AgentCandidateGrant> ReserveGrants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
-    /// <summary>The model's wording for the preview this turn produced, for AgentProposalNotes to check against the final dishes.</summary>
+    /// <summary>The model's wording for the preview this turn produced, for AgentGroundedReply to check against the final dishes.</summary>
     public AgentOutput? PreviewOutput { get; set; }
     /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
     public List<AgentMealCoverage> MealCoverage { get; } = [];

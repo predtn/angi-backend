@@ -5,6 +5,8 @@ using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Entities;
 using ANGI.UnitTests.Application.Services.Agent;
 using Moq;

@@ -628,7 +628,7 @@ Application, Infrastructure và WebApi tổ chức Layer → technical folder �
 
 Mỗi method/constructor viết XML `<summary>` bằng tiếng Anh, nêu mục đích và ý nghĩa. Test ghi `// TEST-xx: English description of the behavior being tested.` trước Fact/Theory; đánh số trong từng file, không dùng cùng số cho các hành vi khác nhau trong file đó.
 
-Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folders>/<Class>.cs` → `ANGI.UnitTests/<Project>/<Folders>/<Class>Tests.cs`. Ví dụ `ANGI.Application/Services/Agent/AgentProposalBuilder.cs` → `ANGI.UnitTests/Application/Services/Agent/AgentProposalBuilderTests.cs`. Test HTTP/PostgreSQL đặt trong ANGI.IntegrationTests, ưu tiên cùng cấu trúc source cho controller/repository/configuration. Helper chỉ phục vụ nhóm test đặt cùng folder của nhóm đó; không tạo Services/Agent chung ở gốc test.
+Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folders>/<Class>.cs` → `ANGI.UnitTests/<Project>/<Folders>/<Class>Tests.cs`. Ví dụ `ANGI.Application/Services/Agent/Proposals/AgentProposalBuilder.cs` → `ANGI.UnitTests/Application/Services/Agent/Proposals/AgentProposalBuilderTests.cs`. Test HTTP/PostgreSQL đặt trong ANGI.IntegrationTests, ưu tiên cùng cấu trúc source cho controller/repository/configuration. Helper chỉ phục vụ nhóm test đặt cùng folder của nhóm đó; không tạo Services/Agent chung ở gốc test.
 
 ### 2. Các vùng và biên phải được kiểm chứng
 

@@ -10,6 +10,8 @@ using ANGI.Application.Common.Interfaces.UseCases.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using FluentValidation;
@@ -178,7 +180,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                     { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, PlanningIntake = null, FocusDay = null, FocusMeal = null } };
             }
             // Mọi đường tạo bản nháp, kể cả không qua model, đều đi qua đây nên phần giới thiệu luôn khớp với món cuối cùng.
-            if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentProposalNotes.Attach(drafted, context) };
+            if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentGroundedReply.AttachNotes(drafted, context) };
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
         }

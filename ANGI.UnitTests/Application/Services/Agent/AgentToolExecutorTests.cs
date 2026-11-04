@@ -6,6 +6,7 @@ using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Discovery;
 using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Conversation;
 using FluentAssertions;
 using Moq;
 

@@ -3,6 +3,10 @@ using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Proposals;
 using FluentAssertions;
 using Moq;
 

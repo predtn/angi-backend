@@ -4,7 +4,7 @@ using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Agent;
-using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using Moq;

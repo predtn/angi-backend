@@ -2,6 +2,7 @@ using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.UseCases.Agent.SendMessage;
 using ANGI.Application.UseCases.Validators.Agent;
 using ANGI.UnitTests.Application.Services.Agent;

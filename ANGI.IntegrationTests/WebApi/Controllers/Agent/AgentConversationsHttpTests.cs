@@ -12,6 +12,8 @@ using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Application.DTOs.Roadmap;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Intake;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using ANGI.Infrastructure.Persistences;

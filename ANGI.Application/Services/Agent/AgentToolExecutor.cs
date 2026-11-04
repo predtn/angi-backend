@@ -9,6 +9,10 @@ using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Discovery;
 using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.Common.Models.Roadmap;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Validators.Agent;
 
 namespace ANGI.Application.Services.Agent;

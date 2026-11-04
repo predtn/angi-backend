@@ -1,0 +1,116 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.UseCases.Validators.Agent;
+
+namespace ANGI.Application.Services.Agent.Constraints;
+
+/// <summary>Reads explicit day/meal wording ("bữa 2 ngày 1", "ngày 1 bữa trưa") so a meal taste is never widened to its whole day.</summary>
+public static class AgentMealScopePolicy
+{
+    private static readonly string[] DefaultMeals = ["breakfast", "lunch", "dinner"];
+    private const string Meal = @"bua\s+(?<meal>sang|trua|toi|phu|khuya|(?:thu\s+)?(?:\d{1,2}|nhat|hai|ba|bon|nam)|dau(?:\s+tien)?|cuoi(?:\s+cung)?)\b";
+    private const string Day = @"ngay\s+(?:thu\s+)?(?<day>\d{1,2})\b";
+    private static readonly Regex MealThenDay = new(@"\b" + Meal + @"\s*,?\s*(?:(?:cua|trong|vao)\s+)?" + Day, RegexOptions.CultureInvariant);
+    private static readonly Regex DayThenMeal = new(@"\b" + Day + @"\s*,?\s*(?:(?:vao|o)\s+)?" + Meal, RegexOptions.CultureInvariant);
+    private static readonly Regex AnyMeal = new(@"\b" + Meal, RegexOptions.CultureInvariant);
+    private static readonly Regex AnyDay = new(@"\b" + Day, RegexOptions.CultureInvariant);
+
+    /// <summary>Meals named together with a day, days named without a meal, and whether a meal number exceeds the meals per day.</summary>
+    public static AgentMealReferences Read(string content, AgentState state)
+    {
+        var text = Normalize(content);
+        var slots = Slots(state);
+        var meals = new List<AgentScope>();
+        var covered = new List<(int Start, int End)>();
+        foreach (var match in MealThenDay.Matches(text).Concat(DayThenMeal.Matches(text)).OrderBy(match => match.Index))
+        {
+            if (covered.Any(span => match.Index < span.End && span.Start < match.Index + match.Length)) continue;
+            covered.Add((match.Index, match.Index + match.Length));
+            if (Resolve(match.Groups["meal"].Value, slots) is { } meal && short.TryParse(match.Groups["day"].Value, out var day))
+                meals.Add(new(day, meal));
+        }
+        var days = AnyDay.Matches(text).Where(match => !covered.Any(span => match.Index >= span.Start && match.Index < span.End))
+            .Select(match => short.Parse(match.Groups["day"].Value, CultureInfo.InvariantCulture)).Distinct().ToArray();
+        var outOfRange = AnyMeal.Matches(text).Any(match => Resolve(match.Groups["meal"].Value, slots) is null);
+        return new([.. meals.Distinct()], days, outOfRange);
+    }
+
+    /// <summary>User wording that may scope a taste this turn: the retained clarification messages, or the current message when it states a taste.</summary>
+    public static string[] Evidence(AgentContext context) => context.State.PendingPlanningRequest?.Messages
+        ?? (AgentTasteClarificationPolicy.StatesTaste(context.Request.Content) ? [context.Request.Content] : []);
+
+    /// <summary>Turns a whole-day taste the model newly proposed into the meal overrides the user named for that day.</summary>
+    public static AgentState? Narrow(AgentState? proposed, AgentState current, IEnumerable<string> messages)
+    {
+        if (proposed is null || proposed.TasteOverrides.Length == 0) return proposed;
+        var references = messages.Select(message => Read(message, proposed)).ToArray();
+        var meals = references.SelectMany(x => x.Meals).Distinct().ToArray();
+        var days = references.SelectMany(x => x.Days).ToHashSet();
+        var overrides = new List<AgentTasteOverride>();
+        var changed = false;
+        foreach (var item in proposed.TasteOverrides)
+        {
+            var named = meals.Where(x => x.DayNumber == item.DayNumber).Select(x => x.MealSlot!).ToArray();
+            // Chỉ sửa phạm vi model vừa đề xuất ở lượt này. Ngày cũng được nhắc riêng ("cả ngày 1") hoặc bữa đã có khẩu vị riêng thì giữ nguyên.
+            if (item.MealSlot is not null || named.Length == 0 || days.Contains(item.DayNumber) || current.TasteOverrides.Any(x => Same(x, item)) ||
+                named.Any(meal => proposed.TasteOverrides.Any(x => x.DayNumber == item.DayNumber && x.MealSlot == meal)))
+            {
+                overrides.Add(item);
+                continue;
+            }
+            overrides.AddRange(named.Select(meal => item with { MealSlot = meal }));
+            changed = true;
+        }
+        return changed ? proposed with { TasteOverrides = [.. overrides] } : proposed;
+    }
+
+    /// <summary>Asks which meal is meant when a numbered meal exceeds the meals planned per day, or returns null.</summary>
+    public static string? Question(string content, AgentState state)
+    {
+        if (!Read(content, state).OutOfRange) return null;
+        var slots = Slots(state);
+        return $"Mỗi ngày trong lịch có {slots.Length} bữa ({string.Join(", ", slots.Select(AgentReplyBuilder.Meal))}). Bạn muốn chọn bữa nào?";
+    }
+
+    // "Bữa N" đếm theo các bữa đã khai báo, sắp theo thứ tự sáng → khuya; chưa khai báo thì mặc định sáng, trưa, tối.
+    private static string[] Slots(AgentState state) => state.MealSlots.Length > 0
+        ? AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray() : DefaultMeals;
+
+    private static string? Resolve(string token, string[] slots)
+    {
+        switch (token)
+        {
+            case "sang": return "breakfast";
+            case "trua": return "lunch";
+            case "toi": return "dinner";
+            case "phu": return "snack";
+            case "khuya": return "late_night";
+        }
+        if (token.StartsWith("dau", StringComparison.Ordinal)) return slots[0];
+        if (token.StartsWith("cuoi", StringComparison.Ordinal)) return slots[^1];
+        var number = Regex.Replace(token, @"^thu\s+", "", RegexOptions.CultureInvariant) switch
+        {
+            "nhat" => 1, "hai" => 2, "ba" => 3, "bon" => 4, "nam" => 5,
+            var digits => int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 0
+        };
+        return number >= 1 && number <= slots.Length ? slots[number - 1] : null;
+    }
+
+    private static bool Same(AgentTasteOverride left, AgentTasteOverride right) =>
+        left.DayNumber == right.DayNumber && left.MealSlot == right.MealSlot && left.Targets.SequenceEqual(right.Targets);
+
+    private static string Normalize(string text)
+    {
+        var unquoted = Regex.Replace(text, "\"[^\"]*\"|'[^']*'|“[^”]*”|‘[^’]*’|`[^`]*`", " ");
+        return new string(unquoted.Normalize(NormalizationForm.FormD)
+            .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
+            .Normalize(NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd').Trim();
+    }
+}
+
+/// <summary>Explicit meal references paired with a day, days named without a meal, and an out-of-range meal number flag.</summary>
+public sealed record AgentMealReferences(AgentScope[] Meals, short[] Days, bool OutOfRange);

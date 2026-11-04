@@ -6,7 +6,7 @@ using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Interfaces.UseCases.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
-using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Enums;
 using FluentValidation;
 
