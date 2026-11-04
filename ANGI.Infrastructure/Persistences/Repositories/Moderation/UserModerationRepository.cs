@@ -301,4 +301,104 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
                 AvatarUrl = u.AvatarMedia != null ? u.AvatarMedia.Url : null
             })
             .FirstOrDefaultAsync(ct);
+
+    /// <summary>Checks whether a non-deleted user account exists.</summary>
+    public Task<bool> UserExistsAsync(int userId, CancellationToken ct) =>
+        context.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.DeletedAt == null, ct);
+
+    /// <summary>Lists paginated audit logs where the user is the actor or the subject user, newest first.</summary>
+    public async Task<Paged<AuditLogDto>> GetUserAuditLogsAsync(int userId, GetUserAuditLogsRequestDto request, CancellationToken ct)
+    {
+        var query = context.AuditLogs.AsNoTracking()
+            .Where(a => a.ActorId == userId || a.SubjectUserId == userId);
+
+        if (!string.IsNullOrWhiteSpace(request.Action))
+        {
+            var action = request.Action.Trim().ToUpperInvariant();
+            query = query.Where(a => a.Action == action);
+        }
+
+        if (request.From.HasValue)
+        {
+            var fromUtc = ToUtc(request.From.Value);
+            query = query.Where(a => a.CreatedAt >= fromUtc);
+        }
+
+        if (request.To.HasValue)
+        {
+            var toUtc = ToUtc(request.To.Value);
+            if (toUtc.TimeOfDay == TimeSpan.Zero)
+            {
+                var toExclusive = toUtc.AddDays(1);
+                query = query.Where(a => a.CreatedAt < toExclusive);
+            }
+            else
+            {
+                query = query.Where(a => a.CreatedAt <= toUtc);
+            }
+        }
+
+        var count = await query.LongCountAsync(ct);
+        var offset = ((long)request.Page - 1) * request.PageSize;
+        var totalPages = (int)Math.Ceiling((double)count / request.PageSize);
+
+        if (count == 0 || offset > int.MaxValue)
+        {
+            return new Paged<AuditLogDto>
+            {
+                Items = [],
+                Page = request.Page,
+                PageSize = request.PageSize,
+                TotalItems = count,
+                TotalPages = totalPages
+            };
+        }
+
+        var items = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .ThenByDescending(a => a.Id)
+            .Skip((int)offset)
+            .Take(request.PageSize)
+            .Select(a => new AuditLogDto
+            {
+                Id = a.Id,
+                Actor = a.ActorId.HasValue
+                    ? new AuditActorDto
+                    {
+                        Id = a.ActorId.Value,
+                        DisplayName = a.Actor != null ? a.Actor.DisplayName : string.Empty,
+                        Role = a.ActorRole
+                    }
+                    : null,
+                Action = a.Action,
+                EntityType = a.EntityType,
+                EntityId = a.EntityId,
+                SubjectUser = a.SubjectUser != null
+                    ? new UserSummaryDto
+                    {
+                        Id = a.SubjectUser.Id,
+                        DisplayName = a.SubjectUser.DisplayName,
+                        AvatarUrl = a.SubjectUser.AvatarMedia != null ? a.SubjectUser.AvatarMedia.Url : null
+                    }
+                    : null,
+                CreatedAt = a.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        return new Paged<AuditLogDto>
+        {
+            Items = items,
+            Page = request.Page,
+            PageSize = request.PageSize,
+            TotalItems = count,
+            TotalPages = totalPages
+        };
+    }
+
+    private static DateTime ToUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+    };
 }

@@ -7,6 +7,7 @@ using ANGI.Application.UseCases.Moderation.GetMenuSubmissionReview;
 using ANGI.Application.UseCases.Moderation.GetModRestaurant;
 using ANGI.Application.UseCases.Moderation.GetModBlogs;
 using ANGI.Application.UseCases.Moderation.GetReport;
+using ANGI.Application.UseCases.Moderation.GetUserAuditLogs;
 using ANGI.Application.UseCases.Moderation.GetUserDetail;
 using ANGI.Application.UseCases.Moderation.GetUsers;
 using ANGI.Application.UseCases.Moderation.GetVerificationReview;
@@ -60,6 +61,7 @@ public static class ModerationModule
         services.AddScoped<IClaimReportUseCase, ClaimReportUseCase>();
         services.AddScoped<IGetUsersUseCase, GetUsersUseCase>();
         services.AddScoped<IGetUserDetailUseCase, GetUserDetailUseCase>();
+        services.AddScoped<IGetUserAuditLogsUseCase, GetUserAuditLogsUseCase>();
         services.AddScoped<IUnbanUserUseCase, UnbanUserUseCase>();
         services.AddScoped<IExpireUserSuspensionsUseCase, ExpireUserSuspensionsUseCase>();
         services.AddScoped<IGetModReviewsUseCase, GetModReviewsUseCase>();
