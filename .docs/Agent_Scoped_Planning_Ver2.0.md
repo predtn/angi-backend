@@ -182,6 +182,11 @@ A point pinned on the roadmap gives the province and a search circle of at least
 eat. A model state that leaves province, duration, budget or pin empty keeps the current value; only a pin the user names can
 be removed, and that still asks for confirmation.
 
+A trip longer than 14 days is assembled by the backend right after one `get_recommendation scope=full`, drawing on the reserve
+list and repeating the least used dish only when a meal runs out. It costs one provider call, writes no dish notes or day
+summaries, and fetches no route legs in chat. A source over 60 items reaches the model cut to the days the message names
+(`sourceIsPartial`, `sourceItemCount`).
+
 `action=out_of_scope` covers anything outside dishes, restaurants and the food itinerary, including general food
 knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always exactly: "Việc này
 nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi." For a food question, the

@@ -2046,7 +2046,41 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotContain("chốt");
     }
 
-    // TEST-107: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-107: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
+    /// <summary>A model reply cannot hold hundreds of items, so these trips would otherwise end in a truncated output.</summary>
+    [Theory]
+    [InlineData(15)]
+    [InlineData(30)]
+    [InlineData(100)]
+    public async Task RunAsync_LongTrip_BackendAssemblesAfterOneSearch(int days)
+    {
+        var state = new AgentState { Province = "Da Nang", NumDays = (short)days, BudgetAmount = 99999999, MealSlots = ["breakfast", "lunch", "dinner"] };
+        var context = IntakeContext("lập lịch đi", state);
+        context.IntakeComplete = true;
+        var search = new AgentRecommendationInput(Scope: "full", TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 30);
+        var call = new AgentToolCall("r", "get_recommendation", System.Text.Json.JsonSerializer.SerializeToElement(search, AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([call], null));
+        var catalog = Enumerable.Range(1, 40).Select(id => AgentTestData.Dish(id)).ToArray();
+        var fixture = AgentTestData.Validator(catalog);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<ANGI.Application.Common.Models.Discovery.DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(catalog.Select(dish => dish.Id).ToArray());
+        var policy = new AgentStatePolicy();
+        var limits = new AgentLimits();
+        var telemetry = Mock.Of<IAgentTelemetry>();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), policy, new AgentRouteEstimator(fixture.Routes.Object), limits, telemetry);
+
+        var result = await new AgentOrchestrator(llm.Object, tools, policy, new(), fixture.Validator, limits, telemetry).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Should().HaveCount(days * 3);
+        result.Snapshot.Items.Select(item => (item.DayNumber, item.MealSlot)).Distinct().Should().HaveCount(days * 3);
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Routes.Verify(x => x.CalculateRouteAsync(It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteCoordinate?>(), It.IsAny<IReadOnlyList<ANGI.Application.Common.Models.Roadmap.RouteCoordinate>>(),
+            It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-108: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]

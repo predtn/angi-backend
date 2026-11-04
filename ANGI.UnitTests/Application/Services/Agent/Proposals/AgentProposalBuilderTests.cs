@@ -298,4 +298,42 @@ public sealed class AgentProposalBuilderTests
 
         AgentProposalBuilder.Assemble(context).Should().BeNull();
     }
+
+    // TEST-P1: A long plan reaches the model cut to the days and dishes the message names; a short plan stays whole; this keeps each call on a 100-day plan affordable.
+    /// <summary>Resending hundreds of items on every call would cost more than the edit itself and exceed the context limit.</summary>
+    [Theory]
+    [InlineData(25, "đổi bữa trưa ngày 12", new short[] { 12 })]
+    [InlineData(25, "đổi Dish 25?", new short[] { 9 })]
+    [InlineData(25, "đổi bớt món đi", new short[0])]
+    public void PromptSource_LongPlan_KeepsOnlyNamedDays(int days, string content, short[] expected)
+    {
+        var context = AgentTestData.Context(Long(days));
+        context.State = context.Source!.State;
+        context.Request.Content = content;
+
+        var prompt = AgentProposalBuilder.PromptSource(context)!;
+
+        prompt.Items.Select(item => item.DayNumber).Distinct().Should().Equal(expected);
+        prompt.Grants.Should().BeEmpty();
+        context.Source!.Items.Should().HaveCount(days * 3);
+    }
+
+    // TEST-P2: A plan that fits is sent whole, exactly as before.
+    /// <summary>Short plans must not change behaviour.</summary>
+    [Fact]
+    public void PromptSource_ShortPlan_IsNull()
+    {
+        var context = AgentTestData.Context(Long(7));
+        context.State = context.Source!.State;
+
+        AgentProposalBuilder.PromptSource(context).Should().BeNull();
+    }
+
+    /// <summary>A plan of three dishes a day, named in order.</summary>
+    private static AgentSnapshot Long(int days)
+    {
+        var state = AgentTestData.State() with { NumDays = (short)days, MealSlots = ["breakfast", "lunch", "dinner"] };
+        var items = Enumerable.Range(0, days * 3).Select(index => AgentTestData.Item(index + 1, $"i{index}", (short)(index / 3 + 1), state.MealSlots[index % 3]) with { DishName = $"Dish {index + 1}" }).ToArray();
+        return new(state, items, []);
+    }
 }

@@ -26,6 +26,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     // Thang điểm reco là 0..1. Đo trên yêu cầu thật của các tài khoản có vector khẩu vị: món hạng 2 kém món đầu 0,0003-0,06, hạng 5 kém 0,02-0,12.
     // Mức 0,05 gom khoảng 1-13 món đầu vào cùng một nhóm, còn chênh lệch lớn hơn vẫn do khẩu vị quyết định.
     public const double NearlyEqualScore = 0.05;
+    // Chuyến dài bị tách theo ngày có nhiều ngày cùng điều kiện: mỗi bữa của mỗi điều kiện chỉ lọc và xếp hạng một lần trong một lượt gọi tool.
+    private readonly Dictionary<string, RankedMeal> _rankedMeals = [];
 
     /// <summary>Rejects unrecognized tools and validates arguments before executing any external operation.</summary>
     public async Task<JsonElement> ExecuteAsync(AgentContext context, AgentToolCall call, CancellationToken ct)
@@ -68,7 +70,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (!context.ReplanAfterConfirmation)
             context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(AgentNamedRequestPolicy.Retain(
                 AgentMealScopePolicy.Narrow(AgentStatePolicy.WithoutErased(AgentIntakePolicy.WithoutUnstatedProvince(input.State, context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
+        // Backend tự ghép chuyến dài theo bữa, nên phải biết các bữa ngay cả khi model không ghi mealSlots.
+        if (AgentScopedPlanning.IsLongTrip(context.State) && context.State.MealSlots.Length == 0 && context.Source is not { Items.Length: > 0 })
+            context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"] };
         var state = context.State;
+        _rankedMeals.Clear();
         // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
         // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
         // Orchestrator hỏi lại bằng câu cố định mà không gọi thêm LLM.
@@ -339,7 +345,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 return found.Length > 0 ? found : qualified.ToArray();
             }
             var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
-            var eligible = await EligibleAsync(area);
+            var mealKey = AgentScopedPlanning.IsLongTrip(state) && perMealSearch ? $"{mealSlot}|{AgentScopedPlanning.Fingerprint(state, vectorSlot.Day, vectorSlot.Meal)}" : null;
+            var known = mealKey is not null ? _rankedMeals.GetValueOrDefault(mealKey) : null;
+            var eligible = known?.Eligible ?? await EligibleAsync(area);
             // Nơi đến người dùng nêu tên mà bữa này không có món trong bán kính: chỉ bữa này được tìm xa dần, các bữa khác của ngày vẫn giữ bán kính cũ.
             // Món hoặc quán được yêu cầu đích danh giữ cách báo thiếu cũ, vì tìm xa hơn không tạo ra đúng món/quán đó.
             if (namedCenter is not null && mealSlot is not null && distinctNames && restaurantId is null)
@@ -374,12 +382,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             if (diversify) topK = Math.Min(limits.MaxRanked, topK + usedNames.Count);
             // Xét độ gần cần thấy đủ các món gần bằng điểm nhau, kể cả món ngoài suất. Phần này không gửi cho model nên không tăng token LLM.
             if (namedCenter is not null && perMealSearch) topK = limits.MaxRanked;
+            // Chuyến dài cần nhiều món khác tên nhất có thể để ít phải lặp; phần ngoài suất cũng không gửi cho model.
+            if (mealKey is not null) topK = limits.MaxRanked;
             // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
             // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
-            var ranked = state.Preferences?.Initialized == true
+            var ranked = known?.Ranked ?? (state.Preferences?.Initialized == true
                 ? await recommendation.RecommendConversationAsync(context.UserId, candidates, topK,
                     new RecommendationVector("conversation", AgentScopedPlanning.Vector(state, vectorSlot.Day, vectorSlot.Meal)), ct)
-                : new RecommendationResult(null, candidates.Take(topK).ToArray(), []);
+                : new RecommendationResult(null, candidates.Take(topK).ToArray(), []));
             if (ranked.RequestId.HasValue && ranked.VectorSource != "conversation")
                 ranked = new RecommendationResult(null, candidates.Take(topK).ToArray(), []);
             var allowed = candidates.ToHashSet();
@@ -394,7 +404,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             ignoredTotal += ranked.IgnoredDishIds.Count;
             // Loại ID trùng nhưng giữ thứ tự ranking; lấy metadata từ catalog backend thay vì để LLM tự bịa.
             var rankedIds = ranked.DishIds.Distinct().ToArray();
-            var catalog = (await dishes.GetCardDishesAsync(rankedIds, ct)).ToDictionary(x => x.Id);
+            var catalog = known?.Catalog ?? (await dishes.GetCardDishesAsync(rankedIds, ct)).ToDictionary(x => x.Id);
+            if (mealKey is not null) _rankedMeals[mealKey] = new(eligible, ranked, catalog);
             var actual = rankedIds.Where(catalog.ContainsKey).Select(id => catalog[id])
                 .Where(d => string.Equals(d.Restaurant.ProvinceName?.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) &&
                     FitsMeal(d, mealSlot) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
@@ -465,6 +476,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         }
         return coverage;
     }
+
+    /// <summary>One meal's filtered and ranked dishes, reused by the days of a long trip that share its conditions.</summary>
+    private sealed record RankedMeal(ANGI.Domain.Entities.Dish[] Eligible, RecommendationResult Ranked, Dictionary<int, ANGI.Domain.Entities.Dish> Catalog);
 
     private async Task<object> SearchAsync(AgentContext context, AgentCatalogInput input, CancellationToken ct)
     {

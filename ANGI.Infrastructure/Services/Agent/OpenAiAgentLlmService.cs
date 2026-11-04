@@ -127,6 +127,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         Take province only from the user's own words: never infer it from state.title or a roadmap name.
         originMode=pinned or gps with coordinates means the user already chose where to eat: never ask where, and keep
         originMode, its coordinates and radiusKm in any state you return.
+        sourceIsPartial=true means a long plan: source.items holds only the days this message names, out of sourceItemCount items, and the
+        backend keeps all the others. Never ask to see them or copy them. When an edit names no day, ask which day with clarification=edit_scope.
+        For a change to the whole trip, call get_recommendation scope=full and the backend rebuilds the plan.
         A district, street or landmark is a place, not a dish or restaurant: never pass one to search_catalog. state.dayAreas is backend-owned: the backend
         already located each day's place and searches around it, so never ask for those places again; a day without one uses the whole province.
         itineraryChangedDays lists days that just moved: fetch scope=day for each of them and return a proposal for those days.
@@ -403,10 +406,11 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         // Đặt rules ở system message; state/catalog/history/request là dữ liệu để model tham khảo.
         // Câu "sửa roadmap cho tôi" được hiểu trong Source hiện có, không tự tìm roadmap khác của user.
         var messages = new List<object> { new { role = "system", content = Instructions } };
-        messages.Add(new { role = "user", content = JsonSerializer.Serialize(new { state = context.State, source = context.Source,
+        messages.Add(new { role = "user", content = JsonSerializer.Serialize(new { state = context.State, source = context.PromptSource ?? context.Source,
             currentProposal = context.CurrentProposal is null ? null : new { context.CurrentProposal.ProposalId, context.CurrentProposal.Version, context.CurrentProposal.Status },
             proposalVersion = context.ProposalVersion, history = context.History, request = context.Request,
             proposalMode = context.Source is null ? "create" : "update",
+            sourceIsPartial = context.PromptSource is not null, sourceItemCount = context.Source?.Items.Length,
             catalogTags = context.CatalogTags, replanAfterConfirmation = context.ReplanAfterConfirmation, intakeComplete = context.IntakeComplete, itineraryChangedDays = context.MovedDays,
             issuedCandidateScopes = context.Grants.Select(grant => new { grant.DayNumber, grant.MealSlot, grant.DishIds }),
             currentDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),

@@ -182,6 +182,8 @@ public sealed class AgentContext
     public bool ItineraryChanged => MovedDays.Length > 0;
     /// <summary>What this turn learned from the point pinned on the map; told to the user once, with the next question.</summary>
     public string? PinNote { get; set; }
+    /// <summary>A long plan cut to the days this message names, sent to the model instead of Source; null sends Source whole.</summary>
+    public AgentSnapshot? PromptSource { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>

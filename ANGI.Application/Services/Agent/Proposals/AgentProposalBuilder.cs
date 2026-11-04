@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Constraints;
@@ -146,27 +147,58 @@ public sealed class AgentProposalBuilder
                 items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
     }
 
+    // Mỗi món trong nguồn gửi cho model tốn khoảng 100 token ở mọi lần gọi; quá mức này chỉ gửi các ngày tin nhắn nhắc tới.
+    private const int MaxPromptItems = 60;
+
+    /// <summary>A long plan cut to the days or dishes this message names; null when the whole source fits, so short plans reach the model as before.</summary>
+    public static AgentSnapshot? PromptSource(AgentContext context)
+    {
+        if (context.Source is not { } source || source.Items.Length <= MaxPromptItems) return null;
+        var named = AgentMealScopePolicy.Read(context.Request.Content, context.State);
+        var days = named.Days.Concat(named.Meals.Select(meal => meal.DayNumber ?? 0)).Concat(context.MovedDays)
+            .Concat(source.Items.Where(item => item.ItemKey == context.Request.SelectedItemKey).Select(item => item.DayNumber)).ToHashSet();
+        if (context.State.FocusDay is { } focus) days.Add(focus);
+        var message = NameWords(context.Request.Content);
+        return source with { Items = source.Items.Where(item => days.Contains(item.DayNumber) || item.DishName is not null && message.Contains(NameWords(item.DishName), StringComparison.Ordinal)).ToArray(),
+            Grants = [], Changes = null, RetainedItems = null, DishNotes = null, DaySummaries = null };
+    }
+
+    // Khớp nguyên từ: "Dish 2" không được khớp "Dish 25".
+    private static string NameWords(string text) => $" {Regex.Replace(AgentScopedPlanning.Normalize(text)!, @"[^\p{L}\p{M}\p{N}]+", " ").Trim()} ";
+
+    /// <summary>A long trip whose whole plan this turn searched for: the backend assembles it, because the model could not write that many items in one reply.</summary>
+    public static bool AssemblesWholeTrip(AgentContext context)
+    {
+        if (!AgentScopedPlanning.IsLongTrip(context.State) || context.Grants.Count == 0 || context.Exchanges.Count == 0 ||
+            !context.Exchanges[^1].Calls.Any(call => call.Name == "get_recommendation" && call.Arguments.TryGetProperty("scope", out var scope) && scope.GetString() == "full")) return false;
+        var named = AgentMealScopePolicy.Read(context.Request.Content, context.State);
+        return context.Source is not { Items.Length: > 0 } || named.Days.Length == 0 && named.Meals.Length == 0 && !context.ItineraryChanged;
+    }
+
     /// <summary>
     /// Fills a new plan from the candidates already issued this turn, best ranked first, when the model could not submit a usable one.
     /// Null when an existing plan or a narrowed scope is involved, or when a position has no candidate; validation still checks the result.
+    /// A long trip may replace an existing plan and also draws on the reserve list; when every candidate of a meal is used, the least used comes back.
     /// </summary>
-    public static AgentOutput? Assemble(AgentContext context)
+    public static AgentOutput? Assemble(AgentContext context, bool longTrip = false)
     {
         var state = context.State;
-        if (context.Source is { Items.Length: > 0 } || context.AlternativeScopes.Count > 0 || state.FocusDay.HasValue ||
+        if (!longTrip && context.Source is { Items.Length: > 0 } || context.AlternativeScopes.Count > 0 || state.FocusDay.HasValue ||
             context.Request.ConfirmedState?.FocusDay is not null || context.Request.SelectedItemKey is not null) return null;
         var meals = state.MealSlots.Length > 0 ? AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray() : ["breakfast", "lunch", "dinner"];
-        AgentCandidateGrant[] grants = [.. context.Grants];
+        AgentCandidateGrant[] grants = longTrip ? [.. context.Grants, .. context.ReserveGrants] : [.. context.Grants];
         var used = new Dictionary<int, int>();
         var items = new List<AgentItem>();
         for (short day = 1; day <= (state.NumDays ?? 0); day++)
             foreach (var meal in meals)
             {
+                if (longTrip && state.SkippedMeals?.Contains(new(day, meal)) == true) continue;
                 var fingerprint = AgentScopedPlanning.Fingerprint(state, day, meal);
                 var options = grants.Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == day) && (grant.MealSlot is null || grant.MealSlot == meal) &&
                         AgentScopedPlanning.Fingerprint(grant.Constraints, day, meal) == fingerprint)
                     .SelectMany(grant => grant.DishIds).ToArray();
                 var pick = options.Where(id => !used.ContainsKey(id)).Select(id => (int?)id).FirstOrDefault();
+                if (pick is null && longTrip && options.Length > 0) pick = options.MinBy(id => used[id]);
                 if (pick is not { } dishId) return null;
                 used[dishId] = used.GetValueOrDefault(dishId) + 1;
                 items.Add(new($"day{day}-{meal}", null, day, meal, 0, dishId));

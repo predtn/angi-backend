@@ -107,13 +107,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var executedTools = new HashSet<string>(StringComparer.Ordinal);
         var turnStarted = Stopwatch.GetTimestamp();
         var confirmedState = context.ConstraintBaseline = context.State;
+        context.PromptSource = AgentProposalBuilder.PromptSource(context);
         try
         {
             for (var calls = 0; calls < limits.MaxLlmCalls; calls++)
             {
                 // Mỗi vòng có thể là một lần model xin tools hoặc trả output cuối; đều tính vào MaxLlmCalls.
                 timeout.Token.ThrowIfCancellationRequested();
-                if (AgentJson.Write(new { context.State, context.Source, context.History, context.Request, context.Exchanges, context.RejectedOutput }).Length > limits.MaxContextCharacters)
+                if (AgentJson.Write(new { context.State, Source = context.PromptSource ?? context.Source, context.History, context.Request, context.Exchanges, context.RejectedOutput }).Length > limits.MaxContextCharacters)
                     throw Unavailable();
                 var started = Stopwatch.GetTimestamp();
                 // ĐÂY LÀ DÒNG GỌI LLM qua IAgentLlmService (DI nối tới OpenAiAgentLlmService).
@@ -209,7 +210,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
                     // ở các lần gọi sau, vì thông báo cũ khiến model lặp lại đúng tool call vừa chạy.
                     repaired = false;
-                    continue;
+                    // Lịch dài: model sẽ phải viết hàng trăm món và vượt giới hạn một lần trả lời, nên backend tự ghép từ các món vừa được cấp và không gọi LLM thêm.
+                    if (!AgentProposalBuilder.AssemblesWholeTrip(context) || AgentProposalBuilder.Assemble(context, longTrip: true) is not { } longPlan) continue;
+                    context.Grants.AddRange(context.ReserveGrants);
+                    context.ReserveGrants.Clear();
+                    telemetry.Record("long_trip_assembled", context.ConversationId, context.TurnId, context.AttemptId, new { days = context.State.NumDays, items = longPlan.Items.Length });
+                    step = new([], longPlan, step.Tokens);
                 }
                 var output = step.Output!;
                 // Action do LLM chọn theo Instructions trong adapter; hợp đồng chỉ cho phép các action
@@ -341,7 +347,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     {
                         var future = futureSource with { State = context.State with { PendingQuestion = null, PendingPlanningRequest = null }, Changes = [],
                             RetainedItems = futureSource.Items, Scope = new() };
-                        var checkedFuture = await validator.ValidateAsync(future, futureSource, false, true, timeout.Token, context.Grants);
+                        var checkedFuture = await validator.ValidateAsync(future, futureSource, false, Routes(context), timeout.Token, context.Grants);
                         if (checkedFuture.Validation.Errors.Length > 0)
                             return new("Chưa thể giữ nguyên đề xuất theo các điều kiện mới. Vui lòng kiểm tra lại yêu cầu.", context.State, null, checkedFuture.Validation);
                         return new("Đã cập nhật khẩu vị cho các gợi ý tiếp theo. Các món trong bản đề xuất hiện tại được giữ nguyên; lịch chính thức chưa thay đổi.",
@@ -420,7 +426,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.State = AgentRemovalPolicy.WithSkippedMeals(context.State, removalSource, snapshot.Items);
                     snapshot = snapshot with { State = snapshot.State with { SkippedMeals = context.State.SkippedMeals } };
                 }
-                var validated = await validator.ValidateAsync(snapshot, context.Source, false, true, timeout.Token, context.Grants, context.ReserveGrants);
+                var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 var substituted = 0;
                 // Lỗi DUY NHẤT là món nằm ngoài ngày/bữa được cấp: backend thay bằng món xếp hạng cao nhất đã được cấp cho
@@ -429,7 +435,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (validated.Validation.ScopeRejectedItemKeys is { Length: > 0 } rejectedKeys &&
                     await validator.RepairScopeAsync(snapshot, context.Source, context.Grants, rejectedKeys, timeout.Token) is { } repairedSnapshot)
                 {
-                    var revalidated = await validator.ValidateAsync(repairedSnapshot, context.Source, false, true, timeout.Token, context.Grants, context.ReserveGrants);
+                    var revalidated = await validator.ValidateAsync(repairedSnapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
                     telemetry.Record("scope_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { replaced = rejectedKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted = rejectedKeys.Length; }
@@ -441,7 +447,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (AgentReplyBuilder.OverBudgetOnly(validated.Validation) &&
                     await validator.RepairBudgetAsync(validated.Snapshot, context.Source, [.. context.Grants, .. context.ReserveGrants], timeout.Token) is { } cheaper)
                 {
-                    var revalidated = await validator.ValidateAsync(cheaper.Snapshot, context.Source, false, true, timeout.Token, repeatGrants);
+                    var revalidated = await validator.ValidateAsync(cheaper.Snapshot, context.Source, false, Routes(context), timeout.Token, repeatGrants);
                     telemetry.Record("budget_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { replaced = cheaper.Replaced, revalidated.Validation.TotalCost, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted += cheaper.Replaced; }
@@ -451,7 +457,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (validated.Validation.Errors.Length == 0 && validated.Validation.AvoidableRepeatItemKeys is { Length: > 0 } repeatKeys &&
                     await validator.RepairScopeAsync(validated.Snapshot, context.Source, repeatGrants, repeatKeys, timeout.Token, repeatsOnly: true) is { } varied)
                 {
-                    var revalidated = await validator.ValidateAsync(varied, context.Source, false, true, timeout.Token, repeatGrants);
+                    var revalidated = await validator.ValidateAsync(varied, context.Source, false, Routes(context), timeout.Token, repeatGrants);
                     telemetry.Record("repeat_autorepair", context.ConversationId, context.TurnId, context.AttemptId,
                         new { replaced = repeatKeys.Length, revalidated.Validation.Errors });
                     if (revalidated.Validation.Errors.Length == 0) { validated = revalidated; substituted += repeatKeys.Length; }
@@ -489,6 +495,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         // State do model đề xuất sai luật: lỗi của model, không phải của người dùng. Giữ state đầu lượt và hỏi lại.
         catch (FluentValidation.ValidationException) { return Misunderstood(context, turnState); }
     }
+
+    /// <summary>Route legs are fetched per day from a paid map service for each validation; a long trip skips them in chat and the saved roadmap fetches a day's route when it is opened.</summary>
+    private static bool Routes(AgentContext context) => !AgentScopedPlanning.IsLongTrip(context.State);
 
     /// <summary>
     /// A point pinned on the map already says where the user will eat, so a new plan never asks again: it gives the province and the search circle.
@@ -631,7 +640,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         state = state with { ReplacedDishNames = AgentScopedPlanning.Replaced(state, source, source with { Items = remaining }) };
         var snapshot = source with { State = state, Items = remaining, RetainedItems = remaining, Scope = new(),
             Changes = removed.Select(item => new AgentChange("remove", item.ItemKey, null)).ToArray() };
-        var checkedRemoval = await validator.ValidateAsync(snapshot, source, false, true, ct, context.Grants);
+        var checkedRemoval = await validator.ValidateAsync(snapshot, source, false, Routes(context), ct, context.Grants);
         if (checkedRemoval.Validation.Errors.Length > 0)
             return new("Chưa thể bỏ món này: " + string.Join(" ", checkedRemoval.Validation.Errors), context.State, null, checkedRemoval.Validation);
         return new(AgentReplyBuilder.Proposal(checkedRemoval.Snapshot, source: source),

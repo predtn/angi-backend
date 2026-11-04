@@ -33,7 +33,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         var source = snapshot.BaseRoadmapId is { } sourceId
             ? await roadmaps.GetOwnedDetailAsync(sourceId, userId, ct) ?? throw RoadmapMissing() : null;
         if (source is not null && source.UpdatedAt != snapshot.BaseRoadmapUpdatedAt) throw RoadmapConflict();
-        var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, true, ct);
+        var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, !AgentScopedPlanning.IsLongTrip(snapshot.State), ct);
         if (outside.Validation.Errors.Length > 0) throw new AgentProposalValidationException(outside.Validation);
         return new(conversation.Id, proposal.Id, proposal.ProposalVersion, snapshot);
     }
