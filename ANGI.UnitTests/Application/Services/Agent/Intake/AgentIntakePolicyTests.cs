@@ -76,7 +76,29 @@ public sealed class AgentIntakePolicyTests
         AgentIntakePolicy.WithoutUnstatedProvince(titled, located).Should().BeSameAs(titled);
     }
 
-    // TEST-06: An itinerary opens the questions without planning wording, skips the place question and is acknowledged; a day past the known duration grows it.
+    // TEST-06: Tools close only for a new plan with no special request whose search covered every meal; covers each reason to keep them open.
+    /// <summary>Ensures the saving from conversation 94 never costs a side dish or named request its extra search.</summary>
+    [Theory]
+    [InlineData("covered", true)][InlineData("not-intake", false)][InlineData("no-meals", false)][InlineData("meal-request", false)]
+    [InlineData("gap", false)][InlineData("uncovered-day", false)][InlineData("taste-answer", false)][InlineData("side-dish", false)][InlineData("earlier-request", false)]
+    [InlineData("quick-reply", true)][InlineData("taste-only", true)][InlineData("sightseeing", true)]
+    public void PlanCovered_OnlyWithoutAnythingLeftToSearch(string area, bool expected)
+    {
+        var context = Context(area switch { "taste-answer" => "không ăn cay", "side-dish" => "thêm trà sữa nhé", "quick-reply" => "Không, lập lịch luôn nhé.", "taste-only" => "Cay nhẹ cho toàn chuyến đi", _ => "không" });
+        context.IntakeComplete = area != "not-intake";
+        context.State = context.State with
+        {
+            NumDays = 2, MealSlots = area == "no-meals" ? [] : ["lunch"],
+            MealRequests = area == "meal-request" ? [new(1, "lunch", "Phở", null, [])] : [],
+            PendingPlanningRequest = area == "earlier-request" ? new(["ngày 1 ăn hải sản"]) : area == "sightseeing" ? new(["Ngày 1 tôi đi tham quan Hồ Gươm ở quận Hoàn Kiếm"]) : null
+        };
+        context.MealCoverage.Add(new(1, "lunch", area == "gap" ? 0 : 3, "", []));
+        if (area != "uncovered-day") context.MealCoverage.Add(new(2, "lunch", 3, "", []));
+
+        AgentIntakePolicy.PlanCovered(context).Should().Be(expected);
+    }
+
+    // TEST-07: An itinerary opens the questions without planning wording, skips the place question and is acknowledged; a day past the known duration grows it.
     /// <summary>Ensures "Ngày 1 ở Hoàn Kiếm" alone is treated as the start of a plan and reaches the user as a confirmation.</summary>
     [Fact]
     public void Read_Itinerary_StartsIntakeAndCarriesPlaces()
@@ -93,7 +115,7 @@ public sealed class AgentIntakePolicyTests
         step.Reply.Should().StartWith("Mình ghi nhận hành trình ở Hà Nội").And.Contain("ngân sách");
     }
 
-    // TEST-07: A whole-trip area keeps its origin and radius through the read instead of being reset by the old state.
+    // TEST-08: A whole-trip area keeps its origin and radius through the read instead of being reset by the old state.
     /// <summary>Ensures "ở Cầu Giấy" stays a search around Cầu Giấy all the way into the proposed state.</summary>
     [Fact]
     public void Read_TripArea_KeepsOriginAndRadius()
@@ -104,7 +126,7 @@ public sealed class AgentIntakePolicyTests
         read.Note.Should().Contain("khu vực Cầu Giấy");
     }
 
-    // TEST-08: An itinerary sent with the answer to the preferences question still applies, and planning still starts.
+    // TEST-09: An itinerary sent with the answer to the preferences question still applies, and planning still starts.
     /// <summary>Ensures a late itinerary is not lost because the intake was already closing.</summary>
     [Fact]
     public void Read_ItineraryAtPreferencesStage_AppliesAndCloses()

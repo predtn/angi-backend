@@ -203,6 +203,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         telemetry.Record("trip_details_clarification", context.ConversationId, context.TurnId, context.AttemptId);
                         return new(question, context.State with { PendingQuestion = question, PlanningIntake = AgentIntakePolicy.HasPlan(context) ? null : AgentIntakePolicy.Details }, null, null);
                     }
+                    // Hội thoại 94 tốn thêm 2 lần gọi LLM vì model xin tiếp ứng viên dù đã đủ món cho mọi bữa.
+                    if (AgentIntakePolicy.PlanCovered(context)) context.ToolsClosed = true;
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
                     // ở các lần gọi sau, vì thông báo cũ khiến model lặp lại đúng tool call vừa chạy.
                     repaired = false;

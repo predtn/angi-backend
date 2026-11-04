@@ -285,6 +285,8 @@ not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_
   reply drops it and continues normally. A one-day trip moves without asking. `đổi sang <tên>` without `khu` or `hành trình`
   could be a dish, so only catalog addresses may confirm it. With no plan yet, the same short wording starts the pre-plan questions
   with that place as the area of the whole trip. A bare name with no such word still goes to the model.
+- A new plan whose user declined extra requests closes tools once one search covered every meal, which removes the
+  repeated `get_recommendation` rounds seen in conversation 94.
 - `Agent:MessagesPerMinute` is now 60. `MessagesPerDay` stays 100.
 - Near-first order applies only to a place the user named: a day in `dayAreas`, or a whole-trip area marked by the backend-owned
   `namedAreaLabel`. Reco's scores are split into bands of 0.05 from the best dish and sorted by distance inside each band, so a clearly better

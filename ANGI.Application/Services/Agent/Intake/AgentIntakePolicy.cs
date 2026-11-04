@@ -36,6 +36,8 @@ public static class AgentIntakePolicy
         @"\b(?:bua (?:sang|trua|toi|phu|khuya)|ngay \d+ (?:an|chi)|mon|quan|an chay|hai san|khong an|di ung|khau vi|an vat|do uong)\b", RegexOptions.CultureInvariant);
     // Trả lời câu hỏi phạm vi là không cần khu cụ thể: "toàn thành phố", "cả tỉnh", "không", "đâu cũng được".
     private static readonly Regex WholeProvinceWords = new(@"\b(?:toan|ca)\s+(?:thanh pho|tinh|tp)\b|^(?:khong|ko|binh thuong|tuy|tuy ban|dau cung duoc|o dau cung duoc|sao cung duoc|mac dinh)(?:\s+(?:nhe|nha|a|ban))*$", RegexOptions.CultureInvariant);
+    // Câu trả lời "không có yêu cầu gì" cho câu hỏi khẩu vị, kể cả nút "Không, lập lịch luôn nhé."; "không ăn cay" không khớp.
+    private static readonly Regex Declines = new(@"^(?:khong|ko|thoi|bo qua|khong co|khong can|khong co gi)(?:\s+(?:lap lich luon|lap lich|luon|nhe|nha|dau|a|ban))*$", RegexOptions.CultureInvariant);
     private static readonly (string Alias, string Name)[] Aliases =
         [("hn", "ha noi"), ("hcm", "ho chi minh"), ("tphcm", "ho chi minh"), ("tp hcm", "ho chi minh"), ("sai gon", "ho chi minh"), ("saigon", "ho chi minh")];
 
@@ -180,6 +182,22 @@ public static class AgentIntakePolicy
 
     /// <summary>True when the message asks for a new plan, in the wording that opens the pre-plan questions.</summary>
     internal static bool StatesPlan(string message) => PlanningWords.IsMatch(Plain(message));
+
+    /// <summary>
+    /// A new plan with no special request, whose one search returned dishes for every declared meal: more candidates add cost but
+    /// no choice, so the model assembles the plan next. A side dish or named request keeps the tools open.
+    /// </summary>
+    public static bool PlanCovered(AgentContext context)
+    {
+        var state = context.State;
+        // Khẩu vị đã nằm trong vector của lượt tìm nên không cần tìm thêm; yêu cầu về món hay bữa thì có thể cần tìm riêng.
+        var content = context.Request.Content;
+        if (!context.IntakeComplete || state.MealSlots.Length == 0 || state.MealRequests.Length > 0 ||
+            !Declines.IsMatch(Plain(content)) && AgentTasteClarificationPolicy.MentionedTastes(content).Length == 0 ||
+            (state.PendingPlanningRequest?.Messages ?? []).Append(content).Any(StatesFoodRequest)) return false;
+        return AgentScopedPlanning.Slots(state, new()).Where(slot => state.MealSlots.Contains(slot.Meal))
+            .All(slot => context.MealCoverage.Any(meal => meal.DayNumber == slot.Day && meal.MealSlot == slot.Meal && meal.AvailableCount > 0));
+    }
 
     private static int WordCount(string message) => Plain(message).Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
