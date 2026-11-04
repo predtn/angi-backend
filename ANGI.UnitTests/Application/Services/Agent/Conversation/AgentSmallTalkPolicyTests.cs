@@ -118,7 +118,7 @@ public sealed class AgentSmallTalkPolicyTests
     public void OutOfScopeReply_NamedDish_OffersToFindIt(string content, string dish) =>
         AgentSmallTalkPolicy.OutOfScopeReply(content, dish).Should().NotContain("chỉ giúp được về món ăn").And.EndWith($"Bạn có muốn mình tìm quán {dish.Trim()} không?");
 
-    // TEST-11A: A description of a dish is shown with an offer to find it; a number or health claim falls back to the fixed line, because neither comes from ANGI data.
+    // TEST-12: A description of a dish is shown with an offer to find it; a number or health claim falls back to the fixed line, because neither comes from ANGI data.
     /// <summary>Lets the model describe a dish without letting it state facts the backend cannot check.</summary>
     [Theory]
     [InlineData("Mì Quảng thường có vị đậm đà, nước dùng sền sệt.", true)]
@@ -132,7 +132,7 @@ public sealed class AgentSmallTalkPolicyTests
         result.Should().StartWith(shown ? reply : AgentSmallTalkPolicy.FoodInfoFallback).And.EndWith("Bạn có muốn mình tìm quán Mì Quảng trên ANGI không?");
     }
 
-    // TEST-12: A greeting names the trip when its place is known and stays general otherwise; covers a known province, null and blank.
+    // TEST-13: A greeting names the trip when its place is known and stays general otherwise; covers a known province, null and blank.
     /// <summary>The reply should follow this conversation; an unknown place is never guessed.</summary>
     [Theory]
     [InlineData("Đà Nẵng", "Chào bạn, mình là ANGI, trợ lý ăn uống của bạn. Bạn muốn mình giúp gì cho chuyến đi Đà Nẵng?")]
@@ -141,7 +141,7 @@ public sealed class AgentSmallTalkPolicyTests
     public void GreetingFor_UsesKnownPlaceOnly(string? province, string expected) =>
         AgentSmallTalkPolicy.GreetingFor(new AgentState { Province = province }).Should().Be(expected);
 
-    // TEST-13: A bare request for help gets the fixed guide; covers accents, no accents and politeness words. A message naming a topic is left to the model.
+    // TEST-14: A bare request for help gets the fixed guide; covers accents, no accents and politeness words. A message naming a topic is left to the model.
     /// <summary>Ensures "hướng dẫn tôi" is free and helpful, while "hướng dẫn tôi gọt vỏ cam" is still classified as off-topic by the model.</summary>
     [Theory]
     [InlineData("huong dan toi", true)][InlineData("Hướng dẫn tôi", true)][InlineData("hãy hướng dẫn mình với", true)][InlineData("giúp tôi", true)]

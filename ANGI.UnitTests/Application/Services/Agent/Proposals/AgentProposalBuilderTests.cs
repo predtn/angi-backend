@@ -299,7 +299,7 @@ public sealed class AgentProposalBuilderTests
         AgentProposalBuilder.Assemble(context).Should().BeNull();
     }
 
-    // TEST-P1: A long plan reaches the model cut to the days and dishes the message names; a short plan stays whole; this keeps each call on a 100-day plan affordable.
+    // TEST-18: A long plan reaches the model cut to the days and dishes the message names; a short plan stays whole; this keeps each call on a 100-day plan affordable.
     /// <summary>Resending hundreds of items on every call would cost more than the edit itself and exceed the context limit.</summary>
     [Theory]
     [InlineData(25, "đổi bữa trưa ngày 12", new short[] { 12 })]
@@ -318,7 +318,7 @@ public sealed class AgentProposalBuilderTests
         context.Source!.Items.Should().HaveCount(days * 3);
     }
 
-    // TEST-P2: A plan that fits is sent whole, exactly as before.
+    // TEST-19: A plan that fits is sent whole, exactly as before.
     /// <summary>Short plans must not change behaviour.</summary>
     [Fact]
     public void PromptSource_ShortPlan_IsNull()
