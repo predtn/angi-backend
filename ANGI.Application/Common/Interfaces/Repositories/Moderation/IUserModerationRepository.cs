@@ -19,4 +19,10 @@ public interface IUserModerationRepository : IUserSanctionRepository
 
     /// <summary>Queries active unlifted sanctions for a user.</summary>
     Task<IReadOnlyList<UserSanction>> GetActiveSanctionsAsync(int userId, DateTime now, CancellationToken ct);
+
+    /// <summary>Checks whether a non-deleted user account exists.</summary>
+    Task<bool> UserExistsAsync(int userId, CancellationToken ct);
+
+    /// <summary>Lists paginated audit logs where the user is the actor or the subject user.</summary>
+    Task<Paged<AuditLogDto>> GetUserAuditLogsAsync(int userId, GetUserAuditLogsRequestDto request, CancellationToken ct);
 }
