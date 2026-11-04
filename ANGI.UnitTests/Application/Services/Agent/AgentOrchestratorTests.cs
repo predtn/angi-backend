@@ -1167,9 +1167,9 @@ public sealed class AgentOrchestratorTests
     // TEST-57: A general food question is refused with an offer to find the dish the user named; covers a dish in the message and one the model invented.
     /// <summary>Gives a useful next step while keeping the offer tied to the user's own words.</summary>
     [Theory]
-    [InlineData("phở", " Bạn có muốn mình tìm quán phở không?")]
-    [InlineData("bún chả", "")]
-    public async Task RunAsync_OutOfScopeFoodQuestion_OffersOnlyTheNamedDish(string dish, string offer)
+    [InlineData("phở", "Mình chưa hướng dẫn được phần này vì ANGI không có dữ liệu về công thức, dinh dưỡng hay sức khỏe. Bạn có muốn mình tìm quán phở không?")]
+    [InlineData("bún chả", AgentSmallTalkPolicy.OutOfScope)]
+    public async Task RunAsync_OutOfScopeFoodQuestion_OffersOnlyTheNamedDish(string dish, string expected)
     {
         var context = AgentTestData.Context();
         context.Request.Content = "Cách nấu phở";
@@ -1177,7 +1177,7 @@ public sealed class AgentOrchestratorTests
         llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
             { Action = "out_of_scope", Reply = "Draft", SuggestedDish = dish }));
 
-        (await Create(llm.Object).RunAsync(context, default)).Reply.Should().Be(AgentSmallTalkPolicy.OutOfScope + offer);
+        (await Create(llm.Object).RunAsync(context, default)).Reply.Should().Be(expected);
     }
 
     // TEST-58: An off-topic reply to an open taste question keeps that question and does not join the request being planned.
@@ -2000,7 +2000,27 @@ public sealed class AgentOrchestratorTests
         result.State.RadiusKm.Should().BeNull();
     }
 
-    // TEST-104: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
+    // TEST-104: A question about what a dish is like is answered, and neither that answer nor a refused recipe contradicts itself; covers the message of the bug report.
+    /// <summary>"Mì Quảng có vị như thế nào" used to get "mình chỉ giúp được về món ăn".</summary>
+    [Theory]
+    [InlineData("food_info", "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng thường đậm đà, nước dùng sền sệt.", "Mì Quảng thường đậm đà")]
+    [InlineData("out_of_scope", "Cách nấu Mì Quảng", "Nháp", "chưa hướng dẫn được")]
+    public async Task RunAsync_QuestionAboutDish_AnswersWithoutContradiction(string action, string content, string reply, string expected)
+    {
+        var state = new AgentState { Province = "Hà Nội" };
+        var context = IntakeContext(content, state);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = action, Reply = reply, SuggestedDish = "Mì Quảng", State = new AgentState { Province = "Hue" } }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Contain(expected).And.Contain("tìm quán Mì Quảng").And.NotContain("chỉ giúp được về món ăn");
+        result.Action.Should().Be(action);
+        result.State.Province.Should().Be("Hà Nội");
+    }
+
+    // TEST-105: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
     /// <summary>Only a real change reaches the confirmation question.</summary>
     [Fact]
     public async Task RunAsync_ModelLeavesTripValuesEmpty_KeepsThemWithoutConfirmation()
@@ -2017,7 +2037,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.PendingStateChange == null && x.NumDays == 7 && x.BudgetAmount == 3500000 && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
     }
 
-    // TEST-105: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
+    // TEST-106: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
     /// <summary>Keeps the explicit way out of a pinned search.</summary>
     [Fact]
     public async Task RunAsync_UserRemovesPin_StillAsksToConfirm()
@@ -2034,7 +2054,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingStateChange!.OriginMode.Should().Be("none");
     }
 
-    // TEST-106: "ok" with no plan yet never invites saving a plan that does not exist; turn 26 of conversation 138 said "Ưng rồi thì cứ bảo mình chốt".
+    // TEST-107: "ok" with no plan yet never invites saving a plan that does not exist; turn 26 of conversation 138 said "Ưng rồi thì cứ bảo mình chốt".
     /// <summary>Keeps the acknowledgement honest about what exists.</summary>
     [Fact]
     public async Task RunAsync_BareAcknowledgementWithoutPlan_DoesNotInviteSaving()
@@ -2046,7 +2066,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotContain("chốt");
     }
 
-    // TEST-107: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
+    // TEST-108: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
     /// <summary>A model reply cannot hold hundreds of items, so these trips would otherwise end in a truncated output.</summary>
     [Theory]
     [InlineData(15)]
@@ -2080,7 +2100,7 @@ public sealed class AgentOrchestratorTests
             It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-108: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-109: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]

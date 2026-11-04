@@ -5,7 +5,7 @@ using ANGI.Application.Common.Models.Agent;
 
 namespace ANGI.Application.Services.Agent.Conversation;
 
-/// <summary>Answers social messages and refuses requests outside ANGI; neither can touch the plan, state or an open question.</summary>
+/// <summary>Answers social messages and general questions about a dish, and refuses requests outside ANGI; none of them can touch the plan, state or an open question.</summary>
 public static class AgentSmallTalkPolicy
 {
     public const string Greeting = "Chào bạn, mình là ANGI, trợ lý ăn uống của bạn. Bạn muốn tìm món, tìm quán hay lập lịch ăn uống nào?";
@@ -16,7 +16,9 @@ public static class AgentSmallTalkPolicy
     public const string ChatFallback = "Mình luôn sẵn sàng! Bạn muốn tìm món, tìm quán hay lập lịch ăn uống nào?";
     // Câu từ chối do chủ dự án chốt: giữ nguyên văn, không để model viết lại.
     public const string OutOfScope = "Việc này nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi.";
+    public const string FoodInfoFallback = "Mình chưa có đủ thông tin chắc chắn về món này.";
     private const int MaxChatReplyLength = 200;
+    private const int MaxFoodInfoLength = 500;
     private const int MaxDishLength = 40;
 
     private const string Addressee = @"(?: (?:ban|angi|ad|admin|em|anh|chi|tro ly|buoi sang|buoi trua|buoi chieu|buoi toi|nhieu|lam|nhe|nha|a|nhe ban|nha ban))*";
@@ -30,6 +32,9 @@ public static class AgentSmallTalkPolicy
     // Cam kết thay đổi và số liệu chỉ backend được nói; thuật ngữ nội bộ trong câu chào là dấu hiệu model đang lộ prompt.
     private static readonly Regex UnsafeChatWords = new(
         @"\d|https?:|www\.|\b(?:da|vua) (?:luu|doi|thay|them|xoa|bo|cap nhat|chot|dat)\b|\b(?:dong|vnd|usd)\b|\b(?:catalog|roadmap|proposal|backend|schema|llm|api|prompt|tag)\b", RegexOptions.CultureInvariant);
+    // Hiểu biết chung về món do model viết, không phải dữ liệu ANGI: chỉ được tả món, không được nêu số liệu, tuyên bố sức khỏe hay cam kết thay đổi.
+    private static readonly Regex UnsafeFoodInfoWords = new(
+        @"\d|https?:|www\.|\b(?:da|vua) (?:luu|doi|thay|them|xoa|bo|cap nhat|chot|dat)\b|\b(?:catalog|roadmap|proposal|backend|schema|llm|api|prompt|tag)\b|\b(?:an toan|di ung|halal|chua benh|giam can|calo)\b", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> GenericFoodWords = ["mon", "mon an", "do an", "an", "quan", "quan an", "thuc an", "am thuc"];
 
     /// <summary>Returns the fixed reply for a whole-message greeting, thanks or "who are you", or null so the model reads the message.</summary>
@@ -56,13 +61,25 @@ public static class AgentSmallTalkPolicy
         return WithOpenQuestion(safe ? text : ChatFallback, state);
     }
 
-    /// <summary>Returns the fixed refusal, plus an offer to find a dish only when the user's own message names that dish.</summary>
-    public static string OutOfScopeReply(string content, string? suggestedDish)
+    /// <summary>Returns the fixed refusal; a food question naming a dish gets its own wording, because "mình chỉ giúp được về món ăn" would contradict refusing it.</summary>
+    public static string OutOfScopeReply(string content, string? suggestedDish) => NamedDish(content, suggestedDish) is { } dish
+        ? $"Mình chưa hướng dẫn được phần này vì ANGI không có dữ liệu về công thức, dinh dưỡng hay sức khỏe. Bạn có muốn mình tìm quán {dish} không?" : OutOfScope;
+
+    /// <summary>Shows the model's description of a dish when it states no number, health claim, change or internal term; otherwise a fixed line. Both offer to find the dish.</summary>
+    public static string FoodInfoReply(string? reply, string content, string? suggestedDish, AgentState state)
+    {
+        var text = (reply ?? "").Trim();
+        var safe = text.Length is > 0 and <= MaxFoodInfoLength && !text.Any(char.IsControl) && text.IndexOfAny(['<', '>']) < 0 && !UnsafeFoodInfoWords.IsMatch(Words(text, keepSymbols: true));
+        var offer = NamedDish(content, suggestedDish) is { } dish ? $" Bạn có muốn mình tìm quán {dish} trên ANGI không?" : "";
+        return WithOpenQuestion((safe ? text : FoodInfoFallback) + offer, state);
+    }
+
+    /// <summary>The dish the model picked out, only when the user's own message names it and it is more than a generic food word.</summary>
+    private static string? NamedDish(string content, string? suggestedDish)
     {
         var dish = (suggestedDish ?? "").Trim();
-        var named = dish.Length is >= 2 and <= MaxDishLength && Regex.IsMatch(dish, @"^[\p{L}\p{M} ]+$", RegexOptions.CultureInvariant) &&
-            !GenericFoodWords.Contains(Words(dish)) && $" {Words(content)} ".Contains($" {Words(dish)} ", StringComparison.Ordinal);
-        return named ? $"{OutOfScope} Bạn có muốn mình tìm quán {dish} không?" : OutOfScope;
+        return dish.Length is >= 2 and <= MaxDishLength && Regex.IsMatch(dish, @"^[\p{L}\p{M} ]+$", RegexOptions.CultureInvariant) &&
+            !GenericFoodWords.Contains(Words(dish)) && $" {Words(content)} ".Contains($" {Words(dish)} ", StringComparison.Ordinal) ? dish : null;
     }
 
     // Câu đang chờ trả lời vẫn còn hiệu lực sau lời chào, nên nhắc lại để người dùng biết cuộc trò chuyện đang dừng ở đâu.

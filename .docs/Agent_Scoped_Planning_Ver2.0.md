@@ -177,6 +177,9 @@ decided by the project owner on 2026-11-02, is `action=chat`: a social reply sta
 `AgentSmallTalkPolicy` rejects anything with digits, prices, a claimed change, a link, markup, internal terms or
 more than 200 characters, falling back to a fixed sentence.
 A whole-message greeting, thanks or "who are you" gets a fixed reply before any LLM call ("Chào bạn, mình là ANGI…").
+`action=food_info` answers a general question about what a named dish is like (taste, main ingredients, origin, how it
+is eaten) from the model's common knowledge. The backend drops the wording if it states a number, a health or allergy claim,
+a change or an internal term, and offers to find the dish.
 
 A point pinned on the roadmap gives the province and a search circle of at least 10 km, so a new plan does not ask where to
 eat. A model state that leaves province, duration, budget or pin empty keeps the current value; only a pin the user names can

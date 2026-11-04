@@ -116,7 +116,21 @@ public sealed class AgentSmallTalkPolicyTests
     [InlineData("Cách nấu phở?", "phở")][InlineData("cach nau pho", "phở")][InlineData("Công thức bún bò Huế", " bún bò Huế ")]
     [InlineData("Nấu aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     public void OutOfScopeReply_NamedDish_OffersToFindIt(string content, string dish) =>
-        AgentSmallTalkPolicy.OutOfScopeReply(content, dish).Should().Be($"{AgentSmallTalkPolicy.OutOfScope} Bạn có muốn mình tìm quán {dish.Trim()} không?");
+        AgentSmallTalkPolicy.OutOfScopeReply(content, dish).Should().NotContain("chỉ giúp được về món ăn").And.EndWith($"Bạn có muốn mình tìm quán {dish.Trim()} không?");
+
+    // TEST-11A: A description of a dish is shown with an offer to find it; a number or health claim falls back to the fixed line, because neither comes from ANGI data.
+    /// <summary>Lets the model describe a dish without letting it state facts the backend cannot check.</summary>
+    [Theory]
+    [InlineData("Mì Quảng thường có vị đậm đà, nước dùng sền sệt.", true)]
+    [InlineData("Mì Quảng khoảng 30000 một tô.", false)]
+    [InlineData("Món này an toàn cho người dị ứng.", false)]
+    [InlineData("", false)]
+    public void FoodInfoReply_ChecksWording(string reply, bool shown)
+    {
+        var result = AgentSmallTalkPolicy.FoodInfoReply(reply, "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng", new AgentState());
+
+        result.Should().StartWith(shown ? reply : AgentSmallTalkPolicy.FoodInfoFallback).And.EndWith("Bạn có muốn mình tìm quán Mì Quảng trên ANGI không?");
+    }
 
     // TEST-12: A greeting names the trip when its place is known and stays general otherwise; covers a known province, null and blank.
     /// <summary>The reply should follow this conversation; an unknown place is never guessed.</summary>

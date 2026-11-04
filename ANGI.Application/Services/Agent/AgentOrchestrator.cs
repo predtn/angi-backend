@@ -226,7 +226,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (output.Reply is null || output.Reply.Length > limits.MaxMessageLength ||
                     output.Clarification is not null && !AgentReplyBuilder.Clarifications.Contains(output.Clarification) ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
-                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation" or "chat" or "out_of_scope"))
+                    output.Action is not ("clarify" or "answer" or "create_proposal" or "patch_proposal" or "discard_proposal" or "reset_conversation" or "chat" or "food_info" or "out_of_scope"))
                 {
                     // Chỉ ghi tên trường và độ dài, không ghi nội dung model trả về.
                     telemetry.Record("invalid_output", context.ConversationId, context.TurnId, context.AttemptId,
@@ -236,11 +236,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     continue;
                 }
                 // Dừng trước khi nhận state của model: câu lạc đề không được đổi điều kiện chuyến đi, và mọi items/changes kèm theo đều bị bỏ qua.
-                if (output.Action is "chat" or "out_of_scope")
+                if (output.Action is "chat" or "food_info" or "out_of_scope")
                 {
                     telemetry.Record(output.Action, context.ConversationId, context.TurnId, context.AttemptId);
-                    return new(output.Action == "chat" ? AgentSmallTalkPolicy.ChatReply(output.Reply, turnState)
-                        : AgentSmallTalkPolicy.OutOfScopeReply(context.Request.Content, output.SuggestedDish), turnState, null, null, output.Action);
+                    return new(output.Action switch
+                    {
+                        "chat" => AgentSmallTalkPolicy.ChatReply(output.Reply, turnState),
+                        "food_info" => AgentSmallTalkPolicy.FoodInfoReply(output.Reply, context.Request.Content, output.SuggestedDish, turnState),
+                        _ => AgentSmallTalkPolicy.OutOfScopeReply(context.Request.Content, output.SuggestedDish)
+                    }, turnState, null, null, output.Action);
                 }
                 // Model có thể bổ sung/siết điều kiện, nhưng không được tự nới ràng buộc đã chốt.
                 // Cờ ConstraintsChangeConfirmed không cấp quyền; backend giữ pending change để người dùng xác nhận.

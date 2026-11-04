@@ -172,7 +172,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 {
                     prepared = await orchestrator.RunAsync(context, ct);
                     // Lời chào hay câu ngoài phạm vi không trả lời câu hỏi lưu nhưng cũng không hủy nó.
-                    if (pendingSave is not null && prepared.Action is "chat" or "out_of_scope")
+                    if (pendingSave is not null && prepared.Action is "chat" or "food_info" or "out_of_scope")
                         prepared = prepared with { State = prepared.State with { PendingSave = pendingSave } };
                 }
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
