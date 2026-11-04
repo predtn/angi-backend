@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using ANGI.Application.Common.Models.Discovery;
 
 namespace ANGI.Application.Common.Models.Agent;
 
@@ -38,13 +39,46 @@ public static class AgentScopedPlanning
     public static string Fingerprint(AgentState state, short day, string meal)
     {
         var request = Request(state, day, meal) with { DayNumber = null, MealSlot = null };
-        var json = AgentJson.Write(new { targets = Targets(state, day, meal), vector = Vector(state, day, meal),
-            request = request with { DishName = Normalize(request.DishName), RestaurantName = Normalize(request.RestaurantName) } });
+        var targets = Targets(state, day, meal);
+        var vector = Vector(state, day, meal);
+        var named = request with { DishName = Normalize(request.DishName), RestaurantName = Normalize(request.RestaurantName) };
+        // Ngày có nơi đến riêng được xếp hạng riêng. Ngày không có thì giữ nguyên chuỗi băm cũ để bản nháp đã lưu trước đây vẫn xác nhận được.
+        var json = state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
+            ? AgentJson.Write(new { targets, vector, request = named, area = new { place.Latitude, place.Longitude, place.RadiusKm } })
+            : AgentJson.Write(new { targets, vector, request = named });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
+    /// <summary>The circle a day's dishes must fall in: the day's own place when the itinerary names one, otherwise the whole trip's origin and radius.</summary>
+    public static NearbyArea? Area(AgentState state, short day) => state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
+        ? new(place.Latitude, place.Longitude, place.RadiusKm)
+        : state.RadiusKm is { } radius && state.OriginLatitude is { } latitude && state.OriginLongitude is { } longitude ? new(latitude, longitude, radius) : null;
+
+    /// <summary>The circle one meal's dish must fall in: its day's circle, or the wider one when that meal had nothing nearer.</summary>
+    public static NearbyArea? MealArea(AgentState state, short day, string meal) =>
+        Area(state, day) is { } area && state.WidenedMeals?.FirstOrDefault(x => x.DayNumber == day && x.MealSlot == meal) is { } widened
+            ? area with { RadiusKm = widened.RadiusKm } : Area(state, day);
+
+    /// <summary>Records how far a meal's search reached on these days; a null radius means the meal found dishes without widening.</summary>
+    public static AgentState WithWidenedMeal(AgentState state, IEnumerable<short> days, string meal, decimal? radius)
+    {
+        var scope = days.ToArray();
+        var kept = (state.WidenedMeals ?? []).Where(x => x.MealSlot != meal || !scope.Contains(x.DayNumber));
+        var meals = (radius is { } km ? kept.Concat(scope.Select(day => new AgentWidenedMeal(day, meal, km))) : kept).ToArray();
+        return meals.Length == 0 && state.WidenedMeals is null ? state : state with { WidenedMeals = meals.Length > 0 ? meals : null };
+    }
+
+    /// <summary>
+    /// The place the user named for this day, in words: a day of the itinerary or an area of the whole trip. Null for a whole-province day
+    /// and for an origin from GPS or the map, whose search order stays as it was.
+    /// </summary>
+    public static NearbyArea? NamedArea(AgentState state, short day) => state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
+        ? new(place.Latitude, place.Longitude, place.RadiusKm)
+        : state.NamedAreaLabel is not null && state.NamedAreaLabel == state.OriginLabel ? Area(state, day) : null;
+
     /// <summary>Detects affected existing meals, preserving explicit future-only taste changes.</summary>
     public static bool RequiresRefresh(AgentState previous, AgentState current, AgentItem item) =>
+        Area(previous, item.DayNumber) != Area(current, item.DayNumber) ||
         AgentJson.Write(Request(previous, item.DayNumber, item.MealSlot)) != AgentJson.Write(Request(current, item.DayNumber, item.MealSlot)) ||
         current.PreferenceApplication != "future" && (previous.PreferenceApplication == "future" ||
             AgentJson.Write(Targets(previous, item.DayNumber, item.MealSlot)) != AgentJson.Write(Targets(current, item.DayNumber, item.MealSlot)) ||

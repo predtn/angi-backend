@@ -76,6 +76,50 @@ public sealed class AgentIntakePolicyTests
         AgentIntakePolicy.WithoutUnstatedProvince(titled, located).Should().BeSameAs(titled);
     }
 
+    // TEST-06: An itinerary opens the questions without planning wording, skips the place question and is acknowledged; a day past the known duration grows it.
+    /// <summary>Ensures "Ngày 1 ở Hoàn Kiếm" alone is treated as the start of a plan and reaches the user as a confirmation.</summary>
+    [Fact]
+    public void Read_Itinerary_StartsIntakeAndCarriesPlaces()
+    {
+        AgentDayArea[] areas = [new(1, "Hoàn Kiếm", 21.03m, 105.85m, 3m), new(2, "Lăng Bác", 21.04m, 105.83m, 3m)];
+        var read = AgentIntakePolicy.Read(Context("Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác"), Provinces, null, new("Hà Nội", areas, null, [], [], 2))!;
+
+        read.Progress.Should().BeTrue();
+        read.Current.DayAreas.Should().Equal(areas);
+        read.Proposed.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.NumDays == 2 && x.PlanningIntake == AgentIntakePolicy.Details);
+        read.Note.Should().Contain("ngày 1 quanh Hoàn Kiếm").And.Contain("ngày 2 quanh Lăng Bác");
+
+        var step = AgentIntakePolicy.Next(Context("Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác"), read.Proposed, read, Provinces);
+        step.Reply.Should().StartWith("Mình ghi nhận hành trình ở Hà Nội").And.Contain("ngân sách");
+    }
+
+    // TEST-07: A whole-trip area keeps its origin and radius through the read instead of being reset by the old state.
+    /// <summary>Ensures "ở Cầu Giấy" stays a search around Cầu Giấy all the way into the proposed state.</summary>
+    [Fact]
+    public void Read_TripArea_KeepsOriginAndRadius()
+    {
+        var read = AgentIntakePolicy.Read(Context("lập lịch ở Cầu Giấy"), Provinces, null, new("Hà Nội", [], new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m), [], [], 0))!;
+
+        read.Proposed.Should().Match<AgentState>(x => x.OriginMode == "pinned" && x.OriginLabel == "Cầu Giấy" && x.RadiusKm == 3m && x.Province == "Hà Nội");
+        read.Note.Should().Contain("khu vực Cầu Giấy");
+    }
+
+    // TEST-08: An itinerary sent with the answer to the preferences question still applies, and planning still starts.
+    /// <summary>Ensures a late itinerary is not lost because the intake was already closing.</summary>
+    [Fact]
+    public void Read_ItineraryAtPreferencesStage_AppliesAndCloses()
+    {
+        var context = Context("Ngày 1 ở Hoàn Kiếm");
+        context.State = context.State with { Province = "Hà Nội", NumDays = 2, PlanningIntake = AgentIntakePolicy.Preferences };
+
+        var read = AgentIntakePolicy.Read(context, Provinces, null, new("Hà Nội", [new(1, "Hoàn Kiếm", 21.03m, 105.85m, 3m)], null, [], [], 1))!;
+
+        read.Proposed.DayAreas.Should().ContainSingle();
+        var step = AgentIntakePolicy.Next(context, read.Proposed, read, Provinces);
+        step.Plan.Should().BeTrue();
+        step.State.DayAreas.Should().ContainSingle();
+    }
+
     /// <summary>Builds a context with no plan and an unknown place.</summary>
     private static AgentContext Context(string content, AgentSnapshot? source = null)
     {

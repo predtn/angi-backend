@@ -12,6 +12,7 @@ using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Validators.Agent;
 
@@ -22,6 +23,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     AgentStatePolicy statePolicy, AgentRouteEstimator routes, AgentLimits limits, IAgentTelemetry telemetry,
     AgentPreferenceService? preferences = null, IAgentCatalogRepository? catalogSearch = null)
 {
+    // Thang điểm reco là 0..1. Đo trên yêu cầu thật của các tài khoản có vector khẩu vị: món hạng 2 kém món đầu 0,0003-0,06, hạng 5 kém 0,02-0,12.
+    // Mức 0,05 gom khoảng 1-13 món đầu vào cùng một nhóm, còn chênh lệch lớn hơn vẫn do khẩu vị quyết định.
+    public const double NearlyEqualScore = 0.05;
+
     /// <summary>Rejects unrecognized tools and validates arguments before executing any external operation.</summary>
     public async Task<JsonElement> ExecuteAsync(AgentContext context, AgentToolCall call, CancellationToken ct)
     {
@@ -277,8 +282,12 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         }
         // Hai giới hạn cùng tồn tại thì lấy giá trị nhỏ hơn: tool không được tăng trần giá/bán kính của state.
         var maxPrice = Min(state.MaxPricePerMeal, input.MaxPricePerMeal);
-        var radius = Min(state.RadiusKm, input.RadiusKm);
-        var area = radius is { } km && state.OriginLatitude is { } lat && state.OriginLongitude is { } lng ? new NearbyArea(lat, lng, km) : null;
+        // Ngày có nơi đến trong hành trình thì tìm quanh nơi đó, thay cho điểm xuất phát chung của chuyến.
+        var place = state.DayAreas?.FirstOrDefault(x => x.DayNumber == day);
+        var radius = Min(place?.RadiusKm ?? state.RadiusKm, input.RadiusKm);
+        var area = radius is { } km && (place?.Latitude ?? state.OriginLatitude) is { } lat && (place?.Longitude ?? state.OriginLongitude) is { } lng ? new NearbyArea(lat, lng, km) : null;
+        // Người dùng nêu tên nơi đến: giữa các món hợp khẩu vị gần bằng nhau thì ưu tiên quán gần hơn. Toàn tỉnh, GPS và điểm chấm trên bản đồ không đi nhánh này.
+        var namedCenter = AgentScopedPlanning.NamedArea(state, day);
         var requiredTags = catalogTags.Where(tag => tagIds.Contains(tag.Id)).Select(tag => tag.Name).ToArray();
         // Tìm cả chuyến/cả ngày với các bữa đã khai báo: xếp hạng RIÊNG từng bữa để bữa sáng không bị món trưa/tối
         // có điểm cao chiếm hết topK. Mỗi bữa có suất (số ngày trong phạm vi + 2) món khác tên, đủ cho một lượt
@@ -305,25 +314,49 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var mealTags = mainTag is not null && mealSlot is not null && !tagIds.Contains(mainTag.Id) &&
                 AgentScopedPlanning.RequiresMain(state, slots.First(x => x.Meal == mealSlot).Day, mealSlot, catalogTags, input.TagIds)
                 ? tagIds.Append(mainTag.Id).ToArray() : tagIds;
-            var filter = new DishCandidateFilter { Province = state.Province, TagIds = mealTags, ExcludeTagIds = excludeTags,
-                ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = area, RestaurantId = restaurantId, DishIds = namedDishIds,
-                RequireAllTags = true, CompatibleMealTimeCode = mealSlot };
-            // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
-            // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
-            // Catalog có rất nhiều bản cùng tên ở nhiều quán: lấy rộng rồi gom theo tên, giữ quán đứng đầu thứ tự rating,
-            // để reco xếp hạng các món khác nhau thay vì hàng trăm bản sao của vài món.
-            var pool = await dishes.GetCandidateIdsAsync(filter, Math.Max(limits.MaxCandidates, CandidatePool), ct);
-            var cards = pool.Count == 0 ? new Dictionary<int, ANGI.Domain.Entities.Dish>()
-                : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
-            // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
-            var qualified = pool.Where(cards.ContainsKey).Select(id => cards[id])
-                .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot) &&
-                    (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
-            if (distinctNames) qualified = qualified.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name));
-            // Món người dùng đã đổi đi trong chuyến này không quay lại khi họ đổi tiếp ("món khác" nhiều lần), trừ khi không còn món nào khác.
-            var replaced = (state.ReplacedDishNames ?? []).Select(AgentScopedPlanning.Normalize).ToHashSet();
-            var eligible = namedDishIds.Length > 0 ? qualified.ToArray() : qualified.Where(dish => !replaced.Contains(AgentScopedPlanning.Normalize(dish.Name))).ToArray();
-            if (eligible.Length == 0) eligible = qualified.ToArray();
+            async Task<ANGI.Domain.Entities.Dish[]> EligibleAsync(NearbyArea? searchArea)
+            {
+                var filter = new DishCandidateFilter { Province = state.Province, TagIds = mealTags, ExcludeTagIds = excludeTags,
+                    ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds,
+                    RequireAllTags = true, CompatibleMealTimeCode = mealSlot };
+                // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
+                // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
+                // Catalog có rất nhiều bản cùng tên ở nhiều quán: lấy rộng rồi gom theo tên, giữ quán đứng đầu thứ tự rating,
+                // để reco xếp hạng các món khác nhau thay vì hàng trăm bản sao của vài món.
+                var pool = await dishes.GetCandidateIdsAsync(filter, Math.Max(limits.MaxCandidates, CandidatePool), ct);
+                var cards = pool.Count == 0 ? new Dictionary<int, ANGI.Domain.Entities.Dish>()
+                    : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
+                // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
+                var qualified = pool.Where(cards.ContainsKey).Select(id => cards[id])
+                    .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot) &&
+                        (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
+                if (distinctNames) qualified = namedCenter is not null
+                    ? NearestBranches(qualified, dish => AgentScopedPlanning.Normalize(dish.Name), namedCenter)
+                    : qualified.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name));
+                // Món người dùng đã đổi đi trong chuyến này không quay lại khi họ đổi tiếp ("món khác" nhiều lần), trừ khi không còn món nào khác.
+                var replaced = (state.ReplacedDishNames ?? []).Select(AgentScopedPlanning.Normalize).ToHashSet();
+                var found = namedDishIds.Length > 0 ? qualified.ToArray() : qualified.Where(dish => !replaced.Contains(AgentScopedPlanning.Normalize(dish.Name))).ToArray();
+                return found.Length > 0 ? found : qualified.ToArray();
+            }
+            var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
+            var eligible = await EligibleAsync(area);
+            // Nơi đến người dùng nêu tên mà bữa này không có món trong bán kính: chỉ bữa này được tìm xa dần, các bữa khác của ngày vẫn giữ bán kính cũ.
+            // Món hoặc quán được yêu cầu đích danh giữ cách báo thiếu cũ, vì tìm xa hơn không tạo ra đúng món/quán đó.
+            if (namedCenter is not null && mealSlot is not null && distinctNames && restaurantId is null)
+            {
+                decimal? widenedKm = null;
+                if (eligible.Length == 0)
+                    foreach (var step in AgentPlaceResolver.RadiusSteps.Where(step => step > namedCenter.RadiusKm))
+                    {
+                        eligible = await EligibleAsync(namedCenter with { RadiusKm = step });
+                        if (eligible.Length == 0) continue;
+                        widenedKm = step;
+                        break;
+                    }
+                context.State = state = AgentScopedPlanning.WithWidenedMeal(state, slots.Where(x => x.Meal == mealSlot).Select(x => x.Day), mealSlot, widenedKm);
+                if (widenedKm is { } reached)
+                    telemetry.Record("meal_area_widened", context.ConversationId, context.TurnId, context.AttemptId, new { day, mealSlot, reached });
+            }
             IReadOnlyList<int> candidates = eligible.Select(dish => dish.Id).Take(limits.MaxCandidates).ToArray();
             candidateTotal += candidates.Count;
             // Bữa không có món phù hợp được ghi nhận qua mealCoverage = 0; không tự nới điều kiện.
@@ -334,12 +367,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             }
             if (requestIds.Count == 0)
                 context.State = state = await (preferences ?? new AgentPreferenceService(recommendation)).EnsureAsync(context.State, context.UserId, ct);
-            var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
             // Xin dư để còn đủ món sau khi bỏ trùng tên; reco chỉ tính lượt hiển thị qua /impressions khi lịch được lưu.
             // Khi đa dạng hóa, xin thêm đúng số tên đã dùng: sau khi đẩy các tên đó xuống cuối vẫn còn đủ món mới cho suất của bữa.
             // Phần vượt suất không gửi cho model (grant dự phòng), chỉ để backend có món rẻ hơn hoặc khác tên khi cần thay, nên không tốn thêm token LLM.
             var topK = perMealSearch ? Math.Min(limits.MaxRanked, Math.Max(mealQuota * 3, ReserveDepth)) : input.TopK;
             if (diversify) topK = Math.Min(limits.MaxRanked, topK + usedNames.Count);
+            // Xét độ gần cần thấy đủ các món gần bằng điểm nhau, kể cả món ngoài suất. Phần này không gửi cho model nên không tăng token LLM.
+            if (namedCenter is not null && perMealSearch) topK = limits.MaxRanked;
             // ĐÂY LÀ LỜI GỌI RECOMMENDATION (RECO-05), khác với lời gọi LLM ở AgentOrchestrator.
             // IRecommendationService dùng cấu hình/kết nối riêng; API key LLM không truyền qua tool này.
             var ranked = state.Preferences?.Initialized == true
@@ -368,6 +402,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
             // của mỗi tên. Khi chia theo bữa, ưu tiên tên chưa dùng ở bữa trước (OrderBy ổn định nên vẫn giữ thứ tự ranking).
             var distinct = distinctNames ? actual.DistinctBy(d => AgentScopedPlanning.Normalize(d.Name)).ToArray() : actual;
+            // Danh sách theo điểm đánh giá (không có score) không có căn cứ về khẩu vị để so "gần bằng nhau" nên giữ nguyên thứ tự.
+            if (namedCenter is not null && distinctNames && ranked.Scores is { } rankedScores)
+            {
+                var scoreById = new Dictionary<int, double>();
+                for (var index = 0; index < ranked.DishIds.Count; index++) scoreById.TryAdd(ranked.DishIds[index], rankedScores[index]);
+                distinct = OrderNearby(distinct, scoreById, namedCenter);
+            }
             var chosen = distinct;
             if (diversify)
                 chosen = chosen.OrderBy(d => usedNames.Contains(AgentScopedPlanning.Normalize(d.Name)!) ? 1 : 0)
@@ -380,7 +421,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             picked.AddRange(chosen.Where(d => picked.All(x => x.Id != d.Id)));
             // Grant là bằng chứng backend đã cấp các món này cho đúng ngày/bữa và điều kiện lọc.
             // Validator dựa vào grant để chặn model thêm/thay bằng ID chưa được cấp hoặc sai scope.
-            var constraints = state with { TagIds = mealTags, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = radius };
+            var constraints = state with { TagIds = mealTags, ExcludeTagIds = excludeTags, MaxPricePerMeal = maxPrice, RadiusKm = place is null ? radius : state.RadiusKm };
             context.Grants.Add(new(scope.DayNumber, mealSlot, chosen.Select(x => x.Id).ToArray(), ranked.RequestId, constraints));
             // Phần còn lại của cùng danh sách reco (cùng request, cùng vector) không gửi cho model. Khi một ngày chỉ được cấp vài món
             // và model chọn trùng món đã dùng, backend lấy món chưa dùng xếp hạng cao nhất ở đây để thay, không tốn thêm lần gọi LLM.
@@ -433,6 +474,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // "cái này", "món đó" chỉ là từ chỉ trỏ, không phải tên: tra cứu sẽ báo "không tìm thấy" một món người dùng chưa từng nêu.
         if (AgentEditScopePolicy.IsPointingOnly(input.Name))
             return ArgumentError(context, "Đây là từ chỉ trỏ, không phải tên món/quán. Hãy hỏi người dùng muốn nói món/bữa nào (clarification=edit_scope).");
+        // Nơi đến đã đọc được từ hành trình không phải tên quán: tra nó sẽ báo "không tìm thấy" cho một địa điểm backend đã biết.
+        if (AgentItineraryPolicy.IsKnownPlace(context.State, input.Name))
+            return ArgumentError(context, "Đây là nơi đến trong hành trình của người dùng, không phải tên món/quán; backend đã tìm quanh nơi này. Hãy gọi get_recommendation.");
         var result = await LookupAsync(input, ct);
         // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
         // mọi câu clarify của lượt sẽ thành "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI."
@@ -539,6 +583,28 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// <summary>Combines optional upper bounds without relaxing an existing bound.</summary>
     // Một bên chưa đặt giới hạn thì dùng bên còn lại; cả hai có thì giữ mức chặt hơn.
     private static decimal? Min(decimal? left, decimal? right) => left.HasValue && right.HasValue ? Math.Min(left.Value, right.Value) : left ?? right;
+
+    /// <summary>
+    /// Orders dishes when the user named a place: taste stays the main criterion, and among dishes that fit about equally the nearer restaurant comes first.
+    /// Only that case uses it; a whole-province search, GPS and an origin on the map keep their plain ranking.
+    /// Keeps the ranking between score bands measured from the best dish, and sorts by distance inside each band.
+    /// Dishes without a score keep their place at the end of the order they arrived in.
+    /// </summary>
+    public static ANGI.Domain.Entities.Dish[] OrderNearby(IReadOnlyList<ANGI.Domain.Entities.Dish> ranked, IReadOnlyDictionary<int, double> scores, NearbyArea center)
+    {
+        var known = ranked.Where(dish => scores.ContainsKey(dish.Id)).ToArray();
+        if (known.Length == 0) return ranked.ToArray();
+        var best = known.Max(dish => scores[dish.Id]);
+        return known.OrderBy(dish => (int)Math.Floor((best - scores[dish.Id]) / NearlyEqualScore)).ThenBy(dish => Distance(dish, center))
+            .Concat(ranked.Where(dish => !scores.ContainsKey(dish.Id))).ToArray();
+    }
+
+    /// <summary>Among branches selling the same dish, which fit the same taste, keeps the nearest; the first branch's position in the list is kept.</summary>
+    public static IEnumerable<ANGI.Domain.Entities.Dish> NearestBranches(IEnumerable<ANGI.Domain.Entities.Dish> dishes, Func<ANGI.Domain.Entities.Dish, string?> name, NearbyArea center) =>
+        dishes.GroupBy(name).Select(branches => branches.MinBy(dish => Distance(dish, center))!);
+
+    private static double Distance(ANGI.Domain.Entities.Dish dish, NearbyArea center) =>
+        NearbyArea.DistanceKm(center.Latitude, center.Longitude, dish.Restaurant.Latitude, dish.Restaurant.Longitude);
 
     /// <summary>Parses a schema-checked route profile.</summary>
     // Input đã được kiểm tra chỉ nhận driving/walking/cycling; nhánh mặc định biểu diễn driving.

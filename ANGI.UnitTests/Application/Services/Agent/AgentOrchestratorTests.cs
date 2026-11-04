@@ -6,6 +6,7 @@ using ANGI.Application.Services.Agent;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 using FluentAssertions;
 using Moq;
@@ -1506,7 +1507,461 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
     }
 
-    // TEST-76: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-76: The reported itinerary message reaches the budget question with every day placed, with no provider call and without searching places as restaurants.
+    /// <summary>Replays the start of conversation 94, which used to cost two LLM calls and end in "chưa tìm thấy món/quán".</summary>
+    [Fact]
+    public async Task RunAsync_ReportedItinerary_AsksBudgetWithoutProvider()
+    {
+        var context = IntakeContext("Ngày 1 tôi ở Hoàn kiếm\nNgày 2 tôi đi lăng bác\nNgày 3 tôi ở Hoàng Mai\nHãy lập lịch đi ăn", new AgentState());
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.Reply.Should().StartWith("Mình ghi nhận hành trình ở Hà Nội: ngày 1 quanh Hoàn Kiếm").And.Contain("ngày 2 quanh Lăng Bác").And.Contain("ngày 3 quanh Hoàng Mai").And.Contain("ngân sách");
+        result.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.NumDays == 3 && x.PlanningIntake == AgentIntakePolicy.Details);
+        result.State.DayAreas.Should().HaveCount(3);
+    }
+
+    // TEST-77: A longer trip keeps its duration and says what the unnamed days will do, which is how a four-day roadmap frame met a three-day itinerary.
+    /// <summary>Ensures the mismatch of conversation 94 is stated to the user instead of silently planning a day they did not mention.</summary>
+    [Fact]
+    public async Task RunAsync_ItineraryShorterThanTrip_StatesTheRemainingDays()
+    {
+        var context = IntakeContext("Ngày 1 tôi ở Hoàn Kiếm, ngày 2 đi lăng bác", new AgentState { NumDays = 4, SourceRoadmapUpdatedAt = DateTime.UtcNow });
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.State.NumDays.Should().Be(4);
+        result.Reply.Should().Contain("Những ngày còn lại trong 4 ngày, mình chọn trong toàn Hà Nội.");
+    }
+
+    // TEST-78: A bare area answers the place question for free; an unknown one keeps the old question and shows no province.
+    /// <summary>Replays "Hai bà trưng", which used to end in "chưa nhận ra địa điểm", and an unknown name beside it.</summary>
+    [Theory]
+    [InlineData("Hai bà trưng", "khu vực Hai Bà Trưng")]
+    [InlineData("Vậy thì ở Cầu Giấy", "khu vực Cầu Giấy")]
+    [InlineData("xyzxyz", "Mình chưa nhận ra địa điểm")]
+    public async Task RunAsync_AreaAnswersPlaceQuestion(string content, string expected)
+    {
+        var open = new AgentState { PlanningIntake = AgentIntakePolicy.Details, PendingQuestion = AgentIntakePolicy.PlaceQuestion };
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        (await sut.RunAsync(IntakeContext(content, open), default)).Reply.Should().Contain(expected);
+    }
+
+    // TEST-79: Moving a day of an existing plan updates the state before the model runs, and its proposal is not discarded as "unrequested" although the wording has no edit verb.
+    /// <summary>Ensures "Ngày 1 tôi ở Hoàn Kiếm" changes the plan, where it used to be searched as a restaurant.</summary>
+    [Fact]
+    public async Task RunAsync_ItineraryOnExistingPlan_MovesDayAndAcceptsProposal()
+    {
+        var source = AgentTestData.Snapshot(AgentTestData.Item());
+        var context = AgentTestData.Context(source);
+        context.State = context.State with { Province = "Hà Nội", NumDays = 1, MealSlots = ["lunch"] };
+        context.Request.Content = "Ngày 1 tôi ở Hoàn Kiếm";
+        var dish = AgentTestData.Dish(2);
+        dish.Restaurant.ProvinceName = "Hà Nội"; dish.Restaurant.Latitude = 21.03m; dish.Restaurant.Longitude = 105.85m;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            context.Grants.Clear();
+            context.Grants.Add(new(1, "lunch", [2], null, context.State));
+            return Task.FromResult<AgentLlmStep?>(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Xong rồi", Scope = new(1, "lunch"), Items = [AgentTestData.Item(2, "a")] }))!;
+        });
+
+        var result = await Create(llm.Object, catalog: [dish], intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.ItineraryChanged.Should().BeTrue();
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.State.DayAreas!.Single().Label.Should().Be("Hoàn Kiếm");
+        result.Snapshot.Items.Single().DishId.Should().Be(2);
+    }
+
+    // TEST-80: A day past the trip, or naming the same place again, changes nothing and is not flagged as a move.
+    /// <summary>Ensures an unchanged or impossible itinerary does not force a replan, and the duration still goes through confirmation.</summary>
+    [Theory]
+    [InlineData("Ngày 9 tôi ở Hoàn Kiếm", false)]
+    [InlineData("Ngày 1 tôi ở Hoàn Kiếm", true)]
+    public async Task RunAsync_ItineraryWithoutChange_IsNotAMove(string content, bool alreadyThere)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", DayAreas = alreadyThere ? [new(1, "Hoàn Kiếm", 21.03m, 105.85m, 3m)] : null };
+        context.Request.Content = content;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.ItineraryChanged.Should().BeFalse();
+    }
+
+    // TEST-81: A place with no day on an existing multi-day plan asks which day, free of charge, keeps the plan and holds the place for the answer.
+    /// <summary>Implements the user's rule: "đổi sang khu Cầu Giấy" must not guess days, in any of the short wordings.</summary>
+    [Theory]
+    [InlineData("đổi sang khu Cầu Giấy")]
+    [InlineData("ở Cầu Giấy thôi")]
+    [InlineData("đổi hành trình sang Cầu Giấy")]
+    public async Task RunAsync_AreaWithoutDayOnExistingPlan_AsksWhichDay(string content)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội" };
+        context.Request.Content = content;
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.Reply.Should().StartWith("Bạn muốn đổi ngày nào sang khu vực Cầu Giấy?");
+        result.Snapshot.Should().BeNull();
+        result.State.PendingDayArea!.Label.Should().Be("Cầu Giấy");
+        result.State.PendingQuestion.Should().Be(result.Reply);
+        result.State.DayAreas.Should().BeNull();
+    }
+
+    // TEST-82: The answer moves exactly those days and then goes to the model for new dishes; covers one day, several days and the whole trip.
+    /// <summary>Ensures a short "ngày 2" finishes the change the previous message started, and clears the question so the plan can be saved afterwards.</summary>
+    [Theory]
+    [InlineData("ngày 2", new short[] { 2 })]
+    [InlineData("ngày 1 và 2", new short[] { 1, 2 })]
+    [InlineData("cả chuyến", new short[] { 1, 2 })]
+    public async Task RunAsync_AnswerToWhichDay_MovesThoseDays(string content, short[] days)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", PendingQuestion = "Bạn muốn đổi ngày nào?", PendingDayArea = new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m) };
+        context.Request.Content = content;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.MovedDays.Should().Equal(days);
+        context.State.DayAreas!.Select(area => area.DayNumber).Should().Equal(days);
+        context.State.DayAreas!.Should().OnlyContain(area => area.Label == "Cầu Giấy");
+        context.State.PendingDayArea.Should().BeNull();
+    }
+
+    // TEST-83: Any other reply ends the wait and goes on normally, so the user is never stuck; nothing moves.
+    /// <summary>Ensures "đổi bữa tối sang phở" after the question is treated as what it says, and that the place does not linger for a later "ngày 2".</summary>
+    [Fact]
+    public async Task RunAsync_OtherReplyToWhichDay_DropsThePlace()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", PendingQuestion = "Bạn muốn đổi ngày nào?", PendingDayArea = new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m) };
+        context.Request.Content = "đổi bữa trưa ngày 1 sang món khác";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.ItineraryChanged.Should().BeFalse();
+        context.State.DayAreas.Should().BeNull();
+        context.State.PendingDayArea.Should().BeNull();
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-84: Answering with a day already there changes nothing and costs no model call.
+    /// <summary>Ensures choosing the current place cannot trigger a paid replan.</summary>
+    [Fact]
+    public async Task RunAsync_AnswerToWhichDayWithSamePlace_KeepsPlanWithoutProvider()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", PendingQuestion = "Bạn muốn đổi ngày nào?", PendingDayArea = new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m),
+            DayAreas = [new(2, "Cầu Giấy", 21.03m, 105.79m, 3m)] };
+        context.Request.Content = "ngày 2";
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.Reply.Should().Contain("giữ nguyên lịch");
+        result.State.PendingQuestion.Should().BeNull();
+        result.State.PendingDayArea.Should().BeNull();
+    }
+
+    // TEST-85: A one-day trip has nothing to ask: the place applies to that day and goes to the model.
+    /// <summary>Ensures the question is not asked when there is only one possible answer.</summary>
+    [Fact]
+    public async Task RunAsync_AreaWithoutDayOnOneDayTrip_MovesThatDay()
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", NumDays = 1 };
+        context.Request.Content = "đổi sang khu Cầu Giấy";
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.MovedDays.Should().Equal((short)1);
+    }
+
+    // TEST-86: With no plan yet, only naming a place starts the questions around it for free, whether a district or a landmark.
+    /// <summary>Answers "ở Hoàn Kiếm" and "đi Lăng Bác" as the first message, which used to reach the model.</summary>
+    [Theory]
+    [InlineData("ở Hoàn Kiếm", "khu vực Hoàn Kiếm")]
+    [InlineData("tôi đi Lăng Bác", "khu vực Lăng Bác")]
+    public async Task RunAsync_AreaWithoutPlan_StartsQuestionsWithoutProvider(string content, string expected)
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext(content, new AgentState()), default);
+
+        result.Reply.Should().Contain(expected).And.Contain("số ngày");
+        result.State.Should().Match<AgentState>(x => x.OriginMode == "pinned" && x.Province == "Hà Nội" && x.RadiusKm != null);
+    }
+
+    // TEST-87: A trip only to a place with no restaurants says so, says where ANGI has data and asks again, free of charge and without inventing a province.
+    /// <summary>Ensures "Ngày 1 đi Đà Nẵng" is answered honestly instead of planning in Hà Nội or asking as if nothing was said.</summary>
+    [Fact]
+    public async Task RunAsync_OnlyPlaceOutsideCatalog_SaysWhereDataExistsAndAsks()
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext("Ngày 1 đi Đà Nẵng\nlập lịch giúp mình", new AgentState()), default);
+
+        result.Reply.Should().StartWith("Mình chưa tìm được quán quanh “Đà Nẵng”.").And.Contain("Hiện ANGI có dữ liệu ở Hà Nội").And.EndWith(AgentIntakePolicy.PlaceQuestion);
+        result.State.Province.Should().BeNull();
+        result.State.DayAreas.Should().BeNull();
+    }
+
+    // TEST-88: The itinerary of conversation 121 reads Hồ Gươm at the lake, keeps a free day for the whole province and still asks about preferences, for free.
+    /// <summary>Replays the message that put day 1 in Hà Đông, made day 3 a place called "Tự Do", and skipped the preferences question because of "tham quan".</summary>
+    [Fact]
+    public async Task RunAsync_Conversation121Itinerary_ReadsCorrectly()
+    {
+        var context = IntakeContext("Hiện tại tôi có hành trình sau : \nNgày 1 : Tôi đi tham quan Hồ Gươm \nNgày 2 : Tôi đi Lăng Bác \nNgày 3 : Tôi đi tự do \nHãy lập lịch ăn uống theo hành trình này",
+            new AgentState { BudgetAmount = 900000 });
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.State.NumDays.Should().Be(3);
+        result.State.DayAreas!.Select(area => (area.DayNumber, area.Label)).Should().Equal(((short)1, "Hồ Gươm"), ((short)2, "Lăng Bác"));
+        result.State.DayAreas![0].Latitude.Should().Be(21.0287m);
+        result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Preferences);
+        result.Reply.Should().Contain("Những ngày còn lại trong 3 ngày, mình chọn trong toàn Hà Nội.").And.Contain(AgentIntakePolicy.PreferencesQuestion);
+    }
+
+    // TEST-89: Both complaints of conversation 121 move day 1 to the right place and reach the model for new dishes; these were the turns that repeated the wrong area and gave up.
+    /// <summary>Ensures saying "ngày 1 sai" with the right place fixes the plan, whichever way the day is named.</summary>
+    [Theory]
+    [InlineData("Ngày 1 đang đề xuất sai, tôi đi Hồ Gươm nhưng sao roadmap lại chỉ sang Hà Đông nhỉ")]
+    [InlineData("ý tôi là Hồ Gươm ở Hoàn Kiếm mà sao lại đề xuất ở Hà Đông")]
+    public async Task RunAsync_ComplaintWithRightPlace_MovesTheDay(string content)
+    {
+        var context = WrongDayOneContext(content);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        context.MovedDays.Should().Equal((short)1);
+        var day1 = context.State.DayAreas!.Single(area => area.DayNumber == 1);
+        day1.Latitude.Should().Be(21.0287m);
+        day1.Longitude.Should().Be(105.8524m);
+        context.State.DayAreas!.Single(area => area.DayNumber == 2).Label.Should().Be("Lăng Bác");
+    }
+
+    // TEST-90: A complaint with no place explains where the plan searches and how to fix it, with no provider call and without blocking the save.
+    /// <summary>Covers the bare "ngày 1 sai" that used to confuse the model; the reply names the place it uses and its district.</summary>
+    [Fact]
+    public async Task RunAsync_ComplaintWithoutPlace_ExplainsWithoutProvider()
+    {
+        var context = WrongDayOneContext("ngày 1 sai rồi");
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(context, default);
+
+        result.Reply.Should().Contain("ngày 1 quanh Hồ Gươm (khu Hà Đông)").And.Contain("“Ngày 1 ở Hoàn Kiếm”").And.Contain("đổi bữa trưa ngày 1 sang món khác");
+        result.Reply.Should().NotContain("Lăng Bác");
+        result.State.PendingQuestion.Should().BeNull();
+        result.Snapshot.Should().BeNull();
+    }
+
+    // TEST-91: A right place with no day to bind asks which day, and a place that cannot be located says so; neither reaches the model.
+    /// <summary>Ensures a correction never guesses a day or claims to have fixed something it could not find.</summary>
+    [Theory]
+    [InlineData("sai rồi, tôi ở Cầu Giấy", "Bạn muốn đổi ngày nào sang khu vực Cầu Giấy?")]
+    [InlineData("ngày 1 sai, tôi đi Xyzxyz", "Mình chưa định vị được “Xyzxyz”.")]
+    public async Task RunAsync_ComplaintWithoutDayOrUnknownPlace_AsksWithoutProvider(string content, string expected)
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        (await sut.RunAsync(WrongDayOneContext(content), default)).Reply.Should().StartWith(expected);
+    }
+
+    // TEST-92: Complaints about a dish, and any plan without itinerary places, keep the model's normal edit flow.
+    /// <summary>Guards the rule that the new correction case does not take over edits handled before.</summary>
+    [Theory]
+    [InlineData("bữa trưa ngày 1 sai vị rồi", true)]
+    [InlineData("món này sai rồi", true)]
+    [InlineData("ngày 1 sai rồi", false)]
+    public async Task RunAsync_ComplaintAboutDishOrPlanWithoutPlaces_KeepsModelFlow(string content, bool withPlaces)
+    {
+        var context = withPlaces ? WrongDayOneContext(content) : IntakeContext(content, AgentTestData.State() with { Province = "Hà Nội" }, AgentTestData.Snapshot(AgentTestData.Item()));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        context.ItineraryChanged.Should().BeFalse();
+    }
+
+    // TEST-93: Changing taste after a proposal replans with the new taste, keeps the itinerary places although the model's state cannot carry them, and accepts the new dishes.
+    /// <summary>Covers the question "người dùng bỗng đổi khẩu vị khi đã có đề xuất": every changed position needs a fresh search under the new taste.</summary>
+    [Fact]
+    public async Task RunAsync_TasteChangedOnProposalWithItinerary_ReplansAndKeepsPlaces()
+    {
+        var before = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"], TasteTargets = [new("spicy", .25)], DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 3m)] };
+        var source = new AgentSnapshot(before, [AgentTestData.Item() with { DishName = "Dish 1" }], []);
+        var context = AgentTestData.Context(source);
+        context.State = before;
+        context.Request.Content = "đổi khẩu vị sang ngọt nhẹ cho cả chuyến";
+        var fresh = AgentTestData.Dish(2);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            var changed = context.State with { TasteTargets = [new("sweet", .25)], DayAreas = null };
+            context.Grants.Clear();
+            context.Grants.Add(new(1, "lunch", [2], Guid.NewGuid(), context.State with { TasteTargets = [new("sweet", .25)] }));
+            return Task.FromResult<AgentLlmStep?>(new AgentLlmStep([], new AgentOutput { Action = "create_proposal", Reply = "Xong rồi", State = changed, Scope = new(1, null), Items = [AgentTestData.Item(2, "a")] }))!;
+        });
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(), fresh], intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        result.Validation!.Errors.Should().BeEmpty();
+        result.Snapshot!.Items.Single().DishId.Should().Be(2);
+        result.Snapshot.State.TasteTargets.Should().ContainSingle(target => target.Dimension == "sweet" && target.Target == .25);
+        result.Snapshot.State.DayAreas!.Single().Label.Should().Be("Hoàn Kiếm");
+        result.Reply.Should().Contain("ngọt mức nhẹ");
+    }
+
+    // TEST-94: A bare province now asks the scope once, for free; covers planning wording and the province alone.
+    /// <summary>Implements the decision that "ở Hà Nội" asks: whole city, an area, an itinerary or the current location.</summary>
+    [Theory]
+    [InlineData("lập lịch ở Hà Nội")]
+    [InlineData("Tôi muốn lập lịch đi ăn ở Hà Nội")]
+    [InlineData("Hà Nội")]
+    public async Task RunAsync_BareProvince_AsksScopeOnce(string content)
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext(content, new AgentState()), default);
+
+        result.Reply.Should().StartWith("Mình ghi nhận Hà Nội. Bạn muốn mình chọn quán trong toàn Hà Nội").And.Contain("hành trình từng ngày").And.Contain("vị trí hiện tại");
+        result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Scope);
+        result.State.Province.Should().Be("Hà Nội");
+    }
+
+    // TEST-95: A message that already gives days, a budget or a taste keeps the previous flow and does not ask the scope; these are the cases the question must not take over.
+    /// <summary>Guards the rule that the scope question is only for a message naming nothing but the province.</summary>
+    [Theory]
+    [InlineData("Hà Nội 3 ngày 1 triệu")]
+    [InlineData("Lập lịch 3 ngày tại Hà Nội, tổng ngân sách 1500000 đồng.")]
+    [InlineData("Tôi muốn lên lịch ăn uống Hà Nội 3 ngày, ngân sách 500000 đồng 1 ngày, tôi thích ăn chua")]
+    public async Task RunAsync_ProvinceWithTripFacts_DoesNotAskScope(string content)
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext(content, new AgentState()), default);
+
+        result.Reply.Should().NotContain("Bạn muốn mình chọn quán");
+        result.State.PlanningIntake.Should().NotBe(AgentIntakePolicy.Scope);
+        result.State.Province.Should().Be("Hà Nội");
+    }
+
+    // TEST-96: Each answer to the scope question leads to the next question; covers the whole city, no preference, an area, an itinerary, trip facts and an unknown name.
+    /// <summary>Ensures every reply moves on, so the question can never trap the user.</summary>
+    [Theory]
+    [InlineData("toàn thành phố", "Mình sẽ chọn quán trong toàn Hà Nội.")]
+    [InlineData("toàn Hà Nội nhé", "Mình sẽ chọn quán trong toàn Hà Nội.")]
+    [InlineData("không", "Mình sẽ chọn quán trong toàn Hà Nội.")]
+    [InlineData("3 ngày 1 triệu", "Mình sẽ chọn quán trong toàn Hà Nội.")]
+    [InlineData("ở Cầu Giấy", "khu vực Cầu Giấy")]
+    [InlineData("Cầu Giấy", "khu vực Cầu Giấy")]
+    [InlineData("Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác", "ngày 1 quanh Hoàn Kiếm")]
+    [InlineData("xyzxyz", "Mình chưa nhận ra khu này")]
+    public async Task RunAsync_ScopeAnswer_MovesOn(string content, string expected)
+    {
+        var open = new AgentState { Province = "Hà Nội", PlanningIntake = AgentIntakePolicy.Scope, PendingQuestion = "phạm vi" };
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext(content, open), default);
+
+        result.Reply.Should().Contain(expected);
+        result.State.PlanningIntake.Should().NotBe(AgentIntakePolicy.Scope);
+    }
+
+    // TEST-97: The current location answers the scope question with its coordinates and radius, without a map search or provider call.
+    /// <summary>Ensures the location button works at this new question, where the province is already known.</summary>
+    [Fact]
+    public async Task RunAsync_ScopeAnsweredByLocation_KeepsCoordinates()
+    {
+        var located = new AgentState { Province = "Hà Nội", PlanningIntake = AgentIntakePolicy.Scope, OriginMode = "gps", OriginLatitude = 21.03m, OriginLongitude = 105.85m, OriginLabel = "Vị trí hiện tại", RadiusKm = 10m };
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext("Dùng vị trí hiện tại của mình", located), default);
+
+        result.Reply.Should().StartWith("Mình sẽ ưu tiên quán trong khoảng 10 km quanh vị trí của bạn.");
+        result.State.Should().Match<AgentState>(x => x.OriginMode == "gps" && x.RadiusKm == 10m && x.PlanningIntake == AgentIntakePolicy.Details);
+    }
+
+    // TEST-98: A message that already says where the trip goes is not asked again; covers an area, an itinerary and a province with an area.
+    /// <summary>Ensures the new question only fires when the scope is really unknown.</summary>
+    [Theory]
+    [InlineData("lập lịch ở Cầu Giấy")]
+    [InlineData("Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác")]
+    [InlineData("lập lịch ở Hà Nội khu Cầu Giấy")]
+    public async Task RunAsync_ScopeAlreadyStated_DoesNotAsk(string content)
+    {
+        var sut = Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places());
+
+        var result = await sut.RunAsync(IntakeContext(content, new AgentState()), default);
+
+        result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
+        result.Reply.Should().NotContain("Bạn muốn mình chọn quán");
+    }
+
+    // TEST-99: The roadmap of conversation 138 has a pin and no province: the pin answers "ở đâu", gives the search circle and only the budget is asked, for free.
+    /// <summary>This message used to ask for a place the user had already chosen on the map.</summary>
+    [Fact]
+    public async Task RunAsync_PinnedRoadmapWithoutProvince_UsesPinInsteadOfAskingPlace()
+    {
+        var state = new AgentState { NumDays = 7, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
+        var context = IntakeContext("lập lịch cho tôi", state, new AgentSnapshot(state, [], []));
+
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        result.Reply.Should().Contain("quanh điểm bạn đã chấm").And.Contain("ngân sách").And.NotContain("ở đâu");
+        result.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.RadiusKm == 10m && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
+    }
+
+    // TEST-100: A pin far from every restaurant says so and asks for a place, keeping the pin; covers the only case where the place question remains.
+    /// <summary>Ensures the question is honest instead of looking as if the pin was never seen.</summary>
+    [Fact]
+    public async Task RunAsync_PinOutsideCatalog_SaysSoAndAsksPlace()
+    {
+        var state = new AgentState { NumDays = 7, OriginMode = "pinned", OriginLatitude = 10m, OriginLongitude = 106m };
+
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places())
+            .RunAsync(IntakeContext("lập lịch cho tôi", state), default);
+
+        result.Reply.Should().StartWith("Quanh điểm bạn chấm trên bản đồ chưa có quán nào trên ANGI.").And.Contain("ở đâu");
+        result.State.Should().Match<AgentState>(x => x.Province == null && x.OriginLatitude == 10m);
+    }
+
+    // TEST-101: A trip that already has a province keeps its search as it is, so a user who widened the search is not narrowed again.
+    /// <summary>Only the first contact with a pin fills the circle.</summary>
+    [Fact]
+    public async Task RunAsync_PinWithProvince_KeepsSearch()
+    {
+        var state = new AgentState { Province = "Hà Nội", NumDays = 7, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
+
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object, intakeCatalog: IntakeCatalog(), places: Places())
+            .RunAsync(IntakeContext("lập lịch cho tôi", state), default);
+
+        result.State.RadiusKm.Should().BeNull();
+    }
+
+    // TEST-102: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]
@@ -1517,6 +1972,27 @@ public sealed class AgentOrchestratorTests
 
         result.State.NumDays.Should().Be((short)days);
         result.Reply.Should().NotContain("Số ngày phải");
+    }
+
+    /// <summary>Builds the plan of conversation 121: day 1 wrongly located in Hà Đông and day 2 at Lăng Bác.</summary>
+    private static AgentContext WrongDayOneContext(string content)
+    {
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        context.State = context.State with { Province = "Hà Nội", NumDays = 3,
+            DayAreas = [new(1, "Hồ Gươm", 20.978894m, 105.785555m, 3m, "Hà Đông"), new(2, "Lăng Bác", 21.0368m, 105.8347m, 3m, "Ba Đình")] };
+        context.Source = context.Source! with { State = context.State };
+        context.Request.Content = content;
+        return context;
+    }
+
+    /// <summary>Returns a resolver over Hà Nội districts with enough restaurants each, and no map service.</summary>
+    private static AgentPlaceResolver Places()
+    {
+        var addresses = new[] { "Hoàn Kiếm", "Ba Đình", "Hoàng Mai", "Cầu Giấy" }.SelectMany((district, index) => Enumerable.Range(0, 25)
+            .Select(_ => new AgentCatalogPlace("Hà Nội", $"1 Phố Hai Bà Trưng, P. Cửa Nam, {district}, Hà Nội", 21.03m + index / 100m, 105.85m)));
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetPublicPlacesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(addresses.ToArray());
+        return new(catalog.Object);
     }
 
     /// <summary>Builds a turn with the given message over the given state.</summary>
@@ -1539,12 +2015,12 @@ public sealed class AgentOrchestratorTests
 
     private static AgentOrchestrator Create(IAgentLlmService llm, AgentLimits? configuredLimits = null, IAgentTelemetry? telemetry = null,
         ANGI.Domain.Entities.Dish[]? catalog = null, ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalogSearch = null,
-        ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? intakeCatalog = null)
+        ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? intakeCatalog = null, AgentPlaceResolver? places = null)
     {
         var fixture = AgentTestData.Validator(catalog ?? [AgentTestData.Dish()]);
         telemetry ??= Mock.Of<IAgentTelemetry>(); var limits = configuredLimits ?? new AgentLimits(); var state = new AgentStatePolicy();
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), state,
             new AgentRouteEstimator(fixture.Routes.Object), limits, telemetry, catalogSearch: catalogSearch);
-        return new(llm, tools, state, new(), fixture.Validator, limits, telemetry, intakeCatalog);
+        return new(llm, tools, state, new(), fixture.Validator, limits, telemetry, intakeCatalog, places);
     }
 }

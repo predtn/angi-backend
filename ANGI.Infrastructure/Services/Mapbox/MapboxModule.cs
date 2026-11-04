@@ -17,7 +17,7 @@ namespace ANGI.Infrastructure.Services.Mapbox
 
             services.AddOptions<MapboxSettings>().Bind(mapboxSection);
             services.AddMemoryCache();
-            services.AddHttpClient<IRouteService, MapboxRouteService>(client =>
+            void Configure(HttpClient client)
             {
                 if (Uri.TryCreate(mapboxSettings.BaseUrl, UriKind.Absolute, out var baseAddress))
                 {
@@ -28,7 +28,10 @@ namespace ANGI.Infrastructure.Services.Mapbox
                     mapboxSettings.TimeoutMilliseconds > 0
                         ? mapboxSettings.TimeoutMilliseconds
                         : 3000);
-            });
+            }
+
+            services.AddHttpClient<IRouteService, MapboxRouteService>(Configure);
+            services.AddHttpClient<IPlaceSearchService, MapboxPlaceSearchService>(Configure);
 
             return services;
         }

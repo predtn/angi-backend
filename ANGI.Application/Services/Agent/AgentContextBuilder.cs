@@ -20,7 +20,8 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
-                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, PlanningIntake = stored.PlanningIntake }
+                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, PlanningIntake = stored.PlanningIntake,
+                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
             : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
@@ -72,6 +73,8 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             Province = state.Province ?? current.Province, OriginMode = current.OriginMode,
             OriginLatitude = latitude, OriginLongitude = longitude, OriginLabel = current.OriginLabel,
             RadiusKm = latitude.HasValue ? state.RadiusKm : null, FocusDay = focus, FocusMeal = focus.HasValue ? state.FocusMeal : null,
+            DayAreas = state.DayAreas?.Where(x => x.DayNumber <= current.NumDays).ToArray() is { Length: > 0 } areas ? areas : null,
+            WidenedMeals = state.WidenedMeals?.Where(x => x.DayNumber <= current.NumDays).ToArray() is { Length: > 0 } widened ? widened : null,
             SourceRoadmapUpdatedAt = roadmap.UpdatedAt
         };
     }

@@ -323,4 +323,32 @@ public sealed class AgentReplyBuilderTests
 
         AgentReplyBuilder.Answer(context).Should().Be("Chưa lấy được gợi ý.");
     }
+
+    // TEST-21: A widened meal is stated with the place, both radii and its days, grouped per meal; a meal not in the plan is not mentioned, and a plan without widening says nothing.
+    /// <summary>Ensures the user always learns that a meal was chosen further away, as the chosen behaviour promises.</summary>
+    [Fact]
+    public void Proposal_WidenedMeal_IsStated()
+    {
+        var plain = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1), AgentTestData.Item(2, "b", 2));
+        var state = plain.State with { DayAreas = [new(1, "Hoàn Kiếm", 21m, 105.8m, 3m), new(2, "Hoàn Kiếm", 21m, 105.8m, 3m)],
+            WidenedMeals = [new(1, "lunch", 8m), new(2, "lunch", 8m), new(1, "dinner", 12m)] };
+
+        var reply = AgentReplyBuilder.Proposal(plain with { State = state });
+
+        reply.Should().Contain("Quanh Hoàn Kiếm trong 3 km chưa có món cho bữa trưa ngày 1, 2, nên bữa đó mình chọn quán trong khoảng 8 km.");
+        reply.Should().NotContain("12 km");
+        AgentReplyBuilder.Proposal(plain).Should().NotContain("chưa có món cho");
+    }
+
+    // TEST-22: A preview names each itinerary day in order and how far a thin place reaches; a plan without an itinerary says nothing about it.
+    /// <summary>Lets the user check at a glance that each day follows their itinerary.</summary>
+    [Fact]
+    public void Proposal_Itinerary_NamesEachDay()
+    {
+        var plain = AgentTestData.Snapshot(AgentTestData.Item());
+        var planned = plain with { State = plain.State with { DayAreas = [new(2, "Hòa Lạc", 21m, 105.5m, 30m), new(1, "Hoàn Kiếm", 21m, 105.8m, 3m)] } };
+
+        AgentReplyBuilder.Proposal(plain).Should().NotContain("Theo hành trình");
+        AgentReplyBuilder.Proposal(planned).Should().Contain("Theo hành trình của bạn: ngày 1 quanh Hoàn Kiếm; ngày 2 quanh Hòa Lạc (quanh đó còn ít quán").And.Contain("30 km");
+    }
 }

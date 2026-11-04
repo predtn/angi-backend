@@ -1636,7 +1636,9 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         place.Reply.Should().Be(AgentIntakePolicy.PlaceQuestion);
         var unknown = await SendPromptAsync(client, conversation.ConversationId, "Đà Nẵng");
         unknown.Reply.Should().Contain("Ho Chi Minh City");
-        var details = await SendPromptAsync(client, conversation.ConversationId, "ho chi minh city");
+        var scope = await SendPromptAsync(client, conversation.ConversationId, "ho chi minh city");
+        scope.Reply.Should().Contain("toàn Ho Chi Minh City").And.Contain("vị trí hiện tại");
+        var details = await SendPromptAsync(client, conversation.ConversationId, "toàn thành phố");
         details.Reply.Should().Contain("số ngày").And.Contain("ngân sách");
         var preferences = await SendPromptAsync(client, conversation.ConversationId, "1 ngày, ngân sách 500000 đồng");
         preferences.Reply.Should().Be(AgentIntakePolicy.PreferencesQuestion);

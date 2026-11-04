@@ -177,6 +177,10 @@ decided by the project owner on 2026-11-02, is `action=chat`: a social reply sta
 `AgentSmallTalkPolicy` rejects anything with digits, prices, a claimed change, a link, markup, internal terms or
 more than 200 characters, falling back to a fixed sentence.
 A whole-message greeting, thanks or "who are you" gets a fixed reply before any LLM call ("Chào bạn, mình là ANGI…").
+
+A point pinned on the roadmap gives the province and a search circle of at least 10 km, so a new plan does not ask where to
+eat.
+
 `action=out_of_scope` covers anything outside dishes, restaurants and the food itinerary, including general food
 knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always exactly: "Việc này
 nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi." For a food question, the
@@ -258,4 +262,40 @@ not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_
   `out_of_scope` (`huong dan toi`) spend 2-4 calls and end in a 503. A bare request for help is answered without a
   call. Output still unusable after its repair, and invalid model state, ask again instead of returning 503.
   AGENT_UNAVAILABLE remains for provider failures, oversized context and exhausted tool or call limits.
+
+## Itinerary by day and places inside a province (2026-11-03)
+
+- `Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác` is read by `AgentItineraryPolicy` without a provider call and stored in the
+  backend-owned `AgentState.dayAreas` (JSONB, no migration). Clients and the model cannot write it. A day without an area
+  uses the whole province or the trip origin. One area without a day (`ở Cầu Giấy`) becomes the existing pinned origin
+  and radius. The province is inferred from the places; a day past the known duration extends the trip, and days the
+  itinerary leaves out are stated in the reply. Plans still hold one province.
+- `AgentPlaceResolver` looks a name up in this order: province (whole province), landmark coordinates, catalog addresses, then
+  Mapbox Search Box. Search Box returns confident wrong answers (`Lăng Bác` gave `Làng cổ Bắc Biên`, nonsense gave `Hà Nội`),
+  so its result is used only when its name or address contains the user's whole phrase and it is not a city-level type.
+  Without Mapbox the resolver stays catalog-only. A place that cannot be found is reported and that day uses the province.
+- The radius is the smallest of 3, 5, 8, 12, 20, 30 and 50 km holding 20 restaurants. Above 12 km the reply says the search
+  reaches the nearest restaurants. It counts restaurants, not dishes per meal, so a thin meal still appears in `mealCoverage`.
+- `Fingerprint` includes a day's area only when one exists, so proposals saved before this change still confirm. One
+  `scope=full` call splits into a search per area, each with its own grant, and validation checks each dish against its day.
+- On an existing plan `Ngày 2 tôi ở Cầu Giấy` updates that day and passes `itineraryChangedDays` to the model; a day past the
+  trip goes to the model because changing a saved duration needs confirmation.
+- A place with no day on an existing plan (`đổi sang khu Cầu Giấy`, `ở Hoàn Kiếm thôi`) asks which days, without a provider call,
+  and holds the place in the backend-owned `pendingDayArea`. `ngày 2`, `ngày 1 và 3` or `cả chuyến` moves those days; any other
+  reply drops it and continues normally. A one-day trip moves without asking. `đổi sang <tên>` without `khu` or `hành trình`
+  could be a dish, so only catalog addresses may confirm it. With no plan yet, the same short wording starts the pre-plan questions
+  with that place as the area of the whole trip. A bare name with no such word still goes to the model.
 - `Agent:MessagesPerMinute` is now 60. `MessagesPerDay` stays 100.
+- Near-first order applies only to a place the user named: a day in `dayAreas`, or a whole-trip area marked by the backend-owned
+  `namedAreaLabel`. Reco's scores are split into bands of 0.05 from the best dish and sorted by distance inside each band, so a clearly better
+  taste stays ahead. The nearest branch of a dish is sent to reco, and the list is requested up to `MaxRanked` so ties are seen; dishes past the
+  meal quota stay out of the model's context. The whole province, GPS, a map origin and a rating fallback keep their previous order and depth.
+- Names of other provinces and well-known destinations are refused before the map, because `Đà Nẵng, Hà Nội` returns a Hà Nội business with that
+  name. A street keeps its word (`phố Huế`) and is not refused. This list is static, so an unlisted distant place can still match a local business.
+- A meal with no dish inside a named place searches further along the radius steps; only that meal may use the wider radius (`widenedMeals`, backend-owned), the
+  reply states it, and moving the day drops it. A meal with nothing at 50 km still gets the coverage question. The whole province, GPS, a map origin and a requested
+  dish or restaurant keep their previous behaviour.
+- A map result is trusted only with evidence, because a business can carry any place name (`Hồ Gươm, Hà Nội` returned `Hồ Gươm Plaza` in Hà Đông): an area or street containing the
+  phrase, a business named exactly that, or most businesses with the phrase in their name within 2 km of each other. Common Hà Nội landmarks use fixed coordinates, and replies show the district of the nearest restaurant so a wrong location is visible early.
+- `đi tự do` and similar wording mean the whole province for that day. A complaint such as `ngày 1 sai` on a plan with `dayAreas` is handled before the model: with the right place the day moves; without one the reply says where it searches and how to fix it. Complaints about a dish or meal stay with the model.
+- A message naming nothing but the province asks the scope once (`planningIntake=scope`, no provider call): the whole province, an area, an itinerary or the current location. Any other reply keeps the whole province and says so. A message that already gives days, a budget or a taste keeps the previous flow without this question.

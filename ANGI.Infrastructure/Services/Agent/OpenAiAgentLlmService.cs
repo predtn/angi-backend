@@ -125,6 +125,11 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         The backend authenticates and enforces ownership. Only get_recommendation, estimate_day_route and get_roadmap
         and search_catalog are allowed. Ask for province first, then number of days and budget, when missing.
         Take province only from the user's own words: never infer it from state.title or a roadmap name.
+        originMode=pinned or gps with coordinates means the user already chose where to eat: never ask where, and keep
+        originMode, its coordinates and radiusKm in any state you return.
+        A district, street or landmark is a place, not a dish or restaurant: never pass one to search_catalog. state.dayAreas is backend-owned: the backend
+        already located each day's place and searches around it, so never ask for those places again; a day without one uses the whole province.
+        itineraryChangedDays lists days that just moved: fetch scope=day for each of them and return a proposal for those days.
         intakeComplete=true means the human just finished the pre-plan questions, so the trip details are confirmed and the
         current message holds only optional preferences; 'không' adds none. Issue one get_recommendation scope=full now.
         StartDate is optional while planning: a duration such as '3 days' fully resolves numDays. Never ask for calendar
@@ -402,7 +407,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             currentProposal = context.CurrentProposal is null ? null : new { context.CurrentProposal.ProposalId, context.CurrentProposal.Version, context.CurrentProposal.Status },
             proposalVersion = context.ProposalVersion, history = context.History, request = context.Request,
             proposalMode = context.Source is null ? "create" : "update",
-            catalogTags = context.CatalogTags, replanAfterConfirmation = context.ReplanAfterConfirmation, intakeComplete = context.IntakeComplete,
+            catalogTags = context.CatalogTags, replanAfterConfirmation = context.ReplanAfterConfirmation, intakeComplete = context.IntakeComplete, itineraryChangedDays = context.MovedDays,
             issuedCandidateScopes = context.Grants.Select(grant => new { grant.DayNumber, grant.MealSlot, grant.DishIds }),
             currentDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
             limits = new { limits.MaxRanked, limits.MaxCandidates, limits.MaxToolRounds, limits.MaxToolCalls } }, PromptJson) });

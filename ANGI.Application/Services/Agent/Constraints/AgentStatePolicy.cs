@@ -25,6 +25,15 @@ public sealed class AgentStatePolicy
         if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
         if (!ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) || !ReferenceEquals(proposed.SkippedMeals, current.SkippedMeals))
             proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
+        // Nơi đến theo ngày do backend đọc từ lời người dùng, model không được ghi. Đổi tỉnh hoặc rút ngắn chuyến thì bỏ các nơi đến không còn áp dụng.
+        var movedProvince = current.Province is not null && !string.Equals(current.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var numDays = proposed.NumDays;
+        var areas = movedProvince ? [] : (current.DayAreas ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
+        if (!areas.SequenceEqual(proposed.DayAreas ?? [])) proposed = proposed with { DayAreas = areas.Length > 0 ? areas : null };
+        var widened = movedProvince ? [] : (current.WidenedMeals ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
+        if (!widened.SequenceEqual(proposed.WidenedMeals ?? [])) proposed = proposed with { WidenedMeals = widened.Length > 0 ? widened : null };
+        if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel)
+            proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel };
         new AgentStateValidator().ValidateAndThrow(proposed);
         if (proposed.Preferences?.Initialized == true)
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };

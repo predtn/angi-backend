@@ -5,6 +5,7 @@ using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 
 namespace ANGI.Application.Services.Agent;
@@ -12,26 +13,28 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Runs bounded LLM/tool rounds outside a database transaction and prepares validated immutable output.</summary>
 public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor tools, AgentStatePolicy statePolicy,
     AgentProposalBuilder builder, AgentProposalValidator validator, AgentLimits limits, IAgentTelemetry telemetry,
-    Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalog = null)
+    Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalog = null, AgentPlaceResolver? places = null)
 {
     /// <summary>Bounds schema, proposal and unsupported-coverage repairs within the same call and timeout limits.</summary>
     public async Task<AgentPreparedTurn> RunAsync(AgentContext context, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        // Giữ state đầu lượt: lời chào hoặc câu ngoài phạm vi không được làm mất câu hỏi đang mở hay lọt vào yêu cầu lập lịch.
-        var turnState = context.State;
         // "Xin chào", "cảm ơn", "bạn là ai": trả lời luôn, không tốn lần gọi LLM và không đụng tới lịch.
         if (AgentSmallTalkPolicy.FixedReply(context) is { } smallTalk)
         {
             telemetry.Record("small_talk", context.ConversationId, context.TurnId, context.AttemptId);
-            return new(smallTalk, turnState, null, null, "chat");
+            return new(smallTalk, context.State, null, null, "chat");
         }
+        await UsePinnedAreaAsync(context, ct);
+        // Giữ state đầu lượt: lời chào hoặc câu ngoài phạm vi không được làm mất câu hỏi đang mở hay lọt vào yêu cầu lập lịch.
+        var turnState = context.State;
         // Lịch mới: hỏi lần lượt địa điểm, số ngày và ngân sách, rồi khẩu vị/yêu cầu; không tốn lần gọi LLM cho tới khi đủ điều kiện lập lịch.
         if (await IntakeAsync(context, ct) is { } intake)
         {
             telemetry.Record("intake", context.ConversationId, context.TurnId, context.AttemptId, new { stage = intake.State.PlanningIntake });
             return intake;
         }
+        if (await ItineraryChangeAsync(context, ct) is { } itineraryTurn) return itineraryTurn;
         if (AgentTasteClarificationPolicy.Question(context) is { } tasteQuestion)
         {
             var pending = AgentPendingPlanningPolicy.Capture(context.State.PendingPlanningRequest, context.Request.Content);
@@ -244,7 +247,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         AgentMealScopePolicy.Narrow(AgentIntakePolicy.WithoutUnstatedProvince(output.State, context), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
                 // Đã có lịch mà người dùng không yêu cầu đổi gì ("ăn vui vui", "ok") và model cũng không trích được ràng buộc mới:
                 // không nhận đề xuất đổi món. Giữ nguyên lịch và state đầu lượt, hỏi lại bằng câu chung; lịch hiện tại vẫn lưu được.
-                if (output.Action is "create_proposal" or "patch_proposal" && context.Source is { Items.Length: > 0 } && !context.ReplanAfterConfirmation &&
+                if (output.Action is "create_proposal" or "patch_proposal" && context.Source is { Items.Length: > 0 } && !context.ReplanAfterConfirmation && !context.ItineraryChanged &&
                     AgentChangeRequestPolicy.IsUnrequested(context.Request.Content, confirmedState, context.State, context.CatalogTagNames))
                 {
                     telemetry.Record("unrequested_change", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope });
@@ -473,6 +476,25 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         catch (FluentValidation.ValidationException) { return Misunderstood(context, turnState); }
     }
 
+    /// <summary>
+    /// A point pinned on the map already says where the user will eat, so a new plan never asks again: it gives the province and the search circle.
+    /// Only a state with no province takes these, so a user who later widened the search is not narrowed again.
+    /// </summary>
+    private async Task UsePinnedAreaAsync(AgentContext context, CancellationToken ct)
+    {
+        var state = context.State;
+        if (places is null || state.OriginMode != "pinned" || state.OriginLatitude is not { } latitude || state.OriginLongitude is not { } longitude ||
+            !string.IsNullOrWhiteSpace(state.Province) || state.PendingStateChange is not null || AgentIntakePolicy.HasPlan(context)) return;
+        if (await places.AroundPointAsync(latitude, longitude, ct) is not { } area)
+        {
+            context.PinNote = "Quanh điểm bạn chấm trên bản đồ chưa có quán nào trên ANGI.";
+            return;
+        }
+        context.State = state with { Province = area.Province, RadiusKm = state.RadiusKm ?? area.RadiusKm };
+        context.PinNote = $"Mình sẽ tìm quán trong khoảng {context.State.RadiusKm:0} km quanh điểm bạn đã chấm trên bản đồ.";
+        telemetry.Record("pinned_area", context.ConversationId, context.TurnId, context.AttemptId, new { context.State.RadiusKm });
+    }
+
     /// <summary>Runs the pre-plan questions; null means the turn continues through the normal flow, possibly with the intake just closed.</summary>
     private async Task<AgentPreparedTurn?> IntakeAsync(AgentContext context, CancellationToken ct)
     {
@@ -480,7 +502,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var provinces = await catalog.GetProvincesAsync(ct);
         var nearby = AgentIntakePolicy.NeedsNearby(context)
             ? await catalog.NearestProvinceAsync(context.State.OriginLatitude!.Value, context.State.OriginLongitude!.Value, AgentIntakePolicy.MaxNearbyKm, ct) : null;
-        if (AgentIntakePolicy.Read(context, provinces, nearby) is not { } read) return null;
+        var trip = places is null ? null : await places.ReadAsync(context, provinces, ct);
+        if (AgentIntakePolicy.Read(context, provinces, nearby, trip, places is not null) is not { } read) return null;
         if (read.Reply is { } fixedReply)
         {
             // Tọa độ không dùng được thì không giữ lại: state không được mang điểm xuất phát mà chuyến đi không dùng.
@@ -505,6 +528,74 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         context.State = step.State;
         context.IntakeComplete = step.Plan;
         return null;
+    }
+
+    /// <summary>
+    /// Reads where an existing plan moves without asking the model to read the place. "Ngày 2 tôi ở Cầu Giấy" moves that day; "đổi sang khu Cầu Giấy" names no
+    /// day, so it asks which days instead of guessing. A returned turn ends here; null continues to the model with the moved days set.
+    /// Days past the trip stay with the model, because extending a saved duration needs the user's confirmation.
+    /// </summary>
+    private async Task<AgentPreparedTurn?> ItineraryChangeAsync(AgentContext context, CancellationToken ct)
+    {
+        if (places is null || catalog is null || context.Request.Command != "chat" || !AgentIntakePolicy.HasPlan(context) || context.State.PendingStateChange is not null) return null;
+        var content = context.Request.Content;
+        // Trả lời câu hỏi "ngày nào". Câu khác thì câu hỏi hết hiệu lực và tin nhắn đi tiếp như bình thường, để người dùng không bị kẹt ở câu hỏi này.
+        if (context.State.PendingDayArea is { } pending)
+        {
+            context.State = context.State with { PendingDayArea = null, PendingQuestion = null };
+            if (AgentItineraryPolicy.AnsweredDays(content, context.State.NumDays ?? 0) is { Length: > 0 } days)
+            {
+                var areas = days.Select(day => new AgentDayArea(day, pending.Label, pending.Latitude, pending.Longitude, pending.RadiusKm, pending.District)).ToArray();
+                return Move(context, areas, []) ? null : new($"Những ngày đó đã ở khu vực {AgentReplyBuilder.Safe(pending.Label)} rồi nên mình giữ nguyên lịch nhé.", context.State, null, null);
+            }
+        }
+        // Người dùng báo sai địa điểm: tự sửa nếu câu có nơi đúng, không thì nói rõ đang tìm ở đâu và cách sửa, không để model đoán rồi lấy lại đúng vùng cũ.
+        if (AgentItineraryPolicy.Correction(content, context.State) is { } correction)
+        {
+            telemetry.Record("itinerary_correction", context.ConversationId, context.TurnId, context.AttemptId, new { correction.Days, hasPlace = correction.Place is not null });
+            var corrected = correction.Place is { } name ? await places.LocateAsync(name, context.State.Province, true, await catalog.GetProvincesAsync(ct), ct) : null;
+            if (corrected is not null && correction.Days.Length > 0)
+            {
+                var areas = correction.Days.Select(day => new AgentDayArea(day, corrected.Label, corrected.Latitude, corrected.Longitude, corrected.RadiusKm, corrected.District)).ToArray();
+                if (Move(context, areas, [])) return null;
+            }
+            else if (corrected is not null) return WhichDayQuestion(context, corrected);
+            return new(AgentItineraryPolicy.CorrectionHelp(context.State, correction.Days, corrected is null ? correction.Place : null), context.State, null, null);
+        }
+        if (AgentItineraryPolicy.Stops(content).Length > 0)
+        {
+            if (await places.ReadAsync(context, await catalog.GetProvincesAsync(ct), ct) is { } trip)
+                Move(context, trip.DayAreas.Where(area => area.DayNumber <= context.State.NumDays).ToArray(), trip.WholeProvinceDays.Where(day => day <= context.State.NumDays).ToArray());
+            return null;
+        }
+        if (AgentItineraryPolicy.BareArea(content) is not { } bare || context.State.NumDays is not { } numDays ||
+            await places.LocateAsync(bare.Name, context.State.Province, bare.Searchable, await catalog.GetProvincesAsync(ct), ct) is not { } place) return null;
+        // Chuyến một ngày thì không có gì để hỏi.
+        if (numDays == 1)
+        {
+            Move(context, [new(1, place.Label, place.Latitude, place.Longitude, place.RadiusKm, place.District)], []);
+            return null;
+        }
+        return WhichDayQuestion(context, place);
+    }
+
+    /// <summary>Asks which days move to a place named without a day, and holds the place for the answer.</summary>
+    private AgentPreparedTurn WhichDayQuestion(AgentContext context, AgentPlaceMatch place)
+    {
+        var question = $"Bạn muốn đổi ngày nào sang khu vực {AgentReplyBuilder.Safe(place.Label)}? Bạn nhắn ví dụ “ngày 2”, “ngày 1 và 2” hoặc “cả chuyến” nhé.";
+        telemetry.Record("itinerary_day_clarification", context.ConversationId, context.TurnId, context.AttemptId);
+        return new(question, context.State with { PendingQuestion = question, PendingDayArea = place }, null, null);
+    }
+
+    /// <summary>Applies new day places and records which days changed; false when nothing changed, so an unchanged itinerary never forces a replan.</summary>
+    private bool Move(AgentContext context, AgentDayArea[] areas, short[] wholeProvince)
+    {
+        var updated = AgentItineraryPolicy.Apply(context.State, new(null, areas, null, wholeProvince, [], 0));
+        if (AgentJson.Write(updated.DayAreas) == AgentJson.Write(context.State.DayAreas)) return false;
+        context.MovedDays = areas.Select(area => area.DayNumber).Concat(wholeProvince).ToArray();
+        telemetry.Record("itinerary_change", context.ConversationId, context.TurnId, context.AttemptId, new { days = context.MovedDays });
+        context.State = updated;
+        return true;
     }
 
     /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>

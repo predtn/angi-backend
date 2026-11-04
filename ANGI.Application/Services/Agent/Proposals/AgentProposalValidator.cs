@@ -99,7 +99,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (!string.Equals(dish.Restaurant.ProvinceName?.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 state.ExcludeTagIds.Any(tagSet.Contains) || state.TagIds.Any(id => !tagSet.Contains(id)) ||
                 state.MaxPricePerMeal.HasValue && dish.Price > state.MaxPricePerMeal ||
-                state.RadiusKm is { } radius && state.OriginLatitude is { } lat && state.OriginLongitude is { } lng && !new NearbyArea(lat, lng, radius).Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
+                AgentScopedPlanning.MealArea(state, item.DayNumber, item.MealSlot) is { } area && !area.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                 errors.Add($"Món {item.DishId} không đáp ứng ràng buộc chuyến đi.");
             if (grant is not null && (!unchanged || refreshed))
             {
@@ -108,7 +108,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot))
                     errors.Add($"Món {item.DishId} được lấy theo khẩu vị khác; cần lấy gợi ý lại.");
                 if (applied.MaxPricePerMeal.HasValue && dish.Price > applied.MaxPricePerMeal || applied.ExcludeTagIds.Any(tagSet.Contains) || applied.TagIds.Any(id => !tagSet.Contains(id)) ||
-                    applied.RadiusKm is { } r && applied.OriginLatitude is { } a && applied.OriginLongitude is { } b && !new NearbyArea(a, b, r).Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
+                    AgentScopedPlanning.MealArea(applied, item.DayNumber, item.MealSlot) is { } issued && !issued.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                     errors.Add($"Món {item.DishId} không còn đáp ứng điều kiện lúc lấy ứng viên.");
             }
             if (!FitsMeal(dish, item.MealSlot)) errors.Add($"Món {item.DishId} không phù hợp bữa đã chọn.");

@@ -46,6 +46,18 @@ public sealed record AgentState
     /// <summary>Backend-owned meals the user removed on purpose; they may stay empty although their meal slot is declared.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentScope[]? SkippedMeals { get; init; }
+    /// <summary>Backend-owned places from the user's itinerary; a day without one uses the area of the whole trip.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentDayArea[]? DayAreas { get; init; }
+    /// <summary>Backend-owned place named without a day on an existing plan, waiting for the reply saying which days move there.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentPlaceMatch? PendingDayArea { get; init; }
+    /// <summary>Backend-owned label of a whole-trip area the user named; it tells that area apart from an origin picked on the map or by GPS.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NamedAreaLabel { get; init; }
+    /// <summary>Backend-owned meals with no dish inside their named place, searched further out; only these meals may use the wider radius.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentWidenedMeal[]? WidenedMeals { get; init; }
     /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentState? PendingStateChange { get; init; }
@@ -65,6 +77,13 @@ public sealed record AgentState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? HistoryStartSequence { get; init; }
 }
+
+/// <summary>Where the traveler is on one day; that day's dishes are searched within the radius around this point.</summary>
+/// <param name="District">The district around that point, shown to the user so a wrongly located place is noticed before any dish is chosen.</param>
+public sealed record AgentDayArea(short DayNumber, string Label, decimal Latitude, decimal Longitude, decimal RadiusKm, string? District = null);
+
+/// <summary>One meal whose search reached this radius around its named place, because nearer restaurants have nothing for it.</summary>
+public sealed record AgentWidenedMeal(short DayNumber, string MealSlot, decimal RadiusKm);
 
 /// <summary>Bounded user messages plus explicit duration/budget values collected across clarification turns.</summary>
 public sealed record AgentPendingPlanningRequest(string[] Messages, short? NumDays = null,
@@ -158,6 +177,11 @@ public sealed class AgentContext
     public bool TripDetailsMissing { get; set; }
     /// <summary>Set when the user just finished the pre-plan questions; this turn plans, and a short reply such as "không" adds no requirement.</summary>
     public bool IntakeComplete { get; set; }
+    /// <summary>Days this message moved to another place on an existing plan; they need new dishes.</summary>
+    public short[] MovedDays { get; set; } = [];
+    public bool ItineraryChanged => MovedDays.Length > 0;
+    /// <summary>What this turn learned from the point pinned on the map; told to the user once, with the next question.</summary>
+    public string? PinNote { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>

@@ -60,7 +60,9 @@ public static class AgentConversationRules
         MealSlots = state.MealSlots.Order(StringComparer.Ordinal).ToArray(),
         BudgetAmount = Number(state.BudgetAmount), MaxPricePerMeal = Number(state.MaxPricePerMeal),
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
-        PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, PlanningIntake = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+        DayAreas = state.DayAreas is { Length: > 0 } areas ? areas.OrderBy(x => x.DayNumber).Select(x => x with { Latitude = Number(x.Latitude)!.Value,
+            Longitude = Number(x.Longitude)!.Value, RadiusKm = Number(x.RadiusKm)!.Value }).ToArray() : null,
+        PendingDayArea = null, NamedAreaLabel = null, WidenedMeals = null, PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, PlanningIntake = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
         ReplacedDishNames = null
     };
 

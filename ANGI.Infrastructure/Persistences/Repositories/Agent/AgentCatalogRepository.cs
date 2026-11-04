@@ -49,6 +49,11 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
             .Where(x => x.Km <= (double)radiusKm).OrderBy(x => x.Km).Select(x => x.ProvinceName).FirstOrDefault();
     }
 
+    /// <inheritdoc />
+    public async Task<AgentCatalogPlace[]> GetPublicPlacesAsync(CancellationToken ct) =>
+        await Public().Where(x => x.ProvinceName != null)
+            .Select(x => new AgentCatalogPlace(x.ProvinceName!, x.AddressLine, x.Latitude, x.Longitude)).ToArrayAsync(ct);
+
     /// <summary>Restricts every catalog read to verified restaurants that moderation has not hidden.</summary>
     private IQueryable<Domain.Entities.Restaurant> Public() => context.Restaurants.AsNoTracking().Where(x =>
         x.VerificationStatus == RestaurantVerificationStatus.Verified && x.ModerationStatus == RestaurantModerationStatus.Visible);

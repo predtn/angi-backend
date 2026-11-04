@@ -403,6 +403,47 @@ public sealed class AgentProposalValidatorTests
         (await validator.RepairBudgetAsync(new(state, [item], [grant], Scope: new()), source, [grant], default)).Should().BeNull();
     }
 
+    // TEST-20: A dish must lie within its own day's place; another day without a place accepts it, and a day place overrides the trip's origin radius.
+    /// <summary>Ensures a model cannot move day-1 dishes across the city, which is the point of following the itinerary.</summary>
+    [Fact]
+    public async Task ValidateAsync_DayArea_AppliesOnlyToItsDay()
+    {
+        var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish());
+        var near = new AgentDayArea(1, "Gần", 16.05m, 108.2m, 3m);
+        var far = new AgentDayArea(1, "Xa", 21.03m, 105.85m, 3m);
+        async Task<string[]> Errors(AgentState state)
+        {
+            var snapshot = new AgentSnapshot(state, [AgentTestData.Item()], [new(null, null, [1], null, state)]);
+            return (await validator.ValidateAsync(snapshot, null, false, false, default, [new(null, null, [1], null, state)])).Validation.Errors;
+        }
+
+        (await Errors(AgentTestData.State() with { DayAreas = [near] })).Should().BeEmpty();
+        (await Errors(AgentTestData.State() with { DayAreas = [far] })).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
+        (await Errors(AgentTestData.State() with { DayAreas = [far with { DayNumber = 2 }] })).Should().BeEmpty();
+        (await Errors(AgentTestData.State() with { OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m, RadiusKm = 3m, DayAreas = [near] })).Should().BeEmpty();
+    }
+
+    // TEST-21: A widened meal accepts a dish within its wider radius; another meal of that day, or a dish past that radius, is still rejected.
+    /// <summary>Ensures widening one meal never loosens the rest of the day, and passes the dish the search issued.</summary>
+    [Fact]
+    public async Task ValidateAsync_WidenedMeal_AppliesOnlyToThatMeal()
+    {
+        var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish());
+        // Món nằm cách tâm khoảng 5,6 km: ngoài 3 km, trong 8 km.
+        var place = new AgentDayArea(1, "Gần", 16.10m, 108.2m, 3m);
+        async Task<string[]> Errors(AgentWidenedMeal[]? widened)
+        {
+            var state = AgentTestData.State() with { DayAreas = [place], WidenedMeals = widened };
+            var snapshot = new AgentSnapshot(state, [AgentTestData.Item()], [new(null, null, [1], null, state)]);
+            return (await validator.ValidateAsync(snapshot, null, false, false, default, [new(null, null, [1], null, state)])).Validation.Errors;
+        }
+
+        (await Errors(null)).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
+        (await Errors([new(1, "lunch", 8m)])).Should().BeEmpty();
+        (await Errors([new(1, "dinner", 8m)])).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
+        (await Errors([new(1, "lunch", 5m)])).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {

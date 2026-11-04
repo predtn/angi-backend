@@ -12,7 +12,7 @@ using Moq;
 
 namespace ANGI.UnitTests.Application.Services.Agent;
 
-/// <summary>Verifies tool allowlisting, trusted identity, filtering and reco-result validation.</summary>
+/// <summary>Verifies tool allowlisting, trusted identity, filtering, reco-result validation and ordering dishes around a named place.</summary>
 public sealed class AgentToolExecutorTests
 {
     // TEST-01: Selection scope and allowed meal slots never widen a grant; covers full, day and slot scopes.
@@ -535,7 +535,7 @@ public sealed class AgentToolExecutorTests
         context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
     }
 
-    // TEST-25: A restaurant serving only dinner moves off a meal the backend chose; a meal the user named stays and reports no candidates.
+    // TEST-22: A restaurant serving only dinner moves off a meal the backend chose; a meal the user named stays and reports no candidates.
     /// <summary>Fixes a replacement restaurant getting stuck on the lunch position its predecessor was placed on.</summary>
     [Theory]
     [InlineData("đổi sang quán Lẩu Bò", "dinner")]
@@ -558,7 +558,7 @@ public sealed class AgentToolExecutorTests
         context.State.MealRequests.Single().MealSlot.Should().Be(expected);
     }
 
-    // TEST-22: An unresolved name keeps its wide request so the ranking step reports it as a catalog question.
+    // TEST-23: An unresolved name keeps its wide request so the ranking step reports it as a catalog question.
     /// <summary>Ensures placement never hides a dish the catalog does not have.</summary>
     [Fact]
     public async Task ExecuteAsync_UnknownNamedDish_StaysUnplacedAndAsks()
@@ -578,7 +578,7 @@ public sealed class AgentToolExecutorTests
         context.ToolNotice.Should().Contain("Phở Sao Hỏa");
     }
 
-    // TEST-23: Pointing words are refused as a catalog name before any lookup and never become a "not found" notice.
+    // TEST-24: Pointing words are refused as a catalog name before any lookup and never become a "not found" notice.
     /// <summary>Stops "cái này" from producing a false claim that the dish is not in the catalog.</summary>
     [Fact]
     public async Task ExecuteAsync_SearchPointingWords_ReturnsArgumentErrorWithoutLookup()
@@ -597,7 +597,7 @@ public sealed class AgentToolExecutorTests
         catalog.VerifyNoOtherCalls();
     }
 
-    // TEST-24: Dishes the user replaced earlier are not ranked again; when they are the only candidates they are still offered.
+    // TEST-25: Dishes the user replaced earlier are not ranked again; when they are the only candidates they are still offered.
     /// <summary>Prevents repeated "món khác" from cycling back while never leaving a meal without candidates.</summary>
     [Theory]
     [InlineData(new[] { "Bún" }, new[] { 1 })]
@@ -616,6 +616,249 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(expected);
     }
 
+    // TEST-26: One full search splits days with different places, each searched around its own place, while a day without one searches the whole province and keeps its own grant.
+    /// <summary>Ensures the model needs one call for the whole itinerary and that candidates of one day never authorize another.</summary>
+    [Fact]
+    public async Task ExecuteAsync_ItineraryDays_SearchEachDayAroundItsPlace()
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"), Named(3, "Cơm"));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .Callback((DishCandidateFilter filter, int _, CancellationToken _) => filters.Add(filter))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.Area?.Latitude == 16.05m ? new[] { 1 } : filter.Area?.Latitude == 16.06m ? new[] { 2 } : new[] { 3 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 3, MealSlots = ["lunch"], DayAreas = [new(1, "A", 16.05m, 108.2m, 3m), new(2, "B", 16.06m, 108.2m, 5m)] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        filters.Select(filter => filter.Area?.RadiusKm).Should().Equal(3m, 5m, null);
+        context.Grants.Select(grant => (grant.DayNumber, grant.DishIds.Single())).Should().Equal(((short?)1, 1), ((short?)2, 2), ((short?)3, 3));
+        result.GetProperty("scopedResults").GetArrayLength().Should().Be(3);
+    }
+
+    // TEST-27: A place the itinerary holds is refused as a catalog name before any lookup, so the reply never claims it is "not found"; other names are still searched.
+    /// <summary>Stops the failure of the reported conversation, where "Hoàn Kiếm" was searched as a restaurant name.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SearchItineraryPlace_ReturnsArgumentErrorWithoutLookup()
+    {
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        var context = AgentTestData.Context();
+        context.State = context.State with { DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 3m)] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "hoàn kiếm"), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        context.ToolNotice.Should().BeNull();
+        catalog.VerifyNoOtherCalls();
+    }
+
+    // TEST-28: A named place offers the nearer of two dishes with nearly equal scores first, asks reco for the deep list, and keeps a clearly better taste on top; covers a day of the itinerary and a whole-trip area.
+    /// <summary>Ensures the near-first rule reaches the model's list and the grant order the backend repairs from.</summary>
+    [Theory]
+    [InlineData("day")]
+    [InlineData("trip")]
+    public async Task ExecuteAsync_NamedPlace_PrefersNearerAmongNearlyEqual(string area)
+    {
+        var (tools, reco, context) = NearbyScenario();
+        context.State = context.State with { MealSlots = ["lunch"], NumDays = 1 };
+        context.State = area == "day"
+            ? context.State with { DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 5m)] }
+            : context.State with { OriginMode = "pinned", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Hoàn Kiếm", RadiusKm = 5m, NamedAreaLabel = "Hoàn Kiếm" };
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(2, 1, 3);
+        context.Grants.Single().DishIds.Should().Equal(2, 1, 3);
+        reco.Verify(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), new AgentLimits().MaxRanked, It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-29: Every case already handled keeps reco's order and depth; covers the whole province, GPS, a pinned map origin and a label that no longer matches the origin.
+    /// <summary>Guards the user's rule that this new case must not change what the system already does.</summary>
+    [Theory]
+    [InlineData("province")]
+    [InlineData("gps")]
+    [InlineData("pinned")]
+    [InlineData("stale-label")]
+    public async Task ExecuteAsync_NoNamedPlace_KeepsRecoOrder(string area)
+    {
+        var (tools, reco, context) = NearbyScenario();
+        context.State = context.State with { MealSlots = ["lunch"], NumDays = 1 };
+        context.State = area switch
+        {
+            "gps" => context.State with { OriginMode = "gps", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Vị trí hiện tại", RadiusKm = 5m },
+            "pinned" => context.State with { OriginMode = "pinned", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Nhà", RadiusKm = 5m },
+            "stale-label" => context.State with { OriginMode = "gps", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Vị trí hiện tại", RadiusKm = 5m, NamedAreaLabel = "Hoàn Kiếm" },
+            _ => context.State
+        };
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2, 3);
+        reco.Verify(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), 30, It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-30: A rating fallback has no taste score to compare, so a named place keeps its order.
+    /// <summary>Ensures distance never replaces the rating order when reco did not rank the dishes.</summary>
+    [Fact]
+    public async Task ExecuteAsync_NamedPlaceWithRatingFallback_KeepsOrder()
+    {
+        var (tools, _, context) = NearbyScenario();
+        context.State = context.State with { MealSlots = ["lunch"], NumDays = 1, Preferences = null, DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 5m)] };
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2, 3);
+    }
+
+    // TEST-31: A named place sends reco the nearest branch of a dish; without one the first-rated branch stays, as before.
+    /// <summary>Ensures the same dish is offered close to the user only in the new case.</summary>
+    [Theory]
+    [InlineData(true, 2)]
+    [InlineData(false, 1)]
+    public async Task ExecuteAsync_SameDishBranches_NearestOnlyForNamedPlace(bool named, int expected)
+    {
+        var far = Named(1, "Phở"); far.Restaurant.Latitude = 16.08m;
+        var near = Named(2, "Phở"); near.Restaurant.Latitude = 16.051m;
+        var fixture = AgentTestData.Validator(far, near);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch"], NumDays = 1, DayAreas = named ? [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 5m)] : null };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Single().GetProperty("dishId").GetInt32().Should().Be(expected);
+    }
+
+    // TEST-32: A meal with no dish in its named place searches further step by step, stops at the first step with a dish and records it; the day's other meals keep their radius.
+    /// <summary>Implements the chosen rule: only the empty meal widens, with no question and no extra model call.</summary>
+    [Fact]
+    public async Task ExecuteAsync_MealWithoutDishInNamedPlace_WidensOnlyThatMeal()
+    {
+        var (tools, filters, context) = WideningScenario((filter) => filter.CompatibleMealTimeCode == "lunch" || filter.Area?.RadiusKm >= 8m ? new[] { filter.CompatibleMealTimeCode == "lunch" ? 2 : 1 } : []);
+        context.State = context.State with { NumDays = 1, MealSlots = ["breakfast", "lunch"], DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 3m)] };
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        filters.Where(filter => filter.CompatibleMealTimeCode == "breakfast").Select(filter => filter.Area!.RadiusKm).Should().Equal(3m, 5m, 8m);
+        filters.Where(filter => filter.CompatibleMealTimeCode == "lunch").Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
+        context.State.WidenedMeals.Should().Equal(new AgentWidenedMeal(1, "breakfast", 8m));
+        context.Grants.Single(grant => grant.MealSlot == "breakfast").Constraints.WidenedMeals.Should().Equal(new AgentWidenedMeal(1, "breakfast", 8m));
+        result.GetProperty("mealCoverage").EnumerateArray().Should().OnlyContain(meal => meal.GetProperty("availableCount").GetInt32() > 0);
+    }
+
+    // TEST-33: The same search keeps the old behaviour everywhere else; covers the whole province, GPS and a map origin.
+    /// <summary>Guards the user's rule that the new case must not change meals already handled: they report a gap instead of widening.</summary>
+    [Theory]
+    [InlineData("province")]
+    [InlineData("gps")]
+    [InlineData("pinned")]
+    public async Task ExecuteAsync_EmptyMealWithoutNamedPlace_DoesNotWiden(string area)
+    {
+        var (tools, filters, context) = WideningScenario(_ => []);
+        context.State = context.State with { NumDays = 1, MealSlots = ["breakfast"] };
+        context.State = area switch
+        {
+            "gps" => context.State with { OriginMode = "gps", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Vị trí hiện tại", RadiusKm = 3m },
+            "pinned" => context.State with { OriginMode = "pinned", OriginLatitude = 16.05m, OriginLongitude = 108.2m, OriginLabel = "Nhà", RadiusKm = 3m },
+            _ => context.State
+        };
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        filters.Should().ContainSingle();
+        context.State.WidenedMeals.Should().BeNull();
+    }
+
+    // TEST-34: With nothing even at the largest radius the meal is reported as a real gap, and no wider radius is recorded.
+    /// <summary>Ensures widening has an end, and that the existing coverage question still covers the last case.</summary>
+    [Fact]
+    public async Task ExecuteAsync_NoDishAtLargestRadius_ReportsGap()
+    {
+        var (tools, filters, context) = WideningScenario(_ => []);
+        context.State = context.State with { NumDays = 1, MealSlots = ["breakfast"], DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 30m)] };
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        filters.Select(filter => filter.Area!.RadiusKm).Should().Equal(30m, 50m);
+        context.State.WidenedMeals.Should().BeNull();
+        context.MealCoverage.Single().AvailableCount.Should().Be(0);
+    }
+
+    // TEST-35: A later search that finds dishes inside the radius drops the recorded widening, and only for that meal.
+    /// <summary>Ensures a stale wider radius cannot keep allowing far dishes once nearer ones exist.</summary>
+    [Fact]
+    public async Task ExecuteAsync_DishesBackInRadius_ClearsThatMealsWidening()
+    {
+        var (tools, _, context) = WideningScenario(_ => new[] { 1 });
+        context.State = context.State with { NumDays = 1, MealSlots = ["lunch"], DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 3m)],
+            WidenedMeals = [new(1, "lunch", 8m), new(1, "dinner", 12m)] };
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        context.State.WidenedMeals.Should().Equal(new AgentWidenedMeal(1, "dinner", 12m));
+    }
+
+    // TEST-36: A dish requested by name is not searched further out, because a wider circle cannot make a different dish the one the user asked for.
+    /// <summary>Keeps the existing "thiếu món" answer for named dishes inside a named place.</summary>
+    [Fact]
+    public async Task ExecuteAsync_NamedDishMissingInPlace_DoesNotWiden()
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .Callback((DishCandidateFilter filter, int _, CancellationToken _) => filters.Add(filter)).ReturnsAsync(Array.Empty<int>());
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", It.IsAny<string?>(), 21, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new AgentCatalogMatch(1, "Phở", 1, "Quán", "Da Nang", "Địa chỉ", true)]);
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = 1, MealSlots = ["breakfast", "lunch"], DayAreas = [new(1, "Hoàn Kiếm", 16.05m, 108.2m, 3m)], MealRequests = [new(1, "lunch", "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        filters.Where(filter => filter.Area is not null && filter.CompatibleMealTimeCode == "lunch").Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
+        (context.State.WidenedMeals ?? []).Should().NotContain(meal => meal.MealSlot == "lunch");
+    }
+
+    /// <summary>Builds a search that answers from the given rule and records every filter it received.</summary>
+    private static (AgentToolExecutor Tools, List<DishCandidateFilter> Filters, AgentContext Context) WideningScenario(Func<DishCandidateFilter, int[]> answer)
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .Callback((DishCandidateFilter filter, int _, CancellationToken _) => filters.Add(filter))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => answer(filter));
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        return (tools, filters, AgentTestData.Context());
+    }
+
+    /// <summary>Builds dishes 1 (far, best), 2 (near, nearly equal) and 3 (near, clearly worse) with a personalized reco result.</summary>
+    private static (AgentToolExecutor Tools, Mock<IRecommendationService> Reco, AgentContext Context) NearbyScenario()
+    {
+        var far = Named(1, "Phở"); far.Restaurant.Latitude = 16.08m;
+        var near = Named(2, "Bún"); near.Restaurant.Latitude = 16.051m;
+        var worse = Named(3, "Cơm"); worse.Restaurant.Latitude = 16.05m;
+        var fixture = AgentTestData.Validator(far, near, worse);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 3 });
+        var reco = new Mock<IRecommendationService>();
+        reco.Setup(x => x.RecommendConversationAsync(3, It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RecommendationResult(Guid.NewGuid(), [1, 2, 3], [], [.9, .87, .6], "conversation"));
+        var context = AgentTestData.Context();
+        context.State = context.State with { Preferences = new() { Initialized = true } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        return (tools, reco, context);
+    }
+
     /// <summary>Builds a public dish with a fixed name and the given tags, for name de-duplication and meal-pool cases.</summary>
     private static ANGI.Domain.Entities.Dish Named(int id, string name, params ANGI.Domain.Entities.Tag[] tags)
     {
@@ -628,4 +871,77 @@ public sealed class AgentToolExecutorTests
     private static AgentRecommendationInput Input() => new(null, "Da Nang", "full", null, null, [], [], []);
     /// <summary>Serializes a complete strict tool call using the public camel-case contract.</summary>
     private static AgentToolCall Call(AgentRecommendationInput input) => new("c", "get_recommendation", JsonSerializer.SerializeToElement(input, AgentJson.Options));
+
+    private static readonly NearbyArea Center = new(21.03m, 105.85m, 5m);
+
+    // TEST-37: Inside one band the nearer dish comes first; a dish clearly better on taste stays ahead however far it is.
+    /// <summary>Ensures the rule the user chose: a near dish only overtakes a dish of about the same taste.</summary>
+    [Fact]
+    public void OrderNearby_NearlyEqualScores_NearerFirst_ClearlyBetterTasteStaysAhead()
+    {
+        var far = At(1, 0.04m);
+        var near = At(2, 0.001m);
+        var clearlyWorseButNext = At(3, 0m);
+
+        var ordered = AgentToolExecutor.OrderNearby([far, near, clearlyWorseButNext], new Dictionary<int, double> { [1] = .90, [2] = .87, [3] = .70 }, Center);
+
+        ordered.Select(dish => dish.Id).Should().Equal(2, 1, 3);
+    }
+
+    // TEST-38: The band edge: exactly under the limit shares a band with the best dish, at the limit starts the next band; covers the boundary both ways.
+    /// <summary>Pins the meaning of "gần bằng nhau" so a later change to it is deliberate.</summary>
+    [Theory]
+    [InlineData(.9, new[] { 2, 1 })]
+    [InlineData(.851, new[] { 2, 1 })]
+    [InlineData(.84, new[] { 1, 2 })]
+    public void OrderNearby_BandEdge_DecidesWhetherDistanceCounts(double second, int[] expected)
+    {
+        var ordered = AgentToolExecutor.OrderNearby([At(1, 0.04m), At(2, 0.001m)], new Dictionary<int, double> { [1] = .9, [2] = second }, Center);
+
+        ordered.Select(dish => dish.Id).Should().Equal(expected);
+    }
+
+    // TEST-39: Equal scores, as for an account with no taste survey, are ordered by distance alone; equal distance keeps the ranking.
+    /// <summary>Ensures long ties cannot hide a near restaurant, and the order stays stable when distance cannot decide.</summary>
+    [Fact]
+    public void OrderNearby_AllTied_UsesDistanceThenKeepsRanking()
+    {
+        var scores = new Dictionary<int, double> { [1] = .44, [2] = .44, [3] = .44 };
+
+        AgentToolExecutor.OrderNearby([At(1, 0.03m), At(2, 0.01m), At(3, 0.02m)], scores, Center).Select(dish => dish.Id).Should().Equal(2, 3, 1);
+        AgentToolExecutor.OrderNearby([At(1, 0.01m), At(2, 0.01m)], new Dictionary<int, double> { [1] = .44, [2] = .44 }, Center).Select(dish => dish.Id).Should().Equal(1, 2);
+    }
+
+    // TEST-40: Dishes with no score stay after scored ones in their order; a list with none is returned unchanged; an empty list stays empty.
+    /// <summary>Ensures missing data never invents a position.</summary>
+    [Fact]
+    public void OrderNearby_MissingScores_StayLastInOrder()
+    {
+        var scores = new Dictionary<int, double> { [3] = .5 };
+
+        AgentToolExecutor.OrderNearby([At(1, 0m), At(2, 0m), At(3, 0.04m)], scores, Center).Select(dish => dish.Id).Should().Equal(3, 1, 2);
+        AgentToolExecutor.OrderNearby([At(1, 0.04m), At(2, 0m)], new Dictionary<int, double>(), Center).Select(dish => dish.Id).Should().Equal(1, 2);
+        AgentToolExecutor.OrderNearby([], new Dictionary<int, double>(), Center).Should().BeEmpty();
+    }
+
+    // TEST-41: Branches of one dish reduce to the nearest while the dish keeps its first position; different dishes are untouched.
+    /// <summary>Ensures "Phở" near the place is offered rather than the better-rated branch across the city.</summary>
+    [Fact]
+    public void NearestBranches_KeepsNearestAtFirstPosition()
+    {
+        var farBranch = At(1, 0.04m); farBranch.Name = "Phở";
+        var other = At(2, 0.02m); other.Name = "Bún";
+        var nearBranch = At(3, 0.001m); nearBranch.Name = "Phở";
+
+        AgentToolExecutor.NearestBranches([farBranch, other, nearBranch], dish => dish.Name, Center).Select(dish => dish.Id).Should().Equal(3, 2);
+    }
+
+    /// <summary>Builds a dish whose restaurant lies the given degrees north of the centre.</summary>
+    private static ANGI.Domain.Entities.Dish At(int id, decimal offset)
+    {
+        var dish = AgentTestData.Dish(id);
+        dish.Restaurant.Latitude = Center.Latitude + offset;
+        dish.Restaurant.Longitude = Center.Longitude;
+        return dish;
+    }
 }

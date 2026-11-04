@@ -2,6 +2,7 @@ using System.Globalization;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Validators.Agent;
 
@@ -41,6 +42,14 @@ public static class AgentReplyBuilder
         var lines = new List<string> { $"{opener ?? "Xong rồi!"} {Summary(snapshot, source)}" };
         // Thẻ đề xuất chỉ liệt kê món đã có, nên bữa còn trống phải được nói rõ ở đây.
         if (EmptyMeals(snapshot) is { Length: > 0 } empty) lines.Add($"Còn thiếu món cho {string.Join("; ", empty)}.");
+        if (snapshot.State.DayAreas is { Length: > 0 } areas)
+            lines.Add($"Theo hành trình của bạn: {string.Join("; ", areas.OrderBy(x => x.DayNumber).Select(AgentItineraryPolicy.Describe))}" +
+                (areas.Length < snapshot.State.NumDays ? $"; các ngày còn lại chọn trong toàn {Safe(snapshot.State.Province)}." : "."));
+        // Điểm chấm trên bản đồ là giới hạn tìm quán: nói rõ để người dùng biết vì sao món đều ở quanh đó.
+        if (snapshot.State is { OriginMode: "pinned", NamedAreaLabel: null, RadiusKm: { } pinnedKm, DayAreas: null })
+            lines.Add($"Mình chọn quán trong khoảng {pinnedKm:0} km quanh điểm bạn đã chấm trên bản đồ.");
+        // Bữa bị nới xa hơn phải được nói rõ: người dùng có thể đang mong quán sát nơi họ đến.
+        lines.AddRange(AgentItineraryPolicy.WidenedNotes(snapshot));
         if (snapshot.Items.Any(x => !x.RequestId.HasValue)) lines.Add(RatingFallbackNote);
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) lines.Add($"Khẩu vị áp dụng: {tastes}.");

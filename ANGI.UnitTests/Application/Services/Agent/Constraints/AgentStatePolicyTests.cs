@@ -67,4 +67,64 @@ public sealed class AgentStatePolicyTests
         policy.Accept(current, AgentTestData.State()).PlanningIntake.Should().Be(AgentIntakePolicy.Details);
         policy.Accept(AgentTestData.State(), current).PlanningIntake.Should().BeNull();
     }
+
+    // TEST-05: Day places stay backend-owned: the model can neither drop nor write them; a shorter trip drops later days and a new province drops them all.
+    /// <summary>Verifies the itinerary survives every model state, whose schema has no such field, and never outlives the trip it belongs to.</summary>
+    [Fact]
+    public void Accept_DayAreas_StayBackendOwned()
+    {
+        var policy = new AgentStatePolicy();
+        AgentDayArea[] areas = [new(1, "Hoàn Kiếm", 21.03m, 105.85m, 3m), new(2, "Lăng Bác", 21.04m, 105.83m, 3m)];
+        var current = AgentTestData.State() with { DayAreas = areas };
+
+        policy.Accept(current, AgentTestData.State()).DayAreas.Should().Equal(areas);
+        policy.Accept(AgentTestData.State(), current).DayAreas.Should().BeNull();
+        policy.Accept(current, current with { BudgetAmount = 100000 }).DayAreas.Should().Equal(areas);
+        var shorter = () => policy.Accept(current, AgentTestData.State() with { NumDays = 1 });
+        shorter.Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>().Which.Proposed.DayAreas.Should().Equal(areas[0]);
+        var moved = () => policy.Accept(current, AgentTestData.State() with { Province = "Huế" });
+        moved.Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>().Which.Proposed.DayAreas.Should().BeNull();
+    }
+
+    // TEST-06: The waiting "which day" place stays backend-owned: a model state can neither drop nor write it.
+    /// <summary>Verifies a model reply in between cannot lose or invent the place the user named.</summary>
+    [Fact]
+    public void Accept_PendingDayArea_StaysBackendOwned()
+    {
+        var policy = new AgentStatePolicy();
+        var pending = new AgentPlaceMatch("Da Nang", "Cầu Giấy", 21.03m, 105.79m, 3m);
+        var current = AgentTestData.State() with { PendingDayArea = pending };
+
+        policy.Accept(current, AgentTestData.State()).PendingDayArea.Should().Be(pending);
+        policy.Accept(AgentTestData.State(), current).PendingDayArea.Should().BeNull();
+    }
+
+    // TEST-07: A widened radius stays backend-owned: a model can neither drop nor write it, a shorter trip drops later days, and a new province drops all.
+    /// <summary>Verifies only the backend's own search can allow a meal to reach further out.</summary>
+    [Fact]
+    public void Accept_WidenedMeals_StayBackendOwned()
+    {
+        var policy = new AgentStatePolicy();
+        AgentWidenedMeal[] widened = [new(1, "lunch", 8m), new(2, "lunch", 8m)];
+        var current = AgentTestData.State() with { WidenedMeals = widened };
+
+        policy.Accept(current, AgentTestData.State()).WidenedMeals.Should().Equal(widened);
+        policy.Accept(AgentTestData.State(), current).WidenedMeals.Should().BeNull();
+        var shorter = () => policy.Accept(current, AgentTestData.State() with { NumDays = 1 });
+        shorter.Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>().Which.Proposed.WidenedMeals.Should().Equal(widened[0]);
+        var moved = () => policy.Accept(current, AgentTestData.State() with { Province = "Huế" });
+        moved.Should().Throw<ANGI.Application.Common.Exceptions.AgentStateChangeRequiredException>().Which.Proposed.WidenedMeals.Should().BeNull();
+    }
+
+    // TEST-08: The named-area label stays backend-owned, so a model or client cannot turn a GPS or map origin into a named area.
+    /// <summary>Verifies only the backend's reading of the user's words can switch on the near-first order.</summary>
+    [Fact]
+    public void Accept_NamedAreaLabel_StaysBackendOwned()
+    {
+        var policy = new AgentStatePolicy();
+        var current = AgentTestData.State() with { NamedAreaLabel = "Cầu Giấy" };
+
+        policy.Accept(current, AgentTestData.State()).NamedAreaLabel.Should().Be("Cầu Giấy");
+        policy.Accept(AgentTestData.State(), current).NamedAreaLabel.Should().BeNull();
+    }
 }

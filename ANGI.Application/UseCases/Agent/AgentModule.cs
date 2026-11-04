@@ -3,6 +3,7 @@ using ANGI.Application.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Agent.CleanupConversations;
 using ANGI.Application.UseCases.Agent.ConfirmProposal;
@@ -29,6 +30,7 @@ public static class AgentModule
         services.AddScoped<AgentProposalCommitter>();
         services.AddScoped<AgentToolExecutor>();
         services.AddScoped<AgentRouteEstimator>();
+        services.AddScoped<AgentPlaceResolver>();
         services.AddScoped<AgentOrchestrator>();
         services.AddScoped<ICreateAgentConversationUseCase, CreateAgentConversationUseCase>();
         services.AddScoped<IGetAgentConversationUseCase, GetAgentConversationUseCase>();

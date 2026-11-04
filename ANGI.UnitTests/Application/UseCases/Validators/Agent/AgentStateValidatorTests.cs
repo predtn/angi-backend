@@ -66,4 +66,36 @@ public sealed class AgentStateValidatorTests
         new AgentStateValidator().Validate(state).IsValid.Should().BeTrue();
         new AgentStateValidator().Validate(new AgentState()).IsValid.Should().BeTrue();
     }
+
+    // TEST-03: Day places must fit the trip and the map; covers a valid one, day 0, a day past the trip, duplicates, blank and long labels, bad coordinates and radius limits.
+    /// <summary>Ensures a client or stored state can never carry an impossible day place into the search.</summary>
+    [Theory]
+    [InlineData(1, "Hoàn Kiếm", 21, 105, 3, true)]
+    [InlineData(2, "Hoàn Kiếm", -90, -180, 1, true)]
+    [InlineData(2, "Hoàn Kiếm", 90, 180, 50, true)]
+    [InlineData(0, "Hoàn Kiếm", 21, 105, 3, false)]
+    [InlineData(3, "Hoàn Kiếm", 21, 105, 3, false)]
+    [InlineData(1, " ", 21, 105, 3, false)]
+    [InlineData(1, "Hoàn Kiếm", 91, 105, 3, false)]
+    [InlineData(1, "Hoàn Kiếm", 21, 181, 3, false)]
+    [InlineData(1, "Hoàn Kiếm", 21, 105, 0, false)]
+    [InlineData(1, "Hoàn Kiếm", 21, 105, 51, false)]
+    public void Validate_DayAreas_FollowTripAndMapLimits(int day, string label, int latitude, int longitude, int radius, bool valid)
+    {
+        var state = new AgentState { NumDays = 2, DayAreas = [new((short)day, label, latitude, longitude, radius)] };
+
+        new AgentStateValidator().Validate(state).IsValid.Should().Be(valid);
+    }
+
+    // TEST-04: One place per day, and a label longer than the limit is refused.
+    /// <summary>Ensures duplicated days and oversized labels are rejected like every other backend-owned list.</summary>
+    [Fact]
+    public void Validate_DayAreas_RejectDuplicatesAndLongLabels()
+    {
+        var area = new AgentDayArea(1, "Hoàn Kiếm", 21m, 105m, 3m);
+
+        new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area, area] }).IsValid.Should().BeFalse();
+        new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 201) }] }).IsValid.Should().BeFalse();
+        new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 200) }] }).IsValid.Should().BeTrue();
+    }
 }

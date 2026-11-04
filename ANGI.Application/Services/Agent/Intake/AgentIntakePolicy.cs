@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Places;
 
 namespace ANGI.Application.Services.Agent.Intake;
 
@@ -14,10 +15,13 @@ public static class AgentIntakePolicy
 {
     public const string Details = "details";
     public const string Preferences = "preferences";
+    /// <summary>Stage after a bare province: the whole province, an area, an itinerary or the current location.</summary>
+    public const string Scope = "scope";
     /// <summary>Nearest-restaurant search limit; matches the largest radius the state validator accepts.</summary>
     public const decimal MaxNearbyKm = 50m;
     public const decimal DefaultRadiusKm = 10m;
-    public const string PlaceQuestion = "Bạn muốn trải nghiệm ẩm thực ở đâu? Bạn nhắn tên tỉnh/thành phố hoặc dùng vị trí hiện tại nhé.";
+    public const string PlaceQuestion = "Bạn muốn trải nghiệm ẩm thực ở đâu? Bạn có thể nhắn tên tỉnh/thành phố để mình chọn quán trong toàn thành phố, một khu như Cầu Giấy, " +
+        "hành trình từng ngày như “Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác”, hoặc dùng vị trí hiện tại nhé.";
     public const string LocationNeeded = "Mình chưa lấy được vị trí hiện tại của bạn. Bạn cho phép truy cập vị trí rồi bấm “Dùng vị trí hiện tại”, hoặc nhắn tên tỉnh/thành phố nhé.";
     public const string PreferencesQuestion = "Bạn có khẩu vị riêng hay yêu cầu gì cho từng ngày, từng bữa không? Ví dụ: ít cay, bữa tối ngày 1 ăn hải sản. " +
         "Nếu không có, bạn nhắn “không” để mình lập lịch luôn nhé.";
@@ -30,6 +34,8 @@ public static class AgentIntakePolicy
     private static readonly Regex HereWords = new(@"\b(?:vi tri (?:hien tai|cua toi|cua minh)|gan day|quanh day|gan toi|gan minh|cho (?:toi|minh) dang o|noi (?:toi|minh) dang o)\b", RegexOptions.CultureInvariant);
     private static readonly Regex PreferenceWords = new(
         @"\b(?:bua (?:sang|trua|toi|phu|khuya)|ngay \d+ (?:an|chi)|mon|quan|an chay|hai san|khong an|di ung|khau vi|an vat|do uong)\b", RegexOptions.CultureInvariant);
+    // Trả lời câu hỏi phạm vi là không cần khu cụ thể: "toàn thành phố", "cả tỉnh", "không", "đâu cũng được".
+    private static readonly Regex WholeProvinceWords = new(@"\b(?:toan|ca)\s+(?:thanh pho|tinh|tp)\b|^(?:khong|ko|binh thuong|tuy|tuy ban|dau cung duoc|o dau cung duoc|sao cung duoc|mac dinh)(?:\s+(?:nhe|nha|a|ban))*$", RegexOptions.CultureInvariant);
     private static readonly (string Alias, string Name)[] Aliases =
         [("hn", "ha noi"), ("hcm", "ho chi minh"), ("tphcm", "ho chi minh"), ("tp hcm", "ho chi minh"), ("sai gon", "ho chi minh"), ("saigon", "ho chi minh")];
 
@@ -44,17 +50,21 @@ public static class AgentIntakePolicy
         context.State.OriginLongitude.HasValue && string.IsNullOrWhiteSpace(context.State.Province);
 
     /// <summary>Reads the current message into a proposed state, or returns null when it neither starts nor continues an intake.</summary>
-    public static AgentIntakeRead? Read(AgentContext context, IReadOnlyCollection<string> provinces, string? nearby)
+    public static AgentIntakeRead? Read(AgentContext context, IReadOnlyCollection<string> provinces, string? nearby, AgentTripPlaces? trip = null, bool askScope = false)
     {
         var state = context.State;
         var text = Plain(context.Request.Content);
         // Câu trả lời cho câu hỏi khẩu vị/yêu cầu kết thúc phần hỏi: lượt này lập lịch, nội dung trả lời do model đọc.
-        if (state.PlanningIntake == Preferences) return new(state, state, false, false, null);
-        var named = FindProvince(text, provinces);
+        if (state.PlanningIntake == Preferences)
+        {
+            var planned = trip is null ? state : AgentItineraryPolicy.Apply(state, trip);
+            return new(planned, planned, false, false, null);
+        }
+        var named = FindProvince(text, provinces) ?? trip?.Province;
         var located = NeedsNearby(context);
         var opened = state.PlanningIntake is not null;
-        if (!opened && (context.ReplanAfterConfirmation || !located && !PlanningWords.IsMatch(text) && (named is null || StatesPreference(text)))) return null;
-        var current = state with { PlanningIntake = Details };
+        if (!opened && (context.ReplanAfterConfirmation || trip is null && !located && !PlanningWords.IsMatch(text) && (named is null || StatesPreference(text)))) return null;
+        var current = (trip is null ? state : AgentItineraryPolicy.Apply(state, trip)) with { PlanningIntake = Details };
         // Có tọa độ nhưng trong bán kính không có quán nào: không gán tỉnh gần đúng, bỏ tọa độ và hỏi lại địa điểm.
         if (located && nearby is null && named is null)
             return new(current, current, false, false, $"Quanh vị trí hiện tại của bạn chưa có quán nào trên ANGI. {Coverage(provinces)} {PlaceQuestion}");
@@ -63,13 +73,43 @@ public static class AgentIntakePolicy
         var budgetKnown = state.BudgetAmount.HasValue || state.BudgetUnrestricted;
         var request = AgentPendingPlanningPolicy.CaptureAnswer(state.PendingPlanningRequest, context.Request.Content, !budgetKnown && state.NumDays.HasValue);
         var province = named ?? (located ? nearby : state.Province);
-        var proposed = AgentPendingPlanningPolicy.Apply(current with { Province = province, RadiusKm = located ? DefaultRadiusKm : state.RadiusKm }, request);
+        var proposed = AgentPendingPlanningPolicy.Apply(current with { Province = province, RadiusKm = located ? DefaultRadiusKm : current.RadiusKm }, request);
         if (!budgetKnown && AgentPendingPlanningPolicy.StatesUnrestricted(context.Request.Content))
             proposed = proposed with { BudgetUnrestricted = true };
-        var progress = province != state.Province || proposed.NumDays != state.NumDays || proposed.BudgetAmount != state.BudgetAmount ||
+        var answeredScope = state.PlanningIntake == Scope;
+        var facts = proposed.NumDays != state.NumDays || proposed.BudgetAmount != state.BudgetAmount ||
             proposed.BudgetUnrestricted != state.BudgetUnrestricted || request.DailyBudget != state.PendingPlanningRequest?.DailyBudget;
-        return new(current with { PendingPlanningRequest = request }, proposed with { PendingPlanningRequest = request }, progress, province != state.Province, null);
+        var whole = answeredScope && StatesWholeProvince(context.Request.Content, province);
+        var progress = trip is not null || province != state.Province || facts || whole || answeredScope && current.OriginLatitude.HasValue;
+        var note = trip is not null ? AgentItineraryPolicy.Note(proposed, trip) : answeredScope ? ScopeNote(proposed, whole || facts) : null;
+        // Chỉ nói tên tỉnh, chưa rõ phạm vi: hỏi một lần. Đã có khu, hành trình hoặc tọa độ thì không có gì để hỏi;
+        // tin nhắn đã nêu số ngày, ngân sách hay khẩu vị vẫn đi theo luồng cũ, chọn trong toàn tỉnh.
+        var needsScope = askScope && province != state.Province && !string.IsNullOrWhiteSpace(province) && trip is null && !located &&
+            !current.OriginLatitude.HasValue && current.DayAreas is null && !facts && !StatesPreference(context.Request.Content);
+        return new(current with { PendingPlanningRequest = request }, proposed with { PendingPlanningRequest = request }, progress, province != state.Province, null, note, needsScope);
     }
+
+    /// <summary>Confirms how the scope question was answered; a reply it could not place keeps the whole province, so the user is never stuck on this question.</summary>
+    private static string ScopeNote(AgentState state, bool understood)
+    {
+        var province = AgentReplyBuilder.Safe(state.Province);
+        if (state.OriginLatitude.HasValue && state.RadiusKm is { } radius) return $"Mình sẽ ưu tiên quán trong khoảng {radius:0} km quanh vị trí của bạn.";
+        return understood ? $"Mình sẽ chọn quán trong toàn {province}."
+            : $"Mình chưa nhận ra khu này nên sẽ chọn quán trong toàn {province}; muốn đổi thì bạn nhắn “ở” kèm tên khu nhé.";
+    }
+
+    private static string ScopeQuestion(string province) =>
+        $"Bạn muốn mình chọn quán trong toàn {AgentReplyBuilder.Safe(province)}, quanh một khu như Cầu Giấy, theo hành trình từng ngày như “Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác”, hay quanh vị trí hiện tại?";
+
+    /// <summary>True when the reply asks for the whole province rather than a place inside it.</summary>
+    internal static bool StatesWholeProvince(string message, string? province)
+    {
+        var text = Plain(message);
+        return WholeProvinceWords.IsMatch(text) || province is not null && Regex.IsMatch(text, $@"\b(?:toan|ca)\s+{Regex.Escape(Plain(province))}\b", RegexOptions.CultureInvariant);
+    }
+
+    /// <summary>True when the message refers to the user's own position, which only coordinates can answer.</summary>
+    internal static bool StatesHere(string message) => HereWords.IsMatch(Plain(message));
 
     /// <summary>Decides the turn after the proposed state was accepted: the next question, or closing the intake.</summary>
     public static AgentIntakeStep Next(AgentContext context, AgentState accepted, AgentIntakeRead read, IReadOnlyCollection<string> provinces)
@@ -81,9 +121,12 @@ public static class AgentIntakePolicy
         if (string.IsNullOrWhiteSpace(accepted.Province))
         {
             if (longAside) return Close(accepted with { PendingPlanningRequest = null }, false);
+            // Người dùng đã nêu nơi đến nhưng không có quán quanh đó: nói rõ và cho biết ANGI có dữ liệu ở đâu, thay vì hỏi lại như chưa nghe gì.
+            if ((read.Note ?? context.PinNote) is { } unknown) return Ask(accepted, Details, $"{unknown} {Coverage(provinces)} {PlaceQuestion}");
             return Ask(accepted, Details, opened && !read.Progress ? $"Mình chưa nhận ra địa điểm trong câu của bạn. {Coverage(provinces)} {PlaceQuestion}" : PlaceQuestion);
         }
-        var acknowledgement = read.PlaceChanged ? Acknowledge(accepted, context) + " " : "";
+        var acknowledgement = (read.Note ?? context.PinNote) is { } note ? note + " " : read.PlaceChanged ? Acknowledge(accepted, context) + " " : "";
+        if (read.NeedsScope) return Ask(accepted, Scope, acknowledgement + ScopeQuestion(accepted.Province!));
         if (AgentPendingPlanningPolicy.MissingTripDetails(accepted, request) is { } question)
         {
             if (longAside) return Close(accepted with { PendingPlanningRequest = null }, false);
@@ -129,11 +172,18 @@ public static class AgentIntakePolicy
         : $"Hiện ANGI có dữ liệu ở {string.Join(", ", provinces.Take(10).Select(AgentReplyBuilder.Safe))}.";
 
     private static bool StatesPreference(string message) =>
-        AgentTasteClarificationPolicy.StatesTaste(message) || PreferenceWords.IsMatch(Plain(message));
+        AgentTasteClarificationPolicy.StatesTaste(message) || StatesFoodRequest(message);
+
+    // "tham quan" và "quận" bỏ dấu đều có chữ "quan", dễ nhầm với "quán": hành trình "tôi đi tham quan" từng làm mất câu hỏi khẩu vị.
+    private static bool StatesFoodRequest(string message) =>
+        PreferenceWords.IsMatch(Plain(Regex.Replace(message.Normalize(NormalizationForm.FormC), "tham quan|quận", " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)));
+
+    /// <summary>True when the message asks for a new plan, in the wording that opens the pre-plan questions.</summary>
+    internal static bool StatesPlan(string message) => PlanningWords.IsMatch(Plain(message));
 
     private static int WordCount(string message) => Plain(message).Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
-    private static string Plain(string text)
+    internal static string Plain(string text)
     {
         var plain = new string(text.Normalize(NormalizationForm.FormD)
             .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
@@ -143,7 +193,7 @@ public static class AgentIntakePolicy
 }
 
 /// <summary>What the current message states, before state policy accepts it; a reply means the turn only asks again.</summary>
-public sealed record AgentIntakeRead(AgentState Current, AgentState Proposed, bool Progress, bool PlaceChanged, string? Reply);
+public sealed record AgentIntakeRead(AgentState Current, AgentState Proposed, bool Progress, bool PlaceChanged, string? Reply, string? Note = null, bool NeedsScope = false);
 
 /// <summary>A question to ask, or a closed intake whose message continues through the normal planning flow.</summary>
 public sealed record AgentIntakeStep(string? Reply, AgentState State, bool Closed, bool Plan);
