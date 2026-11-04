@@ -147,7 +147,7 @@ The API reads its keys from `appsettings.json`, user secrets and environment var
 | `Google:ClientId` | Verifying Google ID tokens; same client id as the frontend | Google sign-in |
 | `Brevo:ApiKey` | Verification and password-reset emails | Sending emails: without it the API starts, but every email returns 503 `SERVICE_UNAVAILABLE` |
 | `Mapbox:AccessToken` | Mapbox Directions (RM-14); the secret token, not the frontend's public `pk.*` token | Roadmap routes |
-| `Ai:ApiKey` | OpenAI key for AI roadmap generation (RM-10) | Optional: without it every day is scheduled by the job's own fallback |
+| `Ai:ApiKey` | OpenAI key of the ANGI project for the Agent and AI roadmap generation (RM-10); see [AI spending limit](#ai-spending-limit) | Optional: without it the Agent is unavailable and every day is scheduled by the job's own fallback |
 
 Set each one once:
 
@@ -258,10 +258,18 @@ catalog. Unknown/ambiguous/unavailable results ask for clarification instead of 
 User-visible replies are rendered from validated snapshots and fixed clarification templates.
 No frontend or reco change, new database table, or migration is required for this extension.
 
-## AI spending gateway
+## AI spending limit
 
-Paid OpenAI setup for backend Agent and roadmap generation requires the [AI spending gateway](.docs/AI_Cost_Control_Ver1.0.md).
-Both backend AI clients refuse real provider keys and route through it. Default budgets are zero and spending is stopped.
-The separate PostgreSQL ledger survives restarts and checks global/chat caps atomically before every attempt.
-Reco keeps its own AI configuration and calls its provider independently; dish/user vector generation is outside this gateway.
-Follow the deployment guide when configuring backend credentials; the backend's real provider key belongs only on the gateway.
+Backend Agent and roadmap generation (RM-10) call OpenAI directly with `Ai:ApiKey`. Spending is capped on
+OpenAI, not in the backend:
+
+1. Create a dedicated OpenAI project for ANGI and issue `Ai:ApiKey` from it. Never use a key of another project.
+2. On the project's **Limits** page, set a monthly budget and turn on **Enforce a hard limit**. Add a usage alert
+   below the limit. OpenAI enforces the limit shortly after spend is recorded, so spending may slightly exceed it.
+3. To stop spending at once, revoke the key or lower the limit on OpenAI.
+
+Once the limit is reached OpenAI answers 429 `project_spend_limit_exceeded` (`organization_spend_limit_exceeded`
+for an organization limit). The Agent never retries it and returns 503 `AGENT_UNAVAILABLE` asking the user to contact
+an administrator; RM-10 falls back to scheduling the days itself. The OpenAI limit is shared by every user, so the
+Agent's own per-user limits (`Agent:MessagesPerMinute`, `Agent:MessagesPerDay`, `Agent:MaxLlmCalls`) stay in place.
+Reco keeps its own AI configuration and calls its provider independently.

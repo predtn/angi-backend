@@ -253,9 +253,8 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
                 Content = JsonContent.Create(BuildBody(context, repair), options: AgentJson.Options)
             };
             // ĐÂY LÀ NƠI TRUYỀN API KEY LLM: header HTTP Authorization: Bearer <Ai:ApiKey>.
-            // Đây là scoped key của budget gateway, khác với JWT của Traveler gọi Web API.
+            // Đây là key của project OpenAI, khác với JWT của Traveler gọi Web API.
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Value.ApiKey);
-            // AiBudgetGatewayHandler bắt buộc chuyển request qua bộ kiểm soát ngân sách dùng chung.
             // AgentOrchestrator gọi method này gián tiếp qua interface IAgentLlmService.
             using var response = await http.SendAsync(request, ct);
             httpStatus = (int)response.StatusCode;
@@ -348,13 +347,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object) return (null, null, null);
             var code = error.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String ? status.GetString() :
                 error.TryGetProperty("code", out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
-            // Giới hạn tốc độ/đồng thời của gateway chỉ là tạm thời: phân loại như rate limit để orchestrator chờ Retry-After
-            // rồi thử lại, thay vì báo người dùng "liên hệ quản trị viên" như khi chi tiêu bị dừng.
-            if (code is "gateway_rate_limit" or "gateway_concurrency_limit") return (code, "rate_limit", null);
-            if (code is "ai_budget_gateway_required" or "gateway_spending_stopped" or "gateway_budget_exhausted" or
-                "gateway_pricing_review_expired" or "gateway_policy_mismatch" or "gateway_provider_not_configured" or
-                "gateway_ledger_unavailable" or "gateway_ledger_not_initialized" or "gateway_settlement_unavailable" or
-                "gateway_upstream_outcome_unknown" or "gateway_usage_missing" or "gateway_upstream_rejected")
+            // Hard limit chi tiêu của project/organization OpenAI chỉ mở lại khi quản trị viên nâng hạn mức hoặc sang kỳ mới:
+            // không thử lại, báo người dùng "liên hệ quản trị viên" thay vì coi như rate limit tạm thời.
+            if (code is "project_spend_limit_exceeded" or "organization_spend_limit_exceeded")
                 return ("budget_control", "budget_control", null);
             if (code is not ("UNAVAILABLE" or "RESOURCE_EXHAUSTED" or "INTERNAL" or "INVALID_ARGUMENT" or "PERMISSION_DENIED" or
                 "UNAUTHENTICATED" or "NOT_FOUND" or "DEADLINE_EXCEEDED" or "insufficient_quota" or "rate_limit_exceeded")) code = null;
