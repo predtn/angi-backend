@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Intake;
@@ -9,6 +12,30 @@ namespace ANGI.Application.Services.Agent.Constraints;
 /// <summary>Accepts validated state enrichment while preventing the model from relaxing hard constraints.</summary>
 public sealed class AgentStatePolicy
 {
+    // Chỉ khi người dùng tự nhắc tới điểm chấm/bán kính thì model mới được bỏ chúng.
+    private static readonly Regex NamesOrigin = new(@"\b(?:ban kinh|diem xuat phat|diem (?:da )?cham|ban do|vi tri|ghim|toan (?:thanh pho|tinh|tp)|ca (?:thanh pho|tinh|tp))\b", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A trip value the model left empty is not a request to erase it: conversation 138 turned "chỉ gợi ý một món" into a state with no duration, budget or pin,
+    /// and a following "ok" wiped them. Removing a budget limit goes through budgetUnrestricted; a pin goes only when the user names it.
+    /// </summary>
+    public static AgentState? WithoutErased(AgentState? proposed, AgentState current, string content)
+    {
+        if (proposed is null) return null;
+        var plain = new string(content.Normalize(NormalizationForm.FormD).Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
+            .Normalize(NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd');
+        var keepsOrigin = !NamesOrigin.IsMatch(plain);
+        var origin = keepsOrigin && proposed.OriginMode == "none" && current.OriginMode != "none"
+            ? proposed with { OriginMode = current.OriginMode, OriginLatitude = current.OriginLatitude, OriginLongitude = current.OriginLongitude, OriginLabel = current.OriginLabel } : proposed;
+        return origin with
+        {
+            Province = string.IsNullOrWhiteSpace(proposed.Province) ? current.Province : proposed.Province,
+            NumDays = proposed.NumDays ?? current.NumDays,
+            BudgetAmount = proposed.BudgetAmount ?? (proposed.BudgetUnrestricted ? null : current.BudgetAmount),
+            RadiusKm = proposed.RadiusKm ?? (keepsOrigin ? current.RadiusKm : null)
+        };
+    }
+
     /// <summary>Requires a backend-staged human confirmation before relaxing an existing trip requirement.</summary>
     public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
     {

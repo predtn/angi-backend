@@ -78,7 +78,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         if (AgentEditScopePolicy.IsBareAcknowledgement(context))
         {
             telemetry.Record("acknowledgement", context.ConversationId, context.TurnId, context.AttemptId);
-            return new(AgentReplyBuilder.Clarify(context, "general") + " Ưng rồi thì cứ bảo mình chốt nhé.", context.State, null, null);
+            // Chưa có lịch nào thì không có gì để chốt.
+            return new(AgentReplyBuilder.Clarify(context, "general") + (AgentIntakePolicy.HasPlan(context) ? " Ưng rồi thì cứ bảo mình chốt nhé." : ""), context.State, null, null);
         }
         // "Món lạ/món mới/món chưa ăn" không có tag nào tương ứng: hỏi nghĩa trước, không để model tra nó như tên món.
         if (AgentTasteClarificationPolicy.NoveltyQuestion(context) is { } noveltyQuestion)
@@ -246,7 +247,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 if (!context.ReplanAfterConfirmation)
                     context.State = statePolicy.Accept(context.State, AgentPendingPlanningPolicy.ApplyStated(AgentNamedRequestPolicy.Retain(
-                        AgentMealScopePolicy.Narrow(AgentIntakePolicy.WithoutUnstatedProvince(output.State, context), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
+                        AgentMealScopePolicy.Narrow(AgentStatePolicy.WithoutErased(AgentIntakePolicy.WithoutUnstatedProvince(output.State, context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.Request.Content), context.ConstraintBaseline);
                 // Đã có lịch mà người dùng không yêu cầu đổi gì ("ăn vui vui", "ok") và model cũng không trích được ràng buộc mới:
                 // không nhận đề xuất đổi món. Giữ nguyên lịch và state đầu lượt, hỏi lại bằng câu chung; lịch hiện tại vẫn lưu được.
                 if (output.Action is "create_proposal" or "patch_proposal" && context.Source is { Items.Length: > 0 } && !context.ReplanAfterConfirmation && !context.ItineraryChanged &&

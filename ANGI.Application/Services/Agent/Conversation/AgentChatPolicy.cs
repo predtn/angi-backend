@@ -85,9 +85,9 @@ public static class AgentChatPolicy
     {
         var changes = new List<string>();
         if (current.Province != proposed.Province) changes.Add($"địa điểm: {proposed.Province ?? "chưa chọn"}");
-        if (current.NumDays != proposed.NumDays) changes.Add($"số ngày: {proposed.NumDays}");
+        if (current.NumDays != proposed.NumDays) changes.Add($"số ngày: {proposed.NumDays?.ToString(CultureInfo.InvariantCulture) ?? "chưa chọn"}");
         if (current.BudgetAmount != proposed.BudgetAmount || current.BudgetUnrestricted != proposed.BudgetUnrestricted)
-            changes.Add(proposed.BudgetUnrestricted ? "ngân sách không giới hạn" : $"ngân sách: {proposed.BudgetAmount:0} đồng");
+            changes.Add(proposed.BudgetUnrestricted ? "ngân sách không giới hạn" : $"ngân sách: {proposed.BudgetAmount?.ToString("0", CultureInfo.InvariantCulture) ?? "chưa chọn"} đồng");
         if (current.MaxPricePerMeal != proposed.MaxPricePerMeal) changes.Add($"trần giá mỗi món: {proposed.MaxPricePerMeal?.ToString("0", CultureInfo.InvariantCulture) ?? "không giới hạn"} đồng");
         if (!current.TagIds.SequenceEqual(proposed.TagIds) || !current.ExcludeTagIds.SequenceEqual(proposed.ExcludeTagIds)) changes.Add("bộ lọc món ăn");
         changes.AddRange(MealRequestChanges(current.MealRequests, proposed.MealRequests));

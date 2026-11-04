@@ -179,7 +179,8 @@ more than 200 characters, falling back to a fixed sentence.
 A whole-message greeting, thanks or "who are you" gets a fixed reply before any LLM call ("Chào bạn, mình là ANGI…").
 
 A point pinned on the roadmap gives the province and a search circle of at least 10 km, so a new plan does not ask where to
-eat.
+eat. A model state that leaves province, duration, budget or pin empty keeps the current value; only a pin the user names can
+be removed, and that still asks for confirmation.
 
 `action=out_of_scope` covers anything outside dishes, restaurants and the food itinerary, including general food
 knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always exactly: "Việc này

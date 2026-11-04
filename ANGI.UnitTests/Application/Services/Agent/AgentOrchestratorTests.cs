@@ -2000,7 +2000,53 @@ public sealed class AgentOrchestratorTests
         result.State.RadiusKm.Should().BeNull();
     }
 
-    // TEST-104: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-104: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
+    /// <summary>Only a real change reaches the confirmation question.</summary>
+    [Fact]
+    public async Task RunAsync_ModelLeavesTripValuesEmpty_KeepsThemWithoutConfirmation()
+    {
+        var state = new AgentState { Province = "Hà Nội", NumDays = 7, BudgetAmount = 3500000, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
+        var context = IntakeContext("thử xem sao", state);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "answer", Reply = "Bạn muốn món gì?", State = new AgentState { Province = "Hà Nội" } }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().NotContain("số ngày:");
+        result.State.Should().Match<AgentState>(x => x.PendingStateChange == null && x.NumDays == 7 && x.BudgetAmount == 3500000 && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
+    }
+
+    // TEST-105: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
+    /// <summary>Keeps the explicit way out of a pinned search.</summary>
+    [Fact]
+    public async Task RunAsync_UserRemovesPin_StillAsksToConfirm()
+    {
+        var state = new AgentState { Province = "Hà Nội", NumDays = 7, BudgetAmount = 3500000, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
+        var context = IntakeContext("bỏ điểm đã chấm trên bản đồ đi", state);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+            { Action = "answer", Reply = "Được", State = state with { OriginMode = "none", OriginLatitude = null, OriginLongitude = null } }));
+
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Contain("điểm xuất phát hoặc bán kính tìm món");
+        result.State.PendingStateChange!.OriginMode.Should().Be("none");
+    }
+
+    // TEST-106: "ok" with no plan yet never invites saving a plan that does not exist; turn 26 of conversation 138 said "Ưng rồi thì cứ bảo mình chốt".
+    /// <summary>Keeps the acknowledgement honest about what exists.</summary>
+    [Fact]
+    public async Task RunAsync_BareAcknowledgementWithoutPlan_DoesNotInviteSaving()
+    {
+        var state = new AgentState { Province = "Hà Nội", NumDays = 7, BudgetAmount = 3500000 };
+
+        var result = await Create(new Mock<IAgentLlmService>(MockBehavior.Strict).Object).RunAsync(IntakeContext("ok", state, new AgentSnapshot(state, [], [])), default);
+
+        result.Reply.Should().NotContain("chốt");
+    }
+
+    // TEST-107: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]
