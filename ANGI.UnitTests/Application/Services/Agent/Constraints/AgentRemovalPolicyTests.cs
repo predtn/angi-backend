@@ -38,6 +38,7 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("xóa bữa trưa toàn chuyến", "b,d")]
     public void Targets_UnambiguousRemoval_ReturnsItems(string content, string keys)
     {
+        // STEP-01: Assert AgentRemovalPolicy.Targets().Select(filtered) equals keys.Split().
         AgentRemovalPolicy.Targets(Context(content))!.Select(item => item.ItemKey).Should().Equal(keys.Split(','));
     }
 
@@ -52,6 +53,7 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("xóa bữa tối ngày 2")]
     public void Targets_NotUnambiguous_ReturnsNull(string content)
     {
+        // STEP-01: Assert AgentRemovalPolicy.Targets() is null.
         AgentRemovalPolicy.Targets(Context(content)).Should().BeNull();
     }
 
@@ -61,12 +63,14 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("no-source")][InlineData("pending-change")][InlineData("pending-plan")][InlineData("replan")]
     public void Targets_NoPlanOrOpenFlow_ReturnsNull(string area)
     {
+        // STEP-01: Derive context from the expected value, set context.Request.Content to a test text and 3 more.
         var context = area == "no-source" ? AgentTestData.Context() : Context("xóa bữa tối ngày 1");
         context.Request.Content = "xóa bữa tối ngày 1";
         if (area == "pending-change") context.State = context.State with { PendingStateChange = AgentTestData.State() };
         if (area == "pending-plan") context.State = context.State with { PendingPlanningRequest = new(["x"]) };
         if (area == "replan") context.ReplanAfterConfirmation = true;
 
+        // STEP-02: Assert AgentRemovalPolicy.Targets() is null.
         AgentRemovalPolicy.Targets(context).Should().BeNull();
     }
 
@@ -75,9 +79,11 @@ public sealed class AgentRemovalPolicyTests
     [Fact]
     public void Targets_NamedRequestAtMeal_ReturnsNull()
     {
+        // STEP-01: Get context from Context and set context.State to a copy of context.State.
         var context = Context("xóa bữa trưa ngày 1");
         context.State = context.State with { MealRequests = [new(1, "lunch", "Bún Chả", null, [])] };
 
+        // STEP-02: Assert AgentRemovalPolicy.Targets() is null.
         AgentRemovalPolicy.Targets(context).Should().BeNull();
     }
 
@@ -88,11 +94,13 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("xóa bữa tối ngày 1", false)]
     public void Targets_SelectedItem_UsesSelection(string content, bool resolved)
     {
+        // STEP-01: Get context from Context, set context.Request.SelectedItemKey to "b" and get items from AgentRemovalPolicy.Targets.
         var context = Context(content);
         context.Request.SelectedItemKey = "b";
 
         var items = AgentRemovalPolicy.Targets(context);
 
+        // STEP-02: Assert depending on resolved, items.Single().ItemKey is "b" and items is null.
         if (resolved) items!.Single().ItemKey.Should().Be("b");
         else items.Should().BeNull();
     }
@@ -106,6 +114,7 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("đổi món", false)]
     public void StatesRemoval_ReadsVerb(string content, bool expected)
     {
+        // STEP-01: Assert AgentRemovalPolicy.StatesRemoval() is expected.
         AgentRemovalPolicy.StatesRemoval(content).Should().Be(expected);
     }
 
@@ -114,9 +123,11 @@ public sealed class AgentRemovalPolicyTests
     [Fact]
     public void WithSkippedMeals_TracksOnlyEmptyMeals()
     {
+        // STEP-01: Get source from AgentTestData.Snapshot and derive state from a copy of AgentTestData.State().
         var source = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1, "lunch"), AgentTestData.Item(2, "b", 1, "dinner"));
         var state = AgentTestData.State() with { SkippedMeals = [new(2, "lunch"), new(1, "dinner")] };
 
+        // STEP-02: Assert WithSkippedMeals().SkippedMeals is equivalent to the expected items and AgentRemovalPolicy.Uncovered() is null.
         AgentRemovalPolicy.WithSkippedMeals(state, source, [AgentTestData.Item(2, "b", 1, "dinner")]).SkippedMeals
             .Should().BeEquivalentTo(new[] { new AgentScope(2, "lunch"), new AgentScope(1, "lunch") });
         AgentRemovalPolicy.Uncovered([new(1, "lunch")], [AgentTestData.Item(1, "a", 1, "lunch")]).Should().BeNull();
@@ -133,11 +144,15 @@ public sealed class AgentRemovalPolicyTests
     [InlineData("đổi bữa sáng", false)]
     public void Question_MealWithoutDay_AsksDays(string content, bool asks)
     {
+        // STEP-01: Get question from AgentRemovalPolicy.Question.
         var question = AgentRemovalPolicy.Question(Context(content));
 
+        // STEP-02: Assert depending on asks, question contains the expected text and question is null.
         if (asks) question.Should().Contain("tất cả các ngày");
         else question.Should().BeNull();
+        // STEP-03: Get planless from AgentTestData.Context and set planless.Request.Content to content.
         var planless = AgentTestData.Context(); planless.Request.Content = content;
+        // STEP-04: Assert AgentRemovalPolicy.Question() is null.
         AgentRemovalPolicy.Question(planless).Should().BeNull();
     }
 }

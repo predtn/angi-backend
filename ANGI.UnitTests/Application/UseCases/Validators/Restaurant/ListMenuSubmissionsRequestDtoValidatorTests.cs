@@ -12,12 +12,14 @@ public sealed class ListMenuSubmissionsRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithInvalidQuery_ShouldRejectStatusAndPageSize()
     {
+        // STEP-01: Validate ListMenuSubmissionsRequestDto { Status = "unknown", PageSize = 101 } and keep result.
         var result = await new ListMenuSubmissionsRequestDtoValidator().ValidateAsync(new ListMenuSubmissionsRequestDto
         {
             Status = "unknown",
             PageSize = 101
         });
 
+        // STEP-02: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName)
             .Should().Contain(["Status", "PageSize"]);
     }
@@ -33,9 +35,11 @@ public sealed class ListMenuSubmissionsRequestDtoValidatorTests
     [InlineData("cancelled")]
     public async Task ValidateAsync_WithSupportedStatus_ShouldBeValid(string? status)
     {
+        // STEP-01: Validate ListMenuSubmissionsRequestDto { Status = status } and keep result.
         var result = await new ListMenuSubmissionsRequestDtoValidator().ValidateAsync(
             new ListMenuSubmissionsRequestDto { Status = status });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -52,9 +56,11 @@ public sealed class ListMenuSubmissionsRequestDtoValidatorTests
         int pageSize,
         bool expectedValid)
     {
+        // STEP-01: Validate ListMenuSubmissionsRequestDto { Page = page, PageSize = pageSize } and keep result.
         var result = await new ListMenuSubmissionsRequestDtoValidator().ValidateAsync(
             new ListMenuSubmissionsRequestDto { Page = page, PageSize = pageSize });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 }

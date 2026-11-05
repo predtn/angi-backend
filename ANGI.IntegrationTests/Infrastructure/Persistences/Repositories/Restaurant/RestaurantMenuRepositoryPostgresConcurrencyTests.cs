@@ -31,6 +31,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
     [PostgresIntegrationFact]
     public async Task Submit_WithTwoDatabaseScopes_ShouldAllowExactlyOneTransition()
     {
+        // STEP-01: Get connectionString from RequiredConnectionString, create seed through SeedDraftAsync, create gate through NewGate and 4 more.
         var connectionString = RequiredConnectionString();
         var seed = await SeedDraftAsync(connectionString);
 
@@ -43,6 +44,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
 
             var outcomes = await Task.WhenAll(first, second);
 
+            // STEP-02: Assert outcomes has exactly one matching item and LoadStatusAsync() is MenuSubmissionStatus.Pending.
             outcomes.Should().ContainSingle(outcome => outcome == "success");
             outcomes.Should().ContainSingle(outcome => outcome == "SUBMISSION_NOT_EDITABLE");
             (await LoadStatusAsync(connectionString, seed.SubmissionId))
@@ -50,6 +52,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
         }
         finally
         {
+            // STEP-03: Clean up: call DeleteSeedAsync.
             await DeleteSeedAsync(connectionString, seed);
         }
     }
@@ -59,6 +62,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
     [PostgresIntegrationFact]
     public async Task Submit_ConcurrentWithCancel_ShouldFinishCancelled()
     {
+        // STEP-01: Get connectionString from RequiredConnectionString, create seed through SeedDraftAsync, create gate through NewGate and 4 more.
         var connectionString = RequiredConnectionString();
         var seed = await SeedDraftAsync(connectionString);
 
@@ -71,6 +75,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
 
             var outcomes = await Task.WhenAll(submit, cancel);
 
+            // STEP-02: Assert outcomes[1] is "success", outcomes[0] is one of the allowed values and LoadStatusAsync() is MenuSubmissionStatus.Cancelled.
             outcomes[1].Should().Be("success");
             outcomes[0].Should().BeOneOf("success", "SUBMISSION_NOT_EDITABLE");
             (await LoadStatusAsync(connectionString, seed.SubmissionId))
@@ -78,6 +83,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
         }
         finally
         {
+            // STEP-03: Clean up: call DeleteSeedAsync.
             await DeleteSeedAsync(connectionString, seed);
         }
     }
@@ -86,18 +92,21 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
     /// <summary>Verifies that an item cannot be added after a concurrent submission becomes pending.</summary>
     [PostgresIntegrationFact]
     public Task Submit_ConcurrentWithAddItem_ShouldNeverAddAfterPending() =>
+        // STEP-01: Assert AssertConcurrentMutationAsync confirms add.
         AssertConcurrentMutationAsync("add");
 
     // TEST-04: Serialize submit against an update-item command using PostgreSQL locks.
     /// <summary>Verifies that an item cannot be updated after a concurrent submission becomes pending.</summary>
     [PostgresIntegrationFact]
     public Task Submit_ConcurrentWithUpdateItem_ShouldNeverUpdateAfterPending() =>
+        // STEP-01: Assert AssertConcurrentMutationAsync confirms update.
         AssertConcurrentMutationAsync("update");
 
     // TEST-05: Serialize submit against a delete-item command using PostgreSQL locks.
     /// <summary>Verifies that an item cannot be deleted after a concurrent submission becomes pending.</summary>
     [PostgresIntegrationFact]
     public Task Submit_ConcurrentWithDeleteItem_ShouldNeverDeleteAfterPending() =>
+        // STEP-01: Assert AssertConcurrentMutationAsync confirms delete.
         AssertConcurrentMutationAsync("delete");
 
     // TEST-06: Hide a submission whose owning restaurant has been soft deleted.
@@ -105,6 +114,7 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
     [PostgresIntegrationFact]
     public async Task Submit_WithSoftDeletedRestaurant_ShouldReturnNotFound()
     {
+        // STEP-01: Get connectionString from RequiredConnectionString, create seed through SeedDraftAsync and 2 more.
         var connectionString = RequiredConnectionString();
         var seed = await SeedDraftAsync(connectionString);
 
@@ -121,12 +131,14 @@ public sealed class RestaurantMenuRepositoryPostgresConcurrencyTests
 
             var outcome = await RunSubmitAsync(connectionString, seed, Task.CompletedTask);
 
+            // STEP-02: Assert outcome is "SUBMISSION_NOT_FOUND" and LoadStatusAsync() is MenuSubmissionStatus.Draft.
             outcome.Should().Be("SUBMISSION_NOT_FOUND");
             (await LoadStatusAsync(connectionString, seed.SubmissionId))
                 .Should().Be(MenuSubmissionStatus.Draft);
         }
         finally
         {
+            // STEP-03: Clean up: call DeleteSeedAsync.
             await DeleteSeedAsync(connectionString, seed);
         }
     }

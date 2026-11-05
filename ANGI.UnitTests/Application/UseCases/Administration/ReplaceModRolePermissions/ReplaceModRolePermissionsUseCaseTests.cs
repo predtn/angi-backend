@@ -21,31 +21,40 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidCodes_ShouldPersistAuditAndReturnSortedDefaults()
     {
+        // STEP-01: Get repository from RepositoryWithCatalog.
         var repository = RepositoryWithCatalog();
+        // STEP-02: Declare auditEntry to capture a call argument; mock IAuditLogService and ICurrentUserService; stub audit.Add and currentUser.UserId.
         var audit = new Mock<IAuditLogService>();
         AuditLogEntry? auditEntry = null;
         audit.Setup(item => item.Add(It.IsAny<AuditLogEntry>()))
             .Callback<AuditLogEntry>(entry => auditEntry = entry);
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(7);
+        // STEP-03: Get transaction from Transaction and get unitOfWork from UnitOfWork.
         var transaction = Transaction();
         var unitOfWork = UnitOfWork(transaction);
+        // STEP-04: Build useCase under test through Create.
         var useCase = Create(repository.Object, currentUser.Object, audit.Object, unitOfWork.Object);
 
+        // STEP-05: Run useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } and keep result.
         var result = await useCase.ExecuteAsync(new ReplaceModRolePermissionsRequestDto
         {
             PermissionCodes = ["DASHBOARD_VIEW", "USER_SUSPEND"]
         }, CancellationToken.None);
 
+        // STEP-06: Assert result.Role is "MOD" and result.PermissionCodes equals "USER_SUSPEND".
         result.Role.Should().Be("MOD");
         result.PermissionCodes.Should().Equal("USER_SUSPEND", "DASHBOARD_VIEW");
+        // STEP-07: Verify ReplaceModRoleDefaultsAsync is called once.
         repository.Verify(item => item.ReplaceModRoleDefaultsAsync(
             3,
             It.Is<IReadOnlyList<short>>(ids => ids.SequenceEqual(new short[] { 1, 13 })),
             It.IsAny<CancellationToken>()), Times.Once);
+        // STEP-08: Assert auditEntry is not null, auditEntry.Action is AuditActions.RolePermissionsChanged and auditEntry.EntityType is AuditEntityTypes.Role.
         auditEntry.Should().NotBeNull();
         auditEntry!.Action.Should().Be(AuditActions.RolePermissionsChanged);
         auditEntry.EntityType.Should().Be(AuditEntityTypes.Role);
+        // STEP-09: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -55,14 +64,19 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyCodes_ShouldPersistEmptyDefaults()
     {
+        // STEP-01: Get repository from RepositoryWithCatalog.
         var repository = RepositoryWithCatalog();
+        // STEP-02: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(repository.Object);
 
+        // STEP-03: Run useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } and keep result.
         var result = await useCase.ExecuteAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = [] },
             CancellationToken.None);
 
+        // STEP-04: Assert result.PermissionCodes is empty.
         result.PermissionCodes.Should().BeEmpty();
+        // STEP-05: Verify ReplaceModRoleDefaultsAsync is called once.
         repository.Verify(item => item.ReplaceModRoleDefaultsAsync(
             3, It.Is<IReadOnlyList<short>>(ids => ids.Count == 0), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -72,12 +86,15 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownCode_ShouldThrowDocumentedError()
     {
+        // STEP-01: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(RepositoryWithCatalog().Object);
 
+        // STEP-02: Wrap useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = ["VERIFICATION_APPROVE"] },
             CancellationToken.None);
 
+        // STEP-03: Assert act throws BadRequestException and exception.ErrorCode is "UNKNOWN_PERMISSION".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("UNKNOWN_PERMISSION");
     }
@@ -89,12 +106,15 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [InlineData("SYSTEM_AUDIT_VIEW")]
     public async Task ExecuteAsync_WithAdminOnlyCode_ShouldThrowDocumentedError(string code)
     {
+        // STEP-01: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(RepositoryWithCatalog().Object);
 
+        // STEP-02: Wrap useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = [code] },
             CancellationToken.None);
 
+        // STEP-03: Assert act throws BadRequestException and exception.ErrorCode is "PERMISSION_NOT_GRANTABLE".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("PERMISSION_NOT_GRANTABLE");
     }
@@ -104,19 +124,24 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IUnitOfWork.
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(
             Mock.Of<IAdministrationPermissionRepository>(),
             Mock.Of<ICurrentUserService>(),
             Mock.Of<IAuditLogService>(),
             unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = [] },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify BeginTransactionAsync is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -125,19 +150,24 @@ public sealed class ReplaceModRolePermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldStopBeforeDependencies()
     {
+        // STEP-01: Mock IAdministrationPermissionRepository and IUnitOfWork.
         var repository = new Mock<IAdministrationPermissionRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(
             repository.Object,
             Mock.Of<ICurrentUserService>(),
             Mock.Of<IAuditLogService>(),
             unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReplaceModRolePermissionsRequestDto { PermissionCodes = null } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = null! },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws FluentValidation.ValidationException.
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+        // STEP-05: Verify repository receives no other calls and unitOfWork receives no other calls.
         repository.VerifyNoOtherCalls();
         unitOfWork.VerifyNoOtherCalls();
     }

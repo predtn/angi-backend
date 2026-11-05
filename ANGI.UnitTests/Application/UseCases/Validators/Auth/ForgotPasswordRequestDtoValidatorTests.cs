@@ -12,9 +12,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithValidEmail_ShouldBeValid()
         {
+            // STEP-01: Validate ForgotPasswordRequestDto { Email = "user@angi.test" } and keep result.
             var result = new ForgotPasswordRequestDtoValidator().Validate(
                 new ForgotPasswordRequestDto { Email = "user@angi.test" });
 
+            // STEP-02: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
 
@@ -23,9 +25,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithMalformedEmail_ShouldBeInvalid()
         {
+            // STEP-01: Validate ForgotPasswordRequestDto { Email = "not-an-email" } and keep result.
             var result = new ForgotPasswordRequestDtoValidator().Validate(
                 new ForgotPasswordRequestDto { Email = "not-an-email" });
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(ForgotPasswordRequestDto.Email));
         }
@@ -38,9 +42,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public void Validate_WithMissingEmail_ShouldBeInvalid(string? email)
         {
+            // STEP-01: Validate ForgotPasswordRequestDto { Email = email } and keep result.
             var result = new ForgotPasswordRequestDtoValidator().Validate(
                 new ForgotPasswordRequestDto { Email = email! });
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(ForgotPasswordRequestDto.Email));
         }
@@ -52,12 +58,15 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData(256, false)]
         public void Validate_WithBoundaryLengthEmail_ShouldMatchMaximum(int length, bool expectedValid)
         {
+            // STEP-01: Define domain as "@example.com" and derive email from Length) + domain.
             const string domain = "@example.com";
             var email = new string('a', length - domain.Length) + domain;
 
+            // STEP-02: Validate ForgotPasswordRequestDto { Email = email } and keep result.
             var result = new ForgotPasswordRequestDtoValidator().Validate(
                 new ForgotPasswordRequestDto { Email = email });
 
+            // STEP-03: Assert result.IsValid is expectedValid.
             result.IsValid.Should().Be(expectedValid);
         }
 
@@ -66,9 +75,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithOuterWhitespaceAroundValidEmail_ShouldBeValid()
         {
+            // STEP-01: Validate ForgotPasswordRequestDto { Email = " user@angi.test " } and keep result.
             var result = new ForgotPasswordRequestDtoValidator().Validate(
                 new ForgotPasswordRequestDto { Email = "  user@angi.test  " });
 
+            // STEP-02: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
     }

@@ -26,12 +26,16 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_OnAuthorizedEndpoint_ShouldCheckAccountAndContinue()
         {
+            // STEP-01: Create context through CreateContext and define nextCalled as false.
             var context = CreateContext(authenticated: true, new AuthorizeAttribute());
             var nextCalled = false;
 
+            // STEP-02: Run CreateMiddleware().InvokeAsync with context.
             await CreateMiddleware().InvokeAsync(context, _ => { nextCalled = true; return Task.CompletedTask; });
 
+            // STEP-03: Verify ExecuteAsync is called once.
             _ensureActiveAccount.Verify(x => x.ExecuteAsync(12, It.IsAny<CancellationToken>()), Times.Once);
+            // STEP-04: Assert nextCalled is true.
             nextCalled.Should().BeTrue();
         }
 
@@ -40,13 +44,17 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_WithInactiveAccount_ShouldThrowAndNotCallNext()
         {
+            // STEP-01: Stub ensureActiveAccount.ExecuteAsync.
             _ensureActiveAccount.Setup(x => x.ExecuteAsync(12, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ForbiddenException("ACCOUNT_BANNED", "Tài khoản đã bị cấm."));
+            // STEP-02: Create context through CreateContext and define nextCalled as false.
             var context = CreateContext(authenticated: true, new AuthorizeAttribute());
             var nextCalled = false;
 
+            // STEP-03: Wrap CreateMiddleware().InvokeAsync with context in act so its outcome can be asserted.
             var act = () => CreateMiddleware().InvokeAsync(context, _ => { nextCalled = true; return Task.CompletedTask; });
 
+            // STEP-04: Assert act throws ForbiddenException and nextCalled is false.
             await act.Should().ThrowAsync<ForbiddenException>();
             nextCalled.Should().BeFalse();
         }
@@ -56,11 +64,15 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_OnAnonymousOrPublicEndpoint_ShouldNotCheckAccount()
         {
+            // STEP-01: Build middleware under test through CreateMiddleware.
             var middleware = CreateMiddleware();
 
+            // STEP-02: Run middleware.InvokeAsync.
             await middleware.InvokeAsync(CreateContext(true, new AuthorizeAttribute(), new AllowAnonymousAttribute()), _ => Task.CompletedTask);
+            // STEP-03: Run middleware.InvokeAsync.
             await middleware.InvokeAsync(CreateContext(true), _ => Task.CompletedTask);
 
+            // STEP-04: Verify ExecuteAsync is never called.
             _ensureActiveAccount.Verify(x => x.ExecuteAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -69,8 +81,10 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_WithoutAuthenticatedUser_ShouldNotCheckAccount()
         {
+            // STEP-01: Run CreateMiddleware().InvokeAsync.
             await CreateMiddleware().InvokeAsync(CreateContext(false, new AuthorizeAttribute()), _ => Task.CompletedTask);
 
+            // STEP-02: Verify ExecuteAsync is never called.
             _ensureActiveAccount.Verify(x => x.ExecuteAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 

@@ -16,8 +16,10 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData("RESTAURANT_OWNER")]
     public void Validate_WithAllowedRole_ShouldHaveNoErrors(string role)
     {
+        // STEP-01: Validate ValidRequest(role) and keep result.
         var result = _validator.TestValidate(ValidRequest(role));
 
+        // STEP-02: Assert no validation errors are reported.
         result.ShouldNotHaveAnyValidationErrors();
     }
 
@@ -30,8 +32,10 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData("UNKNOWN")]
     public void Validate_WithDisallowedRole_ShouldFailOnRole(string role)
     {
+        // STEP-01: Validate ValidRequest(role) and keep result.
         var result = _validator.TestValidate(ValidRequest(role));
 
+        // STEP-02: Assert a validation error on Role.
         result.ShouldHaveValidationErrorFor(x => x.Role);
     }
 
@@ -43,11 +47,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData("12345678")]
     public void Validate_WithInvalidPassword_ShouldFailOnPassword(string password)
     {
+        // STEP-01: Create request through ValidRequest and set request.Password to password.
         var request = ValidRequest("TRAVELER");
         request.Password = password;
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on Password.
         result.ShouldHaveValidationErrorFor(x => x.Password);
     }
 
@@ -56,12 +63,15 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [Fact]
     public void Validate_WithInvalidProfileFields_ShouldFailOnTheirFields()
     {
+        // STEP-01: Create request through ValidRequest, set request.Email to "not-an-email" and set request.DisplayName to " ".
         var request = ValidRequest("TRAVELER");
         request.Email = "not-an-email";
         request.DisplayName = " ";
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on Email and a validation error on DisplayName.
         result.ShouldHaveValidationErrorFor(x => x.Email);
         result.ShouldHaveValidationErrorFor(x => x.DisplayName);
     }
@@ -71,6 +81,7 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [Fact]
     public void Validate_WithMissingRequiredFields_ShouldFailOnEveryField()
     {
+        // STEP-01: Create request as RegisterAccountRequestDto.
         var request = new RegisterAccountRequestDto
         {
             Email = null!,
@@ -79,8 +90,10 @@ public sealed class RegisterAccountRequestDtoValidatorTests
             Role = null!
         };
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on Email, a validation error on Password, a validation error on DisplayName and a validation error on Role.
         result.ShouldHaveValidationErrorFor(x => x.Email);
         result.ShouldHaveValidationErrorFor(x => x.Password);
         result.ShouldHaveValidationErrorFor(x => x.DisplayName);
@@ -94,12 +107,15 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData(256, true)]
     public void Validate_WithEmailLengthBoundary_ShouldReturnExpectedResult(int length, bool shouldFail)
     {
+        // STEP-01: Define suffix as "@example.com", create request through ValidRequest and set request.Email to Length) + suffix.
         const string suffix = "@example.com";
         var request = ValidRequest("TRAVELER");
         request.Email = new string('a', length - suffix.Length) + suffix;
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on Email and no validation error on Email.
         if (shouldFail)
         {
             result.ShouldHaveValidationErrorFor(x => x.Email);
@@ -119,11 +135,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData(65, true)]
     public void Validate_WithPasswordLengthBoundary_ShouldReturnExpectedResult(int length, bool shouldFail)
     {
+        // STEP-01: Create request through ValidRequest and set request.Password to a test value + new string('a', length - 2).
         var request = ValidRequest("TRAVELER");
         request.Password = "A1" + new string('a', length - 2);
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on Password and no validation error on Password.
         if (shouldFail)
         {
             result.ShouldHaveValidationErrorFor(x => x.Password);
@@ -143,11 +162,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData(101, true)]
     public void Validate_WithDisplayNameLengthBoundary_ShouldReturnExpectedResult(int trimmedLength, bool shouldFail)
     {
+        // STEP-01: Create request through ValidRequest and set request.DisplayName to a test value.
         var request = ValidRequest("TRAVELER");
         request.DisplayName = " " + new string('A', trimmedLength) + " ";
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on DisplayName and no validation error on DisplayName.
         if (shouldFail)
         {
             result.ShouldHaveValidationErrorFor(x => x.DisplayName);
@@ -170,11 +192,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData("Nguyễn\u2028An")]
     public void Validate_WithUnsafeUnicodeInDisplayName_ShouldFail(string displayName)
     {
+        // STEP-01: Create request through ValidRequest and set request.DisplayName to displayName.
         var request = ValidRequest("TRAVELER");
         request.DisplayName = displayName;
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on DisplayName.
         result.ShouldHaveValidationErrorFor(x => x.DisplayName);
     }
 
@@ -186,11 +211,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
     [InlineData("An 🍜")]
     public void Validate_WithSafeUnicodeDisplayName_ShouldPass(string displayName)
     {
+        // STEP-01: Create request through ValidRequest and set request.DisplayName to displayName.
         var request = ValidRequest("TRAVELER");
         request.DisplayName = displayName;
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert no validation error on DisplayName.
         result.ShouldNotHaveValidationErrorFor(x => x.DisplayName);
     }
 
@@ -203,11 +231,14 @@ public sealed class RegisterAccountRequestDtoValidatorTests
         int characterCount,
         bool shouldFail)
     {
+        // STEP-01: Create request through ValidRequest and set request.DisplayName to string.Concat().
         var request = ValidRequest("TRAVELER");
         request.DisplayName = string.Concat(Enumerable.Repeat("🍜", characterCount));
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.TestValidate(request);
 
+        // STEP-03: Assert a validation error on DisplayName and no validation error on DisplayName.
         if (shouldFail)
         {
             result.ShouldHaveValidationErrorFor(x => x.DisplayName);

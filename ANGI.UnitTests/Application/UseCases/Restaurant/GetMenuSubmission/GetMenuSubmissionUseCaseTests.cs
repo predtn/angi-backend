@@ -17,6 +17,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithChangedAndOmittedDishes_ShouldMapDiff()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant, create retainedDish as Dish, create removedDish as Dish and 4 more.
         var restaurant = new Domain.Entities.Restaurant { Id = 7, Name = "Quán", Latitude = 1, Longitude = 2 };
         var retainedDish = new Dish
         {
@@ -41,15 +42,19 @@ public sealed class GetMenuSubmissionUseCaseTests
             DishForm = DishForm.Soup,
             Price = 40000
         });
+        // STEP-02: Mock IRestaurantMenuRepository and ICurrentUserService; stub repository.GetSubmissionDetailsAsync and currentUser.UserId.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetSubmissionDetailsAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(12);
+        // STEP-03: Create the GetMenuSubmissionUseCase under test as useCase.
         var useCase = new GetMenuSubmissionUseCase(repository.Object, currentUser.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-05: Assert result.Items has exactly one matching item, result.Items.Change is "edited", result.RemovedDishes has exactly one matching item and 1 more.
         result.Items.Should().ContainSingle().Which.Change.Should().Be("edited");
         result.RemovedDishes.Should().ContainSingle().Which.Id.Should().Be(106);
     }
@@ -59,12 +64,15 @@ public sealed class GetMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownOrOtherOwnerSubmission_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantMenuRepository; stub repository.GetSubmissionDetailsAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetSubmissionDetailsAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync((MenuSubmission?)null);
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository).ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and exception.ErrorCode is "SUBMISSION_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_FOUND");
     }
@@ -74,6 +82,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_ShouldMapNewUnchangedAndEveryEditableDifference()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant, create source as Dish, add source to restaurant.Dishes and 3 more.
         var restaurant = new Domain.Entities.Restaurant { Id = 7 };
         var source = new Dish
         {
@@ -98,12 +107,15 @@ public sealed class GetMenuSubmissionUseCaseTests
         submission.Items.Add(Clone(source, 7, item => item.TagIds = [(short)3]));
         submission.Items.Add(Clone(source, 8, item => item.SortOrder = 2));
         submission.Items.Add(new MenuSubmissionItem { Id = 9, Name = "New", SortOrder = 9 });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.GetSubmissionDetailsAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetSubmissionDetailsAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-04: Assert result.Items.Single(filtered).Change is "unchanged", result.Items.Where(filtered) only holds items matching the condition and 1 more.
         result.Items.Single(item => item.Id == 1).Change.Should().Be("unchanged");
         result.Items.Where(item => item.Id is >= 2 and <= 8)
             .Should().OnlyContain(item => item.Change == "edited");
@@ -115,6 +127,7 @@ public sealed class GetMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_ShouldMapReviewerAvatarAndOrderItemsAndRemovedDishes()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant, add a Dish to restaurant.Dishes, create submission as MenuSubmission and 1 more.
         var restaurant = new Domain.Entities.Restaurant { Id = 7 };
         restaurant.Dishes.Add(new Dish { Id = 12, Restaurant = restaurant, SortOrder = 2, Status = DishStatus.Hidden });
         restaurant.Dishes.Add(new Dish { Id = 11, Restaurant = restaurant, SortOrder = 2 });
@@ -131,12 +144,15 @@ public sealed class GetMenuSubmissionUseCaseTests
         };
         submission.Items.Add(new MenuSubmissionItem { Id = 3, Name = "B", SortOrder = 2 });
         submission.Items.Add(new MenuSubmissionItem { Id = 2, Name = "A", SortOrder = 2 });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.GetSubmissionDetailsAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetSubmissionDetailsAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-04: Assert result.ReviewedBy is equivalent to test/avatar.jpg" }, result.Items.Select(filtered) equals 2 and 1 more.
         result.ReviewedBy.Should().BeEquivalentTo(new
         {
             Id = 8,

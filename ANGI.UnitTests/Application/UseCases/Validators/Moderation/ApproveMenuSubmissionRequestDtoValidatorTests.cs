@@ -18,9 +18,12 @@ public sealed class ApproveMenuSubmissionRequestDtoValidatorTests
     [InlineData("1001", false)]
     public void Validate_NoteBoundaries(string? note, bool valid)
     {
+        // STEP-01: When note is "1000" or "1001", set note to a new string.
         if (note is "1000" or "1001") note = new string('x', int.Parse(note));
+        // STEP-02: Validate ApproveMenuSubmissionRequestDto { ReviewNote = note } and keep result.
         var result = new ApproveMenuSubmissionRequestDtoValidator()
             .Validate(new ApproveMenuSubmissionRequestDto { ReviewNote = note });
+        // STEP-03: Assert result.IsValid is valid and result.Errors has exactly one matching item.
         result.IsValid.Should().Be(valid);
         if (!valid) result.Errors.Should().ContainSingle(x => x.PropertyName == "ReviewNote");
     }

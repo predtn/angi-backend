@@ -14,6 +14,7 @@ public class CloudinaryServiceTests
     [Fact]
     public void Constructor_RejectsNullConfiguration()
     {
+        // STEP-01: Assert new CloudinaryService throws ArgumentNullException.
         Assert.Throws<ArgumentNullException>(() =>
             new CloudinaryService((IConfiguration)null!));
     }
@@ -26,10 +27,12 @@ public class CloudinaryServiceTests
     [InlineData("Cloudinary:ApiSecret")]
     public void Constructor_RejectsIncompleteConfiguration(string missingKey)
     {
+        // STEP-01: Create values through ValidConfigurationValues, set values[missingKey] to an empty string and 1 more.
         var values = ValidConfigurationValues();
         values[missingKey] = "";
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
+        // STEP-02: Assert new CloudinaryService throws InvalidOperationException.
         Assert.Throws<InvalidOperationException>(() => new CloudinaryService(configuration));
     }
 
@@ -38,9 +41,12 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_RejectsNullFileBeforeProviderCall()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient();
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
 
+        // STEP-03: Assert service.UploadAsync throws ArgumentNullException and client.UploadCallCount is 0.
         await Assert.ThrowsAsync<ArgumentNullException>(() => service.UploadAsync(
             null!, "photo.png", "image/png", "angi/avatar", false, CancellationToken.None));
         Assert.Equal(0, client.UploadCallCount);
@@ -53,10 +59,14 @@ public class CloudinaryServiceTests
     [InlineData("   ")]
     public async Task UploadAsync_RejectsInvalidFileNameBeforeProviderCall(string fileName)
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient();
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ArgumentException and client.UploadCallCount is 0.
         await Assert.ThrowsAnyAsync<ArgumentException>(() => service.UploadAsync(
             file, fileName, "image/png", "angi/avatar", false, CancellationToken.None));
         Assert.Equal(0, client.UploadCallCount);
@@ -69,10 +79,14 @@ public class CloudinaryServiceTests
     [InlineData("   ")]
     public async Task UploadAsync_RejectsInvalidMimeTypeBeforeProviderCall(string mimeType)
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient();
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ArgumentException and client.UploadCallCount is 0.
         await Assert.ThrowsAnyAsync<ArgumentException>(() => service.UploadAsync(
             file, "photo.png", mimeType, "angi/avatar", false, CancellationToken.None));
         Assert.Equal(0, client.UploadCallCount);
@@ -87,10 +101,14 @@ public class CloudinaryServiceTests
     [InlineData(" / ")]
     public async Task UploadAsync_RejectsInvalidFolderBeforeProviderCall(string folder)
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient();
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ArgumentException and client.UploadCallCount is 0.
         await Assert.ThrowsAnyAsync<ArgumentException>(() => service.UploadAsync(
             file, "photo.png", "image/png", folder, false, CancellationToken.None));
         Assert.Equal(0, client.UploadCallCount);
@@ -101,12 +119,16 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_PropagatesCallerCancellationBeforeProviderCall()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient();
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream, create source as CancellationTokenSource and cancel source.
         using var file = new MemoryStream([1]);
         using var source = new CancellationTokenSource();
         source.Cancel();
 
+        // STEP-04: Assert service.UploadAsync throws OperationCanceledException and client.UploadCallCount is 0.
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.UploadAsync(
             file, "photo.png", "image/png", "angi/avatar", false, source.Token));
         Assert.Equal(0, client.UploadCallCount);
@@ -117,6 +139,7 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_MapsPublicImageUploadAndResult()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient
         {
             ImageResult = new ImageUploadResult
@@ -126,12 +149,16 @@ public class CloudinaryServiceTests
                 SecureUrl = new Uri("https://cdn.example.com/angi/avatar/generated-id.png")
             }
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1, 2, 3]);
 
+        // STEP-04: Run service.UploadAsync with file and keep result.
         var result = await service.UploadAsync(
             file, "photo.png", "image/png", "/angi/avatar/", false, CancellationToken.None);
 
+        // STEP-05: Assert result.StorageKey is the expected text, result.Url is the expected text, client.ImageParameters is not null and 3 more.
         Assert.Equal("image/upload/angi/avatar/generated-id.png", result.StorageKey);
         Assert.Equal("https://cdn.example.com/angi/avatar/generated-id.png", result.Url);
         Assert.NotNull(client.ImageParameters);
@@ -145,6 +172,7 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_MapsPrivatePdfUploadAndResult()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient
         {
             RawResult = new RawUploadResult
@@ -153,13 +181,17 @@ public class CloudinaryServiceTests
                 SecureUrl = new Uri("https://cdn.example.com/angi/verification_doc/generated-id.pdf")
             }
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1, 2, 3]);
 
+        // STEP-04: Run service.UploadAsync with file and keep result.
         var result = await service.UploadAsync(
             file, "identity.pdf", "application/pdf", "angi/verification_doc", true,
             CancellationToken.None);
 
+        // STEP-05: Assert result.StorageKey is the expected text, client.RawParameters is not null, client.RawParameters.Type is "authenticated" and 2 more.
         Assert.Equal("raw/authenticated/angi/verification_doc/generated-id.pdf", result.StorageKey);
         Assert.NotNull(client.RawParameters);
         Assert.Equal("authenticated", client.RawParameters.Type);
@@ -172,6 +204,7 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_WithMixedCasePdfMimeType_ShouldUseRawUpload()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient
         {
             RawResult = new RawUploadResult
@@ -180,13 +213,17 @@ public class CloudinaryServiceTests
                 SecureUrl = new Uri("https://cdn.example.com/angi/verification_doc/generated-id.pdf")
             }
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1, 2, 3]);
 
+        // STEP-04: Run service.UploadAsync with file.
         await service.UploadAsync(
             file, "identity.pdf", "Application/PDF", "angi/verification_doc", true,
             CancellationToken.None);
 
+        // STEP-05: Assert client.RawUploadCallCount is 1 and client.ImageUploadCallCount is 0.
         Assert.Equal(1, client.RawUploadCallCount);
         Assert.Equal(0, client.ImageUploadCallCount);
     }
@@ -196,13 +233,17 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_ConvertsProviderExceptionToServiceUnavailable()
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient
         {
             UploadException = new HttpRequestException("Provider is unavailable.")
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ServiceUnavailableException and exception.ErrorCode is "SERVICE_UNAVAILABLE".
         var exception = await Assert.ThrowsAsync<ServiceUnavailableException>(() => service.UploadAsync(
             file, "photo.png", "image/png", "angi/avatar", false, CancellationToken.None));
 
@@ -214,15 +255,19 @@ public class CloudinaryServiceTests
     [Fact]
     public async Task UploadAsync_PropagatesCancellationRaisedByProvider()
     {
+        // STEP-01: Create source as CancellationTokenSource and create client as FakeCloudinaryClient.
         using var source = new CancellationTokenSource();
         var client = new FakeCloudinaryClient
         {
             BeforeUpload = source.Cancel,
             UploadException = new OperationCanceledException(source.Token)
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws OperationCanceledException.
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.UploadAsync(
             file, "photo.png", "image/png", "angi/avatar", false, source.Token));
     }
@@ -233,10 +278,14 @@ public class CloudinaryServiceTests
     [MemberData(nameof(InvalidImageResults))]
     public async Task UploadAsync_RejectsInvalidProviderResult(UploadResult providerResult)
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient { ImageResult = providerResult };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ServiceUnavailableException and exception.ErrorCode is "SERVICE_UNAVAILABLE".
         var exception = await Assert.ThrowsAsync<ServiceUnavailableException>(() => service.UploadAsync(
             file, "photo.png", "image/png", "angi/avatar", false, CancellationToken.None));
 
@@ -250,6 +299,7 @@ public class CloudinaryServiceTests
     [InlineData("relative/photo.png")]
     public async Task UploadAsync_RejectsNonHttpsProviderUrl(string providerUrl)
     {
+        // STEP-01: Create client as FakeCloudinaryClient.
         var client = new FakeCloudinaryClient
         {
             ImageResult = new ImageUploadResult
@@ -259,9 +309,12 @@ public class CloudinaryServiceTests
                 SecureUrl = new Uri(providerUrl, UriKind.RelativeOrAbsolute)
             }
         };
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(client);
+        // STEP-03: Create file as MemoryStream.
         using var file = new MemoryStream([1]);
 
+        // STEP-04: Assert service.UploadAsync throws ServiceUnavailableException.
         await Assert.ThrowsAsync<ServiceUnavailableException>(() => service.UploadAsync(
             file, "photo.png", "image/png", "angi/avatar", false, CancellationToken.None));
     }
@@ -271,9 +324,12 @@ public class CloudinaryServiceTests
     [Fact]
     public void GetUrl_BuildsStablePublicImageUrl()
     {
+        // STEP-01: Build service under test through CreateService.
         var service = CreateService();
+        // STEP-02: Run service.GetUrl and keep url.
         var url = service.GetUrl("image/upload/angi/avatar/example.png");
 
+        // STEP-03: Assert url starts with "https://" and url ends with "/angi/avatar/example.png".
         Assert.StartsWith("https://", url);
         Assert.EndsWith("/angi/avatar/example.png", url);
     }
@@ -283,9 +339,12 @@ public class CloudinaryServiceTests
     [Fact]
     public void GetUrl_BuildsStablePublicRawUrl()
     {
+        // STEP-01: Build service under test through CreateService.
         var service = CreateService();
+        // STEP-02: Run service.GetUrl and keep url.
         var url = service.GetUrl("raw/upload/angi/document/example.pdf");
 
+        // STEP-03: Assert url starts with "https://" and url ends with "/angi/document/example.pdf".
         Assert.StartsWith("https://", url);
         Assert.EndsWith("/angi/document/example.pdf", url);
     }
@@ -297,11 +356,16 @@ public class CloudinaryServiceTests
     [InlineData("image/authenticated/angi/avatar/example.png")]
     public void GetUrl_CreatesPrivateUrlThatExpiresInAboutFiveMinutes(string storageKey)
     {
+        // STEP-01: Create now as DateTimeOffset.
         var now = new DateTimeOffset(2026, 10, 14, 1, 2, 3, TimeSpan.Zero);
+        // STEP-02: Build service under test through CreateService.
         var service = CreateService(new FixedTimeProvider(now));
+        // STEP-03: Run service.GetUrl with storageKey and keep url.
         var url = service.GetUrl(storageKey);
 
+        // STEP-04: Get match from Regex.Match.
         var match = Regex.Match(url, @"(?:\?|&)expires_at=(\d+)");
+        // STEP-05: Assert match.Success is true, long.Parse() is now.AddMinutes().ToUnixTimeSeconds() and url does not contain "unit-test-placeholder".
         Assert.True(match.Success);
         Assert.Equal(now.AddMinutes(5).ToUnixTimeSeconds(), long.Parse(match.Groups[1].Value));
         Assert.DoesNotContain("unit-test-placeholder", url);
@@ -318,8 +382,10 @@ public class CloudinaryServiceTests
     [InlineData("raw/upload/")]
     public void GetUrl_RejectsInvalidStorageKey(string storageKey)
     {
+        // STEP-01: Build service under test through CreateService.
         var service = CreateService();
 
+        // STEP-02: Assert service.GetUrl throws ArgumentException.
         Assert.ThrowsAny<ArgumentException>(() => service.GetUrl(storageKey));
     }
 

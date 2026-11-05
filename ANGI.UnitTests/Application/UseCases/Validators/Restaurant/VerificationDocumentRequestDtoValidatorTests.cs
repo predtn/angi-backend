@@ -20,12 +20,14 @@ public sealed class VerificationDocumentRequestDtoValidatorTests
     [InlineData("other")]
     public async Task Validate_WithDocumentedType_ShouldBeValid(string documentType)
     {
+        // STEP-01: Validate VerificationDocumentRequestDto { DocType = documentType, MediaId = 1 } and keep result.
         var result = await _validator.TestValidateAsync(new VerificationDocumentRequestDto
         {
             DocType = documentType,
             MediaId = 1
         });
 
+        // STEP-02: Assert no validation errors are reported.
         result.ShouldNotHaveAnyValidationErrors();
     }
 
@@ -37,12 +39,14 @@ public sealed class VerificationDocumentRequestDtoValidatorTests
     [InlineData("Business_License")]
     public async Task Validate_WithInvalidDocumentType_ShouldHaveError(string documentType)
     {
+        // STEP-01: Validate VerificationDocumentRequestDto { DocType = documentType, MediaId = 1 } and keep result.
         var result = await _validator.TestValidateAsync(new VerificationDocumentRequestDto
         {
             DocType = documentType,
             MediaId = 1
         });
 
+        // STEP-02: Assert a validation error on DocType.
         result.ShouldHaveValidationErrorFor(document => document.DocType);
     }
 
@@ -53,12 +57,14 @@ public sealed class VerificationDocumentRequestDtoValidatorTests
     [InlineData(-1L)]
     public async Task Validate_WithNonPositiveMediaId_ShouldHaveError(long mediaId)
     {
+        // STEP-01: Validate VerificationDocumentRequestDto { DocType = "business_license", MediaId = mediaId } and keep result.
         var result = await _validator.TestValidateAsync(new VerificationDocumentRequestDto
         {
             DocType = "business_license",
             MediaId = mediaId
         });
 
+        // STEP-02: Assert a validation error on MediaId.
         result.ShouldHaveValidationErrorFor(document => document.MediaId);
     }
 }

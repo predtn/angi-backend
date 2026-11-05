@@ -17,12 +17,15 @@ public sealed class DeleteRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOwnedMatchingItem_ShouldRemoveAndCommit()
     {
+        // STEP-01: Create item as RoadmapItem, create fixture through CreateFixture and create cancellationSource as CancellationTokenSource.
         var item = new RoadmapItem { Id = 1502, RoadmapDayId = 301, DishId = 105 };
         var fixture = CreateFixture(item, 12);
         using var cancellationSource = new CancellationTokenSource();
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync.
         await fixture.UseCase.ExecuteAsync(88, 1502, cancellationSource.Token);
 
+        // STEP-03: Verify LockAndGetOwnedItemForDeleteAsync is called once, RemoveItem is called once, SaveChangesAsync is called once and CommitAsync is called once.
         fixture.Repository.Verify(repository => repository.LockAndGetOwnedItemForDeleteAsync(
             88, 1502, 12, cancellationSource.Token), Times.Once);
         fixture.Repository.Verify(repository => repository.RemoveItem(item), Times.Once);
@@ -35,11 +38,15 @@ public sealed class DeleteRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorizedWithoutPersistence()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture(new RoadmapItem(), null);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(88, 1502, CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify LockAndGetOwnedItemForDeleteAsync is never called, RemoveItem is never called, BeginTransactionAsync is never called and 1 more.
         fixture.Repository.Verify(repository => repository.LockAndGetOwnedItemForDeleteAsync(
             It.IsAny<long>(), It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.Repository.Verify(repository => repository.RemoveItem(It.IsAny<RoadmapItem>()), Times.Never);
@@ -60,11 +67,15 @@ public sealed class DeleteRoadmapItemUseCaseTests
         long roadmapId,
         long itemId)
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture(null, 12);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with roadmapId and itemId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(roadmapId, itemId, CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_ITEM_NOT_FOUND");
+        // STEP-04: Verify LockAndGetOwnedItemForDeleteAsync is called once, RemoveItem is never called, SaveChangesAsync is never called and CommitAsync is never called.
         fixture.Repository.Verify(repository => repository.LockAndGetOwnedItemForDeleteAsync(
             roadmapId, itemId, 12, It.IsAny<CancellationToken>()), Times.Once);
         fixture.Repository.Verify(repository => repository.RemoveItem(It.IsAny<RoadmapItem>()), Times.Never);

@@ -19,11 +19,16 @@ public sealed class ConfirmAgentProposalUseCaseTests
     [Fact]
     public async Task ExecuteAsync_CommittedReplay_ReturnsOriginalResultAfterExpiry()
     {
+        // STEP-01: Create fixture as AgentUseCaseFixture, set fixture.Conversation.ExpiresAt to AgentUseCaseFixture.Now, create original as AgentCommitDto and 1 more.
         var fixture = new AgentUseCaseFixture(); fixture.Conversation.ExpiresAt = AgentUseCaseFixture.Now;
         var original = new AgentCommitDto(88, DateTime.UnixEpoch.AddSeconds(5), 9, new Dictionary<string, long> { ["a"] = 55 });
         var proposal = new AgentProposal { Id = 9, ConversationId = 7, ProposalVersion = 2, Status = AgentProposalStatus.Committed, CommitResult = AgentJson.Write(original) };
+        // STEP-02: Stub fixture.GetProposalSnapshotAsync.
         fixture.Repository.Setup(x => x.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        // STEP-03: Run Create().ExecuteAsync and keep result.
         var result = await Create(fixture).ExecuteAsync(7, new() { ProposalId = 9, ProposalVersion = 2 }, CancellationToken.None);
+        // STEP-04: Assert result is equivalent to original.
+        // STEP-05: Verify fixture receives no other calls.
         result.Should().BeEquivalentTo(original); fixture.UnitOfWork.VerifyNoOtherCalls(); fixture.Llm.VerifyNoOtherCalls();
     }
 
@@ -34,6 +39,7 @@ public sealed class ConfirmAgentProposalUseCaseTests
     [InlineData("current", "PROPOSAL_NOT_COMMITTABLE")][InlineData("busy", "CONVERSATION_BUSY")][InlineData("expiry", "PROPOSAL_EXPIRED")]
     public async Task ExecuteAsync_InvalidConfirmation_RejectsBeforeWrites(string area, string code)
     {
+        // STEP-01: Create fixture as AgentUseCaseFixture, set fixture.Conversation.CurrentProposalId to 9, create proposal as AgentProposal and 4 more.
         var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
         var proposal = new AgentProposal { Id = 9, ConversationId = 7, ProposalVersion = 2, Status = AgentProposalStatus.Ready,
             ExpiresAt = AgentUseCaseFixture.Now.AddDays(1), Payload = AgentJson.Write(AgentTestData.Snapshot(AgentTestData.Item())) };
@@ -41,8 +47,12 @@ public sealed class ConfirmAgentProposalUseCaseTests
         if (area == "current") fixture.Conversation.CurrentProposalId = 8;
         if (area == "busy") { fixture.Conversation.ProcessingAttemptId = 2; fixture.Conversation.ProcessingUntil = AgentUseCaseFixture.Now.AddSeconds(1); }
         if (area == "expiry") proposal.ExpiresAt = AgentUseCaseFixture.Now;
+        // STEP-02: Stub fixture.GetProposalSnapshotAsync.
         fixture.Repository.Setup(x => x.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        // STEP-03: Wrap Create().ExecuteAsync with ConfirmAgentProposalRequestDto { ProposalId, ProposalVersion } in act so its outcome can be asserted.
         var act = () => Create(fixture).ExecuteAsync(7, new ConfirmAgentProposalRequestDto { ProposalId = 9, ProposalVersion = area == "version" ? 1 : 2 }, CancellationToken.None);
+        // STEP-04: Assert act throws AppException and the thrown exception.ErrorCode is code.
+        // STEP-05: Verify fixture receives no other calls.
         (await act.Should().ThrowAsync<AppException>()).Which.ErrorCode.Should().Be(code); fixture.UnitOfWork.VerifyNoOtherCalls();
     }
 

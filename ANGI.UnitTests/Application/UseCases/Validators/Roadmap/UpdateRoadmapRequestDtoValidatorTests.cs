@@ -14,6 +14,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNoSpecifiedFields_ShouldBeValid()
     {
+        // STEP-01: Assert _validator.ValidateAsync().IsValid is true.
         (await _validator.ValidateAsync(new UpdateRoadmapRequestDto())).IsValid.Should().BeTrue();
     }
 
@@ -22,6 +23,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullableFieldsCleared_ShouldBeValid()
     {
+        // STEP-01: Validate UpdateRoadmapRequestDto { StartDate = null, BudgetAmount = null, OriginLabel = null } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRoadmapRequestDto
         {
             StartDate = null,
@@ -29,6 +31,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
             OriginLabel = null
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -37,6 +40,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithRequiredPatchFieldsNull_ShouldRejectEachField()
     {
+        // STEP-01: Validate UpdateRoadmapRequestDto { Title = null, NumDays = null, OriginMode = null } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRoadmapRequestDto
         {
             Title = null,
@@ -44,6 +48,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
             OriginMode = null
         });
 
+        // STEP-02: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName).Should().Contain(["Title", "NumDays", "OriginMode"]);
     }
 
@@ -52,6 +57,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithOutOfRangeSpecifiedFields_ShouldRejectEachField()
     {
+        // STEP-01: Validate UpdateRoadmapRequestDto { Title = a new string, NumDays = 0, BudgetAmount = -1, ... } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRoadmapRequestDto
         {
             Title = new string('a', 201),
@@ -63,6 +69,7 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
             OriginLabel = new string('b', 201)
         });
 
+        // STEP-02: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName).Should().Contain([
             "Title", "NumDays", "BudgetAmount", "OriginMode", "OriginLatitude", "OriginLongitude", "OriginLabel"
         ]);

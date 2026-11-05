@@ -14,8 +14,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithRefreshToken_ShouldHaveNoErrors()
         {
+            // STEP-01: Validate RefreshTokenRequestDto { RefreshToken = a test value } and keep result.
             var result = _validator.TestValidate(new RefreshTokenRequestDto { RefreshToken = "refresh-token" });
 
+            // STEP-02: Assert no validation errors are reported.
             result.ShouldNotHaveAnyValidationErrors();
         }
 
@@ -26,8 +28,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public void Validate_WithEmptyRefreshToken_ShouldFailOnRefreshToken(string refreshToken)
         {
+            // STEP-01: Validate RefreshTokenRequestDto { RefreshToken = refreshToken } and keep result.
             var result = _validator.TestValidate(new RefreshTokenRequestDto { RefreshToken = refreshToken });
 
+            // STEP-02: Assert a validation error on RefreshToken with the expected message.
             result.ShouldHaveValidationErrorFor(x => x.RefreshToken).WithErrorMessage("Refresh token là bắt buộc.");
         }
     }

@@ -16,6 +16,7 @@ public sealed class AgentDatePolicyTests
     [InlineData("5 thang 11 nam 2027", 2027, 11, 5)]
     public void Read_SingleDate_ReturnsStart(string content, int year, int month, int day)
     {
+        // STEP-01: Read answer from the response; assert answer.Start is a new DateOnly and answer.End is null.
         var answer = AgentDatePolicy.Read(content, Today);
 
         answer!.Start.Should().Be(new DateOnly(year, month, day));
@@ -27,6 +28,7 @@ public sealed class AgentDatePolicyTests
     [Theory]
     [InlineData("3/11", 2026)][InlineData("2/11", 2027)][InlineData("4/11", 2026)][InlineData("2/11/2026", 2026)]
     public void Read_NoYear_UsesNextOccurrence(string content, int year) =>
+        // STEP-01: Assert AgentDatePolicy.Read().Start.Year is year.
         AgentDatePolicy.Read(content, Today)!.Start.Year.Should().Be(year);
 
     // TEST-03: Ranges keep both ends; covers one month, two months, accents, a dash and a range crossing the new year.
@@ -39,6 +41,7 @@ public sealed class AgentDatePolicyTests
     [InlineData("30/12 - 2/1", "2026-12-30", "2027-01-02")]
     public void Read_Range_ReturnsBothEnds(string content, string start, string end)
     {
+        // STEP-01: Read answer from the response; assert answer.Start is DateOnly.Parse() and answer.End is DateOnly.Parse().
         var answer = AgentDatePolicy.Read(content, Today);
 
         answer!.Start.Should().Be(DateOnly.Parse(start, System.Globalization.CultureInfo.InvariantCulture));
@@ -52,6 +55,7 @@ public sealed class AgentDatePolicyTests
     [InlineData("thứ 7", "2026-11-07")][InlineData("thứ ba", "2026-11-03")][InlineData("thứ hai", "2026-11-09")][InlineData("chủ nhật", "2026-11-08")]
     [InlineData("thứ 7 tuần sau", "2026-11-14")][InlineData("chủ nhật tuần sau", "2026-11-15")][InlineData("đi thứ 4 tuần tới", "2026-11-11")]
     public void Read_RelativeWords_ResolveFromToday(string content, string expected) =>
+        // STEP-01: Assert AgentDatePolicy.Read().Start is DateOnly.Parse().
         AgentDatePolicy.Read(content, Today)!.Start.Should().Be(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
 
     // TEST-05: Messages that state no date return null; covers an edit naming a plan day, a restaurant called Mai, a bare number, empty text and an impossible date.
@@ -59,6 +63,7 @@ public sealed class AgentDatePolicyTests
     [Theory]
     [InlineData("đổi món ngày 2")][InlineData("quán Mai có ngon không")][InlineData("5")][InlineData("ngày 5")][InlineData("")][InlineData("   ")][InlineData("31/2")][InlineData("13/13")]
     [InlineData("3/11 đến 31/2")]
+    // STEP-01: Assert AgentDatePolicy.Read() is null.
     public void Read_NoUsableDate_ReturnsNull(string content) => AgentDatePolicy.Read(content, Today).Should().BeNull();
 
     // TEST-06: Attempts at a date are told apart from new requests; covers a bare number, an impossible date, an edit and plain text.
@@ -67,6 +72,7 @@ public sealed class AgentDatePolicyTests
     [InlineData("5", true)][InlineData("ngày 5 nhé", true)][InlineData("31/2", true)]
     [InlineData("đổi món ngày 2", false)][InlineData("đổi thành 4 ngày", false)][InlineData("thêm món chay", false)]
     public void LooksLikeDate_SeparatesDateAttemptsFromRequests(string content, bool expected) =>
+        // STEP-01: Assert AgentDatePolicy.LooksLikeDate() is expected.
         AgentDatePolicy.LooksLikeDate(content).Should().Be(expected);
 
     // TEST-07: Today follows Vietnam time around midnight; covers one tick before, exactly at and after 17:00 UTC.
@@ -77,8 +83,10 @@ public sealed class AgentDatePolicyTests
     [InlineData("2026-11-03T17:00:01Z", 2026, 11, 4)]
     public void Today_UsesVietnamTime(string now, int year, int month, int day)
     {
+        // STEP-01: Create clock as FixedClock.
         var clock = new FixedClock(DateTimeOffset.Parse(now, System.Globalization.CultureInfo.InvariantCulture));
 
+        // STEP-02: Assert AgentDatePolicy.Today() is a new DateOnly.
         AgentDatePolicy.Today(clock).Should().Be(new DateOnly(year, month, day));
     }
 

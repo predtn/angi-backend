@@ -22,6 +22,7 @@ public sealed class AgentStateValidatorTests
     [InlineData("meal-without-day")][InlineData("date-overflow")]
     public void Validate_InvalidFields_Fails(string area)
     {
+        // STEP-01: Create baseline as AgentState and derive state from the expected value.
         var baseline = new AgentState { NumDays = 2 };
         var state = area switch
         {
@@ -50,6 +51,7 @@ public sealed class AgentStateValidatorTests
             "meal-invalid" => baseline with { FocusDay = 1, FocusMeal = "brunch" }, "meal-without-day" => baseline with { FocusMeal = "lunch" },
             _ => baseline with { StartDate = DateOnly.MaxValue }
         };
+        // STEP-02: Assert the validator.Validate().IsValid is false.
         new AgentStateValidator().Validate(state).IsValid.Should().BeFalse(area);
     }
 
@@ -59,10 +61,12 @@ public sealed class AgentStateValidatorTests
     [InlineData(1, -90, -180, 1)][InlineData(30, 90, 180, 50)]
     public void Validate_InclusiveBounds_Succeeds(short days, decimal latitude, decimal longitude, decimal radius)
     {
+        // STEP-01: Create state as AgentState.
         var state = new AgentState { NumDays = days, Province = new('x', 100), Title = new('x', 200),
             BudgetAmount = AgentStateValidator.MaxMoney, MaxPricePerMeal = 0, OriginMode = "pinned", OriginLatitude = latitude,
             OriginLongitude = longitude, RadiusKm = radius, OriginLabel = new('x', 200), Note = new('x', 500),
             PendingQuestion = new('x', 1000), FocusDay = days, FocusMeal = "late_night" };
+        // STEP-02: Assert the validator.Validate().IsValid is true.
         new AgentStateValidator().Validate(state).IsValid.Should().BeTrue();
         new AgentStateValidator().Validate(new AgentState()).IsValid.Should().BeTrue();
     }
@@ -82,8 +86,10 @@ public sealed class AgentStateValidatorTests
     [InlineData(1, "Hoàn Kiếm", 21, 105, 51, false)]
     public void Validate_DayAreas_FollowTripAndMapLimits(int day, string label, int latitude, int longitude, int radius, bool valid)
     {
+        // STEP-01: Create state as AgentState.
         var state = new AgentState { NumDays = 2, DayAreas = [new((short)day, label, latitude, longitude, radius)] };
 
+        // STEP-02: Assert the validator.Validate().IsValid is valid.
         new AgentStateValidator().Validate(state).IsValid.Should().Be(valid);
     }
 
@@ -92,8 +98,10 @@ public sealed class AgentStateValidatorTests
     [Fact]
     public void Validate_DayAreas_RejectDuplicatesAndLongLabels()
     {
+        // STEP-01: Create area as AgentDayArea.
         var area = new AgentDayArea(1, "Hoàn Kiếm", 21m, 105m, 3m);
 
+        // STEP-02: Assert the validator.Validate().IsValid is false and the validator.Validate().IsValid is true.
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area, area] }).IsValid.Should().BeFalse();
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 201) }] }).IsValid.Should().BeFalse();
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 200) }] }).IsValid.Should().BeTrue();

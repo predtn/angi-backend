@@ -25,12 +25,14 @@ public sealed class SubmitVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidRequest_ShouldCreatePendingVerification()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant.
         var restaurant = new Domain.Entities.Restaurant
         {
             Id = 7,
             OwnerId = 12,
             VerificationStatus = RestaurantVerificationStatus.Unverified
         };
+        // STEP-02: Declare addedVerification to capture a call argument; mock IRestaurantRepository and 4 more; stub restaurantRepository.LockOwnerRestaurantForVerificationAsync and 5 more.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(item => item.LockOwnerRestaurantForVerificationAsync(
                 12,
@@ -66,8 +68,10 @@ public sealed class SubmitVerificationUseCaseTests
         var cloudinary = new Mock<ICloudinaryService>();
         cloudinary.Setup(item => item.GetUrl(It.IsAny<string>()))
             .Returns<string>(storageKey => $"https://signed.test/{Path.GetFileName(storageKey)}");
+        // STEP-03: Create request through ValidRequest and derive cancellationToken from new CancellationTokenSource().Token.
         var request = ValidRequest();
         var cancellationToken = new CancellationTokenSource().Token;
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             mediaRepository,
@@ -75,8 +79,10 @@ public sealed class SubmitVerificationUseCaseTests
             cloudinary,
             transaction: transaction);
 
+        // STEP-05: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(request, cancellationToken);
 
+        // STEP-06: Assert restaurant.VerificationStatus is RestaurantVerificationStatus.Pending, addedVerification is not null and 11 more.
         restaurant.VerificationStatus.Should().Be(RestaurantVerificationStatus.Pending);
         addedVerification.Should().NotBeNull();
         addedVerification!.RestaurantId.Should().Be(7);
@@ -92,6 +98,7 @@ public sealed class SubmitVerificationUseCaseTests
         addedVerification.Documents.Select(item => item.MediaId).Should().Equal(9001, 9002);
         // The media rows come from an untracked query: a set navigation would make EF insert them again.
         addedVerification.Documents.Should().OnlyContain(item => item.Media == null);
+        // STEP-07: Assert result.Id is 21, result.RestaurantId is 7, result.Status is "pending", result.Documents.Select(filtered) equals "business_license" and 4 more.
         result.Id.Should().Be(21);
         result.RestaurantId.Should().Be(7);
         result.Status.Should().Be("pending");
@@ -104,6 +111,7 @@ public sealed class SubmitVerificationUseCaseTests
         result.SubmittedAt.Should().Be(SubmittedAt);
         result.PreviousId.Should().BeNull();
         result.ReviewedBy.Should().BeNull();
+        // STEP-08: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(cancellationToken), Times.Once);
         transaction.Verify(item => item.CommitAsync(cancellationToken), Times.Once);
     }
@@ -113,22 +121,28 @@ public sealed class SubmitVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutBusinessLicense_ShouldFailBeforePersistence()
     {
+        // STEP-01: Mock IRestaurantRepository and IUnitOfWork.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Create request through ValidRequest and set request.Documents to a test items.
         var request = ValidRequest();
         request.Documents =
         [
             new VerificationDocumentRequestDto { DocType = "id_card", MediaId = 9002 }
         ];
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             new Mock<IMediaRepository>(),
             unitOfWork,
             new Mock<ICloudinaryService>());
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-06: Verify BeginTransactionAsync is never called and LockOwnerRestaurantForVerificationAsync is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         restaurantRepository.Verify(item => item.LockOwnerRestaurantForVerificationAsync(
             It.IsAny<int>(),
@@ -140,7 +154,9 @@ public sealed class SubmitVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutAuthenticatedUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IUnitOfWork.
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             new Mock<IRestaurantRepository>(),
             new Mock<IMediaRepository>(),
@@ -148,10 +164,13 @@ public sealed class SubmitVerificationUseCaseTests
             new Mock<ICloudinaryService>(),
             ownerId: null);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify BeginTransactionAsync is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -160,22 +179,27 @@ public sealed class SubmitVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutRestaurant_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantRepository and IUnitOfWork; stub restaurantRepository.LockOwnerRestaurantForVerificationAsync.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(item => item.LockOwnerRestaurantForVerificationAsync(
                 12,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((Domain.Entities.Restaurant?)null);
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             new Mock<IMediaRepository>(),
             unitOfWork,
             new Mock<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws NotFoundException and exception.ErrorCode is "RESTAURANT_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("RESTAURANT_NOT_FOUND");
+        // STEP-05: Verify AddVerification is never called and SaveChangesAsync is never called.
         restaurantRepository.Verify(item => item.AddVerification(It.IsAny<RestaurantVerification>()), Times.Never);
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -190,6 +214,7 @@ public sealed class SubmitVerificationUseCaseTests
         RestaurantVerificationStatus status,
         string errorCode)
     {
+        // STEP-01: Mock IRestaurantRepository, IMediaRepository and IUnitOfWork; stub restaurantRepository.LockOwnerRestaurantForVerificationAsync.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(item => item.LockOwnerRestaurantForVerificationAsync(
                 12,
@@ -202,16 +227,20 @@ public sealed class SubmitVerificationUseCaseTests
             });
         var mediaRepository = new Mock<IMediaRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             mediaRepository,
             unitOfWork,
             new Mock<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is errorCode.
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be(errorCode);
+        // STEP-05: Verify GetOwnedByIdsAsync is never called and SaveChangesAsync is never called.
         mediaRepository.Verify(item => item.GetOwnedByIdsAsync(
             It.IsAny<int>(),
             It.IsAny<IReadOnlyCollection<long>>(),
@@ -227,12 +256,14 @@ public sealed class SubmitVerificationUseCaseTests
     [InlineData("raw/authenticated/report_evidence/evidence.pdf")]
     public async Task ExecuteAsync_WithInvalidVerificationMedia_ShouldThrowValidation(string? storageKey)
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant.
         var restaurant = new Domain.Entities.Restaurant
         {
             Id = 7,
             OwnerId = 12,
             VerificationStatus = RestaurantVerificationStatus.Unverified
         };
+        // STEP-02: Mock IRestaurantRepository and 2 more; stub restaurantRepository.LockOwnerRestaurantForVerificationAsync and 1 more.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(item => item.LockOwnerRestaurantForVerificationAsync(
                 12,
@@ -247,18 +278,22 @@ public sealed class SubmitVerificationUseCaseTests
                 ? Array.Empty<MediaFile>()
                 : [VerificationMedia(9001, storageKey)]);
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             mediaRepository,
             unitOfWork,
             new Mock<ICloudinaryService>());
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(singleDocument: true), CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException, exception.Errors has exactly one matching item and 2 more.
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().ContainSingle()
             .Which.PropertyName.Should().Be("Documents[0].MediaId");
         restaurant.VerificationStatus.Should().Be(RestaurantVerificationStatus.Unverified);
+        // STEP-06: Verify AddVerification is never called and SaveChangesAsync is never called.
         restaurantRepository.Verify(item => item.AddVerification(It.IsAny<RestaurantVerification>()), Times.Never);
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -268,6 +303,7 @@ public sealed class SubmitVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSaveFails_ShouldNotCommit()
     {
+        // STEP-01: Mock IRestaurantRepository and 3 more; stub restaurantRepository.LockOwnerRestaurantForVerificationAsync and 3 more.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(item => item.LockOwnerRestaurantForVerificationAsync(
                 12,
@@ -290,6 +326,7 @@ public sealed class SubmitVerificationUseCaseTests
             .ReturnsAsync(transaction.Object);
         unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database failure"));
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             mediaRepository,
@@ -297,9 +334,12 @@ public sealed class SubmitVerificationUseCaseTests
             new Mock<ICloudinaryService>(),
             transaction: transaction);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(singleDocument: true), CancellationToken.None);
 
+        // STEP-04: Assert act throws InvalidOperationException.
         await act.Should().ThrowAsync<InvalidOperationException>();
+        // STEP-05: Verify CommitAsync is never called.
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 

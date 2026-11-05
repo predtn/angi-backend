@@ -12,5 +12,6 @@ public sealed class CreateAgentConversationRequestDtoValidatorTests
     [Theory]
     [InlineData(null, true)][InlineData(1L, true)][InlineData(long.MaxValue, true)][InlineData(0L, false)][InlineData(-1L, false)]
     public void Validate_RoadmapId_UsesPositiveBoundary(long? id, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new CreateAgentConversationRequestDtoValidator().Validate(new CreateAgentConversationRequestDto { RoadmapId = id }).IsValid.Should().Be(valid);
 }

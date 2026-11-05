@@ -24,6 +24,7 @@ public sealed class UploadMediaRequestDtoValidatorTests
     [Fact]
     public void Validate_WithCompleteUpload_ShouldPass()
     {
+        // STEP-01: Assert _validator.Validate().IsValid is true.
         _validator.Validate(ValidRequest()).IsValid.Should().BeTrue();
     }
 
@@ -32,10 +33,13 @@ public sealed class UploadMediaRequestDtoValidatorTests
     [Fact]
     public void Validate_WithoutFile_ShouldReportOnlyTheFile()
     {
+        // STEP-01: Create request as UploadMediaRequestDto.
         var request = new UploadMediaRequestDto { Purpose = "restaurant" };
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.Validate(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item and result.Errors matches the condition.
         result.Errors.Should().ContainSingle()
             .Which.Should().Match<FluentValidation.Results.ValidationFailure>(error =>
                 error.PropertyName == "File" && error.ErrorMessage == "Tệp là bắt buộc.");
@@ -46,13 +50,16 @@ public sealed class UploadMediaRequestDtoValidatorTests
     [Fact]
     public void Validate_WithEmptyFileMetadata_ShouldReportEachField()
     {
+        // STEP-01: Create request through ValidRequest, set request.FileName to string.Empty, set request.MimeType to string.Empty and set request.SizeBytes to 0.
         var request = ValidRequest();
         request.FileName = string.Empty;
         request.MimeType = string.Empty;
         request.SizeBytes = 0;
 
+        // STEP-02: Validate request and keep result.
         var result = _validator.Validate(request);
 
+        // STEP-03: Assert result.Errors.Select(filtered) is equivalent to "FileName".
         result.Errors.Select(error => error.PropertyName)
             .Should().BeEquivalentTo("FileName", "MimeType", "SizeBytes");
     }
@@ -64,9 +71,11 @@ public sealed class UploadMediaRequestDtoValidatorTests
     [InlineData("menu")]
     public void Validate_WithInvalidPurpose_ShouldFail(string purpose)
     {
+        // STEP-01: Create request through ValidRequest and set request.Purpose to purpose.
         var request = ValidRequest();
         request.Purpose = purpose;
 
+        // STEP-02: Assert _validator.Validate().Errors has exactly one matching item.
         _validator.Validate(request).Errors.Should().ContainSingle(error => error.PropertyName == "Purpose");
     }
 }

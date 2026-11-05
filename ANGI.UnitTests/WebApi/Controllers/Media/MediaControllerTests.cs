@@ -18,6 +18,7 @@ public sealed class MediaControllerTests
     [Fact]
     public async Task Upload_WithValidForm_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create expected as MediaFileDto.
         var expected = new MediaFileDto
         {
             Id = 91,
@@ -26,10 +27,13 @@ public sealed class MediaControllerTests
             SizeBytes = 3,
             Purpose = "restaurant"
         };
+        // STEP-02: Mock IUploadMediaUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUploadMediaUseCase>();
         useCase.Setup(x => x.ExecuteAsync(It.IsAny<UploadMediaRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Create the MediaController under test as controller.
         var controller = new MediaController(useCase.Object);
+        // STEP-04: Build the bytes collection and create form as UploadMediaForm.
         var bytes = new byte[] { 1, 2, 3 };
         var form = new UploadMediaForm
         {
@@ -41,13 +45,16 @@ public sealed class MediaControllerTests
             Purpose = "restaurant"
         };
 
+        // STEP-05: Run controller.Upload with form and keep action.
         var action = await controller.Upload(form, CancellationToken.None);
 
+        // STEP-06: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<MediaFileDto> and 2 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         var response = result.Value.Should().BeOfType<ApiResponse<MediaFileDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
+        // STEP-07: Verify ExecuteAsync is called once.
         useCase.Verify(x => x.ExecuteAsync(
             It.Is<UploadMediaRequestDto>(request =>
                 request.FileName == "photo.jpg" &&
@@ -62,13 +69,17 @@ public sealed class MediaControllerTests
     [Fact]
     public async Task Upload_WithoutFile_ShouldPassNullContentToUseCase()
     {
+        // STEP-01: Mock IUploadMediaUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUploadMediaUseCase>();
         useCase.Setup(x => x.ExecuteAsync(It.IsAny<UploadMediaRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MediaFileDto());
+        // STEP-02: Create the MediaController under test as controller.
         var controller = new MediaController(useCase.Object);
 
+        // STEP-03: Run controller.Upload with UploadMediaForm { File = null, Purpose = "restaurant" }.
         await controller.Upload(new UploadMediaForm { File = null, Purpose = "restaurant" }, CancellationToken.None);
 
+        // STEP-04: Verify ExecuteAsync is called once.
         useCase.Verify(x => x.ExecuteAsync(
             It.Is<UploadMediaRequestDto>(request =>
                 request.Content == null &&

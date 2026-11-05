@@ -27,6 +27,7 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithRoadmapAndMedia_ShouldCreateCompletePublishedBlog()
     {
+        // STEP-01: Declare added to capture a call argument and 1 more; mock IBlogRepository and 2 more; stub blogRepository.GetAuthorAsync and 6 more.
         var blogRepository = new Mock<IBlogRepository>();
         blogRepository.Setup(repository => repository.GetAuthorAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Author());
@@ -59,8 +60,10 @@ public sealed class CreateBlogUseCaseTests
                 added.UpdatedAt = Now;
             })
             .ReturnsAsync(3);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(blogRepository, mediaRepository, sanitizer, unitOfWork);
 
+        // STEP-03: Run useCase.ExecuteAsync with CreateBlogRequestDto { Title, Content, CoverMediaId, ... } and keep result.
         var result = await useCase.ExecuteAsync(new CreateBlogRequestDto
         {
             Title = "  Hành trình Đà Nẵng  ",
@@ -70,6 +73,7 @@ public sealed class CreateBlogUseCaseTests
             RoadmapId = 88
         }, CancellationToken.None);
 
+        // STEP-04: Assert result.Id is 45, result.Title is the expected text, result.Slug is "hanh-trinh-da-nang-2", result.Content is "<p>Safe</p>" and 15 more.
         result.Id.Should().Be(45);
         result.Title.Should().Be("Hành trình Đà Nẵng");
         result.Slug.Should().Be("hanh-trinh-da-nang-2");
@@ -89,11 +93,14 @@ public sealed class CreateBlogUseCaseTests
         result.LikedByMe.Should().BeFalse();
         result.PublishedAt.Should().Be(Now);
         result.UpdatedAt.Should().Be(Now);
+        // STEP-05: Assert added.Status is BlogStatus.Published and added.Images has exactly one matching item.
         added!.Status.Should().Be(BlogStatus.Published);
         added.Images.Should().ContainSingle(image => image.MediaId == 9401 && image.SortOrder == 0);
+        // STEP-06: Read snapshotJson from the response; assert RootElement.days[0].items[0].mealSlot is "breakfast".
         using var snapshotJson = JsonDocument.Parse(added.RoadmapSnapshot!);
         snapshotJson.RootElement.GetProperty("days")[0].GetProperty("items")[0]
             .GetProperty("mealSlot").GetString().Should().Be("breakfast");
+        // STEP-07: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -103,7 +110,9 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutOptionalReferences_ShouldCreatePlainBlog()
     {
+        // STEP-01: Get blogRepository from BaseBlogRepository.
         var blogRepository = BaseBlogRepository();
+        // STEP-02: Declare added to capture a call argument and 1 more; mock IMediaRepository and 1 more; stub blogRepository.Add and 2 more.
         Blog? added = null;
         blogRepository.Setup(repository => repository.Add(It.IsAny<Blog>())).Callback<Blog>(blog => added = blog);
         var mediaRepository = new Mock<IMediaRepository>();
@@ -114,14 +123,17 @@ public sealed class CreateBlogUseCaseTests
             .Callback(() => added!.UpdatedAt = Now)
             .ReturnsAsync(1);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync with CreateBlogRequestDto { Title = the expected text, Content = the expected text } and keep result.
         var result = await CreateUseCase(blogRepository, mediaRepository, sanitizer, unitOfWork)
             .ExecuteAsync(new CreateBlogRequestDto { Title = "Bài mới", Content = "Nội dung" }, CancellationToken.None);
 
+        // STEP-04: Assert result.HasRoadmap is false, result.RoadmapId is null, result.RoadmapSnapshot is null, result.CoverUrl is null and 1 more.
         result.HasRoadmap.Should().BeFalse();
         result.RoadmapId.Should().BeNull();
         result.RoadmapSnapshot.Should().BeNull();
         result.CoverUrl.Should().BeNull();
         result.Images.Should().BeEmpty();
+        // STEP-05: Verify GetOwnedByIdsAsync is never called and GetOwnedRoadmapForSnapshotAsync is never called.
         mediaRepository.Verify(repository => repository.GetOwnedByIdsAsync(
             It.IsAny<int>(), It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()), Times.Never);
         blogRepository.Verify(repository => repository.GetOwnedRoadmapForSnapshotAsync(
@@ -133,16 +145,22 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenOwnedRoadmapIsUnavailable_ShouldThrowRoadmapNotFound()
     {
+        // STEP-01: Get blogRepository from BaseBlogRepository.
         var blogRepository = BaseBlogRepository();
+        // STEP-02: Stub blogRepository.GetOwnedRoadmapForSnapshotAsync.
         blogRepository.Setup(repository => repository.GetOwnedRoadmapForSnapshotAsync(88, 12, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RoadmapSnapshotSource?)null);
+        // STEP-03: Get unitOfWork from UnitOfWork.
         var unitOfWork = UnitOfWork(out _);
 
+        // STEP-04: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(blogRepository, unitOfWork: unitOfWork)
             .ExecuteAsync(ValidRequest(roadmapId: 88), CancellationToken.None);
 
+        // STEP-05: Assert act throws NotFoundException and exception.ErrorCode is "ROADMAP_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-06: Verify Add is never called and SaveChangesAsync is never called.
         blogRepository.Verify(repository => repository.Add(It.IsAny<Blog>()), Times.Never);
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -152,22 +170,28 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithMissingOwnedMedia_ShouldReportBothFields()
     {
+        // STEP-01: Get blogRepository from BaseBlogRepository.
         var blogRepository = BaseBlogRepository();
+        // STEP-02: Mock IMediaRepository; stub mediaRepository.GetOwnedByIdsAsync.
         var mediaRepository = new Mock<IMediaRepository>();
         mediaRepository.Setup(repository => repository.GetOwnedByIdsAsync(
                 12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        // STEP-03: Get unitOfWork from UnitOfWork, create request through ValidRequest, set request.CoverMediaId to 10 and set request.ImageMediaIds to a test items.
         var unitOfWork = UnitOfWork(out _);
         var request = ValidRequest();
         request.CoverMediaId = 10;
         request.ImageMediaIds = [11];
 
+        // STEP-04: Wrap CreateUseCase().ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => CreateUseCase(blogRepository, mediaRepository, unitOfWork: unitOfWork)
             .ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException and exception.Errors.Select(filtered) is equivalent to "CoverMediaId".
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Select(error => error.PropertyName)
             .Should().BeEquivalentTo("CoverMediaId", "ImageMediaIds");
+        // STEP-06: Verify Add is never called.
         blogRepository.Verify(repository => repository.Add(It.IsAny<Blog>()), Times.Never);
     }
 
@@ -176,16 +200,22 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSanitizerRemovesAllContent_ShouldRejectContent()
     {
+        // STEP-01: Get blogRepository from BaseBlogRepository.
         var blogRepository = BaseBlogRepository();
+        // STEP-02: Mock IBlogContentSanitizer; stub sanitizer.Sanitize.
         var sanitizer = new Mock<IBlogContentSanitizer>();
         sanitizer.Setup(service => service.Sanitize(It.IsAny<string>())).Returns(string.Empty);
+        // STEP-03: Get unitOfWork from UnitOfWork.
         var unitOfWork = UnitOfWork(out _);
 
+        // STEP-04: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(blogRepository, sanitizer: sanitizer, unitOfWork: unitOfWork)
             .ExecuteAsync(ValidRequest(content: "<script>bad()</script>"), CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException and exception.Errors has exactly one matching item.
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().ContainSingle(error => error.PropertyName == "Content");
+        // STEP-06: Verify SaveChangesAsync is never called.
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -194,13 +224,17 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldStopAtValidation()
     {
+        // STEP-01: Mock IBlogRepository and IUnitOfWork.
         var blogRepository = new Mock<IBlogRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync with an empty CreateBlogRequestDto in act so its outcome can be asserted.
         var act = () => CreateUseCase(blogRepository, unitOfWork: unitOfWork)
             .ExecuteAsync(new CreateBlogRequestDto(), CancellationToken.None);
 
+        // STEP-03: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-04: Verify BeginTransactionAsync is never called and blogRepository receives no other calls.
         unitOfWork.Verify(work => work.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         blogRepository.VerifyNoOtherCalls();
     }
@@ -210,11 +244,14 @@ public sealed class CreateBlogUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock ICurrentUserService.
         var currentUser = new Mock<ICurrentUserService>();
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(currentUser: currentUser)
             .ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }

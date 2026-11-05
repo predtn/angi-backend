@@ -22,24 +22,33 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEditedDraft_ShouldSubmitForReview()
     {
+        // STEP-01: Create sourceDish through CreateDish, create submission through CreateSubmission and set submission.Items.Single().Price to 55000.
         var sourceDish = CreateDish();
         var submission = CreateSubmission(CloneItem(sourceDish));
         submission.Items.Single().Price = 55000;
+        // STEP-02: Build repository under test through CreateRepository.
         var repository = CreateRepository(submission, [sourceDish]);
+        // STEP-03: Mock IUnitOfWorkTransaction.
         var transaction = new Mock<IUnitOfWorkTransaction>();
+        // STEP-04: Create unitOfWork through CreateUnitOfWork.
         var unitOfWork = CreateUnitOfWork(transaction);
+        // STEP-05: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, unitOfWork);
 
+        // STEP-06: Run useCase.ExecuteAsync with SubmitMenuSubmissionRequestDto { OwnerNote = the expected text } and keep result.
         var result = await useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto { OwnerNote = "  Tăng giá món  " },
             CancellationToken.None);
 
+        // STEP-07: Assert submission.Status is MenuSubmissionStatus.Pending, submission.OwnerNote is the expected text and submission.SubmittedAt is Now.
         submission.Status.Should().Be(MenuSubmissionStatus.Pending);
         submission.OwnerNote.Should().Be("Tăng giá món");
         submission.SubmittedAt.Should().Be(Now);
+        // STEP-08: Assert result.Status is "pending" and result.SubmittedAt is Now.
         result.Status.Should().Be("pending");
         result.SubmittedAt.Should().Be(Now);
+        // STEP-09: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -49,18 +58,25 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyDraft_ShouldThrowMenuEmpty()
     {
+        // STEP-01: Create submission through CreateSubmission.
         var submission = CreateSubmission();
+        // STEP-02: Build repository under test through CreateRepository.
         var repository = CreateRepository(submission, []);
+        // STEP-03: Create unitOfWork through CreateUnitOfWork.
         var unitOfWork = CreateUnitOfWork();
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, unitOfWork);
 
+        // STEP-05: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-06: Assert act throws BadRequestException and exception.ErrorCode is "MENU_EMPTY".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("MENU_EMPTY");
+        // STEP-07: Verify GetDraftSourceDishesAsync is never called and SaveChangesAsync is never called.
         repository.Verify(
             value => value.GetDraftSourceDishesAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -72,19 +88,26 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnchangedDraft_ShouldThrowMenuUnchanged()
     {
+        // STEP-01: Create sourceDish through CreateDish and create submission through CreateSubmission.
         var sourceDish = CreateDish();
         var submission = CreateSubmission(CloneItem(sourceDish));
+        // STEP-02: Build repository under test through CreateRepository.
         var repository = CreateRepository(submission, [sourceDish]);
+        // STEP-03: Create unitOfWork through CreateUnitOfWork.
         var unitOfWork = CreateUnitOfWork();
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, unitOfWork);
 
+        // STEP-05: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-06: Assert act throws BadRequestException and exception.ErrorCode is "MENU_UNCHANGED".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("MENU_UNCHANGED");
+        // STEP-07: Verify SaveChangesAsync is never called.
         unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -95,6 +118,7 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [InlineData(false)]
     public async Task ExecuteAsync_WithAddedOrRemovedDish_ShouldSubmit(bool addDish)
     {
+        // STEP-01: Create sourceDish through CreateDish, create items as List<MenuSubmissionItem>, create currentDishes as List<Dish> and 1 more.
         var sourceDish = CreateDish();
         var items = new List<MenuSubmissionItem> { CloneItem(sourceDish) };
         var currentDishes = new List<Dish> { sourceDish };
@@ -107,14 +131,17 @@ public sealed class SubmitMenuSubmissionUseCaseTests
             currentDishes.Add(CreateDish(106));
         }
 
+        // STEP-02: Build repository under test through CreateRepository; build useCase under test through CreateUseCase.
         var repository = CreateRepository(CreateSubmission(items.ToArray()), currentDishes);
         var useCase = CreateUseCase(repository, CreateUnitOfWork());
 
+        // STEP-03: Run useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto and keep result.
         var result = await useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-04: Assert result.Status is "pending".
         result.Status.Should().Be("pending");
     }
 
@@ -123,17 +150,21 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithPendingSubmission_ShouldThrowNotEditable()
     {
+        // STEP-01: Create submission through CreateSubmission and set submission.Status to MenuSubmissionStatus.Pending.
         var submission = CreateSubmission(new MenuSubmissionItem { Name = "Món" });
         submission.Status = MenuSubmissionStatus.Pending;
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(submission, []),
             CreateUnitOfWork());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "SUBMISSION_NOT_EDITABLE".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_EDITABLE");
     }
@@ -143,14 +174,17 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownSubmission_ShouldThrowNotFound()
     {
+        // STEP-01: Build repository under test through CreateRepository; build useCase under test through CreateUseCase.
         var repository = CreateRepository(null, []);
         var useCase = CreateUseCase(repository, CreateUnitOfWork());
 
+        // STEP-02: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and exception.ErrorCode is "SUBMISSION_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_FOUND");
     }
@@ -164,12 +198,16 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     public async Task ExecuteAsync_WithNonDraftSubmission_ShouldThrowNotEditable(
         MenuSubmissionStatus status)
     {
+        // STEP-01: Create submission through CreateSubmission and set submission.Status to status.
         var submission = CreateSubmission(new MenuSubmissionItem { Name = "Món" });
         submission.Status = status;
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(CreateRepository(submission, []), CreateUnitOfWork());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "SUBMISSION_NOT_EDITABLE".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_EDITABLE");
     }
@@ -186,15 +224,19 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [InlineData("tagIds")]
     public async Task ExecuteAsync_WithChangedEditableField_ShouldSubmit(string field)
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem and call MutateField.
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         MutateField(item, field);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(CreateSubmission(item), [sourceDish]),
             CreateUnitOfWork());
 
+        // STEP-03: Run useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto and keep result.
         var result = await useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert result.Status is "pending".
         result.Status.Should().Be("pending");
     }
 
@@ -203,15 +245,19 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOnlyReorderedTags_ShouldThrowMenuUnchanged()
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem and set item.TagIds to item.TagIds.Reverse().ToArray().
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         item.TagIds = item.TagIds.Reverse().ToArray();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(CreateSubmission(item), [sourceDish]),
             CreateUnitOfWork());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws BadRequestException and exception.ErrorCode is "MENU_UNCHANGED".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("MENU_UNCHANGED");
     }
@@ -223,15 +269,19 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [InlineData(false)]
     public async Task ExecuteAsync_WithAddedOrRemovedTag_ShouldSubmit(bool addTag)
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem and set item.TagIds to . item.TagIds, 9] : [item.TagIds[0]].
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         item.TagIds = addTag ? [.. item.TagIds, 9] : [item.TagIds[0]];
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(CreateSubmission(item), [sourceDish]),
             CreateUnitOfWork());
 
+        // STEP-03: Run useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto and keep result.
         var result = await useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert result.Status is "pending".
         result.Status.Should().Be("pending");
     }
 
@@ -242,16 +292,20 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [InlineData(false)]
     public async Task ExecuteAsync_WithChangedNullableCover_ShouldSubmit(bool addCover)
     {
+        // STEP-01: Create sourceDish through CreateDish, set sourceDish.CoverMediaId to addCover ? null : 8, get item from CloneItem and 1 more.
         var sourceDish = CreateDish();
         sourceDish.CoverMediaId = addCover ? null : 8;
         var item = CloneItem(sourceDish);
         item.CoverMediaId = addCover ? 8 : null;
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(CreateSubmission(item), [sourceDish]),
             CreateUnitOfWork());
 
+        // STEP-03: Run useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto and keep result.
         var result = await useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert result.Status is "pending".
         result.Status.Should().Be("pending");
     }
 
@@ -263,16 +317,20 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [InlineData(long.MaxValue)]
     public async Task ExecuteAsync_WithBoundarySubmissionId_ShouldThrowNotFound(long submissionId)
     {
+        // STEP-01: Build repository under test through CreateRepository; build useCase under test through CreateUseCase.
         var repository = CreateRepository(null, [], submissionId);
         var useCase = CreateUseCase(repository, CreateUnitOfWork());
 
+        // STEP-02: Wrap useCase.ExecuteAsync with submissionId and an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             submissionId,
             new SubmitMenuSubmissionRequestDto(),
             CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and exception.ErrorCode is "SUBMISSION_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_FOUND");
+        // STEP-04: Verify LockOwnedSubmissionAsync is called once.
         repository.Verify(
             value => value.LockOwnedSubmissionAsync(12, submissionId, It.IsAny<CancellationToken>()),
             Times.Once);
@@ -283,13 +341,17 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Build repository under test through CreateRepository; build useCase under test through CreateUseCase.
         var repository = CreateRepository(null, []);
         var useCase = CreateUseCase(repository, CreateUnitOfWork(), null);
 
+        // STEP-02: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify LockOwnedSubmissionAsync is never called.
         repository.Verify(
             value => value.LockOwnedSubmissionAsync(
                 It.IsAny<int>(),
@@ -308,19 +370,23 @@ public sealed class SubmitMenuSubmissionUseCaseTests
         string ownerNote,
         string? expected)
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem, increment item.Price and create submission through CreateSubmission.
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         item.Price++;
         var submission = CreateSubmission(item);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(submission, [sourceDish]),
             CreateUnitOfWork());
 
+        // STEP-03: Run useCase.ExecuteAsync with SubmitMenuSubmissionRequestDto { OwnerNote = ownerNote }.
         await useCase.ExecuteAsync(
             14,
             new SubmitMenuSubmissionRequestDto { OwnerNote = ownerNote },
             CancellationToken.None);
 
+        // STEP-04: Assert submission.OwnerNote is expected.
         submission.OwnerNote.Should().Be(expected);
     }
 
@@ -329,16 +395,23 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenLockQueryIsCancelled_ShouldPropagateAndDisposeTransaction()
     {
+        // STEP-01: Create cancellation as CancellationTokenSource.
         using var cancellation = new CancellationTokenSource();
+        // STEP-02: Build repository under test through CreateRepository.
         var repository = CreateRepository(null, []);
+        // STEP-03: Mock IUnitOfWorkTransaction; stub repository.LockOwnedSubmissionAsync.
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, cancellation.Token))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
         var transaction = new Mock<IUnitOfWorkTransaction>();
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, CreateUnitOfWork(transaction));
 
+        // STEP-05: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), cancellation.Token);
 
+        // STEP-06: Assert act throws OperationCanceledException.
         await act.Should().ThrowAsync<OperationCanceledException>();
+        // STEP-07: Verify DisposeAsync is called once.
         transaction.Verify(value => value.DisposeAsync(), Times.Once);
     }
 
@@ -347,18 +420,26 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenMenuQueryIsCancelled_ShouldNotSaveOrCommit()
     {
+        // STEP-01: Create cancellation as CancellationTokenSource and create sourceDish through CreateDish.
         using var cancellation = new CancellationTokenSource();
         var sourceDish = CreateDish();
+        // STEP-02: Build repository under test through CreateRepository.
         var repository = CreateRepository(CreateSubmission(CloneItem(sourceDish)), [sourceDish]);
+        // STEP-03: Mock IUnitOfWorkTransaction; stub repository.GetDraftSourceDishesAsync.
         repository.Setup(value => value.GetDraftSourceDishesAsync(7, cancellation.Token))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
         var transaction = new Mock<IUnitOfWorkTransaction>();
+        // STEP-04: Create unitOfWork through CreateUnitOfWork.
         var unitOfWork = CreateUnitOfWork(transaction);
+        // STEP-05: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, unitOfWork);
 
+        // STEP-06: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), cancellation.Token);
 
+        // STEP-07: Assert act throws OperationCanceledException.
         await act.Should().ThrowAsync<OperationCanceledException>();
+        // STEP-08: Verify SaveChangesAsync is never called and CommitAsync is never called.
         unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -368,6 +449,7 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSaveIsCancelled_ShouldRestoreDraftState()
     {
+        // STEP-01: Create cancellation as CancellationTokenSource, create sourceDish through CreateDish, get item from CloneItem, increment item.Price and 4 more.
         using var cancellation = new CancellationTokenSource();
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
@@ -376,16 +458,21 @@ public sealed class SubmitMenuSubmissionUseCaseTests
         var previousSubmittedAt = Now.AddDays(-1);
         submission.OwnerNote = "Ghi chú trước đó";
         submission.SubmittedAt = previousSubmittedAt;
+        // STEP-02: Create unitOfWork through CreateUnitOfWork; mock IUnitOfWorkTransaction; stub unitOfWork.SaveChangesAsync.
         var transaction = new Mock<IUnitOfWorkTransaction>();
         var unitOfWork = CreateUnitOfWork(transaction);
         unitOfWork.Setup(value => value.SaveChangesAsync(cancellation.Token))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(CreateRepository(submission, [sourceDish]), unitOfWork);
 
+        // STEP-04: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), cancellation.Token);
 
+        // STEP-05: Assert act throws OperationCanceledException and AssertRestoredDraft succeeds.
         await act.Should().ThrowAsync<OperationCanceledException>();
         AssertRestoredDraft(submission, "Ghi chú trước đó", previousSubmittedAt);
+        // STEP-06: Verify CommitAsync is never called and DisposeAsync is called once.
         transaction.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(value => value.DisposeAsync(), Times.Once);
     }
@@ -395,6 +482,7 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSaveFails_ShouldRestoreDraftState()
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem, increment item.Price, create submission through CreateSubmission and 3 more.
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         item.Price++;
@@ -402,16 +490,21 @@ public sealed class SubmitMenuSubmissionUseCaseTests
         var previousSubmittedAt = Now.AddDays(-1);
         submission.OwnerNote = "Ghi chú trước đó";
         submission.SubmittedAt = previousSubmittedAt;
+        // STEP-02: Create unitOfWork through CreateUnitOfWork; mock IUnitOfWorkTransaction; stub unitOfWork.SaveChangesAsync.
         var transaction = new Mock<IUnitOfWorkTransaction>();
         var unitOfWork = CreateUnitOfWork(transaction);
         unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("save failed"));
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(CreateRepository(submission, [sourceDish]), unitOfWork);
 
+        // STEP-04: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-05: Assert act throws InvalidOperationException and AssertRestoredDraft succeeds.
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("save failed");
         AssertRestoredDraft(submission, "Ghi chú trước đó", previousSubmittedAt);
+        // STEP-06: Verify CommitAsync is never called and DisposeAsync is called once.
         transaction.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(value => value.DisposeAsync(), Times.Once);
     }
@@ -421,21 +514,27 @@ public sealed class SubmitMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenCommitFails_ShouldRestoreDraftState()
     {
+        // STEP-01: Create sourceDish through CreateDish, get item from CloneItem, increment item.Price and create submission through CreateSubmission.
         var sourceDish = CreateDish();
         var item = CloneItem(sourceDish);
         item.Price++;
         var submission = CreateSubmission(item);
+        // STEP-02: Mock IUnitOfWorkTransaction; stub transaction.CommitAsync.
         var transaction = new Mock<IUnitOfWorkTransaction>();
         transaction.Setup(value => value.CommitAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("commit failed"));
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             CreateRepository(submission, [sourceDish]),
             CreateUnitOfWork(transaction));
 
+        // STEP-04: Wrap useCase.ExecuteAsync with an empty SubmitMenuSubmissionRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, new SubmitMenuSubmissionRequestDto(), CancellationToken.None);
 
+        // STEP-05: Assert act throws InvalidOperationException and AssertRestoredDraft succeeds.
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("commit failed");
         AssertRestoredDraft(submission);
+        // STEP-06: Verify DisposeAsync is called once.
         transaction.Verify(value => value.DisposeAsync(), Times.Once);
     }
 

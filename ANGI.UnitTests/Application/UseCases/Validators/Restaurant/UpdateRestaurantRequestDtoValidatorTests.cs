@@ -15,6 +15,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithNullableFieldsCleared_ShouldBeValid()
     {
+        // STEP-01: Create request as UpdateRestaurantRequestDto.
         var request = new UpdateRestaurantRequestDto
         {
             Description = null,
@@ -25,8 +26,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
             CoverMediaId = null
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -35,14 +38,17 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithInvalidSuppliedFields_ShouldReturnFieldErrors()
     {
+        // STEP-01: Create request as UpdateRestaurantRequestDto.
         var request = new UpdateRestaurantRequestDto
         {
             Latitude = null,
             ImageMediaIds = Enumerable.Range(1, 11).Select(value => (long)value).ToArray()
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName)
             .Should().Contain(["Latitude", "ImageMediaIds"]);
     }
@@ -52,6 +58,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public void Deserialize_WithExplicitNull_ShouldMarkOnlyThatFieldAsSpecified()
     {
+        // STEP-01: Read request from the response; assert request is not null, request.DescriptionSpecified is true and request.CoverMediaIdSpecified is false.
         var request = JsonSerializer.Deserialize<UpdateRestaurantRequestDto>(
             """{"description":null}""",
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -70,8 +77,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData("A", true)]
     public async Task ValidateAsync_WithNameBoundary_ShouldMatchContract(string? name, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Name = name } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRestaurantRequestDto { Name = name });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -80,9 +89,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithTwoHundredCharacterName_ShouldBeValid()
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Name = a new string } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { Name = new string('a', 200) });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -93,9 +104,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData(2001, false)]
     public async Task ValidateAsync_WithDescriptionLength_ShouldMatchContract(int length, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Description = a new string } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { Description = new string('a', length) });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -119,8 +132,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData("+84 90 123 4567", true)]
     public async Task ValidateAsync_WithPhoneBoundary_ShouldMatchContract(string? phone, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Phone = phone } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRestaurantRequestDto { Phone = phone });
 
+        // STEP-02: Assert result.IsValid is expectedValid, result.Errors has exactly one matching item and result.Errors.PropertyName is "Phone".
         result.IsValid.Should().Be(expectedValid);
         if (!expectedValid)
         {
@@ -138,8 +153,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData("owner@", false)]
     public async Task ValidateAsync_WithEmailFormat_ShouldMatchContract(string email, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Email = email } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRestaurantRequestDto { Email = email });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -153,8 +170,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData("example.com", false)]
     public async Task ValidateAsync_WithWebsiteScheme_ShouldMatchContract(string website, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Website = website } and keep result.
         var result = await _validator.ValidateAsync(new UpdateRestaurantRequestDto { Website = website });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -171,6 +190,7 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
         int provinceLength,
         bool expectedValid)
     {
+        // STEP-01: Create request as UpdateRestaurantRequestDto.
         var request = new UpdateRestaurantRequestDto
         {
             AddressLine = new string('a', addressLength),
@@ -178,8 +198,10 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
             ProvinceName = new string('p', provinceLength)
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -192,9 +214,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData(90.000001, false)]
     public async Task ValidateAsync_WithLatitudeBoundary_ShouldMatchContract(double latitude, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Latitude = latitude } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { Latitude = (decimal)latitude });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -207,9 +231,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData(180.000001, false)]
     public async Task ValidateAsync_WithLongitudeBoundary_ShouldMatchContract(double longitude, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { Longitude = longitude } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { Longitude = (decimal)longitude });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -223,9 +249,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData((short)5, false)]
     public async Task ValidateAsync_WithPriceLevelBoundary_ShouldMatchContract(short? priceLevel, bool expectedValid)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { PriceLevel = priceLevel } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { PriceLevel = priceLevel });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -234,9 +262,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithDuplicateGalleryIds_ShouldBeInvalid()
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { ImageMediaIds = the expected items } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { ImageMediaIds = [1, 1] });
 
+        // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateRestaurantRequestDto.ImageMediaIds));
     }
@@ -246,9 +276,11 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithExplicitNullGallery_ShouldBeInvalid()
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { ImageMediaIds = null } and keep result.
         var result = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { ImageMediaIds = null });
 
+        // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateRestaurantRequestDto.ImageMediaIds));
     }
@@ -260,11 +292,14 @@ public sealed class UpdateRestaurantRequestDtoValidatorTests
     [InlineData(-1)]
     public async Task ValidateAsync_WithNonPositiveMediaIds_ShouldBeInvalid(long mediaId)
     {
+        // STEP-01: Validate UpdateRestaurantRequestDto { CoverMediaId = mediaId } and keep coverResult.
         var coverResult = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { CoverMediaId = mediaId });
+        // STEP-02: Validate UpdateRestaurantRequestDto { ImageMediaIds = the expected items } and keep galleryResult.
         var galleryResult = await _validator.ValidateAsync(
             new UpdateRestaurantRequestDto { ImageMediaIds = [mediaId] });
 
+        // STEP-03: Assert coverResult.IsValid is false and galleryResult.IsValid is false.
         coverResult.IsValid.Should().BeFalse();
         galleryResult.IsValid.Should().BeFalse();
     }

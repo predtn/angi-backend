@@ -25,11 +25,15 @@ public sealed class UpdateRestaurantModerationStatusUseCaseTests
     [InlineData("suspended", RestaurantModerationStatus.Suspended, "RESTAURANT_SUSPENDED")]
     public async Task PersistsTransition(string status, RestaurantModerationStatus expected, string auditAction)
     {
+        // STEP-01: Create world as ModerationTestContext and set world.Restaurant.ModerationStatus to Visible.
         var world = new ModerationTestContext();
         world.Restaurant.ModerationStatus = expected == RestaurantModerationStatus.Visible ? RestaurantModerationStatus.Hidden : RestaurantModerationStatus.Visible;
+        // STEP-02: Run Create().ExecuteAsync and keep result.
         var result = await Create(world).ExecuteAsync(7, new() { ModerationStatus = status, Reason = " reason " }, default);
+        // STEP-03: Assert result.ModerationStatus is status and world.Restaurant.ModerationStatus is expected.
         result.ModerationStatus.Should().Be(status);
         world.Restaurant.ModerationStatus.Should().Be(expected);
+        // STEP-04: Verify Add is called once, AddNotification is called once, SaveChangesAsync is called once and CommitAsync is called once.
         world.Audit.Verify(x => x.Add(It.Is<ANGI.Application.Common.Models.Audit.AuditLogEntry>(a => a.Action == auditAction)), Times.Once);
         world.Repository.Verify(x => x.AddNotification(It.Is<Domain.Entities.Notification>(n => n.RecipientId == 12 && n.Body == "reason")), Times.Once);
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -41,8 +45,11 @@ public sealed class UpdateRestaurantModerationStatusUseCaseTests
     [Fact]
     public async Task RepeatedStateHasNoDuplicateEffects()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Run Create().ExecuteAsync.
         await Create(world).ExecuteAsync(7, new() { ModerationStatus = "visible", Reason = "reason" }, default);
+        // STEP-03: Verify world receives no other calls and AddNotification is never called.
         world.Audit.VerifyNoOtherCalls();
         world.Repository.Verify(x => x.AddNotification(It.IsAny<Domain.Entities.Notification>()), Times.Never);
     }
@@ -55,10 +62,15 @@ public sealed class UpdateRestaurantModerationStatusUseCaseTests
     [InlineData(ReportTargetType.Blog, 7)]
     public async Task RejectsUnrelatedReport(ReportTargetType? type, long id)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub world.GetReportTargetAsync.
         world.Repository.Setup(x => x.GetReportTargetAsync(88, It.IsAny<CancellationToken>())).ReturnsAsync(type.HasValue ? new ReportTarget(type.Value, id) : null);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(7, new() { ModerationStatus = "hidden", Reason = "reason", ReportId = 88 }, default);
+        // STEP-04: Assert action throws ValidationException.
         await action.Should().ThrowAsync<ValidationException>();
+        // STEP-05: Verify SaveChangesAsync is never called and CommitAsync is never called.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -68,9 +80,13 @@ public sealed class UpdateRestaurantModerationStatusUseCaseTests
     [Fact]
     public async Task MissingRestaurantDoesNotCommit()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(404, new() { ModerationStatus = "hidden", Reason = "reason" }, default);
+        // STEP-03: Assert action throws NotFoundException and the thrown exception.ErrorCode is "RESTAURANT_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("RESTAURANT_NOT_FOUND");
+        // STEP-04: Verify CommitAsync is never called.
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

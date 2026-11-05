@@ -40,10 +40,13 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task List_WithAdminToken_ShouldBindAndReturnPage()
     {
+        // STEP-01: Get client from AdminClient.
         using var client = AdminClient();
 
+        // STEP-02: Send GET /api/v1/admin/mods?q=Linh&status=deactivated&page=2&pageSize=10 and keep response.
         using var response = await client.GetAsync("/api/v1/admin/mods?q=Linh&status=deactivated&page=2&pageSize=10");
 
+        // STEP-03: Read json from the response; assert response.StatusCode is HttpStatusCode.OK, _factory.List.LastRequest is equivalent to the expected value and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _factory.List.LastRequest.Should().BeEquivalentTo(new
         {
@@ -62,6 +65,7 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task Create_WithValidBody_ShouldReturnCreated()
     {
+        // STEP-01: Get client from AdminClient and create request as CreateModRequestDto.
         using var client = AdminClient();
         var request = new CreateModRequestDto
         {
@@ -70,8 +74,10 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
             PermissionOverrides = [new PermissionOverrideDto { PermissionCode = "USER_BAN", Effect = "deny" }]
         };
 
+        // STEP-02: Send POST /api/v1/admin/mods with request and keep response.
         using var response = await client.PostAsJsonAsync("/api/v1/admin/mods", request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Created, _factory.Create.LastRequest is not null and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _factory.Create.LastRequest.Should().NotBeNull();
         _factory.Create.LastRequest!.PermissionOverrides.Should().ContainSingle()
@@ -83,12 +89,16 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task Get_WithAdminToken_ShouldReturnNestedDetail()
     {
+        // STEP-01: Get client from AdminClient.
         using var client = AdminClient();
 
+        // STEP-02: Send GET /api/v1/admin/mods/42 and keep response.
         using var response = await client.GetAsync("/api/v1/admin/mods/42");
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.OK and _factory.Get.LastUserId is 42.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _factory.Get.LastUserId.Should().Be(42);
+        // STEP-04: Read json from the response; assert json contains ""permissions"", json contains ""effective"", json contains ""handled"" and 1 more.
         var json = await response.Content.ReadAsStringAsync();
         json.Should().Contain("\"permissions\"");
         json.Should().Contain("\"effective\"");
@@ -101,12 +111,15 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task Update_WithValidBody_ShouldReturnUpdatedCard()
     {
+        // STEP-01: Get client from AdminClient.
         using var client = AdminClient();
 
+        // STEP-02: Send PATCH /api/v1/admin/mods/42 with a UpdateModRequestDto body and keep response.
         using var response = await client.PatchAsJsonAsync(
             "/api/v1/admin/mods/42",
             new UpdateModRequestDto { Status = "deactivated" });
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.OK, _factory.Update.LastCall.Value.UserId is 42 and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _factory.Update.LastCall!.Value.UserId.Should().Be(42);
         _factory.Update.LastCall.Value.Request.Status.Should().Be("deactivated");
@@ -118,10 +131,13 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task Get_WithoutMod_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Get client from AdminClient.
         using var client = AdminClient();
 
+        // STEP-02: Send GET /api/v1/admin/mods/404 and keep response.
         using var response = await client.GetAsync("/api/v1/admin/mods/404");
 
+        // STEP-03: Read envelope from the response; assert response.StatusCode is HttpStatusCode.NotFound, envelope.Success is false and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
         envelope!.Success.Should().BeFalse();
@@ -138,14 +154,17 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
         string path,
         string body)
     {
+        // STEP-01: Get client from AdminClient and build the HTTP request.
         using var client = AdminClient();
         using var request = new HttpRequestMessage(new HttpMethod(method), path)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await client.SendAsync(request);
 
+        // STEP-03: Read envelope from the response; assert response.StatusCode is HttpStatusCode.BadRequest, envelope.ErrorCode is "VALIDATION_FAILED" and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
         envelope!.ErrorCode.Should().Be("VALIDATION_FAILED");
@@ -157,10 +176,13 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task List_WithoutToken_ShouldReturnUnauthorizedEnvelope()
     {
+        // STEP-01: Create the HTTP client.
         using var client = _factory.CreateClient();
 
+        // STEP-02: Send GET /api/v1/admin/mods and keep response.
         using var response = await client.GetAsync("/api/v1/admin/mods");
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Unauthorized and the response body.ErrorCode is "UNAUTHORIZED".
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await response.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("UNAUTHORIZED");
     }
@@ -170,11 +192,15 @@ public sealed class ModsHttpContractTests : IClassFixture<ModsApiFactory>
     [Fact]
     public async Task List_WithModToken_ShouldReturnForbiddenEnvelope()
     {
+        // STEP-01: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-02: Attach the bearer token to the HTTP client.
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("MOD"));
 
+        // STEP-03: Send GET /api/v1/admin/mods and keep response.
         using var response = await client.GetAsync("/api/v1/admin/mods");
 
+        // STEP-04: Assert response.StatusCode is HttpStatusCode.Forbidden and the response body.ErrorCode is "FORBIDDEN".
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await response.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("FORBIDDEN");
     }

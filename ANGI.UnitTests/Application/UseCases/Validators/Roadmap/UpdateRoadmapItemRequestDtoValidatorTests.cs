@@ -20,6 +20,7 @@ public sealed class UpdateRoadmapItemRequestDtoValidatorTests
     [InlineData(1, 1L, "late_night")]
     public void Validate_WithDocumentedValues_ShouldSucceed(int? dishId, long? dayId, string? mealSlot)
     {
+        // STEP-01: Validate UpdateRoadmapItemRequestDto { DishId = dishId, DayId = dayId, MealSlot = mealSlot, ... } and keep result.
         var result = _validator.Validate(new UpdateRoadmapItemRequestDto
         {
             DishId = dishId,
@@ -28,6 +29,7 @@ public sealed class UpdateRoadmapItemRequestDtoValidatorTests
             SortOrder = short.MinValue
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -39,8 +41,10 @@ public sealed class UpdateRoadmapItemRequestDtoValidatorTests
         UpdateRoadmapItemRequestDto request,
         string propertyName)
     {
+        // STEP-01: Validate request and keep result.
         var result = _validator.Validate(request);
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == propertyName);
     }
 

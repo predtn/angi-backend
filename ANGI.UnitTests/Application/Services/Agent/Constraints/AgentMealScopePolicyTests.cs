@@ -20,6 +20,7 @@ public sealed class AgentMealScopePolicyTests
     [InlineData("Bữa cuối ngày 4", 4, "dinner")]
     public void Read_MealWithDay_ResolvesScope(string content, short day, string meal)
     {
+        // STEP-01: Read references from the response; assert references.Meals equals a new AgentScope, references.Days is empty and references.OutOfRange is false.
         var references = AgentMealScopePolicy.Read(content, new AgentState());
 
         references.Meals.Should().Equal(new AgentScope(day, meal));
@@ -34,6 +35,7 @@ public sealed class AgentMealScopePolicyTests
     [InlineData(new[] { "snack", "lunch", "dinner" }, "bữa cuối ngày 1", "snack")]
     public void Read_DeclaredMeals_DefineNumbering(string[] mealSlots, string content, string meal)
     {
+        // STEP-01: Assert AgentMealScopePolicy.Read().Meals equals a new AgentScope.
         AgentMealScopePolicy.Read(content, new AgentState { MealSlots = mealSlots }).Meals.Should().Equal(new AgentScope(1, meal));
     }
 
@@ -42,6 +44,7 @@ public sealed class AgentMealScopePolicyTests
     [Fact]
     public void Read_StandaloneDay_IsReportedSeparately()
     {
+        // STEP-01: Read references from the response; assert references.Meals equals a new AgentScope and references.Days equals 3.
         var references = AgentMealScopePolicy.Read("Hà Nội 4 ngày, chua cho cả ngày 3 và bữa 2 ngày 1", new AgentState());
 
         references.Meals.Should().Equal(new AgentScope(1, "lunch"));
@@ -57,10 +60,12 @@ public sealed class AgentMealScopePolicyTests
     [InlineData("Đổi bữa 0 ngày 1", null, true)]
     public void Question_MealNumberBeyondPlan_AsksWhichMeal(string content, string[]? mealSlots, bool asks)
     {
+        // STEP-01: Create state as AgentState and get question from AgentMealScopePolicy.Question.
         var state = new AgentState { MealSlots = mealSlots ?? [] };
 
         var question = AgentMealScopePolicy.Question(content, state);
 
+        // STEP-02: Assert AgentMealScopePolicy.Read().OutOfRange is asks, depending on asks, question is the expected text and question is null.
         AgentMealScopePolicy.Read(content, state).OutOfRange.Should().Be(asks);
         if (asks) question.Should().Be("Mỗi ngày trong lịch có 3 bữa (bữa sáng, bữa trưa, bữa tối). Bạn muốn chọn bữa nào?");
         else question.Should().BeNull();
@@ -71,11 +76,13 @@ public sealed class AgentMealScopePolicyTests
     [Fact]
     public void Narrow_NewWholeDayOverride_BecomesNamedMealOverrides()
     {
+        // STEP-01: Build the targets collection, create proposed as AgentState and derive narrowed from AgentMealScopePolicy.Narrow().
         var targets = new AgentTasteTarget[] { new("sour", .5) };
         var proposed = new AgentState { NumDays = 2, TasteOverrides = [new(1, null, targets), new(2, null, targets)] };
 
         var narrowed = AgentMealScopePolicy.Narrow(proposed, new AgentState(), ["Chua vừa cho bữa sáng ngày 1 và bữa tối ngày 1, cả ngày 2"])!;
 
+        // STEP-02: Assert narrowed.TasteOverrides.Select(filtered) equals ((short)1, "breakfast") and narrowed.TasteOverrides only holds items matching the condition.
         narrowed.TasteOverrides.Select(x => (x.DayNumber, x.MealSlot)).Should()
             .Equal(((short)1, "breakfast"), ((short)1, "dinner"), ((short)2, (string?)null));
         narrowed.TasteOverrides.Should().OnlyContain(x => x.Targets.SequenceEqual(targets));
@@ -88,6 +95,7 @@ public sealed class AgentMealScopePolicyTests
     [InlineData("day-also-named")][InlineData("already-stored")][InlineData("meal-override-exists")][InlineData("no-meal-wording")][InlineData("null")]
     public void Narrow_Uncertain_KeepsProposal(string area)
     {
+        // STEP-01: Create day as AgentTasteOverride, create proposed as AgentState, derive current from the expected value and 2 more.
         var day = new AgentTasteOverride(1, null, [new("sour", .5)]);
         var proposed = new AgentState { NumDays = 2, TasteOverrides = area == "meal-override-exists"
             ? [day, new(1, "lunch", [new("sweet", .75)])] : [day] };
@@ -101,6 +109,7 @@ public sealed class AgentMealScopePolicyTests
 
         var narrowed = AgentMealScopePolicy.Narrow(area == "null" ? null : proposed, current, [message]);
 
+        // STEP-02: Assert depending on area == "null", narrowed is null and narrowed is the same instance as proposed.
         if (area == "null") narrowed.Should().BeNull();
         else narrowed.Should().BeSameAs(proposed);
     }
@@ -114,10 +123,12 @@ public sealed class AgentMealScopePolicyTests
     [InlineData(false, "Đổi món khác cho bữa 1 ngày 1", 0)]
     public void Evidence_UsesPendingMessagesOrTasteDeclaration(bool pending, string content, int count)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to content and when pending, set context.State to a copy of context.State.
         var context = AgentTestData.Context();
         context.Request.Content = content;
         if (pending) context.State = context.State with { PendingPlanningRequest = new(["Tôi thích ăn chua", content]) };
 
+        // STEP-02: Assert AgentMealScopePolicy.Evidence() has count item(s).
         AgentMealScopePolicy.Evidence(context).Should().HaveCount(count);
     }
 }

@@ -15,7 +15,9 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
     [PostgresEndToEndFact]
     public async Task UpdateProposal_RequiresCompleteFiniteSource()
     {
+        // STEP-01: Unpack (conversationId, roadmapId) from SetupAsync().
         var (conversationId, roadmapId) = await SetupAsync();
+        // STEP-02: Assert for each timestamp, RejectAsync confirms ck_agent_proposals_base.
         foreach (var timestamp in new DateTime?[] { null, DateTime.MinValue, DateTime.MaxValue })
         {
             var proposal = Proposal(conversationId);
@@ -24,10 +26,13 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
             proposal.BaseRoadmapUpdatedAt = timestamp;
             await RejectAsync(proposal, "ck_agent_proposals_base");
         }
+        // STEP-03: Get missingRoadmap from Proposal, set missingRoadmap.Operation to AgentProposalOperation.Update and 1 more.
         var missingRoadmap = Proposal(conversationId);
         missingRoadmap.Operation = AgentProposalOperation.Update;
         missingRoadmap.BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1);
+        // STEP-04: Assert RejectAsync confirms ck_agent_proposals_base.
         await RejectAsync(missingRoadmap, "ck_agent_proposals_base");
+        // STEP-05: Assert in the database db.AgentProposals.CountAsync() is 1.
         await factory.ExecuteDbAsync(async db =>
         {
             var valid = Proposal(conversationId);
@@ -45,7 +50,9 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
     [PostgresEndToEndFact]
     public async Task CommittedProposal_RequiresCompleteFiniteResult()
     {
+        // STEP-01: Unpack (conversationId, roadmapId) from SetupAsync().
         var (conversationId, roadmapId) = await SetupAsync();
+        // STEP-02: Assert for each missing, RejectAsync confirms ck_agent_proposals_commit.
         foreach (var missing in new[] { "roadmap", "timestamp-null", "timestamp-min", "timestamp-max", "result", "time" })
         {
             var proposal = Proposal(conversationId);
@@ -56,6 +63,7 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
             proposal.CommittedAt = missing == "time" ? null : DateTime.UtcNow;
             await RejectAsync(proposal, "ck_agent_proposals_commit");
         }
+        // STEP-03: Assert in the database db.AgentProposals.CountAsync() is 1.
         await factory.ExecuteDbAsync(async db =>
         {
             var valid = Proposal(conversationId);
@@ -75,7 +83,9 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
     [PostgresEndToEndFact]
     public async Task UncommittedCreate_RejectsSourceAndResultMetadata()
     {
+        // STEP-01: Unpack (conversationId, roadmapId) from SetupAsync().
         var (conversationId, roadmapId) = await SetupAsync();
+        // STEP-02: Assert for each source, RejectAsync confirms ck_agent_proposals_base and for each result, RejectAsync confirms ck_agent_proposals_commit.
         foreach (var source in new[] { "roadmap", "timestamp", "both" })
         {
             var proposal = Proposal(conversationId);
@@ -92,6 +102,7 @@ public sealed class AgentProposalConfigurationTests(PostgresApiFactory factory) 
             proposal.CommittedAt = result == "time" ? DateTime.UtcNow : null;
             await RejectAsync(proposal, "ck_agent_proposals_commit");
         }
+        // STEP-03: Assert in the database db.AgentProposals.CountAsync() is 1.
         await factory.ExecuteDbAsync(async db =>
         {
             db.AgentProposals.Add(Proposal(conversationId));

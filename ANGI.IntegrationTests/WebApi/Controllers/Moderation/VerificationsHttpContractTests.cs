@@ -49,10 +49,13 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [MemberData(nameof(Endpoints))]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(HttpMethod method, string path, object? body)
     {
+        // STEP-01: Get request from Request.
         using var request = Request(method, path, body);
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Unauthorized and AssertErrorAsync confirms UNAUTHORIZED.
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         await AssertErrorAsync(response, "UNAUTHORIZED");
     }
@@ -63,11 +66,14 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [MemberData(nameof(Endpoints))]
     public async Task Endpoint_WithTravelerRole_ShouldReturnForbidden(HttpMethod method, string path, object? body)
     {
+        // STEP-01: Get client from Client and get request from Request.
         using var client = Client("TRAVELER");
         using var request = Request(method, path, body);
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await client.SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertErrorAsync confirms FORBIDDEN.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertErrorAsync(response, "FORBIDDEN");
     }
@@ -77,13 +83,18 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [Fact]
     public async Task List_WithModToken_ShouldReturnPagedContract()
     {
+        // STEP-01: Get client from Client.
         using var client = Client("MOD");
 
+        // STEP-02: Send GET /api/v1/mod/verifications and keep response.
         using var response = await client.GetAsync("/api/v1/mod/verifications");
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.items.length is 1, data.page is 1, data.pageSize is 20 and _factory.List.LastRequest.Status is "pending".
         data.GetProperty("items").GetArrayLength().Should().Be(1);
         data.GetProperty("page").GetInt32().Should().Be(1);
         data.GetProperty("pageSize").GetInt32().Should().Be(20);
@@ -95,13 +106,18 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [Fact]
     public async Task Get_WithModToken_ShouldReturnFlattenedDetailContract()
     {
+        // STEP-01: Get client from Client.
         using var client = Client("MOD");
 
+        // STEP-02: Send GET /api/v1/mod/verifications/21 and keep response.
         using var response = await client.GetAsync("/api/v1/mod/verifications/21");
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.id is 21, data.restaurant.id is 7, data.TryGetProperty() is true and data.TryGetProperty() is false.
         data.GetProperty("id").GetInt64().Should().Be(21);
         data.GetProperty("restaurant").GetProperty("id").GetInt64().Should().Be(7);
         data.TryGetProperty("previous", out _).Should().BeTrue();
@@ -113,12 +129,15 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [Fact]
     public async Task Decide_WithValidBody_ShouldReturnVerificationContract()
     {
+        // STEP-01: Get client from Client.
         using var client = Client("MOD");
 
+        // STEP-02: Send POST /api/v1/mod/verifications/21/decision with a body of decision and reviewNote and keep response.
         using var response = await client.PostAsJsonAsync(
             "/api/v1/mod/verifications/21/decision",
             new { decision = "reject", reviewNote = "Invalid document" });
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK, document.RootElement.data.status is "rejected" and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("data").GetProperty("status").GetString().Should().Be("rejected");
@@ -131,11 +150,14 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [Fact]
     public async Task Decide_WithoutBody_ShouldReturnValidationEnvelope()
     {
+        // STEP-01: Call _factory.Review.Reset and get client from Client.
         _factory.Review.Reset();
         using var client = Client("MOD");
 
+        // STEP-02: Send POST /api/v1/mod/verifications/21/decision with no body and keep response.
         using var response = await client.PostAsync("/api/v1/mod/verifications/21/decision", null);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest, AssertErrorAsync confirms VALIDATION_FAILED and _factory.Review.LastRequest is null.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         await AssertErrorAsync(response, "VALIDATION_FAILED");
         _factory.Review.LastRequest.Should().BeNull();
@@ -147,11 +169,14 @@ public sealed class VerificationsHttpContractTests : IClassFixture<Verifications
     [MemberData(nameof(Endpoints))]
     public async Task Endpoint_WithAdminRole_ShouldReturnForbidden(HttpMethod method, string path, object? body)
     {
+        // STEP-01: Get client from Client and get request from Request.
         using var client = Client("ADMIN");
         using var request = Request(method, path, body);
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await client.SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertErrorAsync confirms FORBIDDEN.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertErrorAsync(response, "FORBIDDEN");
     }

@@ -26,6 +26,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Tôi thích ăn cay với ngân sách vừa phải cho cả chuyến", true, false)]
     public async Task AmbiguousPreference_AsksBeforeCallingModelOrRanking(string content, bool intensity, bool scope)
     {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get context from AgentTestData.Context, set context.Request.Content to content and 3 more.
         var fixture = new AgentUseCaseFixture();
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
@@ -33,12 +34,16 @@ public sealed class AgentTasteClarificationPolicyTests
         context.State = context.State with { TasteTargets = [new("spicy", .75)] };
         var baseline = context.State;
         var result = await fixture.Orchestrator().RunAsync(context, default);
+        // STEP-02: Assert result.Reply.Contains() is intensity and result.Reply.Contains() is scope.
         result.Reply.Contains("Bạn muốn mức ", StringComparison.Ordinal).Should().Be(intensity);
         result.Reply.Contains("toàn chuyến", StringComparison.Ordinal).Should().Be(scope);
+        // STEP-03: Assert a copy of result.State is a copy of baseline, result.State.PendingPlanningRequest.Messages contains content, result.Snapshot is null and 1 more.
         (result.State with { PendingPlanningRequest = null }).Should().Be(baseline with { PendingQuestion = result.Reply });
         result.State.PendingPlanningRequest!.Messages.Should().Contain(content);
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
+        // STEP-04: Assert context.Grants is empty.
         context.Grants.Should().BeEmpty();
+        // STEP-05: Verify RunAsync is never called.
         fixture.Llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -55,7 +60,9 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Nhà hàng có tên “Tôi thích ăn cay”")]
     public void ResolvedOrNonPreferenceText_DoesNotInventAClarification(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(); context.Request.Content = content;
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() is null.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
@@ -64,6 +71,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void PartialAnswers_KeepAskingOnlyWhatIsStillMissing()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to a test text, derive initialQuestion from Question() and 3 more.
         var context = AgentTestData.Context();
         context.Request.Content = "Tôi thích ăn cay";
         var initialQuestion = AgentTasteClarificationPolicy.Question(context)!;
@@ -72,11 +80,14 @@ public sealed class AgentTasteClarificationPolicyTests
         context.State = context.State with { PendingQuestion = initialQuestion };
         context.Request.Content = "Vừa";
         var scopeQuestion = AgentTasteClarificationPolicy.Question(context)!;
+        // STEP-02: Assert scopeQuestion contains the expected text.
         scopeQuestion.Should().Contain("toàn chuyến").And.NotContain("Bạn muốn mức ");
+        // STEP-03: Add the computed value to context.History, set context.State to a copy of context.State and set context.Request.Content to a test text.
         context.History.Add(new("user", "Vừa"));
         context.History.Add(new("assistant", scopeQuestion));
         context.State = context.State with { PendingQuestion = scopeQuestion };
         context.Request.Content = "Cả chuyến";
+        // STEP-04: Assert AgentTasteClarificationPolicy.Question() is null and context.State.TasteTargets is empty.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
         context.State.TasteTargets.Should().BeEmpty();
     }
@@ -86,10 +97,12 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void KnownHumanResolution_IsReusedWithoutTrustingModelGuesses()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.State to a copy of context.State, add the computed value to context.History and 1 more.
         var context = AgentTestData.Context();
         context.State = context.State with { TasteTargets = [new("spicy", .5)] };
         context.History.Add(new("user", "Tôi thích ăn cay vừa cho cả chuyến"));
         context.Request.Content = "Lập lịch 5 ngày, thích ăn cay";
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() is null.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
@@ -99,12 +112,16 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void ScopeAlreadySupplied_PartialIntensityAnswerCompletesTheQuestion()
     {
+        // STEP-01: Get context from AgentTestData.Context, add the computed value to context.History, set context.State to a copy of context.State and 1 more.
         var context = AgentTestData.Context();
         context.History.Add(new("user", "Tôi thích ăn cay cho cả chuyến"));
         context.State = context.State with { PendingQuestion = "Bạn muốn mức cay như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?" };
         context.Request.Content = "Vừa";
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() is null.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
+        // STEP-03: Set context.Request.Content to a test text.
         context.Request.Content = "Nhiều quán hơn";
+        // STEP-04: Assert AgentTasteClarificationPolicy.Question() is null.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
@@ -113,10 +130,12 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void ConstraintConfirmation_DoesNotConfirmAnUnspecifiedTaste()
     {
+        // STEP-01: Get context from AgentTestData.Context, add the computed value to context.History, set context.Request.Content to a test text and 1 more.
         var context = AgentTestData.Context();
         context.History.Add(new("user", "Lập lịch 5 ngày, thích ăn cay"));
         context.Request.Content = "Xác nhận thay đổi";
         context.ReplanAfterConfirmation = true;
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() contains the expected text.
         AgentTasteClarificationPolicy.Question(context).Should().Contain("Bạn muốn mức cay").And.Contain("toàn chuyến");
     }
 
@@ -125,10 +144,12 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void DifferentTaste_DoesNotInheritAnotherTastesIntensity()
     {
+        // STEP-01: Get context from AgentTestData.Context, add the computed value to context.History, set context.State to a copy of context.State and 1 more.
         var context = AgentTestData.Context();
         context.History.Add(new("user", "Tôi thích ăn cay vừa cho toàn chuyến"));
         context.State = context.State with { PendingQuestion = "Bạn muốn áp dụng khẩu vị cay cho toàn chuyến hay ngày/bữa cụ thể nào?" };
         context.Request.Content = "Tôi thích ăn ngọt";
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() contains the expected text.
         AgentTasteClarificationPolicy.Question(context).Should().Contain("Bạn muốn mức ngọt").And.Contain("toàn chuyến");
     }
 
@@ -141,9 +162,11 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Tôi thích ăn chua vừa cho bữa cuối ngày 3")]
     public void NumberedMealScope_IsAnExplicitScope(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context();
         context.Request.Content = content;
 
+        // STEP-02: Assert AgentTasteClarificationPolicy.Question() is null.
         AgentTasteClarificationPolicy.Question(context).Should().BeNull();
     }
 
@@ -155,6 +178,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Tôi không thích ăn cay", false)]
     public void StatesTaste_OnlyForDeclaredPreferences(string content, bool expected)
     {
+        // STEP-01: Assert AgentTasteClarificationPolicy.StatesTaste() is expected.
         AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
     }
 
@@ -173,6 +197,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("toi thich an chua", true)]
     public void StatesTaste_LookAlikeWords_AreNotTastes(string content, bool expected)
     {
+        // STEP-01: Assert AgentTasteClarificationPolicy.StatesTaste() is expected.
         AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
     }
 
@@ -185,6 +210,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("toàn chuyến", true)]
     public void OpenTasteQuestion_NonAnswerEndsIt(string content, bool asksAgain)
     {
+        // STEP-01: Get context from AgentTestData.Context, add the computed value to context.History, set context.State to a copy of context.State and 2 more.
         var context = AgentTestData.Context();
         context.History.Add(new("user", "Tôi thích ăn chua"));
         context.State = context.State with { PendingQuestion = "Bạn muốn mức chua như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều? Bạn muốn áp dụng khẩu vị chua cho toàn chuyến hay ngày/bữa cụ thể nào?" };
@@ -192,6 +218,7 @@ public sealed class AgentTasteClarificationPolicyTests
 
         var question = AgentTasteClarificationPolicy.Question(context);
 
+        // STEP-02: Assert depending on asksAgain, question starts with the expected text and question is null.
         if (asksAgain) question.Should().StartWith("Bạn muốn mức chua");
         else question.Should().BeNull();
     }
@@ -205,11 +232,13 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Bớt ngọt ngày 2", "Bạn muốn mức ngọt", false)]
     public void LimitingTaste_AsksFixedQuestion(string content, string expected, bool asksScope)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to content and get question from AgentTasteClarificationPolicy.Question.
         var context = AgentTestData.Context();
         context.Request.Content = content;
 
         var question = AgentTasteClarificationPolicy.Question(context);
 
+        // STEP-02: Assert question starts with expected and question.Contains() is asksScope.
         question.Should().StartWith(expected);
         question!.Contains("toàn chuyến hay ngày/bữa").Should().Be(asksScope);
     }
@@ -221,6 +250,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Món này chưa ngon", new string[0])]
     public void MentionedTastes_NamesTastesIgnoringLookAlikes(string content, string[] expected)
     {
+        // STEP-01: Assert AgentTasteClarificationPolicy.MentionedTastes() equals expected.
         AgentTasteClarificationPolicy.MentionedTastes(content).Should().Equal(expected);
     }
 
@@ -234,6 +264,7 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("cay", "toàn chuyến", null, null)]
     public void Resolution_CompleteAnswer_NamesTargetAndPlacement(string taste, string answer, string? expected, string? field)
     {
+        // STEP-01: Get context from AgentTestData.Context, add the computed value to context.History, set context.State to a copy of context.State and 2 more.
         var context = AgentTestData.Context();
         context.History.Add(new("user", $"Tôi muốn ăn ở Đà Nẵng 2 ngày, tôi thích ăn {taste}"));
         context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
@@ -242,6 +273,7 @@ public sealed class AgentTasteClarificationPolicyTests
 
         var resolution = AgentTasteClarificationPolicy.Resolution(context);
 
+        // STEP-02: Assert depending on expected is null, resolution is null and resolution contains expected.
         if (expected is null) resolution.Should().BeNull();
         else resolution.Should().Contain(expected).And.Contain(field!).And.Contain("không hỏi lại");
     }
@@ -259,8 +291,10 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("toi muon mon chua an bao gio")]
     public void NoveltyQuestion_NoveltyWording_AsksMeaning(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(); context.Request.Content = content;
 
+        // STEP-02: Assert AgentTasteClarificationPolicy.NoveltyQuestion() is AgentReplyBuilder.NoveltyQuestion.
         AgentTasteClarificationPolicy.NoveltyQuestion(context).Should().Be(AgentReplyBuilder.NoveltyQuestion);
     }
 
@@ -277,8 +311,10 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Món chua ăn với gì ngon")]
     public void NoveltyQuestion_OrdinaryOrResolvedWording_ReachesModel(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(); context.Request.Content = content;
 
+        // STEP-02: Assert AgentTasteClarificationPolicy.NoveltyQuestion() is null.
         AgentTasteClarificationPolicy.NoveltyQuestion(context).Should().BeNull();
     }
 
@@ -291,11 +327,13 @@ public sealed class AgentTasteClarificationPolicyTests
     [InlineData("Chưa ăn bao giờ, khác lịch luôn", false)]
     public void NoveltyQuestion_AnswerToNoveltyQuestion_IsHonestAboutHistory(string content, bool noHistory)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to content, set context.State to a copy of context.State and 1 more.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item())); context.Request.Content = content;
         context.State = context.State with { PendingQuestion = AgentReplyBuilder.NoveltyQuestion };
 
         var reply = AgentTasteClarificationPolicy.NoveltyQuestion(context);
 
+        // STEP-02: Assert depending on noHistory, reply is NoveltyWithoutHistory and reply is null.
         if (noHistory) reply.Should().Be(AgentReplyBuilder.NoveltyWithoutHistory);
         else reply.Should().BeNull();
     }
@@ -305,9 +343,11 @@ public sealed class AgentTasteClarificationPolicyTests
     [Fact]
     public void NoveltyQuestion_NeverEatenWithoutPlan_PlansByTaste()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to a test text and set context.State to a copy of context.State.
         var context = AgentTestData.Context(); context.Request.Content = "Món chưa từng ăn";
         context.State = context.State with { PendingQuestion = AgentReplyBuilder.NoveltyQuestion };
 
+        // STEP-02: Assert AgentTasteClarificationPolicy.NoveltyQuestion() is NoveltyWithoutHistoryOrPlan.
         AgentTasteClarificationPolicy.NoveltyQuestion(context).Should().Be(AgentReplyBuilder.NoveltyWithoutHistoryOrPlan)
             .And.Contain("Mình sẽ lập lịch theo các món hợp khẩu vị của bạn.").And.NotContain("lịch hiện tại");
     }

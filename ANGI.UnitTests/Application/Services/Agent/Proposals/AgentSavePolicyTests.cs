@@ -19,8 +19,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("chốt lịch này")][InlineData("lưu lịch trình này")][InlineData("lưu")][InlineData("chốt đi")][InlineData("ok lên lịch")]
     public void Decide_SaveWithoutDate_AsksStartDateAndNamesDays(string content)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context(content, start: null), null, Today);
 
+        // STEP-02: Assert decision.Commit is false, decision.Reply starts with the expected text and decision.Pending is AskedDate.
         decision!.Commit.Should().BeFalse();
         decision.Reply.Should().StartWith("Lịch của bạn có 2 ngày. Bạn muốn bắt đầu từ ngày nào?").And.Contain("10/11").And.Contain("để sau");
         decision.Pending.Should().Be(AskedDate);
@@ -32,10 +34,12 @@ public sealed class AgentSavePolicyTests
     [InlineData(true)][InlineData(false)]
     public void Decide_ExplicitSaveWithDate_Commits(bool inProposal)
     {
+        // STEP-01: Get context from Context and get decision from AgentSavePolicy.Decide.
         var context = Context("chốt lịch này", start: inProposal ? new(2026, 12, 1) : null, conversationStart: inProposal ? null : new(2026, 12, 1));
 
         var decision = AgentSavePolicy.Decide(context, null, Today);
 
+        // STEP-02: Assert decision.Commit is true and decision.StartDate is null.
         decision!.Commit.Should().BeTrue();
         decision.StartDate.Should().BeNull();
     }
@@ -46,8 +50,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("5/11", "2026-11-05")][InlineData("3/11", "2026-11-03")][InlineData("từ 5/11 đến 6/11", "2026-11-05")][InlineData("ngày mai", "2026-11-04")]
     public void Decide_DateAnswer_CommitsWithDate(string content, string expected)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context(content, start: null), AskedDate, Today);
 
+        // STEP-02: Assert decision.Commit is true and decision.StartDate is DateOnly.Parse().
         decision!.Commit.Should().BeTrue();
         decision.StartDate.Should().Be(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -57,8 +63,10 @@ public sealed class AgentSavePolicyTests
     [Fact]
     public void Decide_PastDate_AsksAgain()
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context("2/11/2026", start: null), AskedDate, Today);
 
+        // STEP-02: Assert decision.Commit is false, decision.Reply contains the expected text and decision.Pending is AskedDate.
         decision!.Commit.Should().BeFalse();
         decision.Reply.Should().Contain("đã qua");
         decision.Pending.Should().Be(AskedDate);
@@ -72,8 +80,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("7/11/2026 đến 5/11/2026", "sớm hơn", "xem lại")]
     public void Decide_RangeMismatch_AsksInsteadOfSaving(string content, string reason, string way)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context(content, start: null), AskedDate, Today);
 
+        // STEP-02: Assert decision.Commit is false, decision.Reply contains reason and decision.Pending is AskedDate.
         decision!.Commit.Should().BeFalse();
         decision.Reply.Should().Contain(reason).And.Contain(way);
         decision.Pending.Should().Be(AskedDate);
@@ -86,8 +96,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("thôi", false)][InlineData("khoan đã", false)][InlineData("chưa lưu", false)]
     public void Decide_DateQuestion_DeferOrDecline(string content, bool commits)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context(content, start: null), AskedDate, Today);
 
+        // STEP-02: Assert decision.Commit is commits, decision.StartDate is null, decision.Pending is null and 1 more.
         decision!.Commit.Should().Be(commits);
         decision.StartDate.Should().BeNull();
         decision.Pending.Should().BeNull();
@@ -101,8 +113,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("đổi bữa trưa ngày 1", false)][InlineData("đổi thành 3 ngày", false)]
     public void Decide_OtherReplies_RepeatOrRelease(string content, bool repeats)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context(content, start: null), AskedDate, Today);
 
+        // STEP-02: Assert depending on repeats, decision.Commit is false, decision.Pending is AskedDate, decision.Reply has a value and decision is null.
         if (repeats)
         {
             decision!.Commit.Should().BeFalse();
@@ -118,7 +132,9 @@ public sealed class AgentSavePolicyTests
     [InlineData("ok")][InlineData("Ừ")][InlineData("đúng rồi")][InlineData("có")][InlineData("được")][InlineData("lưu đi")][InlineData("ok chốt")]
     public void Decide_ShortYesAfterQuestion_Commits(string content)
     {
+        // STEP-01: Get asked from AgentSavePolicy.Decide.
         var asked = AgentSavePolicy.Decide(Context("lưu", start: new(2026, 12, 1)), null, Today);
+        // STEP-02: Assert asked.Pending is AskedConfirm, asked.Reply starts with the expected text and AgentSavePolicy.Decide().Commit is true.
         asked!.Pending.Should().Be(AskedConfirm);
         asked.Reply.Should().StartWith("Mình lưu lịch hiện tại");
 
@@ -131,9 +147,11 @@ public sealed class AgentSavePolicyTests
     [InlineData(null, 2, 9L, "ready")][InlineData(AgentSavePolicy.StageConfirm, 1, 9L, "ready")][InlineData(AgentSavePolicy.StageConfirm, 2, 8L, "ready")][InlineData(AgentSavePolicy.StageConfirm, 2, 9L, "committed")]
     public void Decide_YesWithoutMatchingQuestion_DoesNotCommit(string? stage, int version, long proposalId, string status)
     {
+        // STEP-01: Get context from Context and derive pending from the expected value.
         var context = Context("ok", start: new(2026, 12, 1), status: status);
         var pending = stage is null ? null : new AgentPendingSave(proposalId, version, stage);
 
+        // STEP-02: Assert Decide(context, pending, Today)?.Commit ?? false is false.
         (AgentSavePolicy.Decide(context, pending, Today)?.Commit ?? false).Should().BeFalse();
     }
 
@@ -142,8 +160,10 @@ public sealed class AgentSavePolicyTests
     [Fact]
     public void Decide_DeclineConfirm_DoesNotCommit()
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(Context("không", start: new(2026, 12, 1)), AskedConfirm, Today);
 
+        // STEP-02: Assert decision.Commit is false, decision.Reply is AgentSavePolicy.NotSaved and decision.Pending is null.
         decision!.Commit.Should().BeFalse();
         decision.Reply.Should().Be(AgentSavePolicy.NotSaved);
         decision.Pending.Should().BeNull();
@@ -155,6 +175,7 @@ public sealed class AgentSavePolicyTests
     [InlineData("question")][InlineData("change")][InlineData("planning")]
     public void Decide_OpenItem_BlocksSave(string area)
     {
+        // STEP-01: Get context from Context, set context.State to a test value and get decision from AgentSavePolicy.Decide.
         var context = Context("lưu", start: null);
         context.State = area switch
         {
@@ -165,6 +186,7 @@ public sealed class AgentSavePolicyTests
 
         var decision = AgentSavePolicy.Decide(context, null, Today);
 
+        // STEP-02: Assert decision.Commit is false, decision.Pending is null and decision.Reply contain equivalent of the expected text.
         decision!.Commit.Should().BeFalse();
         decision.Pending.Should().BeNull();
         decision.Reply.Should().ContainEquivalentOf("trước khi lưu");
@@ -176,8 +198,10 @@ public sealed class AgentSavePolicyTests
     [InlineData("lưu lịch trình này", true)][InlineData("lưu", true)][InlineData("ok lên lịch", false)][InlineData("gợi ý món trưa", false)]
     public void Decide_WithoutPlan_NeverCommits(string content, bool answered)
     {
+        // STEP-01: Get decision from AgentSavePolicy.Decide.
         var decision = AgentSavePolicy.Decide(new AgentContextBuilderFixture(content).Context, null, Today);
 
+        // STEP-02: Assert depending on answered, decision.Commit is false, decision.Reply is AgentReplyBuilder.NothingToSave and decision is null.
         if (answered) { decision!.Commit.Should().BeFalse(); decision.Reply.Should().Be(AgentReplyBuilder.NothingToSave); }
         else decision.Should().BeNull();
     }
@@ -188,11 +212,13 @@ public sealed class AgentSavePolicyTests
     [InlineData(false)][InlineData(true)]
     public void Decide_CommittedProposal_ReplaysOnlyWhenUnchanged(bool changed)
     {
+        // STEP-01: Get context from Context, when changed, set context.State to a copy of context.State and get decision from AgentSavePolicy.Decide.
         var context = Context("chốt lịch này", start: new(2026, 12, 1), status: "committed");
         if (changed) context.State = context.State with { BudgetAmount = 1 };
 
         var decision = AgentSavePolicy.Decide(context, null, Today);
 
+        // STEP-02: Assert decision.Commit is !changed and depending on changed, decision.Reply contains the expected text.
         decision!.Commit.Should().Be(!changed);
         if (changed) decision.Reply.Should().Contain("đã thay đổi");
     }

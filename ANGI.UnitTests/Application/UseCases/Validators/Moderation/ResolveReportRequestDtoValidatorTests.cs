@@ -21,7 +21,9 @@ public sealed class ResolveReportRequestDtoValidatorTests
     [InlineData("suspend_restaurant")]
     public void AcceptsEveryAction(string action)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Assert for each outcome, the validator.Validate().IsValid is true and request.ApplyToRelatedReports is true.
         foreach (var outcome in new[] { "resolved", "dismissed" })
         {
             var request = new ResolveReportRequestDto { Outcome = outcome, ResolutionAction = action,
@@ -42,8 +44,11 @@ public sealed class ResolveReportRequestDtoValidatorTests
     [InlineData("invalid")]
     public void RejectsInvalidEnums(string? value)
     {
+        // STEP-01: Create the ResolveReportRequestDtoValidator under test as validator.
         var validator = new ResolveReportRequestDtoValidator(new ModerationTestContext().Clock);
+        // STEP-02: Validate ResolveReportRequestDto { Outcome = value, ResolutionAction = value } and keep result.
         var result = validator.Validate(new ResolveReportRequestDto { Outcome = value!, ResolutionAction = value! });
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(x => x.PropertyName == "Outcome");
         result.Errors.Should().ContainSingle(x => x.PropertyName == "ResolutionAction");
     }
@@ -57,9 +62,11 @@ public sealed class ResolveReportRequestDtoValidatorTests
     [InlineData(1, true)]
     public void ValidatesSuspensionDeadline(int? seconds, bool valid)
     {
+        // STEP-01: Create world as ModerationTestContext and create request as ResolveReportRequestDto.
         var world = new ModerationTestContext();
         var request = new ResolveReportRequestDto { Outcome = "resolved", ResolutionAction = "suspend_user",
             SuspendUntil = seconds.HasValue ? world.Clock.GetUtcNow().AddSeconds(seconds.Value) : null };
+        // STEP-02: Assert the validator.Validate().IsValid is valid.
         new ResolveReportRequestDtoValidator(world.Clock).Validate(request).IsValid.Should().Be(valid);
     }
 
@@ -73,8 +80,10 @@ public sealed class ResolveReportRequestDtoValidatorTests
     [InlineData(1001, false)]
     public void ValidatesNoteLength(int? length, bool valid)
     {
+        // STEP-01: Create request as ResolveReportRequestDto.
         var request = new ResolveReportRequestDto { Outcome = "resolved", ResolutionAction = "none",
             ResolutionNote = length.HasValue ? new string('a', length.Value) : null };
+        // STEP-02: Assert the validator.Validate().IsValid is valid.
         new ResolveReportRequestDtoValidator(new ModerationTestContext().Clock).Validate(request).IsValid.Should().Be(valid);
     }
 }

@@ -16,10 +16,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         [Fact]
         public async Task ExecuteAsync_WithActiveAccount_ShouldReturn()
         {
+            // STEP-01: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(new AccountStatusSnapshot(UserStatus.Active, null));
 
+            // STEP-02: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(12, CancellationToken.None);
 
+            // STEP-03: Assert act does not throw.
             await act.Should().NotThrowAsync();
         }
 
@@ -28,11 +31,15 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         [Fact]
         public async Task ExecuteAsync_WithSuspendedAccount_ShouldThrowAccountSuspended()
         {
+            // STEP-01: Create suspendedUntil as DateTime.
             var suspendedUntil = new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(new AccountStatusSnapshot(UserStatus.Suspended, suspendedUntil));
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(12, CancellationToken.None);
 
+            // STEP-04: Assert act throws AccountSuspendedException and the thrown exception.SuspendedUntil is suspendedUntil.
             (await act.Should().ThrowAsync<AccountSuspendedException>())
                 .Which.SuspendedUntil.Should().Be(suspendedUntil);
         }
@@ -45,10 +52,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         [InlineData(UserStatus.PendingVerification, "EMAIL_NOT_VERIFIED")]
         public async Task ExecuteAsync_WithInactiveAccount_ShouldThrowForbidden(UserStatus status, string errorCode)
         {
+            // STEP-01: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(new AccountStatusSnapshot(status, null));
 
+            // STEP-02: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(12, CancellationToken.None);
 
+            // STEP-03: Assert act throws ForbiddenException and the thrown exception.ErrorCode is errorCode.
             (await act.Should().ThrowAsync<ForbiddenException>()).Which.ErrorCode.Should().Be(errorCode);
         }
 
@@ -57,10 +67,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.EnsureActiveAccount
         [Fact]
         public async Task ExecuteAsync_WithUnknownUser_ShouldThrowUnauthorized()
         {
+            // STEP-01: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(null);
 
+            // STEP-02: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(12, CancellationToken.None);
 
+            // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
             (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
         }
 

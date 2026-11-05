@@ -19,8 +19,10 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData("ngày 2 có món Bún Chả nhé")]
     public void Placeable_NoEveryMealWording_ReturnsRequest(string message)
     {
+        // STEP-01: Create request as AgentMealRequest.
         var request = new AgentMealRequest(null, null, "Bún Chả", null, []);
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Placeable() equals request.
         AgentNamedRequestPolicy.Placeable(State(request), [message]).Should().Equal(request);
     }
 
@@ -32,6 +34,7 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData("tat ca deu an bun cha")]
     public void Placeable_EveryMealWording_KeepsWideScope(string message)
     {
+        // STEP-01: Assert AgentNamedRequestPolicy.Placeable() is empty.
         AgentNamedRequestPolicy.Placeable(State(new AgentMealRequest(null, null, "Bún Chả", null, [])), [message]).Should().BeEmpty();
     }
 
@@ -40,8 +43,10 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Placeable_MealLevelOrUnnamed_ReturnsEmpty()
     {
+        // STEP-01: Get state from State.
         var state = State(new AgentMealRequest(1, "lunch", "Bún Chả", null, []), new AgentMealRequest(null, null, null, null, [5]));
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Placeable() is empty.
         AgentNamedRequestPolicy.Placeable(state, ["phải có Bún Chả"]).Should().BeEmpty();
     }
 
@@ -53,6 +58,7 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData(new string[0], new[] { "lunch", "dinner", "breakfast" })]
     public void Meals_FollowPreferenceWithinDeclaredMeals(string[] declared, string[] expected)
     {
+        // STEP-01: Assert AgentNamedRequestPolicy.Meals() equals expected.
         AgentNamedRequestPolicy.Meals(AgentTestData.State() with { MealSlots = declared }).Should().Equal(expected);
     }
 
@@ -61,10 +67,12 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Slot_SkipsOccupiedPositionsAndStaysInScope()
     {
+        // STEP-01: Create wide as AgentMealRequest, create occupied as AgentMealRequest and create dayLevel as AgentMealRequest.
         var wide = new AgentMealRequest(null, null, "Phở", null, []);
         var occupied = new AgentMealRequest(1, "lunch", "Bún Chả", null, []);
         var dayLevel = new AgentMealRequest(2, null, "Phở", null, []);
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Slot() is ((short)1, "lunch"), AgentNamedRequestPolicy.Slot() is ((short)2, "lunch") and 1 more.
         AgentNamedRequestPolicy.Slot(State(wide), wide, ["lunch"]).Should().Be(((short)1, "lunch"));
         AgentNamedRequestPolicy.Slot(State(wide, occupied), wide, ["lunch"]).Should().Be(((short)2, "lunch"));
         AgentNamedRequestPolicy.Slot(State(dayLevel, occupied), dayLevel, ["lunch"]).Should().Be(((short)2, "lunch"));
@@ -76,10 +84,12 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Place_MovesNameAndKeepsWideFilters()
     {
+        // STEP-01: Create wide as AgentMealRequest and derive requests from Place().MealRequests.
         var wide = new AgentMealRequest(null, null, "Phở", null, [5], DifferentFromPlan: true);
 
         var requests = AgentNamedRequestPolicy.Place(State(wide), wide, 2, "dinner").MealRequests;
 
+        // STEP-02: Assert requests is equivalent to the expected items.
         requests.Should().BeEquivalentTo(new[]
         {
             new AgentMealRequest(null, null, null, null, [5], DifferentFromPlan: true),
@@ -92,12 +102,16 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Retain_ModelResendsOrDrops_KeepsPlacement()
     {
+        // STEP-01: Create placed as AgentMealRequest.
         var placed = new AgentMealRequest(1, "lunch", "Phở", null, []);
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Retain().MealRequests equals placed and AgentNamedRequestPolicy.Retain() is null.
         AgentNamedRequestPolicy.Retain(State(new AgentMealRequest(null, null, "PHỞ", null, [])), [placed])!.MealRequests.Should().Equal(placed);
         AgentNamedRequestPolicy.Retain(State(), [placed])!.MealRequests.Should().Equal(placed);
         AgentNamedRequestPolicy.Retain(null, [placed]).Should().BeNull();
+        // STEP-03: Get untouched from State.
         var untouched = State(new AgentMealRequest(null, null, "Phở", null, []));
+        // STEP-04: Assert AgentNamedRequestPolicy.Retain() is the same instance as untouched.
         AgentNamedRequestPolicy.Retain(untouched, []).Should().BeSameAs(untouched);
     }
 
@@ -106,8 +120,10 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Retain_ModelResendsOldMeal_KeepsMovedMeal()
     {
+        // STEP-01: Create moved as AgentMealRequest.
         var moved = new AgentMealRequest(1, "dinner", null, "Lẩu Bò", []);
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Retain().MealRequests equals moved.
         AgentNamedRequestPolicy.Retain(State(new AgentMealRequest(1, "lunch", null, "Lẩu Bò", [])), [moved])!.MealRequests.Should().Equal(moved);
     }
 
@@ -116,10 +132,12 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Relocatable_OnlyMealsTheUserDidNotName()
     {
+        // STEP-01: Create placedByBackend as AgentMealRequest, create named as AgentMealRequest and get state from State.
         var placedByBackend = new AgentMealRequest(1, "lunch", null, "Lẩu Bò", []);
         var named = new AgentMealRequest(2, "lunch", null, "Lẩu Gà", []);
         var state = State(placedByBackend, named, new AgentMealRequest(3, "lunch", null, null, [5]));
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Relocatable() equals placedByBackend.
         AgentNamedRequestPolicy.Relocatable(state, ["nhất định phải ăn ở Lẩu Bò", "bữa trưa ngày 2 ăn ở Lẩu Gà"]).Should().Equal(placedByBackend);
     }
 
@@ -128,8 +146,10 @@ public sealed class AgentNamedRequestPolicyTests
     [Fact]
     public void Rebase_MovesOnlyAHeldRequest()
     {
+        // STEP-01: Create wide as AgentMealRequest.
         var wide = new AgentMealRequest(null, null, "Phở", null, []);
 
+        // STEP-02: Assert AgentNamedRequestPolicy.Rebase().MealRequests equals a new AgentMealRequest and AgentNamedRequestPolicy.Rebase().MealRequests is empty.
         AgentNamedRequestPolicy.Rebase(State(wide), wide, 1, "lunch").MealRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
         AgentNamedRequestPolicy.Rebase(State(), wide, 1, "lunch").MealRequests.Should().BeEmpty();
     }

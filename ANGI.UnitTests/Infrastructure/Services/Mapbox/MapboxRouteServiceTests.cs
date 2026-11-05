@@ -18,14 +18,17 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithMapboxResponse_ShouldMapAllLegMetrics()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, """
                 {"routes":[{"legs":[
                     {"distance":2350.4,"duration":540.5},
                     {"distance":3100.6,"duration":660.4}
                 ]}]}
                 """));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler, accessToken: "secret token");
 
+            // STEP-03: Run service.CalculateRouteAsync with an empty RouteCoordinate and keep result.
             var result = await service.CalculateRouteAsync(
                 new RouteCoordinate(16.061204m, 108.227531m),
                 [
@@ -35,6 +38,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-04: Assert result.Legs equals a new RouteMetric, result.IsEstimated is false, handler.Requests has exactly one matching item and 2 more.
             result.Legs.Should().Equal(
                 new RouteMetric(2350, 541),
                 new RouteMetric(3101, 660));
@@ -52,18 +56,23 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [InlineData(1)]
         public async Task CalculateRouteAsync_WithFewerThanTwoPoints_ShouldReturnEmptyWithoutCallingMapbox(int count)
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("Must not be called."));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Derive destinations from the expected value.
             var destinations = count == 0
                 ? Array.Empty<RouteCoordinate>()
                 : new[] { new RouteCoordinate(16m, 108m) };
 
+            // STEP-04: Run service.CalculateRouteAsync with destinations and keep result.
             var result = await service.CalculateRouteAsync(
                 null,
                 destinations,
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-05: Assert result is a new RouteCalculationResult and handler.Requests is empty.
             result.Should().Be(new RouteCalculationResult(Array.Empty<RouteMetric>(), false));
             handler.Requests.Should().BeEmpty();
         }
@@ -73,16 +82,20 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithProvidedOrigin_ShouldIncludeOriginWithoutBusinessFiltering()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":29999,\"duration\":1200}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
 
+            // STEP-03: Run service.CalculateRouteAsync with an empty RouteCoordinate and keep result.
             var result = await service.CalculateRouteAsync(
                 new RouteCoordinate(10m, 0m),
                 [new RouteCoordinate(0m, 0m)],
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-04: Assert result.Legs equals a new RouteMetric and handler.Requests.Single().Uri.AbsolutePath ends with "/0,10;0,0".
             result.Legs.Should().Equal(new RouteMetric(29999, 1200));
             handler.Requests.Single().Uri!.AbsolutePath.Should().EndWith("/0,10;0,0");
         }
@@ -92,10 +105,13 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithoutOrigin_ShouldStartAtFirstDestination()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":1000,\"duration\":100}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
 
+            // STEP-03: Run service.CalculateRouteAsync and keep result.
             var result = await service.CalculateRouteAsync(
                 null,
                 [
@@ -105,6 +121,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-04: Assert result.Legs equals a new RouteMetric and handler.Requests.Single().Uri.AbsolutePath ends with "/0,0;0,0.01".
             result.Legs.Should().Equal(new RouteMetric(1000, 100));
             handler.Requests.Single().Uri!.AbsolutePath.Should().EndWith("/0,0;0,0.01");
         }
@@ -114,20 +131,25 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithTwentyFivePoints_ShouldCallMapboxOnce()
         {
+            // STEP-01: Get legs from string.Join and create handler as StubHttpMessageHandler.
             var legs = string.Join(',', Enumerable.Repeat("{\"distance\":1,\"duration\":1}", 24));
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 $"{{\"routes\":[{{\"legs\":[{legs}]}}]}}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Get destinations from Range().Select(filtered).ToArray.
             var destinations = Enumerable.Range(1, 24)
                 .Select(index => new RouteCoordinate(0m, index / 1000m))
                 .ToArray();
 
+            // STEP-04: Run service.CalculateRouteAsync with an empty RouteCoordinate and destinations and keep result.
             var result = await service.CalculateRouteAsync(
                 new RouteCoordinate(0m, 0m),
                 destinations,
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-05: Assert result.Legs has 24 item(s) and handler.Requests has exactly one matching item.
             result.Legs.Should().HaveCount(24);
             handler.Requests.Should().ContainSingle();
         }
@@ -137,18 +159,23 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithMoreThanTwentyFivePoints_ShouldThrowArgumentOutOfRange()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("Must not be called."));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Get destinations from Range().Select(filtered).ToArray.
             var destinations = Enumerable.Range(1, 25)
                 .Select(index => new RouteCoordinate(0m, index / 1000m))
                 .ToArray();
 
+            // STEP-04: Wrap service.CalculateRouteAsync with an empty RouteCoordinate and destinations in act so its outcome can be asserted.
             var act = () => service.CalculateRouteAsync(
                 new RouteCoordinate(0m, 0m),
                 destinations,
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-05: Assert act throws ArgumentOutOfRangeException and handler.Requests is empty.
             await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
             handler.Requests.Should().BeEmpty();
         }
@@ -158,22 +185,28 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithEquivalentRoundedOrigin_ShouldUseCachedMetrics()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":500,\"duration\":60}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Create destination as RouteCoordinate.
             var destination = new RouteCoordinate(16.01m, 108.01m);
 
+            // STEP-04: Run service.CalculateRouteAsync with an empty RouteCoordinate.
             await service.CalculateRouteAsync(
                 new RouteCoordinate(16.00011m, 108.00011m),
                 [destination],
                 RouteProfile.Walking,
                 CancellationToken.None);
+            // STEP-05: Run service.CalculateRouteAsync with an empty RouteCoordinate and keep cached.
             var cached = await service.CalculateRouteAsync(
                 new RouteCoordinate(16.00012m, 108.00012m),
                 [destination],
                 RouteProfile.Walking,
                 CancellationToken.None);
 
+            // STEP-06: Assert handler.Requests has exactly one matching item and cached.Legs equals a new RouteMetric.
             handler.Requests.Should().ContainSingle();
             cached.Legs.Should().Equal(new RouteMetric(500, 60));
         }
@@ -183,22 +216,28 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithOriginsAcrossRoundingBoundary_ShouldCallMapboxTwice()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":500,\"duration\":60}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Create destination as RouteCoordinate.
             var destination = new RouteCoordinate(16.01m, 108.01m);
 
+            // STEP-04: Run service.CalculateRouteAsync with an empty RouteCoordinate.
             await service.CalculateRouteAsync(
                 new RouteCoordinate(16.00049m, 108.00049m),
                 [destination],
                 RouteProfile.Walking,
                 CancellationToken.None);
+            // STEP-05: Run service.CalculateRouteAsync with an empty RouteCoordinate.
             await service.CalculateRouteAsync(
                 new RouteCoordinate(16.00050m, 108.00050m),
                 [destination],
                 RouteProfile.Walking,
                 CancellationToken.None);
 
+            // STEP-06: Assert handler.Requests has 2 item(s).
             handler.Requests.Should().HaveCount(2);
         }
 
@@ -207,23 +246,32 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_AcrossCacheExpiration_ShouldRefreshOnlyAtExpiration()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler and create clock as TestSystemClock.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":500,\"duration\":60}]}]}"));
             var clock = new TestSystemClock(new DateTimeOffset(2026, 10, 13, 0, 0, 0, TimeSpan.Zero));
+            // STEP-02: Create the MemoryCache under test as cache; build service under test through CreateService.
             using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
             var service = CreateService(handler, cache: cache, cacheHours: 1);
+            // STEP-03: Build the destinations collection.
             RouteCoordinate[] destinations =
             [
                 new RouteCoordinate(0m, 0m),
                 new RouteCoordinate(0.01m, 0m)
             ];
 
+            // STEP-04: Run service.CalculateRouteAsync with destinations.
             await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
+            // STEP-05: Advance clock.
             clock.Advance(TimeSpan.FromHours(1) - TimeSpan.FromSeconds(1));
+            // STEP-06: Run service.CalculateRouteAsync with destinations.
             await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
+            // STEP-07: Advance clock.
             clock.Advance(TimeSpan.FromSeconds(1));
+            // STEP-08: Run service.CalculateRouteAsync with destinations.
             await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
 
+            // STEP-09: Assert handler.Requests has 2 item(s).
             handler.Requests.Should().HaveCount(2);
         }
 
@@ -232,18 +280,24 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithDifferentProfiles_ShouldCallMapboxForEachProfile()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK,
                 "{\"routes\":[{\"legs\":[{\"distance\":500,\"duration\":60}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Build the destinations collection.
             RouteCoordinate[] destinations =
             [
                 new RouteCoordinate(0m, 0m),
                 new RouteCoordinate(0.01m, 0m)
             ];
 
+            // STEP-04: Run service.CalculateRouteAsync with destinations.
             await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
+            // STEP-05: Run service.CalculateRouteAsync with destinations.
             await service.CalculateRouteAsync(null, destinations, RouteProfile.Cycling, CancellationToken.None);
 
+            // STEP-06: Assert handler.Requests has 2 item(s) and handler.Requests.Select(filtered) contains a matching item.
             handler.Requests.Should().HaveCount(2);
             handler.Requests.Select(request => request.Uri!.AbsolutePath).Should().Contain(path => path.Contains("/driving/"));
             handler.Requests.Select(request => request.Uri!.AbsolutePath).Should().Contain(path => path.Contains("/cycling/"));
@@ -261,8 +315,10 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [InlineData("negative-metric")]
         public async Task CalculateRouteAsync_WhenMapboxFails_ShouldEstimateRoute(string failure)
         {
+            // STEP-01: Build service under test through CreateFailingService.
             var service = CreateFailingService(failure);
 
+            // STEP-02: Run service.CalculateRouteAsync and keep result.
             var result = await service.CalculateRouteAsync(
                 null,
                 [
@@ -272,6 +328,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-03: Assert result.IsEstimated is true, result.Legs has exactly one matching item, result.Legs[0].DistanceMeters is 1446 and 1 more.
             result.IsEstimated.Should().BeTrue();
             result.Legs.Should().ContainSingle();
             result.Legs[0].DistanceMeters.Should().Be(1446);
@@ -288,9 +345,11 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
             RouteProfile profile,
             int expectedDurationSeconds)
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService(new StubHttpMessageHandler(_ =>
                 new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
 
+            // STEP-02: Run service.CalculateRouteAsync with profile and keep result.
             var result = await service.CalculateRouteAsync(
                 null,
                 [
@@ -300,6 +359,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 profile,
                 CancellationToken.None);
 
+            // STEP-03: Assert result.Legs.Single().DurationSeconds is expectedDurationSeconds.
             result.Legs.Single().DurationSeconds.Should().Be(expectedDurationSeconds);
         }
 
@@ -312,15 +372,19 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
             string baseUrl,
             string accessToken)
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("Must not be called."));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler, baseUrl, accessToken);
 
+            // STEP-03: Run service.CalculateRouteAsync and keep result.
             var result = await service.CalculateRouteAsync(
                 null,
                 [new RouteCoordinate(0m, 0m), new RouteCoordinate(0m, 0.01m)],
                 RouteProfile.Driving,
                 CancellationToken.None);
 
+            // STEP-04: Assert result.IsEstimated is true and handler.Requests is empty.
             result.IsEstimated.Should().BeTrue();
             handler.Requests.Should().BeEmpty();
         }
@@ -330,20 +394,26 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_AfterTransientFailure_ShouldRetryMapbox()
         {
+            // STEP-01: Define callCount as 0 and create handler as StubHttpMessageHandler.
             var callCount = 0;
             var handler = new StubHttpMessageHandler(_ => ++callCount == 1
                 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
                 : Json(HttpStatusCode.OK, "{\"routes\":[{\"legs\":[{\"distance\":10,\"duration\":2}]}]}"));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
+            // STEP-03: Build the destinations collection.
             RouteCoordinate[] destinations =
             [
                 new RouteCoordinate(0m, 0m),
                 new RouteCoordinate(0m, 0.01m)
             ];
 
+            // STEP-04: Run service.CalculateRouteAsync with destinations and keep first.
             var first = await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
+            // STEP-05: Run service.CalculateRouteAsync with destinations and keep second.
             var second = await service.CalculateRouteAsync(null, destinations, RouteProfile.Driving, CancellationToken.None);
 
+            // STEP-06: Assert first.IsEstimated is true, second.IsEstimated is false and handler.Requests has 2 item(s).
             first.IsEstimated.Should().BeTrue();
             second.IsEstimated.Should().BeFalse();
             handler.Requests.Should().HaveCount(2);
@@ -354,20 +424,24 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WhenCallerCancels_ShouldThrowOperationCanceled()
         {
+            // STEP-01: Create cts as CancellationTokenSource and create handler as StubHttpMessageHandler.
             using var cts = new CancellationTokenSource();
             var handler = new StubHttpMessageHandler(_ =>
             {
                 cts.Cancel();
                 throw new TaskCanceledException("Canceled by caller.");
             });
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
 
+            // STEP-03: Wrap service.CalculateRouteAsync in act so its outcome can be asserted.
             var act = () => service.CalculateRouteAsync(
                 null,
                 [new RouteCoordinate(0m, 0m), new RouteCoordinate(0m, 0.01m)],
                 RouteProfile.Driving,
                 cts.Token);
 
+            // STEP-04: Assert act throws OperationCanceledException.
             await act.Should().ThrowAsync<OperationCanceledException>();
         }
 
@@ -376,15 +450,19 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task CalculateRouteAsync_WithUnsupportedProfile_ShouldThrowArgumentOutOfRange()
         {
+            // STEP-01: Create handler as StubHttpMessageHandler.
             var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("Must not be called."));
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService(handler);
 
+            // STEP-03: Wrap service.CalculateRouteAsync in act so its outcome can be asserted.
             var act = () => service.CalculateRouteAsync(
                 null,
                 [new RouteCoordinate(0m, 0m), new RouteCoordinate(0m, 0.01m)],
                 (RouteProfile)99,
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws ArgumentOutOfRangeException and handler.Requests is empty.
             await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
             handler.Requests.Should().BeEmpty();
         }

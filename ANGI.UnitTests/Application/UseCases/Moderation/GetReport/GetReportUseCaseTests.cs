@@ -40,20 +40,28 @@ public sealed class GetReportUseCaseTests
     [Fact]
     public async Task ReturnsRestaurantDetail()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Create cancellation as CancellationTokenSource; stub the mock and world.GetRelatedReportsAsync.
         Setup(world, ReportTargetType.Restaurant);
         using var cancellation = new CancellationTokenSource();
         world.Repository.Setup(x => x.GetRelatedReportsAsync(new ReportTarget(ReportTargetType.Restaurant, 7), 88, cancellation.Token))
             .ReturnsAsync([new() { Id = 89, ReporterId = 4, RestaurantId = 7, TargetType = ReportTargetType.Restaurant, Status = ReportStatus.InReview }]);
+        // STEP-03: Run Create().ExecuteAsync and keep result.
         var result = await Create(world).ExecuteAsync(88, cancellation.Token);
+        // STEP-04: Assert result.Id is 88, result.Reporter.Id is 4 and result.Target is RestaurantCardDto.
         result.Id.Should().Be(88);
         result.Reporter.Id.Should().Be(4);
         var target = result.Target.Should().BeOfType<RestaurantCardDto>().Subject;
+        // STEP-05: Assert target.Id is 7 and target.Name is "Restaurant".
         target.Id.Should().Be(7);
         target.Name.Should().Be("Restaurant");
+        // STEP-06: Assert result.RelatedReports has exactly one matching item.
         result.RelatedReports.Should().ContainSingle(report => report.Id == 89 && report.Status == "in_review");
+        // STEP-07: Verify GetReportAsync is called once and GetReportRestaurantAsync is called once.
         world.Repository.Verify(x => x.GetReportAsync(88, cancellation.Token), Times.Once);
         world.Repository.Verify(x => x.GetReportRestaurantAsync(7, cancellation.Token), Times.Once);
+        // STEP-08: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -62,9 +70,13 @@ public sealed class GetReportUseCaseTests
     [Fact]
     public async Task ReturnsBlogDetail()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world, ReportTargetType.Blog);
+        // STEP-03: Run Create().ExecuteAsync and keep result.
         var result = await Create(world).ExecuteAsync(88, default);
+        // STEP-04: Assert result.Target is BlogDetailDto, target.Title is "Blog", target.Excerpt has length 200, target.Content has length 201 and 6 more.
         var target = result.Target.Should().BeOfType<BlogDetailDto>().Subject;
         target.Title.Should().Be("Blog");
         target.Excerpt.Should().HaveLength(200);
@@ -75,6 +87,7 @@ public sealed class GetReportUseCaseTests
         target.IsMine.Should().BeTrue();
         target.HasRoadmap.Should().BeTrue();
         target.RoadmapSnapshot!.Title.Should().Be("Snapshot");
+        // STEP-05: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -85,13 +98,17 @@ public sealed class GetReportUseCaseTests
     [InlineData("restaurant", "RESTAURANT_NOT_FOUND")] [InlineData("blog", "BLOG_NOT_FOUND")]
     public async Task RejectsMissingResources(string missing, string code)
     {
+        // STEP-01: Create world as ModerationTestContext, when missing != "report", configure the stubs through Setup and 3 more.
         var world = new ModerationTestContext();
         if (missing != "report") Setup(world, missing == "blog" ? ReportTargetType.Blog : ReportTargetType.Restaurant);
         if (missing == "row") world.Repository.Setup(x => x.GetReportAsync(88, It.IsAny<CancellationToken>())).ReturnsAsync((Report?)null);
         if (missing == "restaurant") world.Repository.Setup(x => x.GetReportRestaurantAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync((Domain.Entities.Restaurant?)null);
         if (missing == "blog") world.Repository.Setup(x => x.GetReportBlogAsync(7, 3, It.IsAny<CancellationToken>())).ReturnsAsync((Blog?)null);
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-03: Assert action throws NotFoundException and the thrown exception.ErrorCode is code.
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be(code);
+        // STEP-04: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -102,11 +119,16 @@ public sealed class GetReportUseCaseTests
     [InlineData(ReportTargetType.Blog, "REPORT_RESTAURANT_HANDLE")]
     public async Task RejectsWrongTargetPermission(ReportTargetType type, string permission)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock and world.GetEffectivePermissionsAsync.
         Setup(world, type);
         world.Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>())).ReturnsAsync([permission]);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-04: Assert action throws ForbiddenException.
         await action.Should().ThrowAsync<ForbiddenException>();
+        // STEP-05: Verify GetReportAsync is never called and GetReportDisplayDataAsync is never called.
         world.Repository.Verify(x => x.GetReportAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
         world.Repository.Verify(x => x.GetReportDisplayDataAsync(It.IsAny<ReportTarget>(), It.IsAny<IReadOnlyList<Report>>(), It.IsAny<CancellationToken>()), Times.Never);
     }

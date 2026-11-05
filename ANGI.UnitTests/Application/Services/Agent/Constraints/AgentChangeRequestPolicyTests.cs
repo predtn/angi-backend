@@ -17,8 +17,10 @@ public sealed class AgentChangeRequestPolicyTests
     [InlineData("cảm ơn nhé")]
     public void IsUnrequested_NothingAsked_IsTrue(string content)
     {
+        // STEP-01: Get state from AgentTestData.State.
         var state = AgentTestData.State();
 
+        // STEP-02: Assert AgentChangeRequestPolicy.IsUnrequested() is true.
         AgentChangeRequestPolicy.IsUnrequested(content, state, state, Tags).Should().BeTrue();
     }
 
@@ -35,8 +37,10 @@ public sealed class AgentChangeRequestPolicyTests
     [InlineData("bữa tối nhé")]
     public void IsUnrequested_ChangeSignal_IsFalse(string content)
     {
+        // STEP-01: Get state from AgentTestData.State.
         var state = AgentTestData.State();
 
+        // STEP-02: Assert AgentChangeRequestPolicy.IsUnrequested() is false.
         AgentChangeRequestPolicy.IsUnrequested(content, state, state, Tags).Should().BeFalse();
     }
 
@@ -50,6 +54,7 @@ public sealed class AgentChangeRequestPolicyTests
     [InlineData("taste", false)]
     public void IsUnrequested_StateDifference_CountsOnlyUserConstraints(string area, bool unrequested)
     {
+        // STEP-01: Get before from AgentTestData.State and derive after from the expected value.
         var before = AgentTestData.State();
         var after = area switch
         {
@@ -59,6 +64,7 @@ public sealed class AgentChangeRequestPolicyTests
             _ => before with { TasteTargets = [new("spicy", .25)] }
         };
 
+        // STEP-02: Assert AgentChangeRequestPolicy.IsUnrequested() is unrequested.
         AgentChangeRequestPolicy.IsUnrequested("ăn vui vui", before, after, Tags).Should().Be(unrequested);
     }
 
@@ -73,9 +79,11 @@ public sealed class AgentChangeRequestPolicyTests
     [InlineData("cho tôi Phở Gà Trộn Măng", "dish", (short)0, "Phở Gà Trộn Măng", false)]
     public void IsUnrequested_AddedConstraint_MustBeGrounded(string content, string kind, short tagId, string? dishName, bool unrequested)
     {
+        // STEP-01: Derive before from a copy of AgentTestData.State() and derive after from a copy of before.
         var before = AgentTestData.State() with { MealSlots = ["lunch"] };
         var after = before with { MealRequests = [kind == "tag" ? new(1, "lunch", null, null, [tagId]) : new(1, "lunch", dishName, null, [])] };
 
+        // STEP-02: Assert AgentChangeRequestPolicy.IsUnrequested() is unrequested.
         AgentChangeRequestPolicy.IsUnrequested(content, before, after, Tags).Should().Be(unrequested);
     }
 
@@ -85,12 +93,14 @@ public sealed class AgentChangeRequestPolicyTests
     [Fact]
     public void WithoutUnsettledNames_DropsOnlyNamesAddedThisTurn()
     {
+        // STEP-01: Derive before from a copy of AgentTestData.State(), derive after from a copy of before and 1 more.
         var before = AgentTestData.State() with { MealRequests = [new(2, "lunch", null, "Lẩu Bò Mai", [], RestaurantId: 575)] };
         var after = before with { MealRequests = [new(2, "lunch", null, "Lẩu Bò Mai", [], RestaurantId: 575),
             new(1, "dinner", null, "Hương Sen Phố Cổ", [53]), new(1, "lunch", "Phở Không Có", null, [])] };
 
         var result = AgentChangeRequestPolicy.WithoutUnsettledNames(after, before);
 
+        // STEP-02: Assert result.MealRequests has 2 item(s), result.MealRequests[0] is the same instance as after.MealRequests[0] and 1 more.
         result.MealRequests.Should().HaveCount(2);
         result.MealRequests[0].Should().BeSameAs(after.MealRequests[0]);
         result.MealRequests[1].Should().Match<AgentMealRequest>(request => request.DayNumber == 1 && request.MealSlot == "dinner" &&

@@ -31,11 +31,16 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task CreateAndUpdateRoadmap_ShouldPersistDaysAndOriginInvariant()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterTravelerAndLoginAsync.
         var auth = await RegisterTravelerAndLoginAsync(client, "roadmap-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
 
+        // STEP-05: Send POST /api/v1/roadmaps with a CreateRoadmapRequestDto body and keep createResponse.
         using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
         {
             Title = "Integration trip",
@@ -48,10 +53,12 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             OriginLabel = "Integration Hotel"
         });
 
+        // STEP-06: Obtain created through SuccessDataAsync; assert createResponse.StatusCode is HttpStatusCode.Created and created.Itinerary.Select(filtered) equals 1.
         createResponse.StatusCode.Should().Be(HttpStatusCode.Created, await createResponse.Content.ReadAsStringAsync());
         var created = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
         created.Itinerary.Select(day => day.DayNumber).Should().Equal(1, 2, 3);
 
+        // STEP-07: Send PATCH /api/v1/roadmaps/{created.Overview.Id} with a body of title, numDays and originMode and keep updateResponse.
         using var updateResponse = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{created.Overview.Id}", new
         {
             title = "Updated integration trip",
@@ -59,12 +66,15 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             originMode = "gps"
         });
 
+        // STEP-08: Obtain updated through SuccessDataAsync; assert updateResponse.StatusCode is HttpStatusCode.OK.
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await updateResponse.Content.ReadAsStringAsync());
         var updated = await SuccessDataAsync<RoadmapDetailDto>(updateResponse);
+        // STEP-09: Assert updated.Overview.Title is "Updated integration trip", updated.Overview.OriginMode is "gps", updated.Overview.OriginLatitude is null and 1 more.
         updated.Overview.Title.Should().Be("Updated integration trip");
         updated.Overview.OriginMode.Should().Be("gps");
         updated.Overview.OriginLatitude.Should().BeNull();
         updated.Itinerary.Select(day => day.DayNumber).Should().Equal(1, 2);
+        // STEP-10: Assert in the database persisted.UserId is auth.User.Id, persisted.NumDays is 2, persisted.Days.Select(filtered).Order() equals 1 and 4 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persisted = await context.Roadmaps
@@ -85,28 +95,40 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task AccessAnotherTravelersRoadmap_ShouldReturnNotFoundAcrossOwnedEndpoints()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain first through RegisterTravelerAndLoginAsync.
         var first = await RegisterTravelerAndLoginAsync(client, "first-roadmap@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, first.AccessToken);
+        // STEP-05: Send POST /api/v1/roadmaps with a CreateRoadmapRequestDto body and keep createResponse.
         using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
         {
             Title = "Private trip",
             NumDays = 1
         });
+        // STEP-06: Obtain created through SuccessDataAsync and second through RegisterTravelerAndLoginAsync.
         var created = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
         var second = await RegisterTravelerAndLoginAsync(client, "second-roadmap@integration.test");
+        // STEP-07: Authenticate the HTTP client through Authorize.
         Authorize(client, second.AccessToken);
 
+        // STEP-08: Send PATCH /api/v1/roadmaps/{created.Overview.Id} with a body of title and keep updateResponse.
         using var updateResponse = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{created.Overview.Id}", new
         {
             title = "Unauthorized change"
         });
+        // STEP-09: Send GET /api/v1/roadmaps/{created.Overview.Id} and keep detailResponse.
         using var detailResponse = await client.GetAsync($"/api/v1/roadmaps/{created.Overview.Id}");
+        // STEP-10: Send GET /api/v1/roadmaps/{created.Overview.Id}/days/{created.Itinerary.Single().DayId}/route and keep routeResponse.
         using var routeResponse = await client.GetAsync(
             $"/api/v1/roadmaps/{created.Overview.Id}/days/{created.Itinerary.Single().DayId}/route");
+        // STEP-11: Send DELETE /api/v1/roadmaps/{created.Overview.Id} and keep deleteResponse.
         using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{created.Overview.Id}");
 
+        // STEP-12: Assert for each response, response.StatusCode is HttpStatusCode.NotFound and error.ErrorCode is "ROADMAP_NOT_FOUND".
         foreach (var response in new[] { updateResponse, detailResponse, routeResponse, deleteResponse })
         {
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -120,19 +142,27 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task GetMyRoadmaps_ShouldReturnOnlyOwnedVisibleComputedSummaries()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-list-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain oldest through CreateRoadmapAsync, deleted through CreateRoadmapAsync, newest through CreateRoadmapAsync and 1 more.
         var oldest = await CreateRoadmapAsync(client, "Oldest trip", new DateOnly(2026, 10, 10), 3);
         var deleted = await CreateRoadmapAsync(client, "Deleted trip", null, 1);
         var newest = await CreateRoadmapAsync(client, "Newest trip", null, 1);
 
         var anotherTraveler = await RegisterTravelerAndLoginAsync(client, "roadmap-list-other@integration.test");
+        // STEP-06: Authenticate the HTTP client through Authorize.
         Authorize(client, anotherTraveler.AccessToken);
+        // STEP-07: Assert CreateRoadmapAsync confirms Another traveler's trip.
         await CreateRoadmapAsync(client, "Another traveler's trip", null, 1);
 
+        // STEP-08: Seed or update rows directly in the test database and authenticate the HTTP client through Authorize.
         await _factory.ExecuteDbAsync(async context =>
         {
             var oldestDayId = await context.RoadmapDays
@@ -153,28 +183,37 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         });
         Authorize(client, owner.AccessToken);
 
+        // STEP-09: Send GET /api/v1/roadmaps?page=1&pageSize=1 and keep firstPageResponse.
         using var firstPageResponse = await client.GetAsync("/api/v1/roadmaps?page=1&pageSize=1");
+        // STEP-10: Obtain firstPage through SuccessDataAsync; assert firstPageResponse.StatusCode is HttpStatusCode.OK and 4 more.
         firstPageResponse.StatusCode.Should().Be(HttpStatusCode.OK, await firstPageResponse.Content.ReadAsStringAsync());
         var firstPage = await SuccessDataAsync<Paged<RoadmapSummaryDto>>(firstPageResponse);
         firstPage.Items.Should().ContainSingle().Which.Id.Should().Be(newest.Overview.Id);
         firstPage.TotalItems.Should().Be(2);
         firstPage.TotalPages.Should().Be(2);
 
+        // STEP-11: Send GET /api/v1/roadmaps?page=2&pageSize=1 and keep secondPageResponse.
         using var secondPageResponse = await client.GetAsync("/api/v1/roadmaps?page=2&pageSize=1");
+        // STEP-12: Obtain secondPage through SuccessDataAsync; assert secondPage.Items has exactly one matching item.
         var secondPage = await SuccessDataAsync<Paged<RoadmapSummaryDto>>(secondPageResponse);
         var summary = secondPage.Items.Should().ContainSingle().Subject;
+        // STEP-13: Assert summary.Id is oldest.Overview.Id, summary.EndDate is a new DateOnly, summary.ItemCount is 1, summary.TotalEstimatedCost is 45_000 and 1 more.
         summary.Id.Should().Be(oldest.Overview.Id);
         summary.EndDate.Should().Be(new DateOnly(2026, 10, 12));
         summary.ItemCount.Should().Be(1);
         summary.TotalEstimatedCost.Should().Be(45_000);
         summary.CoverUrl.Should().Be("https://cdn.test/dishes/cover.jpg");
 
+        // STEP-14: Send GET /api/v1/roadmaps?page=3&pageSize=1 and keep emptyPageResponse.
         using var emptyPageResponse = await client.GetAsync("/api/v1/roadmaps?page=3&pageSize=1");
+        // STEP-15: Obtain emptyPage through SuccessDataAsync; assert emptyPage.Items is empty and emptyPage.TotalItems is 2.
         var emptyPage = await SuccessDataAsync<Paged<RoadmapSummaryDto>>(emptyPageResponse);
         emptyPage.Items.Should().BeEmpty();
         emptyPage.TotalItems.Should().Be(2);
 
+        // STEP-16: Send GET /api/v1/roadmaps?page=0&pageSize=101 and keep invalidResponse.
         using var invalidResponse = await client.GetAsync("/api/v1/roadmaps?page=0&pageSize=101");
+        // STEP-17: Read invalid from the response; assert invalidResponse.StatusCode is HttpStatusCode.BadRequest and invalid.ErrorCode is "VALIDATION_FAILED".
         invalidResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var invalid = await invalidResponse.Content.ReadFromJsonAsync<ApiResponse<object>>();
         invalid!.ErrorCode.Should().Be("VALIDATION_FAILED");
@@ -185,12 +224,18 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task GetRoadmapDetail_ShouldReturnOwnedCurrentCalculatedAggregate()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain traveler through RegisterTravelerAndLoginAsync.
         var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-detail@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, traveler.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Detail trip", new DateOnly(2026, 10, 20), 2);
+        // STEP-06: Seed or update rows directly in the test database.
         await _factory.ExecuteDbAsync(async context =>
         {
             var removedDish = await context.Dishes.SingleAsync(dish => dish.Id == publicDish.HiddenDishId);
@@ -226,10 +271,13 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             await context.SaveChangesAsync();
         });
 
+        // STEP-07: Send GET /api/v1/roadmaps/{roadmap.Overview.Id} and keep response.
         using var response = await client.GetAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
 
+        // STEP-08: Obtain detail through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var detail = await SuccessDataAsync<RoadmapDetailDto>(response);
+        // STEP-09: Assert detail.Itinerary has 2 item(s), detail.Itinerary[0].Items.Select(filtered) equals "breakfast" and 5 more.
         detail.Itinerary.Should().HaveCount(2);
         detail.Itinerary[0].Items.Select(item => item.MealSlot).Should().Equal("breakfast", "dinner");
         detail.Itinerary[0].Items[0].MyFeedback.Should().Be("like");
@@ -244,11 +292,16 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task GetRoadmapDayRoute_ShouldReturnEstimatedGpsRouteAndDayNotFound()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain traveler through RegisterTravelerAndLoginAsync.
         var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-route@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, traveler.AccessToken);
+        // STEP-05: Send POST /api/v1/roadmaps with a CreateRoadmapRequestDto body and keep createResponse.
         using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
         {
             Title = "Route trip",
@@ -258,7 +311,9 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             OriginLongitude = 107m,
             OriginLabel = "Pinned point"
         });
+        // STEP-06: Obtain roadmap through SuccessDataAsync.
         var roadmap = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
+        // STEP-07: Get itemIds from _factory.ExecuteDbAsync.
         var itemIds = await _factory.ExecuteDbAsync(async context =>
         {
             var day = await context.RoadmapDays.SingleAsync(value => value.RoadmapId == roadmap.Overview.Id);
@@ -283,12 +338,15 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             return (DayId: day.Id, FirstItemId: first.Id, SecondItemId: second.Id);
         });
 
+        // STEP-08: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/days/{itemIds.DayId}/route?originLat=10.775&originLng=106.700&profile=walking and keep response.
         using var response = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{itemIds.DayId}/route" +
             "?originLat=10.775&originLng=106.700&profile=walking");
 
+        // STEP-09: Obtain route through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var route = await SuccessDataAsync<GetRoadmapDayRouteResponseDto>(response);
+        // STEP-10: Assert route.Profile is "walking", route.Origin is not null, route.Origin.Source is "gps", route.OriginSkipped is false and 4 more.
         route.Profile.Should().Be("walking");
         route.Origin.Should().NotBeNull();
         route.Origin!.Source.Should().Be("gps");
@@ -299,8 +357,10 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         route.TotalDistanceMeters.Should().Be(0);
         route.TotalDurationSeconds.Should().Be(0);
 
+        // STEP-11: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/route and keep missingDay.
         using var missingDay = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/route");
+        // STEP-12: Read error from the response; assert missingDay.StatusCode is HttpStatusCode.NotFound and error.ErrorCode is "DAY_NOT_FOUND".
         missingDay.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var error = await missingDay.Content.ReadFromJsonAsync<ApiResponse<object>>();
         error!.ErrorCode.Should().Be("DAY_NOT_FOUND");
@@ -311,12 +371,18 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task DeleteRoadmap_ShouldSoftDeleteAndHideOnlyTheOwnedRoadmap()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain traveler through RegisterTravelerAndLoginAsync.
         var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-delete@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, traveler.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Delete trip", null, 1);
+        // STEP-06: Get relatedIds from _factory.ExecuteDbAsync.
         var relatedIds = await _factory.ExecuteDbAsync(async context =>
         {
             var dayId = await context.RoadmapDays
@@ -347,13 +413,16 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             return (ItemId: item.Id, BlogId: blog.Id);
         });
 
+        // STEP-07: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id} and keep deleteResponse.
         using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
 
+        // STEP-08: Read envelope from the response; assert deleteResponse.StatusCode is HttpStatusCode.OK, envelope is not null, envelope.Success is true and 1 more.
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteResponse.Content.ReadAsStringAsync());
         var envelope = await deleteResponse.Content.ReadFromJsonAsync<ApiResponse<object>>();
         envelope.Should().NotBeNull();
         envelope!.Success.Should().BeTrue();
         envelope.Data.Should().BeNull();
+        // STEP-09: Assert in the database context.Roadmaps.AnyAsync(filtered) is false, deleted.UserId is traveler.User.Id, deleted.DeletedAt is not null and 4 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Roadmaps.AnyAsync(item => item.Id == roadmap.Overview.Id)).Should().BeFalse();
@@ -370,8 +439,11 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             snapshot.RootElement.GetProperty("title").GetString().Should().Be("Delete trip");
         });
 
+        // STEP-10: Send GET /api/v1/roadmaps/{roadmap.Overview.Id} and keep detailResponse.
         using var detailResponse = await client.GetAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        // STEP-11: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id} and keep repeatedDeleteResponse.
         using var repeatedDeleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        // STEP-12: Assert for each response, response.StatusCode is HttpStatusCode.NotFound and error.ErrorCode is "ROADMAP_NOT_FOUND".
         foreach (var response in new[] { detailResponse, repeatedDeleteResponse })
         {
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -379,7 +451,9 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             error!.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
         }
 
+        // STEP-13: Send GET /api/v1/roadmaps and keep listResponse.
         using var listResponse = await client.GetAsync("/api/v1/roadmaps");
+        // STEP-14: Obtain list through SuccessDataAsync; assert list.Items holds no matching item.
         var list = await SuccessDataAsync<Paged<RoadmapSummaryDto>>(listResponse);
         list.Items.Should().NotContain(item => item.Id == roadmap.Overview.Id);
     }
@@ -389,11 +463,16 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task SuggestAndAddRoadmapItem_ShouldPersistAndExcludeExistingDish()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain traveler through RegisterTravelerAndLoginAsync.
         var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-add-item@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, traveler.AccessToken);
+        // STEP-05: Send POST /api/v1/roadmaps with a CreateRoadmapRequestDto body and keep createResponse.
         using var createResponse = await client.PostAsJsonAsync("/api/v1/roadmaps", new CreateRoadmapRequestDto
         {
             Title = "Manual food trip",
@@ -403,7 +482,9 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             OriginLongitude = 106.700m,
             OriginLabel = "Hotel"
         });
+        // STEP-06: Obtain roadmap through SuccessDataAsync.
         var roadmap = await SuccessDataAsync<RoadmapDetailDto>(createResponse);
+        // STEP-07: Derive dayId from roadmap.Itinerary.Single().DayId and seed or update rows directly in the test database.
         var dayId = roadmap.Itinerary.Single().DayId;
         await _factory.ExecuteDbAsync(async context =>
         {
@@ -418,9 +499,11 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             await context.SaveChangesAsync();
         });
 
+        // STEP-08: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/suggestions (with query parameters) and keep suggestionsResponse.
         using var suggestionsResponse = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/suggestions?province=Ho%20Chi%20Minh%20City&mealSlot=lunch&limit=1");
 
+        // STEP-09: Obtain suggestions through SuccessDataAsync; assert suggestionsResponse.StatusCode is HttpStatusCode.OK, suggestions.RequestId is null and 4 more.
         suggestionsResponse.StatusCode.Should().Be(HttpStatusCode.OK,
             await suggestionsResponse.Content.ReadAsStringAsync());
         var suggestions = await SuccessDataAsync<GetRoadmapSuggestionsResponseDto>(suggestionsResponse);
@@ -429,12 +512,15 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         suggestions.Items.Single().Rank.Should().Be(1);
         suggestions.NextCursor.Should().BeNull();
 
+        // STEP-10: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
 
+        // STEP-11: Obtain added through SuccessDataAsync; assert addResponse.StatusCode is HttpStatusCode.Created.
         addResponse.StatusCode.Should().Be(HttpStatusCode.Created, await addResponse.Content.ReadAsStringAsync());
         var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        // STEP-12: Assert added.DayId is dayId, added.DayNumber is 1, added.SortOrder is 5, added.Source is "manual" and 4 more.
         added.DayId.Should().Be(dayId);
         added.DayNumber.Should().Be(1);
         added.SortOrder.Should().Be(5);
@@ -443,6 +529,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         added.Dish.Status.Should().Be("active");
         added.Dish.Tags.Should().ContainSingle(item => item.Code == "lunch");
         added.MyFeedback.Should().BeNull();
+        // STEP-13: Assert in the database persisted.RoadmapDayId is dayId, persisted.DishId is publicDish.DishId, persisted.MealSlot is MealSlot.Lunch and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persisted = await context.RoadmapItems.SingleAsync(item => item.Id == added.Id);
@@ -453,8 +540,10 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             persisted.Source.Should().Be(RoadmapItemSource.Manual);
         });
 
+        // STEP-14: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/suggestions (with query parameters) and keep repeatedResponse.
         using var repeatedResponse = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/suggestions?province=Ho%20Chi%20Minh%20City&mealSlot=lunch");
+        // STEP-15: Obtain repeated through SuccessDataAsync; assert repeated.Items is empty.
         var repeated = await SuccessDataAsync<GetRoadmapSuggestionsResponseDto>(repeatedResponse);
         repeated.Items.Should().BeEmpty();
     }
@@ -464,38 +553,52 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task AddRoadmapItem_WithInvalidTargets_ShouldReturnDocumentedErrors()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-errors-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Protected trip", null, 1);
+        // STEP-06: Derive dayId from roadmap.Itinerary.Single().DayId.
         var dayId = roadmap.Itinerary.Single().DayId;
 
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/items with a AddRoadmapItemRequestDto body and keep missingDay.
         using var missingDay = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/999999/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-08: Assert missingDay.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "DAY_NOT_FOUND".
         missingDay.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await missingDay.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DAY_NOT_FOUND");
 
+        // STEP-09: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep hiddenDish.
         using var hiddenDish = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.HiddenDishId, MealSlot = "lunch" });
+        // STEP-10: Assert hiddenDish.StatusCode is HttpStatusCode.BadRequest and the response body.ErrorCode is "DISH_NOT_AVAILABLE".
         hiddenDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await hiddenDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
 
+        // STEP-11: Seed or update rows directly in the test database.
         await _factory.ExecuteDbAsync(async context =>
         {
             var dish = await context.Dishes.SingleAsync(item => item.Id == publicDish.DishId);
             dish.IsAvailable = false;
             await context.SaveChangesAsync();
         });
+        // STEP-12: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep soldOutDish.
         using var soldOutDish = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-13: Assert soldOutDish.StatusCode is HttpStatusCode.BadRequest and the response body.ErrorCode is "DISH_NOT_AVAILABLE".
         soldOutDish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await soldOutDish.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
 
+        // STEP-14: Seed or update rows directly in the test database.
         await _factory.ExecuteDbAsync(async context =>
         {
             var dish = await context.Dishes
@@ -505,18 +608,23 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             dish.Restaurant.OperatingStatus = RestaurantOperatingStatus.TemporarilyClosed;
             await context.SaveChangesAsync();
         });
+        // STEP-15: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep closedRestaurant.
         using var closedRestaurant = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-16: Obtain other through RegisterTravelerAndLoginAsync; assert closedRestaurant.StatusCode is HttpStatusCode.BadRequest and 1 more.
         closedRestaurant.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await closedRestaurant.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("DISH_NOT_AVAILABLE");
 
         var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-errors-other@integration.test");
+        // STEP-17: Authenticate the HTTP client through Authorize.
         Authorize(client, other.AccessToken);
+        // STEP-18: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep foreignRoadmap.
         using var foreignRoadmap = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-19: Assert foreignRoadmap.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_NOT_FOUND".
         foreignRoadmap.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await foreignRoadmap.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_NOT_FOUND");
@@ -527,18 +635,27 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task GetRoadmapItemDetail_ShouldReturnCompleteOwnedDataAndHideInvalidTargets()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-detail-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Item detail trip", null, 1);
+        // STEP-06: Derive dayId from roadmap.Itinerary.Single().DayId.
         var dayId = roadmap.Itinerary.Single().DayId;
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-08: Obtain added through SuccessDataAsync.
         var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
 
+        // STEP-09: Seed or update rows directly in the test database.
         await _factory.ExecuteDbAsync(async context =>
         {
             var dish = await context.Dishes.SingleAsync(value => value.Id == publicDish.DishId);
@@ -578,11 +695,14 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             await context.SaveChangesAsync();
         });
 
+        // STEP-10: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep detailResponse.
         using var detailResponse = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
 
+        // STEP-11: Obtain detail through SuccessDataAsync; assert detailResponse.StatusCode is HttpStatusCode.OK.
         detailResponse.StatusCode.Should().Be(HttpStatusCode.OK, await detailResponse.Content.ReadAsStringAsync());
         var detail = await SuccessDataAsync<RoadmapItemDetailDto>(detailResponse);
+        // STEP-12: Assert detail.Id is added.Id, detail.DayId is dayId, detail.MyFeedback is "dislike", detail.Dish.Id is publicDish.DishId and 13 more.
         detail.Id.Should().Be(added.Id);
         detail.DayId.Should().Be(dayId);
         detail.MyFeedback.Should().Be("dislike");
@@ -601,32 +721,44 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         detail.MyReview.Images.Should().ContainSingle();
         detail.Restaurant.MyReview!.Id.Should().Be(detail.MyReview.Id);
 
+        // STEP-13: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/items/999999 and keep missingItem.
         using var missingItem = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999");
+        // STEP-14: Obtain otherRoadmap through CreateRoadmapAsync; assert missingItem.StatusCode is HttpStatusCode.NotFound and 1 more.
         missingItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await missingItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
 
         var otherRoadmap = await CreateRoadmapAsync(client, "Other owned trip", null, 1);
+        // STEP-15: Send GET /api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id} and keep mismatchedRoadmap.
         using var mismatchedRoadmap = await client.GetAsync(
             $"/api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id}");
+        // STEP-16: Obtain other through RegisterTravelerAndLoginAsync; assert mismatchedRoadmap.StatusCode is HttpStatusCode.NotFound and 1 more.
         mismatchedRoadmap.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await mismatchedRoadmap.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
 
         var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-detail-other@integration.test");
+        // STEP-17: Authenticate the HTTP client through Authorize.
         Authorize(client, other.AccessToken);
+        // STEP-18: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep foreignItem.
         using var foreignItem = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        // STEP-19: Assert foreignItem.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         foreignItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await foreignItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
 
+        // STEP-20: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-21: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id} and keep deleteResponse.
         using var deleteResponse = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        // STEP-22: Ensure deleteResponse succeeded.
         deleteResponse.EnsureSuccessStatusCode();
+        // STEP-23: Send GET /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep deletedRoadmapItem.
         using var deletedRoadmapItem = await client.GetAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        // STEP-24: Assert deletedRoadmapItem.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         deletedRoadmapItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await deletedRoadmapItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
@@ -637,6 +769,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task UpdateRoadmapItem_ShouldReplaceThenRepositionWithoutLeakingOldInteractions()
     {
+        // STEP-01: Reset the test database, get publicDish from DiscoverySeed.PublicDishAsync and get replacementDishId from _factory.ExecuteDbAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
         var replacementDishId = await _factory.ExecuteDbAsync(async context =>
@@ -654,16 +787,24 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             await context.SaveChangesAsync();
             return dish.Id;
         });
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain traveler through RegisterTravelerAndLoginAsync.
         var traveler = await RegisterTravelerAndLoginAsync(client, "roadmap-update-item@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, traveler.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Editable trip", null, 2);
+        // STEP-06: Derive firstDayId from Itinerary.Single(filtered).DayId and derive secondDayId from Itinerary.Single(filtered).DayId.
         var firstDayId = roadmap.Itinerary.Single(day => day.DayNumber == 1).DayId;
         var secondDayId = roadmap.Itinerary.Single(day => day.DayNumber == 2).DayId;
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{firstDayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{firstDayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "breakfast", SortOrder = 0 });
+        // STEP-08: Obtain original through SuccessDataAsync.
         var original = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        // STEP-09: Get interactionIds from _factory.ExecuteDbAsync and create recoRequestId through Guid.NewGuid.
         var interactionIds = await _factory.ExecuteDbAsync(async context =>
         {
             var feedback = new DishFeedback
@@ -689,6 +830,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         });
         var recoRequestId = Guid.NewGuid();
 
+        // STEP-10: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/{original.Id} with a UpdateRoadmapItemRequestDto body and keep replaceResponse.
         using var replaceResponse = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{original.Id}",
             new UpdateRoadmapItemRequestDto
@@ -700,8 +842,10 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
                 SortOrder = short.MaxValue
             });
 
+        // STEP-11: Obtain replacement through SuccessDataAsync; assert replaceResponse.StatusCode is HttpStatusCode.OK.
         replaceResponse.StatusCode.Should().Be(HttpStatusCode.OK, await replaceResponse.Content.ReadAsStringAsync());
         var replacement = await SuccessDataAsync<RoadmapItemDto>(replaceResponse);
+        // STEP-12: Assert replacement.Id is not original.Id, replacement.DayId is secondDayId, replacement.DayNumber is 2 and 6 more.
         replacement.Id.Should().NotBe(original.Id);
         replacement.DayId.Should().Be(secondDayId);
         replacement.DayNumber.Should().Be(2);
@@ -711,6 +855,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
         replacement.Source.Should().Be("manual");
         replacement.RecoRequestId.Should().Be(recoRequestId);
         replacement.MyFeedback.Should().BeNull();
+        // STEP-13: Assert in the database context.RoadmapItems.AnyAsync(filtered) is false, persisted.RoadmapDayId is secondDayId and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.RoadmapItems.AnyAsync(item => item.Id == original.Id)).Should().BeFalse();
@@ -723,6 +868,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
                 .RoadmapItemId.Should().BeNull();
         });
 
+        // STEP-14: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/{replacement.Id} with a UpdateRoadmapItemRequestDto body and keep moveResponse.
         using var moveResponse = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{replacement.Id}",
             new UpdateRoadmapItemRequestDto
@@ -732,12 +878,15 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
                 SortOrder = short.MinValue
             });
 
+        // STEP-15: Obtain moved through SuccessDataAsync; assert moveResponse.StatusCode is HttpStatusCode.OK.
         moveResponse.StatusCode.Should().Be(HttpStatusCode.OK, await moveResponse.Content.ReadAsStringAsync());
         var moved = await SuccessDataAsync<RoadmapItemDto>(moveResponse);
+        // STEP-16: Assert moved.Id is replacement.Id, moved.DayId is firstDayId, moved.MealSlot is "lunch" and moved.SortOrder is short.MinValue.
         moved.Id.Should().Be(replacement.Id);
         moved.DayId.Should().Be(firstDayId);
         moved.MealSlot.Should().Be("lunch");
         moved.SortOrder.Should().Be(short.MinValue);
+        // STEP-17: Assert in the database persisted.RoadmapDayId is firstDayId, persisted.MealSlot is MealSlot.Lunch and persisted.SortOrder is short.MinValue.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persisted = await context.RoadmapItems.SingleAsync(item => item.Id == replacement.Id);
@@ -752,30 +901,43 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task UpdateRoadmapItem_WithInvalidTargets_ShouldReturnDocumentedErrors()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-update-errors-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Protected editable trip", null, 1);
+        // STEP-06: Derive dayId from roadmap.Itinerary.Single().DayId.
         var dayId = roadmap.Itinerary.Single().DayId;
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-08: Obtain item through SuccessDataAsync and otherRoadmap through CreateRoadmapAsync.
         var item = await SuccessDataAsync<RoadmapItemDto>(addResponse);
         var otherRoadmap = await CreateRoadmapAsync(client, "Other trip", null, 1);
+        // STEP-09: Derive otherDayId from Itinerary.Single().DayId.
         var otherDayId = otherRoadmap.Itinerary.Single().DayId;
 
+        // STEP-10: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/999999 with a UpdateRoadmapItemRequestDto body and keep missingItem.
         using var missingItem = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999",
             new UpdateRoadmapItemRequestDto { MealSlot = "dinner" });
+        // STEP-11: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id} with a UpdateRoadmapItemRequestDto body and keep crossRoadmapDay.
         using var crossRoadmapDay = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
             new UpdateRoadmapItemRequestDto { DayId = otherDayId });
+        // STEP-12: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id} with a UpdateRoadmapItemRequestDto body and keep unavailableDish.
         using var unavailableDish = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
             new UpdateRoadmapItemRequestDto { DishId = publicDish.HiddenDishId });
 
+        // STEP-13: Obtain other through RegisterTravelerAndLoginAsync; assert for each response, response.StatusCode is HttpStatusCode.NotFound and 3 more.
         foreach (var response in new[] { missingItem, crossRoadmapDay })
         {
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -787,10 +949,13 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             .Should().Be("DISH_NOT_AVAILABLE");
 
         var other = await RegisterTravelerAndLoginAsync(client, "roadmap-update-errors-other@integration.test");
+        // STEP-14: Authenticate the HTTP client through Authorize.
         Authorize(client, other.AccessToken);
+        // STEP-15: Send PATCH /api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id} with a UpdateRoadmapItemRequestDto body and keep foreignItem.
         using var foreignItem = await client.PatchAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{item.Id}",
             new UpdateRoadmapItemRequestDto { MealSlot = "dinner" });
+        // STEP-16: Assert foreignItem.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         foreignItem.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await foreignItem.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
@@ -801,17 +966,26 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task DeleteRoadmapItem_ShouldRemoveOnlyItemAndPreserveRelatedHistory()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Delete item trip", null, 1);
+        // STEP-06: Derive dayId from roadmap.Itinerary.Single().DayId.
         var dayId = roadmap.Itinerary.Single().DayId;
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "dinner" });
+        // STEP-08: Obtain added through SuccessDataAsync.
         var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
+        // STEP-09: Get relatedIds from _factory.ExecuteDbAsync.
         var relatedIds = await _factory.ExecuteDbAsync(async context =>
         {
             var feedback = new DishFeedback
@@ -837,13 +1011,16 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             return (FeedbackId: feedback.Id, ReviewId: review.Id);
         });
 
+        // STEP-10: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep response.
         using var response = await client.DeleteAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
 
+        // STEP-11: Read document from the response; assert response.StatusCode is HttpStatusCode.OK, document.RootElement.success is true and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+        // STEP-12: Assert in the database context.RoadmapItems.AnyAsync(filtered) is false, context.RoadmapDays.AnyAsync(filtered) is true and 4 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.RoadmapItems.AnyAsync(item => item.Id == added.Id)).Should().BeFalse();
@@ -856,8 +1033,10 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
             review.RoadmapItemId.Should().BeNull();
         });
 
+        // STEP-13: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep repeated.
         using var repeated = await client.DeleteAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
+        // STEP-14: Assert repeated.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         repeated.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await repeated.Content.ReadFromJsonAsync<ApiResponse<object>>())!.ErrorCode
             .Should().Be("ROADMAP_ITEM_NOT_FOUND");
@@ -868,34 +1047,52 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
     [PostgresEndToEndFact]
     public async Task DeleteRoadmapItem_WithInvalidScope_ShouldReturnItemNotFoundWithoutMutation()
     {
+        // STEP-01: Reset the test database and get publicDish from DiscoverySeed.PublicDishAsync.
         await _factory.ResetDatabaseAsync();
         var publicDish = await DiscoverySeed.PublicDishAsync(_factory);
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain owner through RegisterTravelerAndLoginAsync.
         var owner = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-scope-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-05: Obtain roadmap through CreateRoadmapAsync and otherRoadmap through CreateRoadmapAsync.
         var roadmap = await CreateRoadmapAsync(client, "Protected item trip", null, 1);
         var otherRoadmap = await CreateRoadmapAsync(client, "Other matching owner trip", null, 1);
+        // STEP-06: Derive dayId from roadmap.Itinerary.Single().DayId.
         var dayId = roadmap.Itinerary.Single().DayId;
+        // STEP-07: Send POST /api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items with a AddRoadmapItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/days/{dayId}/items",
             new AddRoadmapItemRequestDto { DishId = publicDish.DishId, MealSlot = "lunch" });
+        // STEP-08: Obtain added through SuccessDataAsync.
         var added = await SuccessDataAsync<RoadmapItemDto>(addResponse);
 
+        // STEP-09: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id}/items/999999 and keep missing.
         using var missing = await client.DeleteAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/999999");
+        // STEP-10: Send DELETE /api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id} and keep mismatched.
         using var mismatched = await client.DeleteAsync(
             $"/api/v1/roadmaps/{otherRoadmap.Overview.Id}/items/{added.Id}");
+        // STEP-11: Obtain other through RegisterTravelerAndLoginAsync.
         var other = await RegisterTravelerAndLoginAsync(client, "roadmap-item-delete-scope-other@integration.test");
+        // STEP-12: Authenticate the HTTP client through Authorize.
         Authorize(client, other.AccessToken);
+        // STEP-13: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep foreign.
         using var foreign = await client.DeleteAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
 
+        // STEP-14: Authenticate the HTTP client through Authorize.
         Authorize(client, owner.AccessToken);
+        // STEP-15: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id} and keep deleteRoadmap.
         using var deleteRoadmap = await client.DeleteAsync($"/api/v1/roadmaps/{roadmap.Overview.Id}");
+        // STEP-16: Ensure deleteRoadmap succeeded.
         deleteRoadmap.EnsureSuccessStatusCode();
+        // STEP-17: Send DELETE /api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id} and keep deletedParent.
         using var deletedParent = await client.DeleteAsync(
             $"/api/v1/roadmaps/{roadmap.Overview.Id}/items/{added.Id}");
 
+        // STEP-18: Assert for each response, response.StatusCode is HttpStatusCode.NotFound and the response body.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         foreach (var response in new[] { missing, mismatched, foreign, deletedParent })
         {
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -903,6 +1100,7 @@ public sealed class RoadmapEndToEndTests : IClassFixture<PostgresApiFactory>
                 .Should().Be("ROADMAP_ITEM_NOT_FOUND");
         }
 
+        // STEP-19: Assert in the database context.RoadmapItems.AnyAsync(filtered) is true.
         await _factory.ExecuteDbAsync(async context =>
             (await context.RoadmapItems.AnyAsync(item => item.Id == added.Id)).Should().BeTrue());
     }

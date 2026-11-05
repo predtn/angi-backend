@@ -15,6 +15,7 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_FullSnapshotCopiesUnaffectedDay_PreservesItsProvenanceWithoutReranking()
     {
+        // STEP-01: Derive selected from a copy of AgentTestData.Item(), derive copied from a copy of AgentTestData.Item() and 5 more.
         var selected = AgentTestData.Item() with { Price = 50000 };
         var copied = AgentTestData.Item(2, "untouched", 2) with { Price = 50000, RequestId = Guid.NewGuid() };
         var source = AgentTestData.Snapshot(selected, copied);
@@ -24,9 +25,11 @@ public sealed class AgentProposalValidatorTests
         var snapshot = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
             Items = [selected, copied] });
 
+        // STEP-02: Validate snapshot and keep result.
         var result = await AgentTestData.Validator(AgentTestData.Dish(), AgentTestData.Dish(2)).Validator
             .ValidateAsync(snapshot, source, false, false, default, [grant]);
 
+        // STEP-03: Assert result.Validation.Errors is empty, result.Snapshot.Items.Single(filtered).RequestId is grant.RequestId and 3 more.
         result.Validation.Errors.Should().BeEmpty();
         result.Snapshot.Items.Single(item => item.ItemKey == selected.ItemKey).RequestId.Should().Be(grant.RequestId);
         result.Snapshot.Items.Single(item => item.ItemKey == copied.ItemKey).RequestId.Should().Be(copied.RequestId);
@@ -40,6 +43,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("patch_proposal")]
     public async Task ValidateAsync_ReselectedFallbackDish_UsesFreshRecoAndRequiresItsGrant(string action)
     {
+        // STEP-01: Derive item from a copy of AgentTestData.Item(), get source from AgentTestData.Snapshot, get context from AgentTestData.Context and 5 more.
         var item = AgentTestData.Item() with { SourceItemId = 33, Price = 50000 };
         var source = AgentTestData.Snapshot(item);
         var context = AgentTestData.Context(source);
@@ -51,9 +55,12 @@ public sealed class AgentProposalValidatorTests
         var snapshot = new AgentProposalBuilder().Build(context, output);
         var validator = AgentTestData.Validator(AgentTestData.Dish()).Validator;
 
+        // STEP-02: Assert validator.ValidateAsync().Validation.Errors is not empty.
         (await validator.ValidateAsync(snapshot, source, false, false, default, [])).Validation.Errors.Should().NotBeEmpty();
+        // STEP-03: Validate snapshot and keep result.
         var result = await validator.ValidateAsync(snapshot, source, false, false, default, [grant]);
 
+        // STEP-04: Assert result.Validation.Errors is empty, result.Validation.Warnings holds no matching item and 3 more.
         result.Validation.Errors.Should().BeEmpty();
         result.Validation.Warnings.Should().NotContain(warning => warning.Contains("đánh giá"));
         result.Snapshot.Items.Single().RequestId.Should().Be(grant.RequestId);
@@ -66,10 +73,13 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_TasteChangedAfterRanking_RequiresNewCandidates()
     {
+        // STEP-01: Create fixture through AgentTestData.Validator, get snapshot from AgentTestData.Snapshot and set snapshot to a copy of snapshot.
         var fixture = AgentTestData.Validator(AgentTestData.Dish());
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
         snapshot = snapshot with { State = snapshot.State with { TasteTargets = [new("spicy", 1)] } };
+        // STEP-02: Validate snapshot and keep result.
         var result = await fixture.Validator.ValidateAsync(snapshot, null, false, false, default);
+        // STEP-03: Assert result.Validation.Errors is not empty.
         result.Validation.Errors.Should().NotBeEmpty();
     }
 
@@ -78,9 +88,12 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_ValidCandidate_PopulatesTrustedMetadata()
     {
+        // STEP-01: Create fixture through AgentTestData.Validator and get snapshot from AgentTestData.Snapshot.
         var fixture = AgentTestData.Validator(AgentTestData.Dish());
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { Price = 1, DishName = "Fake" });
+        // STEP-02: Validate snapshot and keep result.
         var result = await fixture.Validator.ValidateAsync(snapshot, null, false, true, CancellationToken.None);
+        // STEP-03: Assert result.Validation.Errors is empty, result.Validation.TotalCost is 50000, result.Snapshot.Items.Single().DishName is "Dish 1" and 2 more.
         result.Validation.Errors.Should().BeEmpty(); result.Validation.TotalCost.Should().Be(50000);
         result.Snapshot.Items.Single().DishName.Should().Be("Dish 1");
         result.Snapshot.Items.Single().RequestId.Should().Be(snapshot.Grants.Single().RequestId);
@@ -98,6 +111,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("tag-required")][InlineData("tag-excluded")][InlineData("radius")][InlineData("grant-price")]
     public async Task ValidateAsync_InvalidProposal_ReturnsBlockingErrors(string area)
     {
+        // STEP-01: Get dish from AgentTestData.Dish, get state from AgentTestData.State, get item from AgentTestData.Item, build the grants collection and 3 more.
         var dish = AgentTestData.Dish();
         var state = AgentTestData.State();
         var item = AgentTestData.Item();
@@ -134,8 +148,11 @@ public sealed class AgentProposalValidatorTests
             case "grant-price": grants = [grants[0] with { Constraints = state with { MaxPricePerMeal = 49999 } }]; break;
         }
         var fixture = AgentTestData.Validator(area == "missing" ? [] : [dish]);
+        // STEP-02: Validate new(state, items, grants) and keep result.
         var result = await fixture.Validator.ValidateAsync(new(state, items, grants), null, false, true, CancellationToken.None);
+        // STEP-03: Assert result.Validation.Errors is not empty.
         result.Validation.Errors.Should().NotBeEmpty(area);
+        // STEP-04: Verify CalculateRouteAsync is never called.
         fixture.Routes.Verify(x => x.CalculateRouteAsync(It.IsAny<RouteCoordinate?>(), It.IsAny<IReadOnlyList<RouteCoordinate>>(), It.IsAny<RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -145,8 +162,11 @@ public sealed class AgentProposalValidatorTests
     [InlineData(49999)][InlineData(50001)]
     public async Task ValidateAsync_ConfirmationPriceChange_Blocks(decimal previewPrice)
     {
+        // STEP-01: Create fixture through AgentTestData.Validator.
         var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        // STEP-02: Validate AgentTestData.Snapshot() and keep result.
         var result = await fixture.Validator.ValidateAsync(AgentTestData.Snapshot(AgentTestData.Item() with { Price = previewPrice }), null, true, false, CancellationToken.None);
+        // STEP-03: Assert result.Validation.Errors contains a matching item.
         result.Validation.Errors.Should().Contain(x => x.Contains("Giá"));
     }
 
@@ -155,12 +175,17 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_NewReplacement_RequiresFreshScopedGrant()
     {
+        // STEP-01: Get source from AgentTestData.Snapshot, derive replacement from a copy of source and create fixture through AgentTestData.Validator.
         var source = AgentTestData.Snapshot(AgentTestData.Item());
         var replacement = source with { Items = [AgentTestData.Item(2)] };
         var fixture = AgentTestData.Validator(AgentTestData.Dish(2));
+        // STEP-02: Validate replacement and keep stale.
         var stale = await fixture.Validator.ValidateAsync(replacement, source, false, false, CancellationToken.None, []);
+        // STEP-03: Assert stale.Validation.Errors is not empty.
         stale.Validation.Errors.Should().NotBeEmpty();
+        // STEP-04: Validate replacement and keep current.
         var current = await fixture.Validator.ValidateAsync(replacement, source, false, false, CancellationToken.None, [AgentTestData.Grant([2], 1, "lunch")]);
+        // STEP-05: Assert current.Validation.Errors is empty.
         current.Validation.Errors.Should().BeEmpty();
     }
 
@@ -170,9 +195,12 @@ public sealed class AgentProposalValidatorTests
     [InlineData(true)][InlineData(false)]
     public async Task ValidateAsync_EmptyItinerary_OnlyAllowsSavedRoadmapUpdate(bool update)
     {
+        // STEP-01: Create state as AgentState and create snapshot as AgentSnapshot.
         var state = new AgentState { NumDays = 1 };
         var snapshot = new AgentSnapshot(state, [], [], update ? 88 : null, update ? DateTime.UnixEpoch : null);
+        // STEP-02: Validate snapshot and keep result.
         var result = await AgentTestData.Validator().Validator.ValidateAsync(snapshot, null, false, false, CancellationToken.None);
+        // STEP-03: Assert result.Validation.Errors.Length == 0 is update.
         (result.Validation.Errors.Length == 0).Should().Be(update);
     }
 
@@ -181,9 +209,12 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_UnchangedSource_DoesNotRequireNewGrant()
     {
+        // STEP-01: Derive item from a copy of AgentTestData.Item() and create source as AgentSnapshot.
         var item = AgentTestData.Item() with { SourceItemId = 33, RequestId = Guid.NewGuid() };
         var source = new AgentSnapshot(AgentTestData.State(), [item], []);
+        // STEP-02: Validate source and keep result.
         var result = await AgentTestData.Validator(AgentTestData.Dish()).Validator.ValidateAsync(source, source, false, false, CancellationToken.None);
+        // STEP-03: Assert result.Validation.Errors is empty and result.Snapshot.Items.Single().RequestId is item.RequestId.
         result.Validation.Errors.Should().BeEmpty(); result.Snapshot.Items.Single().RequestId.Should().Be(item.RequestId);
     }
 
@@ -194,12 +225,15 @@ public sealed class AgentProposalValidatorTests
     [InlineData("scope-only")][InlineData("scope-and-budget")][InlineData("valid")]
     public async Task ValidateAsync_ScopeRejection_ExposesItemKeysOnlyWhenItIsTheOnlyError(string area)
     {
+        // STEP-01: Derive state from a copy of AgentTestData.State() and derive grants from the expected value.
         var state = AgentTestData.State() with { BudgetAmount = area == "scope-and-budget" ? 49999 : 500000 };
         AgentCandidateGrant[] grants = area == "valid" ? [AgentTestData.Grant([1])] : [AgentTestData.Grant([1], day: 2)];
 
+        // STEP-02: Validate the computed value and keep result.
         var result = await AgentTestData.Validator(AgentTestData.Dish()).Validator
             .ValidateAsync(new(state, [AgentTestData.Item()], grants), null, false, false, CancellationToken.None);
 
+        // STEP-03: Assert depending on area == "scope-only", result.Validation.ScopeRejectedItemKeys equals "a" and 2 more.
         if (area == "scope-only") result.Validation.ScopeRejectedItemKeys.Should().Equal("a");
         else result.Validation.ScopeRejectedItemKeys.Should().BeNull();
         result.Validation.Errors.Should().HaveCount(area switch { "scope-only" => 1, "scope-and-budget" => 2, _ => 0 });
@@ -211,6 +245,7 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task RepairScopeAsync_OutOfScopeCandidate_SubstitutesBestAuthorizedDish()
     {
+        // STEP-01: Unpack (snapshot, grants, catalog) from ScopeScenario(), get target from snapshot.Items.Single, set snapshot to a copy of snapshot and 3 more.
         var (snapshot, grants, catalog) = ScopeScenario();
         var target = snapshot.Items.Single(item => item.ItemKey == "item6");
         snapshot = snapshot with { Items = snapshot.Items.Select(item => item.ItemKey == "item6" ? item with { Price = 1, DishName = "Fake" } : item).ToArray(),
@@ -220,6 +255,7 @@ public sealed class AgentProposalValidatorTests
         var repaired = await validator.RepairScopeAsync(snapshot, null, grants, ["item6"], CancellationToken.None);
 
         var replaced = repaired!.Items.Single(item => item.ItemKey == "item6");
+        // STEP-02: Assert replaced.DishId is 7, replaced is a new AgentItem, repaired.Changes.Single().Item.DishId is 7 and 2 more.
         replaced.DishId.Should().Be(7);
         replaced.Should().Be(new AgentItem("item6", null, 3, "breakfast", 0, 7));
         repaired.Changes!.Single().Item!.DishId.Should().Be(7);
@@ -235,6 +271,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("rank-order", 7)][InlineData("reversed-rank", 10)][InlineData("specific-grant", 10)][InlineData("same-name", 10)]
     public async Task RepairScopeAsync_Candidates_FollowSelectionPriority(string area, int expected)
     {
+        // STEP-01: Unpack (snapshot, grants, catalog) from ScopeScenario(), derive state from snapshot.State and 4 more.
         var (snapshot, grants, catalog) = ScopeScenario();
         var state = snapshot.State;
         if (area == "reversed-rank") grants[0] = grants[0] with { DishIds = [1, 2, 3, 4, 5, 6, 8, 9, 10, 7] };
@@ -243,6 +280,7 @@ public sealed class AgentProposalValidatorTests
 
         var repaired = await AgentTestData.Validator(catalog).Validator.RepairScopeAsync(snapshot, null, grants, ["item6"], CancellationToken.None);
 
+        // STEP-02: Assert repaired.Items.Single(filtered).DishId is expected.
         repaired!.Items.Single(item => item.ItemKey == "item6").DishId.Should().Be(expected);
     }
 
@@ -255,6 +293,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("meal-tag")][InlineData("unavailable")][InlineData("budget")][InlineData("meal-price")][InlineData("used-only")]
     public async Task RepairScopeAsync_UnsafeSubstitution_ReturnsNull(string area)
     {
+        // STEP-01: Unpack (snapshot, grants, catalog) from ScopeScenario(), build the keys collection, declare source to capture a call argument and 3 more.
         var (snapshot, grants, catalog) = ScopeScenario();
         string[] keys = ["item6"];
         AgentSnapshot? source = null;
@@ -280,6 +319,7 @@ public sealed class AgentProposalValidatorTests
 
         var repaired = await AgentTestData.Validator(catalog).Validator.RepairScopeAsync(snapshot, source, grants, keys, CancellationToken.None);
 
+        // STEP-02: Assert repaired is null.
         repaired.Should().BeNull(area);
     }
 
@@ -289,18 +329,23 @@ public sealed class AgentProposalValidatorTests
     [InlineData("default")][InlineData("drink-request")][InlineData("retained")]
     public async Task ValidateAsync_DrinkOnlyBreakfast_NeedsMainDishUnlessRequestedOrRetained(string area)
     {
+        // STEP-01: Create drink as ANGI.Domain.Entities.Tag, create main as ANGI.Domain.Entities.Tag, get dish from AgentTestData.Dish and 2 more.
         var drink = new ANGI.Domain.Entities.Tag { Id = 4, Code = "local_sf_drink", Name = "Đồ uống", TagType = TagType.Category };
         var main = new ANGI.Domain.Entities.Tag { Id = 5, Code = "local_sf_main", Name = "Món Chính", TagType = TagType.Category };
         var dish = AgentTestData.Dish(); dish.DishTags.Add(new() { DishId = 1, TagId = 4, Tag = drink });
         var fixture = AgentTestData.Validator(dish);
+        // STEP-02: Stub fixture.GetTagsAsync.
         fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { drink, main });
+        // STEP-03: Derive state from a copy of AgentTestData.State(), create grant as AgentCandidateGrant and create snapshot as AgentSnapshot.
         var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["breakfast"],
             MealRequests = area == "drink-request" ? [new(1, "breakfast", null, null, [4])] : [] };
         var grant = new AgentCandidateGrant(1, "breakfast", [1], Guid.NewGuid(), state);
         var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1, "breakfast") with { Price = 50000 }], [grant]);
 
+        // STEP-04: Validate snapshot and keep result.
         var result = await fixture.Validator.ValidateAsync(snapshot, area == "retained" ? snapshot : null, false, false, default, [grant]);
 
+        // STEP-05: Assert depending on area == "default", result.Validation.Errors has exactly one matching item and result.Validation.Errors is empty.
         if (area == "default") result.Validation.Errors.Should().ContainSingle(error => error.Contains("cần ít nhất một món chính"));
         else result.Validation.Errors.Should().BeEmpty();
     }
@@ -311,13 +356,16 @@ public sealed class AgentProposalValidatorTests
     [InlineData(true)][InlineData(false)]
     public async Task ValidateAsync_RepeatedDishName_IsFlaggedOnlyWhenAnUnusedCandidateExists(bool spare)
     {
+        // STEP-01: Derive state from a copy of AgentTestData.State(), create grant as AgentCandidateGrant and create snapshot as AgentSnapshot.
         var state = AgentTestData.State() with { MealSlots = ["lunch"] };
         var grant = new AgentCandidateGrant(null, "lunch", spare ? [1, 2] : [1], Guid.NewGuid(), state);
         var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2)], [grant]);
 
+        // STEP-02: Validate snapshot and keep result.
         var result = await AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2)).Validator
             .ValidateAsync(snapshot, null, false, false, default, [grant]);
 
+        // STEP-03: Assert result.Validation.Errors is empty, depending on spare, result.Validation.AvoidableRepeatItemKeys equals "b" and 1 more.
         result.Validation.Errors.Should().BeEmpty();
         if (spare) result.Validation.AvoidableRepeatItemKeys.Should().Equal("b");
         else result.Validation.AvoidableRepeatItemKeys.Should().BeNull();
@@ -330,6 +378,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData(true)][InlineData(false)]
     public async Task RepairScopeAsync_RepeatsOnly_KeepsPositionsWithoutSpareAndFixesTheRest(bool spare)
     {
+        // STEP-01: Derive state from a copy of AgentTestData.State(), build the items collection, build the grants collection and 2 more.
         var state = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000, MealSlots = ["lunch"] };
         var items = new[] { AgentTestData.Item(1, "a", 1), AgentTestData.Item(1, "b", 2), AgentTestData.Item(1, "c", 3) };
         AgentCandidateGrant[] grants = [new(2, "lunch", spare ? [1, 2] : [1], Guid.NewGuid(), state), new(3, "lunch", [1], Guid.NewGuid(), state)];
@@ -338,6 +387,7 @@ public sealed class AgentProposalValidatorTests
         var repaired = await AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2)).Validator
             .RepairScopeAsync(snapshot, null, grants, ["b", "c"], CancellationToken.None, repeatsOnly: true);
 
+        // STEP-02: Assert depending on !spare, repaired is null and repaired.Items.Select(filtered) equals ("a", 1).
         if (!spare) { repaired.Should().BeNull(); return; }
         repaired!.Items.Select(item => (item.ItemKey, item.DishId)).Should().Equal(("a", 1), ("b", 2), ("c", 1));
     }
@@ -349,6 +399,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("skipped", true)][InlineData("already-empty", true)][InlineData("new-gap", false)][InlineData("new-day", false)][InlineData("new-slot", false)]
     public async Task ValidateAsync_MissingDeclaredMeal_DependsOnWhyItIsEmpty(string area, bool valid)
     {
+        // STEP-01: Get lunch from AgentTestData.Item, get dinner from AgentTestData.Item, derive state from a copy of AgentTestData.State() and 7 more.
         var lunch = AgentTestData.Item(1, "a", 1, "lunch");
         var dinner = AgentTestData.Item(2, "b", 1, "dinner");
         var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch", "dinner"] };
@@ -360,8 +411,10 @@ public sealed class AgentProposalValidatorTests
         var snapshot = new AgentSnapshot(state, area == "new-day" ? [lunch, dinner] : kept, [AgentTestData.Grant()], Scope: new(), RetainedItems: kept);
         var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2));
 
+        // STEP-02: Validate snapshot and keep result.
         var result = await validator.ValidateAsync(snapshot, source, false, false, default, []);
 
+        // STEP-03: Assert result.Validation.Errors.Any(filtered) is !valid.
         result.Validation.Errors.Any(error => error.StartsWith("Chưa có món cho bữa", StringComparison.Ordinal)).Should().Be(!valid);
     }
 
@@ -370,6 +423,7 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task RepairBudgetAsync_CheaperRankedDish_BringsTotalWithinBudget()
     {
+        // STEP-01: Get expensive from AgentTestData.Dish, set expensive.Price to 300000, get mid from AgentTestData.Dish, set mid.Price to 100000 and 7 more.
         var expensive = AgentTestData.Dish(1); expensive.Price = 300000;
         var mid = AgentTestData.Dish(2); mid.Price = 100000;
         var cheap = AgentTestData.Dish(3); cheap.Price = 60000;
@@ -380,6 +434,7 @@ public sealed class AgentProposalValidatorTests
 
         var repaired = await validator.RepairBudgetAsync(new(state, items, [grant], Scope: new()), null, [grant], default);
 
+        // STEP-02: Assert repaired.Value.Replaced is 1 and repaired.Value.Snapshot.Items.Select(filtered) equals 3.
         repaired!.Value.Replaced.Should().Be(1);
         repaired.Value.Snapshot.Items.Select(item => item.DishId).Should().Equal(3, 2);
     }
@@ -390,6 +445,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("no-cheaper")][InlineData("no-budget")][InlineData("named")][InlineData("retained")]
     public async Task RepairBudgetAsync_CannotFit_ReturnsNull(string area)
     {
+        // STEP-01: Get expensive from AgentTestData.Dish, set expensive.Price to 300000, get cheap from AgentTestData.Dish, set cheap.Price to 60000 and 7 more.
         var expensive = AgentTestData.Dish(1); expensive.Price = 300000;
         var cheap = AgentTestData.Dish(3); cheap.Price = 60000;
         var state = AgentTestData.State() with { BudgetAmount = 200000, MealSlots = ["lunch"] };
@@ -400,6 +456,7 @@ public sealed class AgentProposalValidatorTests
         var source = area == "retained" ? new AgentSnapshot(state, [item], [grant]) : null;
         var (validator, _, _, _) = AgentTestData.Validator(expensive, cheap);
 
+        // STEP-02: Assert validator.RepairBudgetAsync() is null.
         (await validator.RepairBudgetAsync(new(state, [item], [grant], Scope: new()), source, [grant], default)).Should().BeNull();
     }
 
@@ -408,6 +465,7 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_DayArea_AppliesOnlyToItsDay()
     {
+        // STEP-01: Unpack (validator, _, _, _) from AgentTestData.Validator(), create near as AgentDayArea, create far as AgentDayArea and define helper Errors.
         var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish());
         var near = new AgentDayArea(1, "Gần", 16.05m, 108.2m, 3m);
         var far = new AgentDayArea(1, "Xa", 21.03m, 105.85m, 3m);
@@ -417,6 +475,7 @@ public sealed class AgentProposalValidatorTests
             return (await validator.ValidateAsync(snapshot, null, false, false, default, [new(null, null, [1], null, state)])).Validation.Errors;
         }
 
+        // STEP-02: Assert Errors() is empty and Errors() contains a matching item.
         (await Errors(AgentTestData.State() with { DayAreas = [near] })).Should().BeEmpty();
         (await Errors(AgentTestData.State() with { DayAreas = [far] })).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
         (await Errors(AgentTestData.State() with { DayAreas = [far with { DayNumber = 2 }] })).Should().BeEmpty();
@@ -428,6 +487,7 @@ public sealed class AgentProposalValidatorTests
     [Fact]
     public async Task ValidateAsync_WidenedMeal_AppliesOnlyToThatMeal()
     {
+        // STEP-01: Unpack (validator, _, _, _) from AgentTestData.Validator(), create place as AgentDayArea and define helper Errors.
         var (validator, _, _, _) = AgentTestData.Validator(AgentTestData.Dish());
         // Món nằm cách tâm khoảng 5,6 km: ngoài 3 km, trong 8 km.
         var place = new AgentDayArea(1, "Gần", 16.10m, 108.2m, 3m);
@@ -438,6 +498,7 @@ public sealed class AgentProposalValidatorTests
             return (await validator.ValidateAsync(snapshot, null, false, false, default, [new(null, null, [1], null, state)])).Validation.Errors;
         }
 
+        // STEP-02: Assert Errors() contains a matching item and Errors() is empty.
         (await Errors(null)).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
         (await Errors([new(1, "lunch", 8m)])).Should().BeEmpty();
         (await Errors([new(1, "dinner", 8m)])).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));

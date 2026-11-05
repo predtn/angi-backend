@@ -13,6 +13,7 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_CompleteSelectionOverSource_MergesScopeAndRetainsStableKeys()
     {
+        // STEP-01: Derive outside from a copy of AgentTestData.Item(), derive changed from a copy of AgentTestData.Item(), get side from AgentTestData.Item and 3 more.
         var outside = AgentTestData.Item() with { SourceItemId = 10 };
         var changed = AgentTestData.Item(2, "existing-lunch", 2) with { SourceItemId = 20 };
         var side = AgentTestData.Item(3, "outside-dinner", 2, "dinner");
@@ -22,6 +23,7 @@ public sealed class AgentProposalBuilderTests
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
             Scope = new(2, "lunch"), Items = [AgentTestData.Item(4, "model-new-key", 2)] });
 
+        // STEP-02: Assert result.Items has 3 item(s), result.Items.Single(filtered) is outside, result.Items.Single(filtered) is side and 5 more.
         result.Items.Should().HaveCount(3);
         result.Items.Single(item => item.ItemKey == outside.ItemKey).Should().Be(outside);
         result.Items.Single(item => item.ItemKey == side.ItemKey).Should().Be(side);
@@ -36,11 +38,14 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_CompleteSelectionWithStaleBaseVersion_Rejects()
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.ProposalVersion to 3.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.ProposalVersion = 3;
+        // STEP-02: Wrap new AgentProposalBuilder().Build with context and AgentOutput { Action, Reply, BaseProposalVersion, ... } in act so its outcome can be asserted.
         var act = () => new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
             BaseProposalVersion = 2, Items = [AgentTestData.Item(2)] });
 
+        // STEP-03: Assert act throws ConflictException and the thrown exception.ErrorCode is "PROPOSAL_VERSION_CONFLICT".
         act.Should().Throw<ConflictException>().Which.ErrorCode.Should().Be("PROPOSAL_VERSION_CONFLICT");
     }
 
@@ -49,6 +54,7 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_SelectedItemSnapshot_PreservesOtherRowsAndRejectsWiderReplacement()
     {
+        // STEP-01: Get selected from AgentTestData.Item, derive side from a copy of AgentTestData.Item(), get context from AgentTestData.Context and 3 more.
         var selected = AgentTestData.Item();
         var side = AgentTestData.Item(2, "side") with { SortOrder = 1 };
         var context = AgentTestData.Context(AgentTestData.Snapshot(selected, side));
@@ -57,6 +63,7 @@ public sealed class AgentProposalBuilderTests
 
         var result = new AgentProposalBuilder().Build(context, output);
 
+        // STEP-02: Assert result.Items.Single(filtered) is side, result.Items.Single(filtered).DishId is 3 and 1 more.
         result.Items.Single(item => item.ItemKey == "side").Should().Be(side);
         result.Items.Single(item => item.ItemKey == selected.ItemKey).DishId.Should().Be(3);
         ((Action)(() => new AgentProposalBuilder().Build(context, output with { Items = [AgentTestData.Item(3), side] })))
@@ -68,12 +75,14 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_ScopedReplacement_PreservesEverythingElse()
     {
+        // STEP-01: Derive a from a copy of AgentTestData.Item(), derive b from a copy of AgentTestData.Item(), get source from AgentTestData.Snapshot and 3 more.
         var a = AgentTestData.Item() with { SourceItemId = 100 };
         var b = AgentTestData.Item(2, "b", 2) with { SourceItemId = 200 };
         var source = AgentTestData.Snapshot(a, b, AgentTestData.Item(3, "c", 2, "dinner"));
         var context = AgentTestData.Context(source); context.ProposalVersion = 3;
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Updated",
             BaseProposalVersion = 3, Scope = new(2, "lunch"), Changes = [new("replace", "b", b with { DishId = 4, SourceItemId = 999 })] });
+        // STEP-02: Assert result.Items.Single(filtered) is a, result.Items.Single(filtered) is source.Items[2] and 3 more.
         result.Items.Single(x => x.ItemKey == "a").Should().Be(a);
         result.Items.Single(x => x.ItemKey == "c").Should().Be(source.Items[2]);
         result.Items.Single(x => x.ItemKey == "b").SourceItemId.Should().BeNull();
@@ -86,10 +95,12 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_Move_PreservesSourceIdentity()
     {
+        // STEP-01: Derive item from a copy of AgentTestData.Item(), get context from AgentTestData.Context and create result through new AgentProposalBuilder().Build.
         var item = AgentTestData.Item() with { SourceItemId = 55 };
         var context = AgentTestData.Context(AgentTestData.Snapshot(item));
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Moved",
             Changes = [new("move", "a", item with { DayNumber = 2 })] });
+        // STEP-02: Assert result.Items.Single().SourceItemId is 55 and result.Items.Single().DayNumber is 2.
         result.Items.Single().SourceItemId.Should().Be(55);
         result.Items.Single().DayNumber.Should().Be(2);
     }
@@ -101,6 +112,7 @@ public sealed class AgentProposalBuilderTests
     [InlineData("stale")][InlineData("bad-scope")][InlineData("bad-meal")][InlineData("focus")][InlineData("wrong-selection")][InlineData("clear-ui-focus")]
     public void Build_InvalidDelta_Rejects(string area)
     {
+        // STEP-01: Get item from AgentTestData.Item, get context from AgentTestData.Context, set context.ProposalVersion to 2, create output as AgentOutput and 1 more.
         var item = AgentTestData.Item();
         var context = AgentTestData.Context(AgentTestData.Snapshot(item));
         context.ProposalVersion = 2;
@@ -120,7 +132,9 @@ public sealed class AgentProposalBuilderTests
             case "wrong-selection": context.Request.SelectedItemKey = "foreign"; break;
             case "clear-ui-focus": context.Request.ConfirmedState = context.State with { FocusDay = 2, FocusMeal = "lunch" }; break;
         }
+        // STEP-02: Wrap new AgentProposalBuilder().Build with context and output in act so its outcome can be asserted.
         var act = () => new AgentProposalBuilder().Build(context, output);
+        // STEP-03: Assert act throws ConflictException.
         act.Should().Throw<ConflictException>();
     }
 
@@ -129,11 +143,16 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_AlternativeCannotRepeatPreviousDish()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Command to "alternative" and create output as AgentOutput.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item())); context.Request.Command = "alternative";
         var output = new AgentOutput { Action = "create_proposal", Reply = "Alternative", Items = [AgentTestData.Item()] };
+        // STEP-02: Wrap new AgentProposalBuilder().Build with context and output in act so its outcome can be asserted.
         var act = () => new AgentProposalBuilder().Build(context, output);
+        // STEP-03: Assert act throws ConflictException.
         act.Should().Throw<ConflictException>();
+        // STEP-04: Set output to a copy of output.
         output = output with { Items = [AgentTestData.Item(2)] };
+        // STEP-05: Assert Build().Items.Single().DishId is 2.
         new AgentProposalBuilder().Build(context, output).Items.Single().DishId.Should().Be(2);
     }
 
@@ -142,18 +161,25 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public async Task Build_MoveUnsavedItem_PreservesConfirmationProvenance()
     {
+        // STEP-01: Get grant from AgentTestData.Grant, derive item from a copy of AgentTestData.Item(), create source as AgentSnapshot and 2 more.
         var grant = AgentTestData.Grant([1], 1, "lunch");
         var item = AgentTestData.Item() with { RequestId = grant.RequestId, Price = 50000 };
         var source = new AgentSnapshot(AgentTestData.State(), [item], [grant]);
         var context = AgentTestData.Context(source);
         var snapshot = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Moved",
             Changes = [new("move", item.ItemKey, item with { DayNumber = 2 })] });
+        // STEP-02: Assert snapshot.RetainedItems has exactly one matching item and snapshot.RetainedItems.DishId is 1.
         snapshot.RetainedItems.Should().ContainSingle().Which.DishId.Should().Be(1);
+        // STEP-03: Derive validator from AgentTestData.Validator().Validator.
         var validator = AgentTestData.Validator(AgentTestData.Dish()).Validator;
+        // STEP-04: Validate snapshot and keep ready.
         var ready = await validator.ValidateAsync(snapshot, source, false, true, CancellationToken.None, []);
+        // STEP-05: Read serialized from the response; assert ready.Validation.Errors is empty.
         ready.Validation.Errors.Should().BeEmpty();
         var serialized = AgentJson.Read<AgentSnapshot>(AgentJson.Write(ready.Snapshot));
+        // STEP-06: Validate serialized and keep confirm.
         var confirm = await validator.ValidateAsync(serialized, null, true, false, CancellationToken.None);
+        // STEP-07: Assert confirm.Validation.Errors is empty and confirm.Snapshot.Items.Single().RequestId is grant.RequestId.
         confirm.Validation.Errors.Should().BeEmpty();
         confirm.Snapshot.Items.Single().RequestId.Should().Be(grant.RequestId);
     }
@@ -163,9 +189,11 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_NewItem_DropsUntrustedMetadata()
     {
+        // STEP-01: Create output as AgentOutput and get result from Build().Items.Single.
         var output = new AgentOutput { Action = "create_proposal", Reply = "Preview", Items = [AgentTestData.Item() with
             { Price = 1, DishName = "Fake", RestaurantName = "Fake", SourceItemId = 900, RequestId = Guid.NewGuid() }] };
         var result = new AgentProposalBuilder().Build(AgentTestData.Context(), output).Items.Single();
+        // STEP-02: Assert result.Price is 0, result.DishName is null, result.SourceItemId is null and result.RequestId is null.
         result.Price.Should().Be(0); result.DishName.Should().BeNull(); result.SourceItemId.Should().BeNull(); result.RequestId.Should().BeNull();
     }
 
@@ -174,10 +202,12 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_ConfirmedReplan_ReturnsCompleteChronologicalReplacement()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.ReplanAfterConfirmation to true and create result through new AgentProposalBuilder().Build.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.ReplanAfterConfirmation = true;
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Updated",
             Items = [AgentTestData.Item(3, "dinner", 2, "dinner"), AgentTestData.Item(2, "breakfast", 1, "breakfast")] });
+        // STEP-02: Assert result.Items.Select(filtered) equals "breakfast" and result.Items holds no matching item.
         result.Items.Select(item => item.ItemKey).Should().Equal("breakfast", "dinner");
         result.Items.Should().NotContain(item => item.ItemKey == "a");
     }
@@ -189,6 +219,7 @@ public sealed class AgentProposalBuilderTests
     [InlineData("move")]
     public void Build_ModelRenamesReplacement_UsesCheckedTargetKey(string action)
     {
+        // STEP-01: Derive item from a copy of AgentTestData.Item(), get other from AgentTestData.Item, get context from AgentTestData.Context and 2 more.
         var item = AgentTestData.Item() with { SourceItemId = 55 };
         var other = AgentTestData.Item(3, "other", 2, "dinner");
         var context = AgentTestData.Context(AgentTestData.Snapshot(item, other));
@@ -196,6 +227,7 @@ public sealed class AgentProposalBuilderTests
             DishId = action == "replace" ? 2 : item.DishId, DayNumber = action == "move" ? (short)2 : item.DayNumber };
         var snapshot = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Edit",
             Changes = [new(action, item.ItemKey, changed)] });
+        // STEP-02: Assert snapshot.Items holds no matching item, snapshot.Items.Single(filtered).SourceItemId is action == "move" ? 55 : null and 1 more.
         snapshot.Items.Should().NotContain(candidate => candidate.ItemKey == "a_alt");
         snapshot.Items.Single(candidate => candidate.ItemKey == item.ItemKey).SourceItemId.Should().Be(action == "move" ? 55 : null);
         snapshot.Items.Single(candidate => candidate.ItemKey == "other").Should().Be(other);
@@ -206,12 +238,16 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_ChatAlternative_AllowsOnlyGrantedReplacementScope()
     {
+        // STEP-01: Get context from AgentTestData.Context, add new(1, "lunch") to context.AlternativeScopes and create output as AgentOutput.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.AlternativeScopes.Add(new(1, "lunch"));
         var output = new AgentOutput { Action = "create_proposal", Reply = "Alternative", Scope = new(1, "lunch"),
             Items = [AgentTestData.Item(2, "new-alternative")] };
+        // STEP-02: Assert Build().Items.Single().DishId is 2.
         new AgentProposalBuilder().Build(context, output).Items.Single().DishId.Should().Be(2);
+        // STEP-03: Derive ungranted from a copy of output.
         var ungranted = output with { Scope = new() };
+        // STEP-04: Assert new AgentProposalBuilder().Build() throws ConflictException.
         ((Action)(() => new AgentProposalBuilder().Build(context, ungranted))).Should().Throw<ConflictException>();
     }
 
@@ -220,6 +256,7 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_BroadAlternativeSearch_NarrowPatchPreservesOtherMealsAndSideDish()
     {
+        // STEP-01: Get main from AgentTestData.Item, derive drink from a copy of AgentTestData.Item(), get outside from AgentTestData.Item and 3 more.
         var main = AgentTestData.Item(1, "main", 2);
         var drink = AgentTestData.Item(2, "drink", 2) with { SortOrder = 1 };
         var outside = AgentTestData.Item(3, "outside", 1, "dinner");
@@ -227,6 +264,7 @@ public sealed class AgentProposalBuilderTests
         context.AlternativeScopes.Add(new());
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Updated",
             Scope = new(2, "lunch"), Changes = [new("replace", "main", main with { DishId = 4 })] });
+        // STEP-02: Assert result.Items has 3 item(s), result.Items.Single(filtered) is outside, result.Items.Single(filtered) is drink and 1 more.
         result.Items.Should().HaveCount(3);
         result.Items.Single(item => item.ItemKey == "outside").Should().Be(outside);
         result.Items.Single(item => item.ItemKey == "drink").Should().Be(drink);
@@ -239,6 +277,7 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_ScopedSelectionWithUnchangedCopies_IgnoresCopies()
     {
+        // STEP-01: Get day1 from AgentTestData.Item, get day2 from AgentTestData.Item, get context from AgentTestData.Context and 1 more.
         var day1 = AgentTestData.Item(1, "d1", 1);
         var day2 = AgentTestData.Item(2, "d2", 2);
         var context = AgentTestData.Context(AgentTestData.Snapshot(day1, day2));
@@ -246,6 +285,7 @@ public sealed class AgentProposalBuilderTests
         var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
             Scope = new(2, null), Items = [day1, AgentTestData.Item(5, "d2", 2)] });
 
+        // STEP-02: Assert result.Items.Single(filtered) is day1, result.Items.Single(filtered).DishId is 5, result.Changes has exactly one matching item and 1 more.
         result.Items.Single(item => item.ItemKey == "d1").Should().Be(day1);
         result.Items.Single(item => item.ItemKey == "d2").DishId.Should().Be(5);
         result.Changes.Should().ContainSingle().Which.Type.Should().Be("replace");
@@ -256,11 +296,14 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Build_ScopedSelectionChangingOtherDay_RejectsWithSpecificFeedback()
     {
+        // STEP-01: Get context from AgentTestData.Context.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "d1", 1), AgentTestData.Item(2, "d2", 2)));
 
+        // STEP-02: Wrap new AgentProposalBuilder().Build with context and AgentOutput { Action, Reply, Scope, ... } in act so its outcome can be asserted.
         var act = () => new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
             Scope = new(2, null), Items = [AgentTestData.Item(9, "d1", 1), AgentTestData.Item(5, "d2", 2)] });
 
+        // STEP-03: Assert act throws ConflictException and the thrown exception.Message contains the expected text.
         act.Should().Throw<ConflictException>().Which.Message.Should().Contain("ngày 1 bữa trưa").And.Contain("Chỉ gửi các món thuộc phạm vi");
     }
 
@@ -269,6 +312,7 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void Assemble_NewPlan_FillsEveryPositionFromItsGrant()
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.State to a copy of context.State, add the computed value to context.Grants and 1 more.
         var context = AgentTestData.Context();
         context.State = context.State with { MealSlots = ["dinner", "lunch"] };
         context.Grants.Add(new(1, "lunch", [1, 2], null, context.State));
@@ -278,6 +322,7 @@ public sealed class AgentProposalBuilderTests
 
         var output = AgentProposalBuilder.Assemble(context)!;
 
+        // STEP-02: Assert output.Items.Select(filtered) equals ((short)1, "lunch", 1) and new AgentProposalBuilder().Build().Items has 4 item(s).
         output.Items.Select(item => (item.DayNumber, item.MealSlot, item.DishId)).Should().Equal(
             ((short)1, "lunch", 1), ((short)1, "dinner", 3), ((short)2, "lunch", 4), ((short)2, "dinner", 5));
         new AgentProposalBuilder().Build(context, output).Items.Should().HaveCount(4);
@@ -289,6 +334,7 @@ public sealed class AgentProposalBuilderTests
     [InlineData("missing-position")][InlineData("other-constraints")][InlineData("existing-plan")][InlineData("focus")][InlineData("selected")][InlineData("alternative")]
     public void Assemble_NotANewCompletePlan_ReturnsNull(string area)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.State to a copy of context.State, derive issued from the expected value and 3 more.
         var context = AgentTestData.Context(area == "existing-plan" ? AgentTestData.Snapshot(AgentTestData.Item()) : null);
         context.State = context.State with { NumDays = 1, MealSlots = ["lunch"], FocusDay = area == "focus" ? (short)1 : null };
         var issued = area == "other-constraints" ? context.State with { TasteTargets = [new("sour", .25)] } : context.State;
@@ -296,6 +342,7 @@ public sealed class AgentProposalBuilderTests
         if (area == "selected") context.Request.SelectedItemKey = "a";
         if (area == "alternative") context.AlternativeScopes.Add(new(1, "lunch"));
 
+        // STEP-02: Assert AgentProposalBuilder.Assemble() is null.
         AgentProposalBuilder.Assemble(context).Should().BeNull();
     }
 
@@ -307,12 +354,14 @@ public sealed class AgentProposalBuilderTests
     [InlineData(25, "đổi bớt món đi", new short[0])]
     public void PromptSource_LongPlan_KeepsOnlyNamedDays(int days, string content, short[] expected)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.State to context.Source.State, set context.Request.Content to content and 1 more.
         var context = AgentTestData.Context(Long(days));
         context.State = context.Source!.State;
         context.Request.Content = content;
 
         var prompt = AgentProposalBuilder.PromptSource(context)!;
 
+        // STEP-02: Assert prompt.Items.Select(filtered).Distinct() equals expected, prompt.Grants is empty and context.Source.Items has days * 3 item(s).
         prompt.Items.Select(item => item.DayNumber).Distinct().Should().Equal(expected);
         prompt.Grants.Should().BeEmpty();
         context.Source!.Items.Should().HaveCount(days * 3);
@@ -323,9 +372,11 @@ public sealed class AgentProposalBuilderTests
     [Fact]
     public void PromptSource_ShortPlan_IsNull()
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.State to context.Source.State.
         var context = AgentTestData.Context(Long(7));
         context.State = context.Source!.State;
 
+        // STEP-02: Assert AgentProposalBuilder.PromptSource() is null.
         AgentProposalBuilder.PromptSource(context).Should().BeNull();
     }
 

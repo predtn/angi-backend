@@ -24,6 +24,7 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidRequest_ShouldCreateRestaurantAggregate()
     {
+        // STEP-01: Declare addedRestaurant to capture a call argument; mock IRestaurantRepository and 3 more; stub restaurantRepository.ExistsByOwnerIdAsync and 4 more.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(repo => repo.ExistsByOwnerIdAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -52,10 +53,13 @@ public sealed class RegisterRestaurantUseCaseTests
                 addedRestaurant.UpdatedAt = Now;
             })
             .ReturnsAsync(3);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(restaurantRepository, mediaRepository, unitOfWork, transaction);
 
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert result.Id is 7, result.Slug is "bun-bo-ba-dieu", result.VerificationStatus is "unverified", result.OperatingStatus is "open" and 9 more.
         result.Id.Should().Be(7);
         result.Slug.Should().Be("bun-bo-ba-dieu");
         result.VerificationStatus.Should().Be("unverified");
@@ -68,10 +72,12 @@ public sealed class RegisterRestaurantUseCaseTests
         result.IsOpenNow.Should().BeTrue();
         result.CreatedAt.Should().Be(Now);
         result.UpdatedAt.Should().Be(Now);
+        // STEP-05: Assert addedRestaurant.OwnerId is 12, addedRestaurant.VerificationStatus is Unverified and 2 more.
         addedRestaurant!.OwnerId.Should().Be(12);
         addedRestaurant.VerificationStatus.Should().Be(RestaurantVerificationStatus.Unverified);
         addedRestaurant.Images.Should().ContainSingle();
         addedRestaurant.BusinessHours.Should().ContainSingle();
+        // STEP-06: Verify LockOwnerForRegistrationAsync is called once, SaveChangesAsync is called once and CommitAsync is called once.
         restaurantRepository.Verify(
             repo => repo.LockOwnerForRegistrationAsync(12, It.IsAny<CancellationToken>()),
             Times.Once);
@@ -84,19 +90,24 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenOwnerAlreadyHasRestaurant_ShouldThrowConflict()
     {
+        // STEP-01: Mock IRestaurantRepository and IUnitOfWork; stub restaurantRepository.ExistsByOwnerIdAsync.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(repo => repo.ExistsByOwnerIdAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             new Mock<IMediaRepository>(),
             unitOfWork);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "OWNER_ALREADY_HAS_RESTAURANT".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("OWNER_ALREADY_HAS_RESTAURANT");
+        // STEP-05: Verify Add is never called and SaveChangesAsync is never called.
         restaurantRepository.Verify(repo => repo.Add(It.IsAny<Domain.Entities.Restaurant>()), Times.Never);
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -106,6 +117,7 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithMissingOwnedMedia_ShouldThrowValidationException()
     {
+        // STEP-01: Mock IRestaurantRepository and IMediaRepository; stub restaurantRepository.ExistsByOwnerIdAsync and mediaRepository.GetOwnedByIdsAsync.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(repo => repo.ExistsByOwnerIdAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -115,16 +127,20 @@ public sealed class RegisterRestaurantUseCaseTests
                 It.IsAny<IReadOnlyCollection<long>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<MediaFile>());
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             mediaRepository,
             new Mock<IUnitOfWork>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException and exception.Errors.Select(filtered) is equivalent to "CoverMediaId".
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Select(error => error.PropertyName)
             .Should().BeEquivalentTo("CoverMediaId", "ImageMediaIds");
+        // STEP-05: Verify Add is never called.
         restaurantRepository.Verify(repo => repo.Add(It.IsAny<Domain.Entities.Restaurant>()), Times.Never);
     }
 
@@ -133,6 +149,7 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithMissingCoverOnly_ShouldReportCoverMediaId()
     {
+        // STEP-01: Mock IRestaurantRepository and IMediaRepository; stub restaurantRepository.ExistsByOwnerIdAsync and mediaRepository.GetOwnedByIdsAsync.
         var restaurantRepository = new Mock<IRestaurantRepository>();
         restaurantRepository.Setup(repo => repo.ExistsByOwnerIdAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -142,10 +159,13 @@ public sealed class RegisterRestaurantUseCaseTests
                 It.IsAny<IReadOnlyCollection<long>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([new MediaFile { Id = 101, UploaderId = 12, MimeType = "image/png", Url = "https://cdn.test/gallery.jpg" }]);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(restaurantRepository, mediaRepository, new Mock<IUnitOfWork>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException, exception.Errors has exactly one matching item and exception.Errors.PropertyName is "CoverMediaId".
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().ContainSingle()
             .Which.PropertyName.Should().Be("CoverMediaId");
@@ -156,17 +176,23 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCoordinates_ShouldThrowValidationExceptionFirst()
     {
+        // STEP-01: Mock IRestaurantRepository.
         var restaurantRepository = new Mock<IRestaurantRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             restaurantRepository,
             new Mock<IMediaRepository>(),
             new Mock<IUnitOfWork>());
+        // STEP-03: Create request through ValidRequest and set request.Latitude to null.
         var request = ValidRequest();
         request.Latitude = null;
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-06: Verify ExistsByOwnerIdAsync is never called.
         restaurantRepository.Verify(
             repo => repo.ExistsByOwnerIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -184,20 +210,26 @@ public sealed class RegisterRestaurantUseCaseTests
     [InlineData("+840901234567")]
     public async Task ExecuteAsync_WithInvalidPhone_ShouldRejectBeforeAnySideEffect(string? phone)
     {
+        // STEP-01: Mock IRestaurantRepository, IMediaRepository, IUnitOfWork and ICurrentUserService.
         var repository = new Mock<IRestaurantRepository>(MockBehavior.Strict);
         var media = new Mock<IMediaRepository>(MockBehavior.Strict);
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         var currentUser = new Mock<ICurrentUserService>(MockBehavior.Strict);
+        // STEP-02: Create the RegisterRestaurantUseCase under test as useCase.
         var useCase = new RegisterRestaurantUseCase(
             new RegisterRestaurantRequestDtoValidator(), repository.Object, media.Object,
             currentUser.Object, unitOfWork.Object, new FixedTimeProvider(Now));
+        // STEP-03: Create request through ValidRequest and set request.Phone to phone.
         var request = ValidRequest();
         request.Phone = phone!;
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException, exception.Errors has exactly one matching item and exception.Errors.PropertyName is "Phone".
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("Phone");
+        // STEP-06: Verify repository receives no other calls, media receives no other calls, currentUser receives no other calls and unitOfWork receives no other calls.
         repository.VerifyNoOtherCalls();
         media.VerifyNoOtherCalls();
         currentUser.VerifyNoOtherCalls();
@@ -212,18 +244,24 @@ public sealed class RegisterRestaurantUseCaseTests
     [InlineData("+84 90 123 4567", "+84 90 123 4567")]
     public async Task ExecuteAsync_WithValidPhone_ShouldPersistAndReturnContact(string phone, string expected)
     {
+        // STEP-01: Mock IRestaurantRepository, IUnitOfWork and IUnitOfWorkTransaction.
         var repository = new Mock<IRestaurantRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
         var transaction = new Mock<IUnitOfWorkTransaction>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), unitOfWork, transaction);
+        // STEP-03: Create request through ValidRequest, set request.Phone to phone, set request.CoverMediaId to null and set request.ImageMediaIds to null.
         var request = ValidRequest();
         request.Phone = phone;
         request.CoverMediaId = null;
         request.ImageMediaIds = null;
 
+        // STEP-04: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert result.Phone is expected.
         result.Phone.Should().Be(expected);
+        // STEP-06: Verify Add is called once, SaveChangesAsync is called once and CommitAsync is called once.
         repository.Verify(item => item.Add(It.Is<Domain.Entities.Restaurant>(value => value.Phone == expected)), Times.Once);
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -243,6 +281,7 @@ public sealed class RegisterRestaurantUseCaseTests
     [InlineData(null, false)]
     public async Task ExecuteAsync_WithOwnedMediaType_ShouldEnforceImageBoundary(string? mimeType, bool expectedValid)
     {
+        // STEP-01: Assert for each isCover, act does not throw and 3 more; verify SaveChangesAsync is called once and 4 more.
         foreach (var isCover in new[] { true, false })
         {
             var repository = new Mock<IRestaurantRepository>();
@@ -281,16 +320,21 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutOwnerIdentity_ShouldThrowUnauthorizedBeforePersistence()
     {
+        // STEP-01: Mock IRestaurantRepository, IMediaRepository and IUnitOfWork.
         var repository = new Mock<IRestaurantRepository>(MockBehavior.Strict);
         var media = new Mock<IMediaRepository>(MockBehavior.Strict);
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        // STEP-02: Create the RegisterRestaurantUseCase under test as useCase.
         var useCase = new RegisterRestaurantUseCase(new RegisterRestaurantRequestDtoValidator(),
             repository.Object, media.Object, new Mock<ICurrentUserService>().Object,
             unitOfWork.Object, new FixedTimeProvider(Now));
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify repository receives no other calls, media receives no other calls and unitOfWork receives no other calls.
         repository.VerifyNoOtherCalls();
         media.VerifyNoOtherCalls();
         unitOfWork.VerifyNoOtherCalls();
@@ -303,17 +347,22 @@ public sealed class RegisterRestaurantUseCaseTests
     [InlineData("🍜", "restaurant")]
     public async Task ExecuteAsync_WithCollidingSlug_ShouldUseNextAvailableSuffix(string name, string baseSlug)
     {
+        // STEP-01: Mock IRestaurantRepository; stub repository.SlugExistsAsync.
         var repository = new Mock<IRestaurantRepository>();
         repository.SetupSequence(item => item.SlugExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true).ReturnsAsync(true).ReturnsAsync(false);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        // STEP-03: Create request through ValidRequest, set request.Name to name, set request.CoverMediaId to null and set request.ImageMediaIds to null.
         var request = ValidRequest();
         request.Name = name;
         request.CoverMediaId = null;
         request.ImageMediaIds = null;
 
+        // STEP-04: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert result.Slug is baseSlug + "-3"; verify for each slug, SlugExistsAsync is called once.
         result.Slug.Should().Be(baseSlug + "-3");
         foreach (var slug in new[] { baseSlug, baseSlug + "-2", baseSlug + "-3" })
         {
@@ -326,19 +375,25 @@ public sealed class RegisterRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSavingFails_ShouldDisposeWithoutCommit()
     {
+        // STEP-01: Mock IRestaurantRepository, IUnitOfWork and IUnitOfWorkTransaction; stub unitOfWork.SaveChangesAsync.
         var repository = new Mock<IRestaurantRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Persistence failure"));
         var transaction = new Mock<IUnitOfWorkTransaction>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, new Mock<IMediaRepository>(), unitOfWork, transaction);
+        // STEP-03: Create request through ValidRequest, set request.CoverMediaId to null and set request.ImageMediaIds to null.
         var request = ValidRequest();
         request.CoverMediaId = null;
         request.ImageMediaIds = null;
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws InvalidOperationException.
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Persistence failure");
+        // STEP-06: Verify SaveChangesAsync is called once, CommitAsync is never called and DisposeAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(item => item.DisposeAsync(), Times.Once);

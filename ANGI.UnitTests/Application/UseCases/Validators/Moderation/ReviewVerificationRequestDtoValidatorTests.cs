@@ -17,12 +17,14 @@ public sealed class ReviewVerificationRequestDtoValidatorTests
     [InlineData("needs_more_info", "Vui lòng bổ sung giấy tờ.")]
     public void Validate_WithValidDecision_ShouldSucceed(string decision, string? note)
     {
+        // STEP-01: Validate ReviewVerificationRequestDto { Decision = decision, ReviewNote = note } and keep result.
         var result = _validator.Validate(new ReviewVerificationRequestDto
         {
             Decision = decision,
             ReviewNote = note
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -34,8 +36,10 @@ public sealed class ReviewVerificationRequestDtoValidatorTests
     [InlineData("cancel")]
     public void Validate_WithInvalidDecision_ShouldFail(string? decision)
     {
+        // STEP-01: Validate ReviewVerificationRequestDto { Decision = decision } and keep result.
         var result = _validator.Validate(new ReviewVerificationRequestDto { Decision = decision! });
 
+        // STEP-02: Assert result.Errors.Count(filtered) is 1.
         result.Errors.Count(error => error.PropertyName == nameof(ReviewVerificationRequestDto.Decision)).Should().Be(1);
     }
 
@@ -47,12 +51,14 @@ public sealed class ReviewVerificationRequestDtoValidatorTests
     [InlineData("needs_more_info", "")]
     public void Validate_WithoutRequiredReviewNote_ShouldFail(string decision, string? note)
     {
+        // STEP-01: Validate ReviewVerificationRequestDto { Decision = decision, ReviewNote = note } and keep result.
         var result = _validator.Validate(new ReviewVerificationRequestDto
         {
             Decision = decision,
             ReviewNote = note
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(ReviewVerificationRequestDto.ReviewNote));
     }
 
@@ -63,12 +69,14 @@ public sealed class ReviewVerificationRequestDtoValidatorTests
     [InlineData(1001, false)]
     public void Validate_AtReviewNoteLengthBoundary_ShouldMatchContract(int length, bool expectedValid)
     {
+        // STEP-01: Validate ReviewVerificationRequestDto { Decision = "reject", ReviewNote = a new string } and keep result.
         var result = _validator.Validate(new ReviewVerificationRequestDto
         {
             Decision = "reject",
             ReviewNote = new string('a', length)
         });
 
+        // STEP-02: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 }

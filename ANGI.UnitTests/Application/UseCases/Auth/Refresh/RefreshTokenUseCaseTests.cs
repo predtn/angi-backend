@@ -26,7 +26,9 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithActiveSession_ShouldRotateRefreshToken()
         {
+            // STEP-01: Create session through CreateSession.
             var session = CreateSession();
+            // STEP-02: Declare addedSession to capture a call argument; mock IAuthenticationRepository and 2 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and 3 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
@@ -41,19 +43,24 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             var recommendationService = new Mock<IRecommendationService>();
             recommendationService.Setup(x => x.GetSurveyStatusAsync(12, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SurveyStatus(true, new DateTime(2026, 10, 2, 2, 30, 1, DateTimeKind.Utc), 6));
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, recommendationService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync with RefreshTokenRequestDto { RefreshToken = a test value } and keep result.
             var result = await useCase.ExecuteAsync(
                 new RefreshTokenRequestDto { RefreshToken = "old-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert session.RevokedAt is Now, addedSession is not null and addedSession.RefreshTokenHash is a test value.
             session.RevokedAt.Should().Be(Now);
             addedSession.Should().NotBeNull();
             addedSession!.RefreshTokenHash.Should().Be("new-hash");
+            // STEP-06: Assert result.RefreshToken is a test value, result.AccessToken is a test value and result.User.NeedsPreferenceSurvey is false.
             result.RefreshToken.Should().Be("new-token");
             // sid names the new session, not the revoked one.
             result.AccessToken.Should().Be("new-access-token-sid-78");
             result.User.NeedsPreferenceSurvey.Should().BeFalse();
+            // STEP-07: Verify SaveChangesAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -62,10 +69,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithReusedToken_ShouldRevokeActiveSessionsAndRejectRequest()
         {
+            // STEP-01: Create reusedSession through CreateSession, set reusedSession.RevokedAt to Now.AddMinutes(), create activeSession through CreateSession and 1 more.
             var reusedSession = CreateSession();
             reusedSession.RevokedAt = Now.AddMinutes(-1);
             var activeSession = CreateSession();
             activeSession.Id = 2;
+            // STEP-02: Mock IAuthenticationRepository and 1 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and 2 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(reusedSession);
@@ -73,15 +82,19 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                 .ReturnsAsync(new List<UserSession> { activeSession });
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync with RefreshTokenRequestDto { RefreshToken = a test value } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new RefreshTokenRequestDto { RefreshToken = "old-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert act throws UnauthorizedException, exception.ErrorCode is "REFRESH_TOKEN_INVALID" and activeSession.RevokedAt is Now.
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
             activeSession.RevokedAt.Should().Be(Now);
+            // STEP-06: Verify SaveChangesAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -90,18 +103,23 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldRejectWithoutSaving()
         {
+            // STEP-01: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((UserSession?)null);
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync with RefreshTokenRequestDto { RefreshToken = a test value } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new RefreshTokenRequestDto { RefreshToken = "old-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "REFRESH_TOKEN_INVALID".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -110,20 +128,26 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithExpiredSession_ShouldRevokeAndRejectRequest()
         {
+            // STEP-01: Create session through CreateSession and set session.ExpiresAt to Now.
             var session = CreateSession();
             session.ExpiresAt = Now;
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and unitOfWork.SaveChangesAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws UnauthorizedException, exception.ErrorCode is "REFRESH_TOKEN_INVALID" and session.RevokedAt is Now.
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
             session.RevokedAt.Should().Be(Now);
+            // STEP-06: Verify AddSession is never called and SaveChangesAsync is called once.
             repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -133,17 +157,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithInactiveUser_ShouldRevokeAndRejectRequest()
         {
+            // STEP-01: Create session through CreateSession and set session.User.Status to UserStatus.Banned.
             var session = CreateSession();
             session.User.Status = UserStatus.Banned;
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and unitOfWork.SaveChangesAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws UnauthorizedException, exception.ErrorCode is "REFRESH_TOKEN_INVALID" and session.RevokedAt is Now.
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
             session.RevokedAt.Should().Be(Now);
@@ -154,9 +183,11 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithEmptyToken_ShouldThrowValidationExceptionFirst()
         {
+            // STEP-01: Mock IAuthenticationRepository, IUnitOfWork and IAuthenticationTokenService.
             var repository = new Mock<IAuthenticationRepository>();
             var unitOfWork = new Mock<IUnitOfWork>();
             var tokenService = new Mock<IAuthenticationTokenService>();
+            // STEP-02: Create the RefreshTokenUseCase under test as useCase.
             var useCase = new RefreshTokenUseCase(
                 new RefreshTokenRequestDtoValidator(),
                 repository.Object,
@@ -165,9 +196,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                 unitOfWork.Object,
                 new FixedTimeProvider(Now));
 
+            // STEP-03: Wrap useCase.ExecuteAsync with an empty RefreshTokenRequestDto in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new RefreshTokenRequestDto(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify HashRefreshToken is never called and BeginTransactionAsync is never called.
             tokenService.Verify(x => x.HashRefreshToken(It.IsAny<string>()), Times.Never);
             unitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -177,21 +211,26 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithActiveSession_ShouldUseLockedTransactionAndCommit()
         {
+            // STEP-01: Create session through CreateSession.
             var session = CreateSession();
+            // STEP-02: Mock IAuthenticationRepository, IUnitOfWork and 1 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and unitOfWork.SaveChangesAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(2);
             var transaction = new Mock<IUnitOfWorkTransaction>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 new Mock<IRecommendationService>(),
                 unitOfWork,
                 transaction);
 
+            // STEP-04: Run useCase.ExecuteAsync.
             await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Verify BeginTransactionAsync is called once, GetSessionByRefreshTokenHashForUpdateAsync is called once and 2 more.
             unitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(
                 x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()),
@@ -207,6 +246,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WhenSaveFails_ShouldNotCommitTransaction()
         {
+            // STEP-01: Mock IAuthenticationRepository, IUnitOfWork and 1 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and unitOfWork.SaveChangesAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(CreateSession());
@@ -214,15 +254,19 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Persistence failed."));
             var transaction = new Mock<IUnitOfWorkTransaction>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 new Mock<IRecommendationService>(),
                 unitOfWork,
                 transaction);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws InvalidOperationException.
             await act.Should().ThrowAsync<InvalidOperationException>();
+            // STEP-05: Verify CommitAsync is never called.
             transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -231,7 +275,9 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
         [Fact]
         public async Task ExecuteAsync_WithConcurrentReuse_ShouldAllowOnlyOneSuccessfulRotation()
         {
+            // STEP-01: Create originalSession through CreateSession.
             var originalSession = CreateSession();
+            // STEP-02: Declare replacementSession to capture a call argument; mock IAuthenticationRepository and 1 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and 3 more.
             UserSession? replacementSession = null;
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
@@ -244,8 +290,11 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                     : new List<UserSession> { replacementSession });
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
+            // STEP-04: Create transactionGate as SemaphoreSlim.
             var transactionGate = new SemaphoreSlim(1, 1);
+            // STEP-05: Stub unitOfWork.BeginTransactionAsync.
             unitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
                 .Returns<CancellationToken>(async ct =>
                 {
@@ -253,14 +302,17 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                     return new SerializingTransaction(transactionGate);
                 });
 
+            // STEP-06: Run Task.WhenAll and keep attempts.
             var attempts = await Task.WhenAll(ExecuteAsync(), ExecuteAsync());
 
+            // STEP-07: Assert attempts.Count(filtered) is 1, replacementSession is not null and replacementSession.RevokedAt is Now.
             attempts.Count(attempt => attempt.Result is not null).Should().Be(1);
             attempts.Count(attempt => attempt.Error is UnauthorizedException unauthorized &&
                                       unauthorized.ErrorCode == "REFRESH_TOKEN_INVALID").Should().Be(1);
             replacementSession.Should().NotBeNull();
             replacementSession!.RevokedAt.Should().Be(Now);
 
+            // STEP-08: Define helper ExecuteAsync.
             async Task<(AuthResultDto? Result, Exception? Error)> ExecuteAsync()
             {
                 try

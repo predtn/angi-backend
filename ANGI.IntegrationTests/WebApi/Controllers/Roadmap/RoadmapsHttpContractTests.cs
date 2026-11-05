@@ -56,10 +56,13 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("GET", "/api/v1/roadmaps/88/generation-jobs/77")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path)
     {
+        // STEP-01: Get request from JsonRequest.
         using var request = JsonRequest(method, path, "{}");
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Unauthorized and AssertErrorCode confirms UNAUTHORIZED.
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         await AssertErrorCode(response, "UNAUTHORIZED");
     }
@@ -83,11 +86,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("GET", "/api/v1/roadmaps/88/generation-jobs/77")]
     public async Task Endpoint_WithWrongRole_ShouldReturnForbidden(string method, string path)
     {
+        // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest(method, path, "{}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("RESTAURANT_OWNER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertErrorCode confirms FORBIDDEN.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertErrorCode(response, "FORBIDDEN");
     }
@@ -103,11 +109,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [InlineData("POST", "/api/v1/roadmaps/88/generate")]
     public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string method, string path)
     {
+        // STEP-01: Build the HTTP request and attach the bearer token to request.
         using var request = new HttpRequestMessage(new HttpMethod(method), path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorCode confirms VALIDATION_FAILED.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         await AssertErrorCode(response, "VALIDATION_FAILED");
     }
@@ -117,16 +126,21 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task Create_WithValidBody_ShouldSerializeCreatedRoadmapDetail()
     {
+        // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest("POST", "/api/v1/roadmaps", """
             {"title":"Trip","numDays":3,"originMode":"none"}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.Created.
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.overview.id is 88, data.itinerary.length is 3 and data.budget.totalEstimatedCost is 0.
         data.GetProperty("overview").GetProperty("id").GetInt64().Should().Be(88);
         data.GetProperty("itinerary").GetArrayLength().Should().Be(3);
         data.GetProperty("budget").GetProperty("totalEstimatedCost").GetDecimal().Should().Be(0);
@@ -137,13 +151,16 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task Update_WithExplicitNulls_ShouldSerializeUpdatedRoadmapDetail()
     {
+        // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest("PATCH", "/api/v1/roadmaps/88", """
             {"startDate":null,"budgetAmount":null,"originLabel":null}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.OK, _factory.Update.LastRequest is not null and 3 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         _factory.Update.LastRequest.Should().NotBeNull();
         _factory.Update.LastRequest!.StartDateSpecified.Should().BeTrue();
@@ -156,14 +173,19 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetMyRoadmaps_WithValidQuery_ShouldSerializePagedRoadmapSummaries()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps?page=2&pageSize=10 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps?page=2&pageSize=10");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.page is 2, data.pageSize is 10, data.totalItems is 11, data.totalPages is 2 and 2 more.
         data.GetProperty("page").GetInt32().Should().Be(2);
         data.GetProperty("pageSize").GetInt32().Should().Be(10);
         data.GetProperty("totalItems").GetInt64().Should().Be(11);
@@ -177,14 +199,19 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetDetail_WithOwnedRoadmap_ShouldSerializeCompleteDetail()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.overview.id is 88, data.itinerary.length is 1, data.budget.totalEstimatedCost is 0 and _factory.GetDetail.LastRoadmapId is 88.
         data.GetProperty("overview").GetProperty("id").GetInt64().Should().Be(88);
         data.GetProperty("itinerary").GetArrayLength().Should().Be(1);
         data.GetProperty("budget").GetProperty("totalEstimatedCost").GetDecimal().Should().Be(0);
@@ -196,15 +223,20 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetDayRoute_WithGpsAndProfile_ShouldSerializeRouteResponse()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88/days/301/route (with query parameters) request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get,
             "/api/v1/roadmaps/88/days/301/route?originLat=16.061204&originLng=108.227531&profile=walking");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.dayId is 301, data.profile is "walking", data.origin.source is "gps", data.legs[0].fromItemId.ValueKind is JsonValueKind.Null and 2 more.
         data.GetProperty("dayId").GetInt64().Should().Be(301);
         data.GetProperty("profile").GetString().Should().Be("walking");
         data.GetProperty("origin").GetProperty("source").GetString().Should().Be("gps");
@@ -225,12 +257,15 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetDayRoute_WithIncompleteGps_ShouldReturnValidationEnvelope()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88/days/301/route?originLat=16.061204 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get,
             "/api/v1/roadmaps/88/days/301/route?originLat=16.061204");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.BadRequest and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("errorCode").GetString().Should().Be("VALIDATION_FAILED");
@@ -242,17 +277,21 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task Delete_WithOwnedRoadmap_ShouldSerializeNullDataSuccessEnvelope()
     {
+        // STEP-01: Build a DELETE /api/v1/roadmaps/88 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/roadmaps/88");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK, document.RootElement.success is true and 3 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         document.RootElement.GetProperty("message").ValueKind.Should().Be(JsonValueKind.Null);
         document.RootElement.GetProperty("errorCode").ValueKind.Should().Be(JsonValueKind.Null);
         document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+        // STEP-04: Assert _factory.Delete.LastRoadmapId is 88.
         _factory.Delete.LastRoadmapId.Should().Be(88);
     }
 
@@ -261,11 +300,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task Delete_WithoutOwnedVisibleRoadmap_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Build a DELETE /api/v1/roadmaps/404 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/roadmaps/404");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.NotFound and AssertErrorCode confirms ROADMAP_NOT_FOUND.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorCode(response, "ROADMAP_NOT_FOUND");
     }
@@ -275,16 +317,21 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetSuggestions_WithAllFilters_ShouldSerializeRankedDishCards()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88/suggestions (with query parameters)&tagIds=2&excludeTagIds=5&maxPrice=50000&lat=16.06&lng=108.22&radiusKm=10&limit=20 request and 1 more.
         using var request = new HttpRequestMessage(HttpMethod.Get,
             "/api/v1/roadmaps/88/suggestions?province=Da%20Nang&dayId=301&mealSlot=lunch&q=bun" +
             "&tagIds=2&excludeTagIds=5&maxPrice=50000&lat=16.06&lng=108.22&radiusKm=10&limit=20");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.requestId is SuggestionRequestId, data.items[0].id is 105, data.items[0].rank is 1 and 2 more.
         data.GetProperty("requestId").GetGuid().Should().Be(RoadmapApiFactory.SuggestionRequestId);
         data.GetProperty("items")[0].GetProperty("id").GetInt32().Should().Be(105);
         data.GetProperty("items")[0].GetProperty("rank").GetInt32().Should().Be(1);
@@ -304,16 +351,21 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task AddItem_WithValidBody_ShouldSerializeCreatedRoadmapItem()
     {
+        // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest("POST", "/api/v1/roadmaps/88/days/301/items", $$"""
             {"dishId":105,"mealSlot":"lunch","sortOrder":2,"recoRequestId":"{{RoadmapApiFactory.SuggestionRequestId}}"}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.Created.
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.id is 1502, data.dayId is 301, data.source is "manual", data.dish.status is "active" and 1 more.
         data.GetProperty("id").GetInt64().Should().Be(1502);
         data.GetProperty("dayId").GetInt64().Should().Be(301);
         data.GetProperty("source").GetString().Should().Be("manual");
@@ -334,11 +386,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetDetail_WithMissingRoadmap_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/404 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/404");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.NotFound and AssertErrorCode confirms ROADMAP_NOT_FOUND.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorCode(response, "ROADMAP_NOT_FOUND");
     }
@@ -348,8 +403,10 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public void Services_ShouldResolveRoadmapDependencies()
     {
+        // STEP-01: Create scope through _factory.Services.CreateScope and derive provider from scope.ServiceProvider.
         using var scope = _factory.Services.CreateScope();
         var provider = scope.ServiceProvider;
+        // STEP-02: Assert provider.GetRequiredService() is not null and Single().GetParameters().Select(filtered) not contain nulls.
         provider.GetRequiredService<IValidator<CreateRoadmapRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<GetMyRoadmapsRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<GetRoadmapDayRouteRequestDto>>().Should().NotBeNull();
@@ -380,16 +437,22 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task RuntimeAndOpenApi_ShouldPublishAllRoadmapOperations()
     {
+        // STEP-01: Get endpoints from Endpoints.Where(filtered).ToArray.
         var endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(RoadmapsController))
             .ToArray();
+        // STEP-02: Assert endpoints has 14 item(s).
         endpoints.Should().HaveCount(14);
 
+        // STEP-03: Send GET /openapi/v1.json and keep response.
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
+        // STEP-04: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-05: Get paths from document.RootElement.GetProperty.
         var paths = document.RootElement.GetProperty("paths");
+        // STEP-06: Assert paths./api/v1/roadmaps.TryGetProperty() is true, /api/v1/roadmaps/{roadmapId}.TryGetProperty() is true and TryGetProperty() is true.
         paths.GetProperty("/api/v1/roadmaps").TryGetProperty("post", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/roadmaps/{roadmapId}").TryGetProperty("patch", out _).Should().BeTrue();
@@ -419,14 +482,19 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetItemDetail_WithOwnedItem_ShouldSerializeCompleteDetail()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88/items/1502 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/items/1502");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.id is 1502, data.myFeedback is "like", data.dish.status is "hidden", data.dish.rank.ValueKind is JsonValueKind.Null and 4 more.
         data.GetProperty("id").GetInt64().Should().Be(1502);
         data.GetProperty("myFeedback").GetString().Should().Be("like");
         data.GetProperty("dish").GetProperty("status").GetString().Should().Be("hidden");
@@ -437,6 +505,7 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
             .GetProperty("openTime").GetString().Should().Be("06:00");
         data.GetProperty("canRate").GetBoolean().Should().BeFalse();
         data.GetProperty("myReview").GetProperty("status").GetString().Should().Be("visible");
+        // STEP-06: Assert _factory.GetItemDetail.LastCall is a new RoadmapApiFactory.ItemDetailCall.
         _factory.GetItemDetail.LastCall.Should().Be(new RoadmapApiFactory.ItemDetailCall(88, 1502));
     }
 
@@ -445,11 +514,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task GetItemDetail_WithoutOwnedMatchingItem_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Build a GET /api/v1/roadmaps/88/items/404 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/roadmaps/88/items/404");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.NotFound and AssertErrorCode confirms ROADMAP_ITEM_NOT_FOUND.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
     }
@@ -459,16 +531,21 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task UpdateItem_WithReplacementBody_ShouldSerializeUpdatedRoadmapItem()
     {
+        // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest("PATCH", "/api/v1/roadmaps/88/items/1502", $$"""
             {"dishId":120,"recoRequestId":"{{RoadmapApiFactory.SuggestionRequestId}}","dayId":302,"mealSlot":"lunch","sortOrder":1}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.id is 1600, data.dayId is 302, data.mealSlot is "lunch", data.dish.id is 120 and 1 more.
         data.GetProperty("id").GetInt64().Should().Be(1600);
         data.GetProperty("dayId").GetInt64().Should().Be(302);
         data.GetProperty("mealSlot").GetString().Should().Be("lunch");
@@ -490,19 +567,23 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task DeleteItem_WithOwnedMatchingItem_ShouldSerializeNullDataSuccessEnvelope()
     {
+        // STEP-01: Build a DELETE /api/v1/roadmaps/88/items/1502 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(
             HttpMethod.Delete,
             "/api/v1/roadmaps/88/items/1502");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK, document.RootElement.success is true and 3 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         document.RootElement.GetProperty("message").ValueKind.Should().Be(JsonValueKind.Null);
         document.RootElement.GetProperty("errorCode").ValueKind.Should().Be(JsonValueKind.Null);
         document.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null);
+        // STEP-04: Assert _factory.DeleteItem.LastCall is a new RoadmapApiFactory.ItemDetailCall.
         _factory.DeleteItem.LastCall.Should().Be(new RoadmapApiFactory.ItemDetailCall(88, 1502));
     }
 
@@ -511,11 +592,14 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     [Fact]
     public async Task DeleteItem_WithoutOwnedMatchingItem_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Build a DELETE /api/v1/roadmaps/88/items/404 request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/roadmaps/88/items/404");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.NotFound and AssertErrorCode confirms ROADMAP_ITEM_NOT_FOUND.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorCode(response, "ROADMAP_ITEM_NOT_FOUND");
     }

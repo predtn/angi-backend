@@ -17,13 +17,18 @@ public sealed class OwnerMenuControllerTests
     [Fact]
     public async Task CreateSubmission_WhenCreated_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create expected as MenuSubmissionWithItemsDto.
         var expected = new MenuSubmissionWithItemsDto { Id = 14, Status = "draft" };
+        // STEP-02: Mock ICreateMenuSubmissionUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<ICreateMenuSubmissionUseCase>();
         useCase.Setup(item => item.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Build controller under test through CreateController.
         var controller = CreateController(createSubmission: useCase.Object);
 
+        // STEP-04: Run controller.CreateSubmission and keep action.
         var action = await controller.CreateSubmission(CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<MenuSubmissionWithItemsDto> and 1 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         result.Value.Should().BeOfType<ApiResponse<MenuSubmissionWithItemsDto>>()
@@ -35,17 +40,22 @@ public sealed class OwnerMenuControllerTests
     [Fact]
     public async Task DeleteItem_WhenDeleted_ShouldReturnOkWithNullData()
     {
+        // STEP-01: Mock IDeleteMenuSubmissionItemUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IDeleteMenuSubmissionItemUseCase>();
         useCase.Setup(item => item.ExecuteAsync(14, 340, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        // STEP-02: Build controller under test through CreateController.
         var controller = CreateController(deleteItem: useCase.Object);
 
+        // STEP-03: Run controller.DeleteItem and keep action.
         var action = await controller.DeleteItem(14, 340, CancellationToken.None);
 
+        // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, response.Success is true and response.Data is null.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeNull();
+        // STEP-05: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(14, 340, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -54,14 +64,19 @@ public sealed class OwnerMenuControllerTests
     [Fact]
     public async Task GetMenu_ShouldForwardRequestCancellationToken()
     {
+        // STEP-01: Create cancellation as CancellationTokenSource.
         using var cancellation = new CancellationTokenSource();
+        // STEP-02: Mock IGetOwnerMenuUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetOwnerMenuUseCase>();
         useCase.Setup(item => item.ExecuteAsync(cancellation.Token))
             .ReturnsAsync(new OwnerMenuDto());
+        // STEP-03: Build controller under test through CreateController.
         var controller = CreateController(getMenu: useCase.Object);
 
+        // STEP-04: Run controller.GetMenu.
         await controller.GetMenu(cancellation.Token);
 
+        // STEP-05: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(cancellation.Token), Times.Once);
     }
 
@@ -70,18 +85,24 @@ public sealed class OwnerMenuControllerTests
     [Fact]
     public async Task SubmitSubmission_WhenSubmitted_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as SubmitMenuSubmissionRequestDto and create expected as MenuSubmissionDto.
         var request = new SubmitMenuSubmissionRequestDto { OwnerNote = "Gửi duyệt" };
         var expected = new MenuSubmissionDto { Id = 14, Status = "pending" };
+        // STEP-02: Mock ISubmitMenuSubmissionUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<ISubmitMenuSubmissionUseCase>();
         useCase.Setup(value => value.ExecuteAsync(14, request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Build controller under test through CreateController.
         var controller = CreateController(submitSubmission: useCase.Object);
 
+        // STEP-04: Run controller.SubmitSubmission with request and keep action.
         var action = await controller.SubmitSubmission(14, request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<MenuSubmissionDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<MenuSubmissionDto>>()
             .Which.Data.Should().BeSameAs(expected);
+        // STEP-06: Verify ExecuteAsync is called once.
         useCase.Verify(
             value => value.ExecuteAsync(14, request, It.IsAny<CancellationToken>()),
             Times.Once);

@@ -18,8 +18,10 @@ public sealed class GetMyRoadmapsRequestDtoValidatorTests
     [InlineData(int.MaxValue, 100)]
     public void Validate_WithPaginationInsideInclusiveBounds_ShouldBeValid(int page, int pageSize)
     {
+        // STEP-01: Validate GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize } and keep result.
         var result = _validator.TestValidate(new GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -34,8 +36,10 @@ public sealed class GetMyRoadmapsRequestDtoValidatorTests
     [InlineData(1, int.MaxValue)]
     public void Validate_WithPaginationOutsideBounds_ShouldBeInvalid(int page, int pageSize)
     {
+        // STEP-01: Validate GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize } and keep result.
         var result = _validator.TestValidate(new GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize });
 
+        // STEP-02: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 }

@@ -14,8 +14,10 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithNullOwnerNote_ShouldBeValid()
     {
+        // STEP-01: Validate an empty SubmitMenuSubmissionRequestDto and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto());
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -24,11 +26,13 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithOwnerNoteOverMaximum_ShouldBeInvalid()
     {
+        // STEP-01: Validate SubmitMenuSubmissionRequestDto { OwnerNote = a new string } and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto
         {
             OwnerNote = new string('a', 1001)
         });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "OwnerNote");
     }
 
@@ -37,11 +41,13 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithExactlyMaximumOwnerNote_ShouldBeValid()
     {
+        // STEP-01: Validate SubmitMenuSubmissionRequestDto { OwnerNote = a new string } and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto
         {
             OwnerNote = new string('a', 1000)
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -53,11 +59,13 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [InlineData("  Gửi duyệt  ")]
     public async Task ValidateAsync_WithOptionalTextForms_ShouldBeValid(string ownerNote)
     {
+        // STEP-01: Validate SubmitMenuSubmissionRequestDto { OwnerNote = ownerNote } and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto
         {
             OwnerNote = ownerNote
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -66,11 +74,13 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithFiveHundredEmoji_ShouldBeValid()
     {
+        // STEP-01: Validate SubmitMenuSubmissionRequestDto { OwnerNote = string.Concat() } and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto
         {
             OwnerNote = string.Concat(Enumerable.Repeat("😀", 500))
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -79,11 +89,13 @@ public sealed class SubmitMenuSubmissionRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithFiveHundredOneEmoji_ShouldBeInvalid()
     {
+        // STEP-01: Validate SubmitMenuSubmissionRequestDto { OwnerNote = string.Concat() } and keep result.
         var result = await _validator.ValidateAsync(new SubmitMenuSubmissionRequestDto
         {
             OwnerNote = string.Concat(Enumerable.Repeat("😀", 501))
         });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "OwnerNote");
     }
 }

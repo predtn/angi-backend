@@ -18,6 +18,7 @@ namespace ANGI.UnitTests.WebApi.Common
         [InlineData("", "")]
         public void ToCamelCase_ShouldConvertEverySegment(string propertyPath, string expected)
         {
+            // STEP-01: Assert ValidationErrorKeys.ToCamelCase() is expected.
             ValidationErrorKeys.ToCamelCase(propertyPath).Should().Be(expected);
         }
     }

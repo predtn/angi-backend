@@ -30,16 +30,21 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task Register_ShouldReturnCreatedApiResponse()
         {
+            // STEP-01: Create expected as RegisterAccountResponseDto.
             var expected = new RegisterAccountResponseDto { UserId = 12, Status = "pending_verification" };
+            // STEP-02: Mock IRegisterAccountUseCase; stub registerUseCase.ExecuteAsync.
             var registerUseCase = new Mock<IRegisterAccountUseCase>();
             registerUseCase.Setup(x => x.ExecuteAsync(
                     It.IsAny<RegisterAccountRequestDto>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expected);
+            // STEP-03: Build controller under test through CreateController.
             var controller = CreateController(registerAccountUseCase: registerUseCase);
 
+            // STEP-04: Run controller.Register with an empty RegisterAccountRequestDto and keep action.
             var action = await controller.Register(new RegisterAccountRequestDto(), CancellationToken.None);
 
+            // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<RegisterAccountResponseDto> and 2 more.
             var result = action.Should().BeOfType<ObjectResult>().Subject;
             result.StatusCode.Should().Be(StatusCodes.Status201Created);
             var response = result.Value.Should().BeOfType<ApiResponse<RegisterAccountResponseDto>>().Subject;
@@ -52,14 +57,19 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task Login_ShouldReturnOkApiResponse()
         {
+            // STEP-01: Create expected as AuthResultDto.
             var expected = new AuthResultDto { AccessToken = "access-token" };
+            // STEP-02: Mock ILoginUseCase; stub loginUseCase.ExecuteAsync.
             var loginUseCase = new Mock<ILoginUseCase>();
             loginUseCase.Setup(x => x.ExecuteAsync(It.IsAny<LoginRequestDto>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expected);
+            // STEP-03: Build controller under test through CreateController.
             var controller = CreateController(loginUseCase: loginUseCase);
 
+            // STEP-04: Run controller.Login with an empty LoginRequestDto and keep action.
             var action = await controller.Login(new LoginRequestDto(), CancellationToken.None);
 
+            // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<AuthResultDto>, response.Success is true and 1 more.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<AuthResultDto>>().Subject;
             response.Success.Should().BeTrue();
@@ -71,18 +81,23 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task Logout_ShouldReturnOkApiResponseWithNullData()
         {
+            // STEP-01: Mock ILogoutUseCase.
             var logoutUseCase = new Mock<ILogoutUseCase>();
+            // STEP-02: Build controller under test through CreateController.
             var controller = CreateController(logoutUseCase: logoutUseCase);
 
+            // STEP-03: Run controller.Logout with LogoutRequestDto { RefreshToken = a test value } and keep action.
             var action = await controller.Logout(
                 new LogoutRequestDto { RefreshToken = "refresh-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert action is OkObjectResult, result.StatusCode is StatusCodes.Status200OK, result.Value is ApiResponse<object> and 2 more.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             result.StatusCode.Should().Be(StatusCodes.Status200OK);
             var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
             response.Success.Should().BeTrue();
             response.Data.Should().BeNull();
+            // STEP-05: Verify ExecuteAsync is called once.
             logoutUseCase.Verify(
                 x => x.ExecuteAsync(It.IsAny<LogoutRequestDto>(), It.IsAny<CancellationToken>()),
                 Times.Once);
@@ -93,16 +108,21 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task Refresh_ShouldReturnOkApiResponse()
         {
+            // STEP-01: Create expected as AuthResultDto.
             var expected = new AuthResultDto { RefreshToken = "new-refresh-token" };
+            // STEP-02: Mock IRefreshTokenUseCase; stub refreshUseCase.ExecuteAsync.
             var refreshUseCase = new Mock<IRefreshTokenUseCase>();
             refreshUseCase.Setup(x => x.ExecuteAsync(It.IsAny<RefreshTokenRequestDto>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expected);
+            // STEP-03: Build controller under test through CreateController.
             var controller = CreateController(refreshTokenUseCase: refreshUseCase);
 
+            // STEP-04: Run controller.Refresh with RefreshTokenRequestDto { RefreshToken = a test value } and keep action.
             var action = await controller.Refresh(
                 new RefreshTokenRequestDto { RefreshToken = "old-refresh-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<AuthResultDto>, response.Success is true and 1 more.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<AuthResultDto>>().Subject;
             response.Success.Should().BeTrue();
@@ -114,18 +134,23 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task VerifyEmail_ShouldReturnOkApiResponse()
         {
+            // STEP-01: Create expected as VerifyEmailResponseDto.
             var expected = new VerifyEmailResponseDto { UserId = 12, Status = "active" };
+            // STEP-02: Mock IVerifyEmailUseCase; stub verifyEmailUseCase.ExecuteAsync.
             var verifyEmailUseCase = new Mock<IVerifyEmailUseCase>();
             verifyEmailUseCase.Setup(x => x.ExecuteAsync(
                     It.IsAny<VerifyEmailRequestDto>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expected);
+            // STEP-03: Build controller under test through CreateController.
             var controller = CreateController(verifyEmailUseCase: verifyEmailUseCase);
 
+            // STEP-04: Run controller.VerifyEmail with VerifyEmailRequestDto { Token = a test value } and keep action.
             var action = await controller.VerifyEmail(
                 new VerifyEmailRequestDto { Token = "raw-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<VerifyEmailResponseDto>, response.Success is true and 1 more.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<VerifyEmailResponseDto>>().Subject;
             response.Success.Should().BeTrue();
@@ -137,17 +162,22 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task ResendVerificationEmail_ShouldReturnOkApiResponseWithNullData()
         {
+            // STEP-01: Mock IResendVerificationEmailUseCase.
             var resendUseCase = new Mock<IResendVerificationEmailUseCase>();
+            // STEP-02: Build controller under test through CreateController.
             var controller = CreateController(resendVerificationEmailUseCase: resendUseCase);
 
+            // STEP-03: Run controller.ResendVerificationEmail with ResendVerificationEmailRequestDto { Email = "user@angi.test" } and keep action.
             var action = await controller.ResendVerificationEmail(
                 new ResendVerificationEmailRequestDto { Email = "user@angi.test" },
                 CancellationToken.None);
 
+            // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, response.Success is true and response.Data is null.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
             response.Success.Should().BeTrue();
             response.Data.Should().BeNull();
+            // STEP-05: Verify ExecuteAsync is called once.
             resendUseCase.Verify(x => x.ExecuteAsync(
                 It.IsAny<ResendVerificationEmailRequestDto>(),
                 It.IsAny<CancellationToken>()), Times.Once);
@@ -158,17 +188,22 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task ForgotPassword_ShouldReturnOkApiResponseWithNullData()
         {
+            // STEP-01: Mock IForgotPasswordUseCase.
             var forgotPasswordUseCase = new Mock<IForgotPasswordUseCase>();
+            // STEP-02: Build controller under test through CreateController.
             var controller = CreateController(forgotPasswordUseCase: forgotPasswordUseCase);
 
+            // STEP-03: Run controller.ForgotPassword with ForgotPasswordRequestDto { Email = "user@angi.test" } and keep action.
             var action = await controller.ForgotPassword(
                 new ForgotPasswordRequestDto { Email = "user@angi.test" },
                 CancellationToken.None);
 
+            // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, response.Success is true and response.Data is null.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
             response.Success.Should().BeTrue();
             response.Data.Should().BeNull();
+            // STEP-05: Verify ExecuteAsync is called once.
             forgotPasswordUseCase.Verify(x => x.ExecuteAsync(
                 It.IsAny<ForgotPasswordRequestDto>(),
                 It.IsAny<CancellationToken>()), Times.Once);
@@ -179,17 +214,22 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task ResetPassword_ShouldReturnOkApiResponseWithNullData()
         {
+            // STEP-01: Mock IResetPasswordUseCase.
             var resetPasswordUseCase = new Mock<IResetPasswordUseCase>();
+            // STEP-02: Build controller under test through CreateController.
             var controller = CreateController(resetPasswordUseCase: resetPasswordUseCase);
 
+            // STEP-03: Run controller.ResetPassword with ResetPasswordRequestDto { Token = a test value, NewPassword = a test value } and keep action.
             var action = await controller.ResetPassword(
                 new ResetPasswordRequestDto { Token = "raw-token", NewPassword = "Password2" },
                 CancellationToken.None);
 
+            // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, response.Success is true and response.Data is null.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
             response.Success.Should().BeTrue();
             response.Data.Should().BeNull();
+            // STEP-05: Verify ExecuteAsync is called once.
             resetPasswordUseCase.Verify(x => x.ExecuteAsync(
                 It.IsAny<ResetPasswordRequestDto>(),
                 It.IsAny<CancellationToken>()), Times.Once);
@@ -200,18 +240,23 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public async Task GoogleLogin_ShouldReturnOkApiResponse()
         {
+            // STEP-01: Create expected as GoogleLoginResponseDto.
             var expected = new GoogleLoginResponseDto { AccessToken = "access-token", IsNewUser = true };
+            // STEP-02: Mock IGoogleLoginUseCase; stub googleLoginUseCase.ExecuteAsync.
             var googleLoginUseCase = new Mock<IGoogleLoginUseCase>();
             googleLoginUseCase.Setup(x => x.ExecuteAsync(
                     It.IsAny<GoogleLoginRequestDto>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expected);
+            // STEP-03: Build controller under test through CreateController.
             var controller = CreateController(googleLoginUseCase: googleLoginUseCase);
 
+            // STEP-04: Run controller.GoogleLogin with GoogleLoginRequestDto { IdToken = a test value, Role = "TRAVELER" } and keep action.
             var action = await controller.GoogleLogin(
                 new GoogleLoginRequestDto { IdToken = "google-token", Role = "TRAVELER" },
                 CancellationToken.None);
 
+            // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<GoogleLoginResponseDto>, response.Success is true and 1 more.
             var result = action.Should().BeOfType<OkObjectResult>().Subject;
             var response = result.Value.Should().BeOfType<ApiResponse<GoogleLoginResponseDto>>().Subject;
             response.Success.Should().BeTrue();
@@ -223,8 +268,10 @@ namespace ANGI.UnitTests.WebApi.Controllers.Auth
         [Fact]
         public void AuthenticationEndpoints_ShouldDeclareDocumentedAuthorizationAttributes()
         {
+            // STEP-01: Derive controllerType from typeof(AuthenticationController).
             var controllerType = typeof(AuthenticationController);
 
+            // STEP-02: Assert controllerType.GetMethod().GetCustomAttributes() has exactly one matching item.
             controllerType.GetMethod(nameof(AuthenticationController.Register))!
                 .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
                 .Should().ContainSingle();

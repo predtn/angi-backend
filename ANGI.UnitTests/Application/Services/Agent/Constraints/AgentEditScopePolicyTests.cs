@@ -16,9 +16,11 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("sửa cái này giúp tôi")]
     public void Question_EditWithoutTarget_AsksWhichItem(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
+        // STEP-02: Assert AgentEditScopePolicy.Question() starts with the expected text.
         AgentEditScopePolicy.Question(context).Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
     }
 
@@ -33,9 +35,11 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("cái đó ngon không")]
     public void Question_EditWithTarget_ReachesModel(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
+        // STEP-02: Assert AgentEditScopePolicy.Question() is null.
         AgentEditScopePolicy.Question(context).Should().BeNull();
     }
 
@@ -46,11 +50,13 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("no-plan")][InlineData("selected")][InlineData("focus")]
     public void Question_PlanlessOrSelected_ReachesModel(string area)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to a test text and 2 more.
         var context = AgentTestData.Context(area == "no-plan" ? null : AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = "đổi cái đó đi";
         if (area == "selected") context.Request.SelectedItemKey = "a";
         if (area == "focus") context.State = context.State with { FocusDay = 1 };
 
+        // STEP-02: Assert AgentEditScopePolicy.Question() is null.
         AgentEditScopePolicy.Question(context).Should().BeNull();
     }
 
@@ -62,9 +68,11 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("tôi không thích món đó")]
     public void Question_DislikeWithoutTarget_AsksWhichItem(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
+        // STEP-02: Assert AgentEditScopePolicy.Question() starts with the expected text.
         AgentEditScopePolicy.Question(context).Should().StartWith("Bạn muốn đổi món nào, hay cả lịch?");
     }
 
@@ -76,9 +84,11 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("cái này ngon")]
     public void Question_DislikeWithTarget_ReachesModel(string content)
     {
+        // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
 
+        // STEP-02: Assert AgentEditScopePolicy.Question() is null.
         AgentEditScopePolicy.Question(context).Should().BeNull();
     }
 
@@ -91,6 +101,7 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("  ", false)]
     public void IsPointingOnly_ReadsWords(string name, bool expected)
     {
+        // STEP-01: Assert AgentEditScopePolicy.IsPointingOnly() is expected.
         AgentEditScopePolicy.IsPointingOnly(name).Should().Be(expected);
     }
 
@@ -103,6 +114,7 @@ public sealed class AgentEditScopePolicyTests
     [InlineData("ok", "change", false)][InlineData("ok", "planning", false)][InlineData("ok", "selected", false)]
     public void IsBareAcknowledgement_OnlyWithNothingOpen(string content, string area, bool expected)
     {
+        // STEP-01: Get context from AgentTestData.Context, set context.Request.Content to content and 4 more.
         var context = AgentTestData.Context(area == "no-plan" ? null : AgentTestData.Snapshot(AgentTestData.Item()));
         context.Request.Content = content;
         if (area == "question") context.State = context.State with { PendingQuestion = "Có muốn đổi không?" };
@@ -110,6 +122,7 @@ public sealed class AgentEditScopePolicyTests
         if (area == "planning") context.State = context.State with { PendingPlanningRequest = new(["x"]) };
         if (area == "selected") context.Request.SelectedItemKey = "a";
 
+        // STEP-02: Assert AgentEditScopePolicy.IsBareAcknowledgement() is expected.
         AgentEditScopePolicy.IsBareAcknowledgement(context).Should().Be(expected);
     }
 }

@@ -35,9 +35,11 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithGpsFilters_ShouldRankAndReturnFirstPage()
     {
+        // STEP-01: Create requestId through Guid.NewGuid, declare captured to capture a call argument and configure the stubs through SetupOwned.
         var requestId = Guid.NewGuid();
         DishCandidateFilter? captured = null;
         SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.Pinned, 11, 107, [9, 10]));
+        // STEP-02: Stub dishRepository.GetCandidateIdsAsync and recommendationService.RecommendAsync.
         _dishRepository.Setup(item => item.GetCandidateIdsAsync(
                 It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => captured = filter)
@@ -49,8 +51,10 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
                 RecommendationContext.RoadmapManual,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RecommendationResult(requestId, [3, 1, 2], []));
+        // STEP-03: Call CardsFor.
         CardsFor(1, 2, 3);
 
+        // STEP-04: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province, DayId, MealSlot, ... } and keep result.
         var result = await CreateUseCase().ExecuteAsync(RoadmapId, new GetRoadmapSuggestionsRequestDto
         {
             Province = "Đà Nẵng",
@@ -66,6 +70,7 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
             Limit = 2
         }, CancellationToken.None);
 
+        // STEP-05: Assert captured is equivalent to a new DishCandidateFilter, result.RequestId is requestId, result.Items.Select(filtered) equals (3, 1) and 1 more.
         captured.Should().BeEquivalentTo(new DishCandidateFilter
         {
             Province = "Đà Nẵng",
@@ -87,8 +92,10 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutGps_ShouldUsePinnedOriginAndFallbackRequestId()
     {
+        // STEP-01: Declare captured to capture a call argument and configure the stubs through SetupOwned.
         DishCandidateFilter? captured = null;
         SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.Pinned, 16.1m, 108.3m, []));
+        // STEP-02: Stub dishRepository.GetCandidateIdsAsync and recommendationService.RecommendAsync.
         _dishRepository.Setup(item => item.GetCandidateIdsAsync(
                 It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => captured = filter)
@@ -97,11 +104,14 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
                 TravelerId, It.IsAny<IReadOnlyList<int>>(), 200,
                 RecommendationContext.RoadmapManual, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RecommendationResult(null, [1], []));
+        // STEP-03: Call CardsFor.
         CardsFor(1);
 
+        // STEP-04: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text } and keep result.
         var result = await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Đà Nẵng" }, CancellationToken.None);
 
+        // STEP-05: Assert captured.Area is a new NearbyArea and result.RequestId is null.
         captured!.Area.Should().Be(new NearbyArea(16.1m, 108.3m, 10));
         result.RequestId.Should().BeNull();
     }
@@ -113,8 +123,10 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [InlineData(RoadmapOriginMode.Gps)]
     public async Task ExecuteAsync_WithoutUsableOrigin_ShouldNotApplyArea(RoadmapOriginMode mode)
     {
+        // STEP-01: Declare captured to capture a call argument and configure the stubs through SetupOwned.
         DishCandidateFilter? captured = null;
         SetupOwned(new RoadmapSuggestionContext(mode, null, null, []));
+        // STEP-02: Stub dishRepository.GetCandidateIdsAsync and recommendationService.RecommendAsync.
         _dishRepository.Setup(item => item.GetCandidateIdsAsync(
                 It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => captured = filter)
@@ -123,11 +135,14 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
                 TravelerId, It.IsAny<IReadOnlyList<int>>(), 200,
                 RecommendationContext.RoadmapManual, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RecommendationResult(null, [], []));
+        // STEP-03: Call CardsFor.
         CardsFor();
 
+        // STEP-04: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text, RadiusKm = 20 }.
         await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế", RadiusKm = 20 }, CancellationToken.None);
 
+        // STEP-05: Assert captured.Area is null.
         captured!.Area.Should().BeNull();
     }
 
@@ -136,14 +151,17 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRecoReturnsUnexpectedIds_ShouldKeepDistinctCandidatesOnly()
     {
+        // STEP-01: Configure the stubs through SetupOwned, call Candidates, call Ranked and call CardsFor.
         SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.None, null, null, []));
         Candidates(1, 2);
         Ranked(Guid.NewGuid(), 2, 999, 2, 1);
         CardsFor(1, 2, 999);
 
+        // STEP-02: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text } and keep result.
         var result = await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế" }, CancellationToken.None);
 
+        // STEP-03: Assert result.Items.Select(filtered) equals (2, 1) and result.NextCursor is null.
         result.Items.Select(item => (item.Id, item.Rank)).Should().Equal((2, 1), (1, 2));
         result.NextCursor.Should().BeNull();
     }
@@ -153,18 +171,23 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithCursor_ShouldReuseScopedCachedList()
     {
+        // STEP-01: Configure the stubs through SetupOwned, call Candidates, call Ranked and call CardsFor.
         SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.None, null, null, []));
         Candidates(1, 2, 3);
         Ranked(Guid.NewGuid(), 3, 1, 2);
         CardsFor(1, 2, 3);
+        // STEP-02: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text, Limit = 2 } and keep first.
         var first = await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế", Limit = 2 }, CancellationToken.None);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = "ignored", Cursor = first.NextCursor } and keep second.
         var second = await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "ignored", Cursor = first.NextCursor }, CancellationToken.None);
 
+        // STEP-04: Assert second.Items.Select(filtered) equals (2, 3) and second.NextCursor is null.
         second.Items.Select(item => (item.Id, item.Rank)).Should().Equal((2, 3));
         second.NextCursor.Should().BeNull();
+        // STEP-05: Verify GetCandidateIdsAsync is called once and RecommendAsync is called once.
         _dishRepository.Verify(item => item.GetCandidateIdsAsync(
             It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
         _recommendationService.Verify(item => item.RecommendAsync(
@@ -177,13 +200,16 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidOrForeignCursor_ShouldThrowInvalidCursor()
     {
+        // STEP-01: Configure the stubs through SetupOwned, call Candidates, call Ranked and call CardsFor.
         SetupOwned(new RoadmapSuggestionContext(RoadmapOriginMode.None, null, null, []));
         Candidates(1, 2);
         Ranked(Guid.NewGuid(), 1, 2);
         CardsFor(1, 2);
+        // STEP-02: Run CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text, Limit = 1 } and keep cursor.
         var cursor = (await CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế", Limit = 1 }, CancellationToken.None)).NextCursor;
 
+        // STEP-03: Assert act throws BadRequestException and the thrown exception.ErrorCode is "INVALID_CURSOR".
         foreach (var (roadmapId, userId, value) in new[]
                  {
                      (RoadmapId, TravelerId, "bad-cursor"),
@@ -206,15 +232,19 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRoadmapIsNotOwned_ShouldThrowRoadmapNotFound()
     {
+        // STEP-01: Stub currentUser.UserId and roadmapRepository.GetSuggestionContextAsync.
         _currentUser.SetupGet(item => item.UserId).Returns(TravelerId);
         _roadmapRepository.Setup(item => item.GetSuggestionContextAsync(
                 RoadmapId, TravelerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RoadmapSuggestionContext?)null);
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text } in act so its outcome can be asserted.
         var act = () => CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế" }, CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-04: Verify dishRepository receives no other calls.
         _dishRepository.VerifyNoOtherCalls();
     }
 
@@ -223,11 +253,15 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Stub currentUser.UserId.
         _currentUser.SetupGet(item => item.UserId).Returns((int?)null);
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = the expected text } in act so its outcome can be asserted.
         var act = () => CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "Huế" }, CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify roadmapRepository receives no other calls.
         _roadmapRepository.VerifyNoOtherCalls();
     }
 
@@ -236,10 +270,13 @@ public sealed class GetRoadmapSuggestionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationFirst()
     {
+        // STEP-01: Wrap CreateUseCase().ExecuteAsync with RoadmapId and GetRoadmapSuggestionsRequestDto { Province = an empty string, Limit = 0 } in act so its outcome can be asserted.
         var act = () => CreateUseCase().ExecuteAsync(RoadmapId,
             new GetRoadmapSuggestionsRequestDto { Province = "", Limit = 0 }, CancellationToken.None);
 
+        // STEP-02: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-03: Verify roadmapRepository receives no other calls, dishRepository receives no other calls and recommendationService receives no other calls.
         _roadmapRepository.VerifyNoOtherCalls();
         _dishRepository.VerifyNoOtherCalls();
         _recommendationService.VerifyNoOtherCalls();

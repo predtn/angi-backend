@@ -17,6 +17,7 @@ public sealed class GetMenuSubmissionReviewUseCaseTests
     [Fact]
     public async Task ExecuteAsync_ShouldMapComparison()
     {
+        // STEP-01: Create restaurant as ANGI.Domain.Entities.Restaurant, create original as Dish, create removed as Dish and 2 more.
         var restaurant = new ANGI.Domain.Entities.Restaurant { Id = 7, Name = "Restaurant", Latitude = 10, Longitude = 106 };
         var original = new Dish { Id = 1, RestaurantId = 7, Restaurant = restaurant, Name = "Original", Price = 100,
             CoverMedia = new MediaFile { Url = "https://cdn.test/old.jpg" },
@@ -34,6 +35,7 @@ public sealed class GetMenuSubmissionReviewUseCaseTests
                     CoverMediaId = 9, CoverMedia = new MediaFile { Url = "https://cdn.test/new.jpg" }, TagIds = [2] }
             ]
         };
+        // STEP-02: Mock IMenuReviewRepository and ICurrentUserService; stub repository.HasPermissionAsync, repository.GetDetailAsync, current.UserId and current.Role.
         var repository = new Mock<IMenuReviewRepository>();
         repository.Setup(x => x.HasPermissionAsync(10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         repository.Setup(x => x.GetDetailAsync(14, It.IsAny<CancellationToken>())).ReturnsAsync(submission);
@@ -41,8 +43,10 @@ public sealed class GetMenuSubmissionReviewUseCaseTests
         current.SetupGet(x => x.UserId).Returns(10);
         current.SetupGet(x => x.Role).Returns("MOD");
 
+        // STEP-03: Run ExecuteAsync and keep result.
         var result = await new GetMenuSubmissionReviewUseCase(repository.Object, current.Object).ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-04: Assert result.Id is 14, result.Status is "pending", result.OwnerNote is "Owner note", result.Restaurant.Id is 7 and 10 more.
         result.Id.Should().Be(14);
         result.Status.Should().Be("pending");
         result.OwnerNote.Should().Be("Owner note");
@@ -67,12 +71,15 @@ public sealed class GetMenuSubmissionReviewUseCaseTests
     [InlineData(999)]
     public async Task ExecuteAsync_Missing_ShouldNotFound(long id)
     {
+        // STEP-01: Mock IMenuReviewRepository and ICurrentUserService; stub repository.HasPermissionAsync, current.UserId and current.Role.
         var repository = new Mock<IMenuReviewRepository>();
         repository.Setup(x => x.HasPermissionAsync(10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var current = new Mock<ICurrentUserService>();
         current.SetupGet(x => x.UserId).Returns(10);
         current.SetupGet(x => x.Role).Returns("ADMIN");
+        // STEP-02: Wrap ExecuteAsync with id in act so its outcome can be asserted.
         var act = () => new GetMenuSubmissionReviewUseCase(repository.Object, current.Object).ExecuteAsync(id, CancellationToken.None);
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "SUBMISSION_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("SUBMISSION_NOT_FOUND");
     }
 
@@ -81,12 +88,16 @@ public sealed class GetMenuSubmissionReviewUseCaseTests
     [Fact]
     public async Task ExecuteAsync_Denied_ShouldNotLoad()
     {
+        // STEP-01: Mock IMenuReviewRepository and ICurrentUserService; stub current.UserId and current.Role.
         var repository = new Mock<IMenuReviewRepository>();
         var current = new Mock<ICurrentUserService>();
         current.SetupGet(x => x.UserId).Returns(10);
         current.SetupGet(x => x.Role).Returns("MOD");
+        // STEP-02: Wrap ExecuteAsync in act so its outcome can be asserted.
         var act = () => new GetMenuSubmissionReviewUseCase(repository.Object, current.Object).ExecuteAsync(14, CancellationToken.None);
+        // STEP-03: Assert act throws ForbiddenException.
         await act.Should().ThrowAsync<ForbiddenException>();
+        // STEP-04: Verify GetDetailAsync is never called.
         repository.Verify(x => x.GetDetailAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

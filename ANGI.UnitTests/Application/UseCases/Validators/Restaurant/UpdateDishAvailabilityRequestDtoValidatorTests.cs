@@ -12,9 +12,11 @@ public sealed class UpdateDishAvailabilityRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithoutAvailability_ShouldRejectRequest()
     {
+        // STEP-01: Validate an empty UpdateDishAvailabilityRequestDto and keep result.
         var result = await new UpdateDishAvailabilityRequestDtoValidator()
             .ValidateAsync(new UpdateDishAvailabilityRequestDto());
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "IsAvailable");
     }
 }

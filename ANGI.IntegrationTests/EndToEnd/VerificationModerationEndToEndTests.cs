@@ -34,25 +34,33 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
     [PostgresEndToEndFact]
     public async Task ReviewVerificationWorkflow_ShouldPersistDecisionNotificationAndAudit()
     {
+        // STEP-01: Reset the test database and create seed through SeedAsync.
         await _factory.ResetDatabaseAsync();
         var seed = await SeedAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Authenticate the HTTP client through Authorize.
         Authorize(client, seed.ModId, "MOD");
 
+        // STEP-04: Send GET /api/v1/mod/verifications (with query parameters) and keep listResponse.
         using var listResponse = await client.GetAsync(
             "/api/v1/mod/verifications?status=pending&province=Da%20Nang&page=1&pageSize=20");
+        // STEP-05: Obtain page through SuccessDataAsync; assert listResponse.StatusCode is HttpStatusCode.OK, page.Items has exactly one matching item and 1 more.
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var page = await SuccessDataAsync<PagedResponse<ModVerificationCardDto>>(listResponse);
         page.Items.Should().ContainSingle(item => item.Id == seed.VerificationId);
         page.Items[0].Documents[0].Url.Should().StartWith("https://media.integration/signed/");
 
+        // STEP-06: Send GET /api/v1/mod/verifications/{seed.VerificationId} and keep detailResponse.
         using var detailResponse = await client.GetAsync($"/api/v1/mod/verifications/{seed.VerificationId}");
+        // STEP-07: Obtain detail through SuccessDataAsync; assert detailResponse.StatusCode is HttpStatusCode.OK, detail.Id is seed.VerificationId and 2 more.
         detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var detail = await SuccessDataAsync<VerificationReviewDetailDto>(detailResponse);
         detail.Id.Should().Be(seed.VerificationId);
         detail.Restaurant.Id.Should().Be(seed.RestaurantId);
         detail.Previous!.Id.Should().Be(seed.PreviousVerificationId);
 
+        // STEP-08: Send POST /api/v1/mod/verifications/{seed.VerificationId}/decision with a ReviewVerificationRequestDto body and keep decisionResponse.
         using var decisionResponse = await client.PostAsJsonAsync(
             $"/api/v1/mod/verifications/{seed.VerificationId}/decision",
             new ReviewVerificationRequestDto
@@ -60,9 +68,11 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
                 Decision = "needs_more_info",
                 ReviewNote = "Please provide a current food safety certificate."
             });
+        // STEP-09: Assert decisionResponse.StatusCode is HttpStatusCode.OK, SuccessDataAsync succeeds and SuccessDataAsync().Status is "needs_more_info".
         decisionResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         (await SuccessDataAsync<VerificationDto>(decisionResponse)).Status.Should().Be("needs_more_info");
 
+        // STEP-10: Assert in the database verification.Status is VerificationStatus.NeedsMoreInfo, verification.ReviewedBy is seed.ModId and 5 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var verification = await context.RestaurantVerifications.SingleAsync(item => item.Id == seed.VerificationId);
@@ -78,14 +88,19 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
                 .Action.Should().Be(AuditActions.RestaurantVerificationRejected);
         });
 
+        // STEP-11: Send POST /api/v1/mod/verifications/{seed.VerificationId}/decision with a body of decision and keep repeatedResponse.
         using var repeatedResponse = await client.PostAsJsonAsync(
             $"/api/v1/mod/verifications/{seed.VerificationId}/decision",
             new { decision = "approve" });
+        // STEP-12: Assert repeatedResponse.StatusCode is HttpStatusCode.Conflict and AssertErrorAsync confirms VERIFICATION_ALREADY_REVIEWED.
         repeatedResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
         await AssertErrorAsync(repeatedResponse, "VERIFICATION_ALREADY_REVIEWED");
 
+        // STEP-13: Change the moderator's permissions through DenyVerificationPermissionAsync.
         await DenyVerificationPermissionAsync(seed.ModId);
+        // STEP-14: Send GET /api/v1/mod/verifications and keep deniedResponse.
         using var deniedResponse = await client.GetAsync("/api/v1/mod/verifications");
+        // STEP-15: Assert deniedResponse.StatusCode is HttpStatusCode.Forbidden and AssertErrorAsync confirms FORBIDDEN.
         deniedResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertErrorAsync(deniedResponse, "FORBIDDEN");
     }
@@ -95,25 +110,32 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
     [PostgresEndToEndFact]
     public async Task Decide_WhenRequestsRace_ShouldCommitExactlyOnce()
     {
+        // STEP-01: Reset the test database and create seed through SeedAsync.
         await _factory.ResetDatabaseAsync();
         var seed = await SeedAsync();
+        // STEP-02: Create HTTP client firstClient; create HTTP client secondClient.
         using var firstClient = _factory.CreateClient();
         using var secondClient = _factory.CreateClient();
+        // STEP-03: Authenticate the HTTP client through Authorize and define path as the expected text.
         Authorize(firstClient, seed.ModId, "MOD");
         Authorize(secondClient, seed.ModId, "MOD");
         var path = $"/api/v1/mod/verifications/{seed.VerificationId}/decision";
 
+        // STEP-04: Send POST path with a body of decision from 2 concurrent calls and keep responses.
         var responses = await Task.WhenAll(
             firstClient.PostAsJsonAsync(path, new { decision = "approve" }),
             secondClient.PostAsJsonAsync(path, new { decision = "approve" }));
 
+        // STEP-05: Assert responses.Select(filtered) is equivalent to the expected items.
         responses.Select(response => response.StatusCode)
             .Should().BeEquivalentTo([HttpStatusCode.OK, HttpStatusCode.Conflict]);
+        // STEP-06: For each response in responses, call response.Dispose.
         foreach (var response in responses)
         {
             response.Dispose();
         }
 
+        // STEP-07: Assert in the database context.Notifications.CountAsync(filtered) is 1, context.AuditLogs.CountAsync(filtered) is 1 and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Notifications.CountAsync(item => item.RecipientId == seed.OwnerId)).Should().Be(1);
@@ -128,6 +150,7 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
     [PostgresEndToEndFact]
     public async Task AdminAccess_ShouldReturnForbiddenWithoutSideEffects()
     {
+        // STEP-01: Reset the test database, create seed through SeedAsync and get adminId from _factory.ExecuteDbAsync.
         await _factory.ResetDatabaseAsync();
         var seed = await SeedAsync();
         var adminId = await _factory.ExecuteDbAsync(async context =>
@@ -144,7 +167,9 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
             await context.SaveChangesAsync();
             return admin.Id;
         });
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Assert for each claimRole, response.StatusCode is HttpStatusCode.Forbidden and AssertErrorAsync confirms FORBIDDEN.
         foreach (var claimRole in new[] { "ADMIN", "MOD" })
         {
             Authorize(client, adminId, claimRole);
@@ -160,6 +185,7 @@ public sealed class VerificationModerationEndToEndTests : IClassFixture<Postgres
             }
         }
 
+        // STEP-04: Assert in the database verification.Status is VerificationStatus.Pending, verification.ReviewedBy is null and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var verification = await context.RestaurantVerifications.SingleAsync(item => item.Id == seed.VerificationId);

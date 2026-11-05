@@ -31,16 +31,21 @@ public sealed class ClaimReportUseCaseTests
     [InlineData(ReportTargetType.Restaurant)] [InlineData(ReportTargetType.Blog)]
     public async Task ClaimsPendingReport(ReportTargetType type)
     {
+        // STEP-01: Create world as ModerationTestContext, get report from Setup and create cancellation as CancellationTokenSource.
         var world = new ModerationTestContext();
         var report = Setup(world, type);
         using var cancellation = new CancellationTokenSource();
+        // STEP-02: Run Create().ExecuteAsync and keep response.
         var response = await Create(world).ExecuteAsync(88, cancellation.Token);
+        // STEP-03: Assert report.Status is ReportStatus.InReview, report.HandledBy is 3, report.HandledAt is null and report.ResolutionAction is null.
         report.Status.Should().Be(ReportStatus.InReview);
         report.HandledBy.Should().Be(3);
         report.HandledAt.Should().BeNull();
         report.ResolutionAction.Should().BeNull();
+        // STEP-04: Assert response.Status is "in_review" and response.HandledBy.Id is 3.
         response.Status.Should().Be("in_review");
         response.HandledBy!.Id.Should().Be(3);
+        // STEP-05: Verify LockReportAsync is called once, SaveChangesAsync is called once, CommitAsync is called once and DisposeAsync is called once.
         world.Repository.Verify(x => x.LockReportAsync(88, cancellation.Token), Times.Once);
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(cancellation.Token), Times.Once);
         world.Transaction.Verify(x => x.CommitAsync(cancellation.Token), Times.Once);
@@ -56,14 +61,18 @@ public sealed class ClaimReportUseCaseTests
     [InlineData(ReportStatus.Dismissed, 6, "REPORT_CLOSED")]
     public async Task RejectsNonPendingReports(ReportStatus status, int handler, string code)
     {
+        // STEP-01: Create world as ModerationTestContext, get report from Setup, set report.Status to status and set report.HandledBy to handler.
         var world = new ModerationTestContext();
         var report = Setup(world);
         report.Status = status;
         report.HandledBy = handler;
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-03: Assert action throws ConflictException, the thrown exception.ErrorCode is code, report.HandledBy is handler and report.Status is status.
         (await action.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be(code);
         report.HandledBy.Should().Be(handler);
         report.Status.Should().Be(status);
+        // STEP-04: Verify SaveChangesAsync is never called, CommitAsync is never called and DisposeAsync is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.DisposeAsync(), Times.Once);
@@ -75,14 +84,18 @@ public sealed class ClaimReportUseCaseTests
     [InlineData(false)] [InlineData(true)]
     public async Task RejectsMissingReports(bool missingAfterLock)
     {
+        // STEP-01: Create world as ModerationTestContext and 1 more.
         var world = new ModerationTestContext();
         if (missingAfterLock)
         {
             Setup(world);
             world.Repository.Setup(x => x.LockReportAsync(88, It.IsAny<CancellationToken>())).ReturnsAsync((Report?)null);
         }
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-03: Assert action throws NotFoundException and the thrown exception.ErrorCode is "REPORT_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        // STEP-04: Verify SaveChangesAsync is never called.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -93,11 +106,16 @@ public sealed class ClaimReportUseCaseTests
     [InlineData(ReportTargetType.Blog, "REPORT_RESTAURANT_HANDLE")]
     public async Task RejectsWrongTargetPermission(ReportTargetType type, string permission)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock and world.GetEffectivePermissionsAsync.
         Setup(world, type);
         world.Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>())).ReturnsAsync([permission]);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-04: Assert action throws ForbiddenException.
         await action.Should().ThrowAsync<ForbiddenException>();
+        // STEP-05: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -107,13 +125,19 @@ public sealed class ClaimReportUseCaseTests
     [InlineData("save")] [InlineData("display")] [InlineData("commit")]
     public async Task DisposesFailedTransaction(string phase)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world);
+        // STEP-03: When phase == "save", call world.UnitOfWork.Setup(filtered).ThrowsAsync and 2 more.
         if (phase == "save") world.UnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException());
         if (phase == "display") world.Repository.Setup(x => x.GetReportDisplayDataAsync(It.IsAny<ReportTarget>(), It.IsAny<IReadOnlyList<Report>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException());
         if (phase == "commit") world.Transaction.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException());
+        // STEP-04: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-05: Assert action throws InvalidOperationException.
         await action.Should().ThrowAsync<InvalidOperationException>();
+        // STEP-06: Verify DisposeAsync is called once and CommitAsync is never called.
         world.Transaction.Verify(x => x.DisposeAsync(), Times.Once);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), phase == "commit" ? Times.Once() : Times.Never());
     }
@@ -123,13 +147,20 @@ public sealed class ClaimReportUseCaseTests
     [Fact]
     public async Task PropagatesCancellation()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world);
+        // STEP-03: Create cancellation as CancellationTokenSource and cancel cancellation.
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
+        // STEP-04: Stub world.LockReportAsync.
         world.Repository.Setup(x => x.LockReportAsync(88, cancellation.Token)).ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        // STEP-05: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, cancellation.Token);
+        // STEP-06: Assert action throws OperationCanceledException.
         await action.Should().ThrowAsync<OperationCanceledException>();
+        // STEP-07: Verify SaveChangesAsync is never called and DisposeAsync is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.DisposeAsync(), Times.Once);
     }
@@ -139,12 +170,16 @@ public sealed class ClaimReportUseCaseTests
     [Fact]
     public async Task RejectsClaimWhenAlreadyClaimedByAnotherModerator()
     {
+        // STEP-01: Create world as ModerationTestContext, get report from Setup, set report.Status to ReportStatus.InReview and set report.HandledBy to 999.
         var world = new ModerationTestContext();
         var report = Setup(world);
         report.Status = ReportStatus.InReview;
         report.HandledBy = 999; // Claimed by another moderator
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, default);
+        // STEP-03: Assert action throws ConflictException and the thrown exception.ErrorCode is "REPORT_ALREADY_CLAIMED".
         (await action.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("REPORT_ALREADY_CLAIMED");
+        // STEP-04: Verify SaveChangesAsync is never called and CommitAsync is never called.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -154,10 +189,15 @@ public sealed class ClaimReportUseCaseTests
     [Fact]
     public async Task RejectsClaimWhenReportNotFound()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub world.GetReportTargetAsync.
         world.Repository.Setup(x => x.GetReportTargetAsync(99999, It.IsAny<CancellationToken>())).ReturnsAsync((ReportTarget?)null);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(99999, default);
+        // STEP-04: Assert action throws NotFoundException and the thrown exception.ErrorCode is "REPORT_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        // STEP-05: Verify SaveChangesAsync is never called.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

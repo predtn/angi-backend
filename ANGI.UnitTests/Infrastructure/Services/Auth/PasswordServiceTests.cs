@@ -11,11 +11,15 @@ public sealed class PasswordServiceTests
     [Fact]
     public void Hash_WithSamePassword_ShouldCreateDistinctBcryptHashes()
     {
+        // STEP-01: Create the PasswordService under test as service.
         var service = new PasswordService();
 
+        // STEP-02: Run service.Hash and keep first.
         var first = service.Hash("MatKhau123");
+        // STEP-03: Run service.Hash and keep second.
         var second = service.Hash("MatKhau123");
 
+        // STEP-04: Assert first is not "MatKhau123" and first starts with "$2".
         first.Should().NotBe("MatKhau123").And.NotBe(second);
         first.Should().StartWith("$2");
     }
@@ -25,9 +29,12 @@ public sealed class PasswordServiceTests
     [Fact]
     public void Verify_WithMatchingAndDifferentPasswords_ShouldReturnExpectedResults()
     {
+        // STEP-01: Create the PasswordService under test as service.
         var service = new PasswordService();
+        // STEP-02: Run service.Hash and keep hash.
         var hash = service.Hash("MatKhau123");
 
+        // STEP-03: Assert service.Verify() is true and service.Verify() is false.
         service.Verify("MatKhau123", hash).Should().BeTrue();
         service.Verify("SaiMatKhau123", hash).Should().BeFalse();
     }

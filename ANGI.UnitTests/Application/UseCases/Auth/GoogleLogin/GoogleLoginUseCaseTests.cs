@@ -29,17 +29,21 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithNewTraveler_ShouldCreateAccountAndSession()
         {
+            // STEP-01: Create harness through CreateHarness.
             var harness = CreateHarness(new GoogleIdentity("google-sub", " New.User@Gmail.com ", null));
+            // STEP-02: Stub harness.GetRoleByCodeAsync, harness.ReserveUserIdAsync and harness.GetSurveyStatusAsync.
             harness.Repository.Setup(x => x.GetRoleByCodeAsync("TRAVELER", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TravelerRole());
             harness.Repository.Setup(x => x.ReserveUserIdAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(12);
             harness.RecommendationService.Setup(x => x.GetSurveyStatusAsync(12, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SurveyStatus(false, null, 0));
+            // STEP-03: Declare addedUser to capture a call argument, declare addedLogin to capture a call argument and 2 more.
             User? addedUser = null;
             UserExternalLogin? addedLogin = null;
             UserSession? addedSession = null;
             var auditEntries = new List<AuditLogEntry>();
+            // STEP-04: Stub harness.AddUser, harness.AddExternalLogin, harness.AddSession and harness.Add.
             harness.Repository.Setup(x => x.AddUser(It.IsAny<User>()))
                 .Callback<User>(user => addedUser = user);
             harness.Repository.Setup(x => x.AddExternalLogin(It.IsAny<UserExternalLogin>()))
@@ -49,31 +53,38 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.AuditLogService.Setup(x => x.Add(It.IsAny<AuditLogEntry>()))
                 .Callback<AuditLogEntry>(auditEntries.Add);
 
+            // STEP-05: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value, Role = "TRAVELER" } and keep result.
             var result = await harness.UseCase.ExecuteAsync(new GoogleLoginRequestDto
             {
                 IdToken = "signed-token",
                 Role = "TRAVELER"
             }, CancellationToken.None);
 
+            // STEP-06: Assert result.IsNewUser is true, result.User.Id is 12, result.User.Email is "new.user@gmail.com", result.User.Status is "active" and 1 more.
             result.IsNewUser.Should().BeTrue();
             result.User.Id.Should().Be(12);
             result.User.Email.Should().Be("new.user@gmail.com");
             result.User.Status.Should().Be("active");
             result.User.NeedsPreferenceSurvey.Should().BeTrue();
+            // STEP-07: Assert addedUser is not null, addedUser.DisplayName is "new.user", addedUser.PasswordHash is null and addedUser.EmailVerifiedAt is Now.
             addedUser.Should().NotBeNull();
             addedUser!.DisplayName.Should().Be("new.user");
             addedUser.PasswordHash.Should().BeNull();
             addedUser.EmailVerifiedAt.Should().Be(Now);
+            // STEP-08: Assert addedLogin.User is the same instance as addedUser, addedLogin.Provider is ExternalLoginProvider.Google and 1 more.
             addedLogin!.User.Should().BeSameAs(addedUser);
             addedLogin.Provider.Should().Be(ExternalLoginProvider.Google);
             addedLogin.ProviderUserId.Should().Be("google-sub");
+            // STEP-09: Assert addedSession.User is the same instance as addedUser, addedSession.RefreshTokenHash is a test value and 1 more.
             addedSession!.User.Should().BeSameAs(addedUser);
             addedSession.RefreshTokenHash.Should().Be("refresh-hash");
             addedSession.IpAddress.Should().Be(IPAddress.Loopback);
+            // STEP-10: Assert auditEntries.Select(filtered) equals AuditActions.UserRegistered and auditEntries only holds items matching the condition.
             auditEntries.Select(entry => entry.Action)
                 .Should().Equal(AuditActions.UserRegistered, AuditActions.UserLogin);
             auditEntries.Should().OnlyContain(entry =>
                 entry.ActorId == 12 && entry.SubjectUserId == 12 && entry.EntityId == 12);
+            // STEP-11: Verify CreateRefreshToken is called once, CreateAccessToken is called once, SaveChangesAsync is called once and CommitAsync is called once.
             harness.TokenService.Verify(x => x.CreateRefreshToken(), Times.Once);
             harness.TokenService.Verify(
                 x => x.CreateAccessToken(It.Is<User>(user => user.Id == 12), It.IsAny<long>()),
@@ -87,21 +98,26 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithLinkedIdentity_ShouldReuseAccount()
         {
+            // STEP-01: Create user through ActiveUser and create harness through CreateHarness.
             var user = ActiveUser();
             var harness = CreateHarness();
+            // STEP-02: Stub harness.GetUserByExternalLoginAsync.
             harness.Repository.Setup(x => x.GetUserByExternalLoginAsync(
                     ExternalLoginProvider.Google,
                     "google-sub",
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } and keep result.
             var result = await harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert result.IsNewUser is false, result.User.Id is user.Id and user.LastLoginAt is Now.
             result.IsNewUser.Should().BeFalse();
             result.User.Id.Should().Be(user.Id);
             user.LastLoginAt.Should().Be(Now);
+            // STEP-05: Verify GetUserByEmailAsync is never called, AddExternalLogin is never called and AddUser is never called.
             harness.Repository.Verify(x => x.GetUserByEmailAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
             harness.Repository.Verify(x => x.AddExternalLogin(It.IsAny<UserExternalLogin>()), Times.Never);
@@ -113,12 +129,14 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithPendingPasswordAccount_ShouldLinkAndActivateAccount()
         {
+            // STEP-01: Create user through ActiveUser, set user.Status to UserStatus.PendingVerification, set user.EmailVerifiedAt to null and 3 more.
             var user = ActiveUser();
             user.Status = UserStatus.PendingVerification;
             user.EmailVerifiedAt = null;
             user.PasswordHash = "password-chosen-by-whoever-registered";
             var openSession = new UserSession { Id = 40, UserId = user.Id, ExpiresAt = Now.AddDays(1) };
             var harness = CreateHarness(new GoogleIdentity("google-sub", " USER@ANGI.TEST ", "Google Name"));
+            // STEP-02: Declare addedLogin to capture a call argument; stub harness.GetUserByEmailAsync, harness.GetActiveSessionsAsync and harness.AddExternalLogin.
             harness.Repository.Setup(x => x.GetUserByEmailAsync(
                     "user@angi.test",
                     It.IsAny<CancellationToken>()))
@@ -129,16 +147,20 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.Repository.Setup(x => x.AddExternalLogin(It.IsAny<UserExternalLogin>()))
                 .Callback<UserExternalLogin>(login => addedLogin = login);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } and keep result.
             var result = await harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert result.IsNewUser is false, user.Status is UserStatus.Active, user.EmailVerifiedAt is Now and user.PasswordHash is null.
             result.IsNewUser.Should().BeFalse();
             user.Status.Should().Be(UserStatus.Active);
             user.EmailVerifiedAt.Should().Be(Now);
             user.PasswordHash.Should().BeNull("the password of an unverified registration is not proven to be the owner's");
+            // STEP-05: Assert openSession.RevokedAt is Now and addedLogin.User is the same instance as user.
             openSession.RevokedAt.Should().Be(Now);
             addedLogin!.User.Should().BeSameAs(user);
+            // STEP-06: Verify Invalidate is called once and AddUser is never called.
             harness.AccountStatusCache.Verify(x => x.Invalidate(user.Id), Times.Once);
             harness.Repository.Verify(x => x.AddUser(It.IsAny<User>()), Times.Never);
         }
@@ -148,16 +170,21 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithVerifiedPasswordAccount_ShouldKeepPasswordAndSessions()
         {
+            // STEP-01: Create user through ActiveUser, set user.PasswordHash to a test value and create harness through CreateHarness.
             var user = ActiveUser();
             user.PasswordHash = "owner-password";
             var harness = CreateHarness();
+            // STEP-02: Stub harness.GetUserByEmailAsync.
             harness.Repository.Setup(x => x.GetUserByEmailAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value }.
             await harness.UseCase.ExecuteAsync(new GoogleLoginRequestDto { IdToken = "signed-token" }, CancellationToken.None);
 
+            // STEP-04: Assert user.PasswordHash is a test value and user.EmailVerifiedAt is Now.AddDays().
             user.PasswordHash.Should().Be("owner-password");
             user.EmailVerifiedAt.Should().Be(Now.AddDays(-1));
+            // STEP-05: Verify GetActiveSessionsAsync is never called.
             harness.Repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -166,14 +193,18 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithNewIdentityAndNoRole_ShouldThrowRoleRequired()
         {
+            // STEP-01: Create harness through CreateHarness.
             var harness = CreateHarness();
 
+            // STEP-02: Wrap harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } in act so its outcome can be asserted.
             var act = () => harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-03: Assert act throws BadRequestException and exception.ErrorCode is "ROLE_REQUIRED".
             var exception = await act.Should().ThrowAsync<BadRequestException>();
             exception.Which.ErrorCode.Should().Be("ROLE_REQUIRED");
+            // STEP-04: Verify AddUser is never called, AddSession is never called, SaveChangesAsync is never called and CommitAsync is never called.
             harness.Repository.Verify(x => x.AddUser(It.IsAny<User>()), Times.Never);
             harness.Repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
             harness.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -190,22 +221,27 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             UserStatus status,
             string expectedCode)
         {
+            // STEP-01: Create user through ActiveUser, set user.Status to status, set user.SuspendedUntil to Suspended ? Now.AddDays(1) : null and 1 more.
             var user = ActiveUser();
             user.Status = status;
             user.SuspendedUntil = status == UserStatus.Suspended ? Now.AddDays(1) : null;
             var harness = CreateHarness();
+            // STEP-02: Stub harness.GetUserByExternalLoginAsync.
             harness.Repository.Setup(x => x.GetUserByExternalLoginAsync(
                     ExternalLoginProvider.Google,
                     "google-sub",
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
 
+            // STEP-03: Wrap harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } in act so its outcome can be asserted.
             var act = () => harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws AppException and exception.ErrorCode is expectedCode.
             var exception = await act.Should().ThrowAsync<AppException>();
             exception.Which.ErrorCode.Should().Be(expectedCode);
+            // STEP-05: Verify AddSession is never called and SaveChangesAsync is never called.
             harness.Repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
             harness.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -215,11 +251,15 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithInvalidRequest_ShouldFailValidationFirst()
         {
+            // STEP-01: Create harness through CreateHarness.
             var harness = CreateHarness();
 
+            // STEP-02: Wrap harness.UseCase.ExecuteAsync with an empty GoogleLoginRequestDto in act so its outcome can be asserted.
             var act = () => harness.UseCase.ExecuteAsync(new GoogleLoginRequestDto(), CancellationToken.None);
 
+            // STEP-03: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-04: Verify VerifyIdTokenAsync is never called and BeginTransactionAsync is never called.
             harness.GoogleIdentityService.Verify(x => x.VerifyIdTokenAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
             harness.UnitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -230,19 +270,24 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithRestaurantOwner_ShouldNotRequestSurveyStatus()
         {
+            // STEP-01: Create user through ActiveUser and create harness through CreateHarness.
             var user = ActiveUser("RESTAURANT_OWNER");
             var harness = CreateHarness();
+            // STEP-02: Stub harness.GetUserByExternalLoginAsync.
             harness.Repository.Setup(x => x.GetUserByExternalLoginAsync(
                     ExternalLoginProvider.Google,
                     "google-sub",
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } and keep result.
             var result = await harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert result.User.NeedsPreferenceSurvey is null.
             result.User.NeedsPreferenceSurvey.Should().BeNull();
+            // STEP-05: Verify GetSurveyStatusAsync is never called.
             harness.RecommendationService.Verify(x => x.GetSurveyStatusAsync(
                 It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -252,8 +297,10 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WhenSurveyStatusIsUnavailable_ShouldReturnNullSurveyFlag()
         {
+            // STEP-01: Create user through ActiveUser and create harness through CreateHarness.
             var user = ActiveUser();
             var harness = CreateHarness();
+            // STEP-02: Stub harness.GetUserByExternalLoginAsync and harness.GetSurveyStatusAsync.
             harness.Repository.Setup(x => x.GetUserByExternalLoginAsync(
                     ExternalLoginProvider.Google,
                     "google-sub",
@@ -264,10 +311,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync((SurveyStatus?)null);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value } and keep result.
             var result = await harness.UseCase.ExecuteAsync(
                 new GoogleLoginRequestDto { IdToken = "signed-token" },
                 CancellationToken.None);
 
+            // STEP-04: Assert result.User.NeedsPreferenceSurvey is null.
             result.User.NeedsPreferenceSurvey.Should().BeNull();
         }
 
@@ -276,10 +325,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
         [Fact]
         public async Task ExecuteAsync_WithOversizedGoogleName_ShouldTruncateDisplayName()
         {
+            // STEP-01: Create harness through CreateHarness.
             var harness = CreateHarness(new GoogleIdentity(
                 "google-sub",
                 "user@angi.test",
                 new string('N', 101)));
+            // STEP-02: Declare addedUser to capture a call argument; stub harness.GetRoleByCodeAsync, harness.ReserveUserIdAsync and harness.AddUser.
             harness.Repository.Setup(x => x.GetRoleByCodeAsync("TRAVELER", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TravelerRole());
             harness.Repository.Setup(x => x.ReserveUserIdAsync(It.IsAny<CancellationToken>()))
@@ -288,12 +339,14 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.GoogleLogin
             harness.Repository.Setup(x => x.AddUser(It.IsAny<User>()))
                 .Callback<User>(user => addedUser = user);
 
+            // STEP-03: Run harness.UseCase.ExecuteAsync with GoogleLoginRequestDto { IdToken = a test value, Role = "TRAVELER" }.
             await harness.UseCase.ExecuteAsync(new GoogleLoginRequestDto
             {
                 IdToken = "signed-token",
                 Role = "TRAVELER"
             }, CancellationToken.None);
 
+            // STEP-04: Assert addedUser.DisplayName has length 100.
             addedUser!.DisplayName.Should().HaveLength(100);
         }
 

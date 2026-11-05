@@ -16,14 +16,18 @@ public sealed class AgentProposalCommitterTests
     [Fact]
     public void EnqueueImpressions_GroupsDistinctDishesByRequestAndSkipsFallback()
     {
+        // STEP-01: Create request through Guid.NewGuid.
         var request = Guid.NewGuid();
+        // STEP-02: Create events as List<OutboxMessage>; mock IAgentRepository; stub repository.AddOutboxMessage.
         var repository = new Mock<IAgentRepository>();
         var events = new List<OutboxMessage>();
         repository.Setup(x => x.AddOutboxMessage(It.IsAny<OutboxMessage>())).Callback<OutboxMessage>(events.Add);
+        // STEP-03: Get snapshot from AgentTestData.Snapshot and call AgentProposalCommitter.EnqueueImpressions.
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { RequestId = request },
             AgentTestData.Item() with { ItemKey = "second", RequestId = request },
             AgentTestData.Item() with { ItemKey = "fallback", DishId = 2, RequestId = null });
         AgentProposalCommitter.EnqueueImpressions(repository.Object, snapshot, 9, 3, DateTime.UtcNow);
+        // STEP-04: Read payload from the response; assert events has exactly one matching item, message.EventType is AgentImpressionRecorded and 2 more.
         var message = events.Should().ContainSingle().Subject;
         message.EventType.Should().Be(OutboxEventType.AgentImpressionRecorded);
         using var payload = JsonDocument.Parse(message.Payload);

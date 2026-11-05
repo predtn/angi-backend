@@ -20,14 +20,19 @@ public sealed class GetRoadmapItemDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOwnedItemAndNoReview_ShouldReturnCompleteRateableDetail()
     {
+        // STEP-01: Create item through CreateItem, get roadmapRepository from RoadmapRepositoryReturning and get restaurantRepository from RestaurantRepositoryReturning.
         var item = CreateItem();
         var roadmapRepository = RoadmapRepositoryReturning(item, FeedbackValue.Like);
         var restaurantRepository = RestaurantRepositoryReturning(null);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(roadmapRepository.Object, restaurantRepository.Object, userId: 12);
+        // STEP-03: Create cancellation as CancellationTokenSource.
         using var cancellation = new CancellationTokenSource();
 
+        // STEP-04: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(88, 1502, cancellation.Token);
 
+        // STEP-05: Assert result is equivalent to the expected value, result.Dish.Id is 105, result.Dish.Status is "hidden", result.Dish.Rank is null and 6 more.
         result.Should().BeEquivalentTo(new
         {
             Id = 1502L,
@@ -51,11 +56,13 @@ public sealed class GetRoadmapItemDetailUseCaseTests
         result.Dish.Restaurant.IsOpenNow.Should().BeTrue();
         result.Restaurant.BusinessHours.Should().ContainSingle();
         result.Restaurant.MyReview.Should().BeNull();
+        // STEP-06: Verify GetOwnedItemDetailAsync is called once and GetFeedbackByItemIdsAsync is called once.
         roadmapRepository.Verify(repository => repository.GetOwnedItemDetailAsync(
             88, 1502, 12, cancellation.Token), Times.Once);
         roadmapRepository.Verify(repository => repository.GetFeedbackByItemIdsAsync(
             12, It.Is<IReadOnlyCollection<long>>(ids => ids.SequenceEqual(new long[] { 1502 })), cancellation.Token),
             Times.Once);
+        // STEP-07: Verify GetTravelerReviewForRestaurantAsync is called once.
         restaurantRepository.Verify(repository => repository.GetTravelerReviewForRestaurantAsync(
             7, 12, cancellation.Token), Times.Once);
     }
@@ -65,14 +72,18 @@ public sealed class GetRoadmapItemDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithHiddenOwnReview_ShouldReturnReviewAndDisableRating()
     {
+        // STEP-01: Create item through CreateItem, create review through CreateReview, get roadmapRepository from RoadmapRepositoryReturning and 1 more.
         var item = CreateItem();
         var review = CreateReview(item.Dish.Restaurant, ContentStatus.Hidden);
         var roadmapRepository = RoadmapRepositoryReturning(item, feedback: null);
         var restaurantRepository = RestaurantRepositoryReturning(review);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(roadmapRepository.Object, restaurantRepository.Object, userId: 12);
 
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(88, 1502, CancellationToken.None);
 
+        // STEP-04: Assert result.CanRate is false, result.MyReview is not null, result.MyReview.Status is "hidden" and 4 more.
         result.CanRate.Should().BeFalse();
         result.MyReview.Should().NotBeNull();
         result.MyReview!.Status.Should().Be("hidden");
@@ -86,13 +97,19 @@ public sealed class GetRoadmapItemDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutOwnedMatchingItem_ShouldThrowRoadmapItemNotFound()
     {
+        // STEP-01: Get roadmapRepository from RoadmapRepositoryReturning.
         var roadmapRepository = RoadmapRepositoryReturning(null, feedback: null);
+        // STEP-02: Mock IRestaurantRepository.
         var restaurantRepository = new Mock<IRestaurantRepository>();
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(roadmapRepository.Object, restaurantRepository.Object, userId: 12);
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(88, 999, CancellationToken.None);
 
+        // STEP-05: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_ITEM_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_ITEM_NOT_FOUND");
+        // STEP-06: Verify GetFeedbackByItemIdsAsync is never called and restaurantRepository receives no other calls.
         roadmapRepository.Verify(repository => repository.GetFeedbackByItemIdsAsync(
             It.IsAny<int>(), It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()), Times.Never);
         restaurantRepository.VerifyNoOtherCalls();
@@ -103,13 +120,18 @@ public sealed class GetRoadmapItemDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IRoadmapRepository and IRestaurantRepository.
         var roadmapRepository = new Mock<IRoadmapRepository>();
         var restaurantRepository = new Mock<IRestaurantRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(roadmapRepository.Object, restaurantRepository.Object, userId: null);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(88, 1502, CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify roadmapRepository receives no other calls and restaurantRepository receives no other calls.
         roadmapRepository.VerifyNoOtherCalls();
         restaurantRepository.VerifyNoOtherCalls();
     }

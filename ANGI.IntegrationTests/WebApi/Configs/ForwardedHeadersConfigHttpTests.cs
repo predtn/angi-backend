@@ -17,12 +17,15 @@ public sealed class ForwardedHeadersConfigHttpTests
     [Fact]
     public async Task Enabled_ShouldLimitEachForwardedClientSeparately()
     {
+        // STEP-01: Create the ForwardedHeadersApiFactory under test as factory; create HTTP client client.
         await using var factory = new ForwardedHeadersApiFactory(enabled: true);
         using var client = factory.CreateClient();
 
+        // STEP-02: Get first from StatusesAsync and get second from StatusesAsync.
         var first = await StatusesAsync(client, "203.0.113.1", 3);
         var second = await StatusesAsync(client, "203.0.113.2", 1);
 
+        // STEP-03: Assert first.Take() does not contain HttpStatusCode.TooManyRequests, first[2] is HttpStatusCode.TooManyRequests and 1 more.
         first.Take(2).Should().NotContain(HttpStatusCode.TooManyRequests);
         first[2].Should().Be(HttpStatusCode.TooManyRequests);
         second[0].Should().NotBe(HttpStatusCode.TooManyRequests);
@@ -33,12 +36,15 @@ public sealed class ForwardedHeadersConfigHttpTests
     [Fact]
     public async Task Disabled_ShouldIgnoreForwardedForHeader()
     {
+        // STEP-01: Create the ForwardedHeadersApiFactory under test as factory; create HTTP client client.
         await using var factory = new ForwardedHeadersApiFactory(enabled: false);
         using var client = factory.CreateClient();
 
+        // STEP-02: Get first from StatusesAsync and get spoofed from StatusesAsync.
         var first = await StatusesAsync(client, "203.0.113.1", 2);
         var spoofed = await StatusesAsync(client, "203.0.113.99", 1);
 
+        // STEP-03: Assert first does not contain HttpStatusCode.TooManyRequests and spoofed[0] is HttpStatusCode.TooManyRequests.
         first.Should().NotContain(HttpStatusCode.TooManyRequests);
         spoofed[0].Should().Be(HttpStatusCode.TooManyRequests);
     }

@@ -15,14 +15,17 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithMaximumLengths_ShouldBeValid()
     {
+        // STEP-01: Create request through ValidRequest, set request.LegalName to a new string, set request.BusinessLicenseNo to a new string and 2 more.
         var request = ValidRequest();
         request.LegalName = new string('L', 255);
         request.BusinessLicenseNo = new string('B', 50);
         request.TaxCode = new string('T', 20);
         request.OwnerNote = new string('N', 1000);
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert no validation errors are reported.
         result.ShouldNotHaveAnyValidationErrors();
     }
 
@@ -31,12 +34,15 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithoutRequiredLegalFields_ShouldHaveErrors()
     {
+        // STEP-01: Create request through ValidRequest, set request.LegalName to " " and set request.BusinessLicenseNo to string.Empty.
         var request = ValidRequest();
         request.LegalName = " ";
         request.BusinessLicenseNo = string.Empty;
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert a validation error on LegalName and a validation error on BusinessLicenseNo.
         result.ShouldHaveValidationErrorFor(item => item.LegalName);
         result.ShouldHaveValidationErrorFor(item => item.BusinessLicenseNo);
     }
@@ -46,14 +52,17 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithOverMaximumLengths_ShouldHaveErrors()
     {
+        // STEP-01: Create request through ValidRequest, set request.LegalName to a new string, set request.BusinessLicenseNo to a new string and 2 more.
         var request = ValidRequest();
         request.LegalName = new string('L', 256);
         request.BusinessLicenseNo = new string('B', 51);
         request.TaxCode = new string('T', 21);
         request.OwnerNote = new string('N', 1001);
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert a validation error on LegalName, a validation error on BusinessLicenseNo, a validation error on TaxCode and a validation error on OwnerNote.
         result.ShouldHaveValidationErrorFor(item => item.LegalName);
         result.ShouldHaveValidationErrorFor(item => item.BusinessLicenseNo);
         result.ShouldHaveValidationErrorFor(item => item.TaxCode);
@@ -67,11 +76,14 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [InlineData(false)]
     public async Task Validate_WithoutDocuments_ShouldHaveError(bool useNull)
     {
+        // STEP-01: Create request through ValidRequest and set request.Documents to a test value.
         var request = ValidRequest();
         request.Documents = useNull ? null! : Array.Empty<VerificationDocumentRequestDto>();
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert a validation error on Documents.
         result.ShouldHaveValidationErrorFor(item => item.Documents);
     }
 
@@ -80,14 +92,17 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithoutBusinessLicense_ShouldHaveDocumentsError()
     {
+        // STEP-01: Create request through ValidRequest and set request.Documents to a test items.
         var request = ValidRequest();
         request.Documents =
         [
             new VerificationDocumentRequestDto { DocType = "id_card", MediaId = 2 }
         ];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert a validation error on Documents.
         result.ShouldHaveValidationErrorFor(item => item.Documents);
     }
 
@@ -96,14 +111,17 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithInvalidNestedDocument_ShouldHaveIndexedError()
     {
+        // STEP-01: Create request through ValidRequest and set request.Documents to a test items.
         var request = ValidRequest();
         request.Documents =
         [
             new VerificationDocumentRequestDto { DocType = "business_license", MediaId = 0 }
         ];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "Documents[0].MediaId");
     }
 
@@ -112,11 +130,14 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullDocument_ShouldHaveIndexedError()
     {
+        // STEP-01: Create request through ValidRequest and set request.Documents to a test items.
         var request = ValidRequest();
         request.Documents = [null!];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "Documents");
         result.Errors.Should().Contain(error => error.PropertyName == "Documents[0]");
     }
@@ -126,10 +147,13 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullRequiredFields_ShouldReportEachOnce()
     {
+        // STEP-01: Create request as SubmitVerificationRequestDto.
         var request = new SubmitVerificationRequestDto { LegalName = null, BusinessLicenseNo = null, Documents = null };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert result.Errors.Select(filtered) is equivalent to the expected items.
         result.Errors.Select(error => (error.PropertyName, error.ErrorMessage)).Should().BeEquivalentTo(
         [
             ("LegalName", "Tên pháp lý là bắt buộc."),
@@ -143,6 +167,7 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullDocType_ShouldReportRequiredOnce()
     {
+        // STEP-01: Create request through ValidRequest and set request.Documents to a test items.
         var request = ValidRequest();
         request.Documents =
         [
@@ -150,8 +175,10 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
             new VerificationDocumentRequestDto { DocType = null, MediaId = 9002 }
         ];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.TestValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item and result.Errors.ErrorMessage is the expected text.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Documents[1].DocType")
             .Which.ErrorMessage.Should().Be("Loại giấy tờ là bắt buộc.");
     }
@@ -166,8 +193,10 @@ public sealed class SubmitVerificationRequestDtoValidatorTests
     [InlineData(typeof(VerificationDocumentRequestDto), nameof(VerificationDocumentRequestDto.DocType))]
     public void RequiredFields_ShouldBeNullableSoTheValidatorReportsNull(Type dtoType, string propertyName)
     {
+        // STEP-01: Derive property from dtoType.GetProperty().
         var property = dtoType.GetProperty(propertyName)!;
 
+        // STEP-02: Assert NullabilityInfoContext().Create().WriteState is Reflection.NullabilityState.Nullable.
         new System.Reflection.NullabilityInfoContext().Create(property).WriteState
             .Should().Be(System.Reflection.NullabilityState.Nullable);
     }

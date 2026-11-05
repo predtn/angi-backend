@@ -27,6 +27,7 @@ namespace ANGI.IntegrationTests.WebApi.Filters
         [InlineData("")]
         public async Task Login_WithNullOrEmptyBody_ShouldReportBodyInVietnamese(string body)
         {
+            // STEP-01: Obtain errors through PostAndReadErrors; assert errors is equivalent to a new Dictionary<string, string[]>.
             var errors = await PostAndReadErrors("/api/v1/auth/login", body);
 
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
@@ -40,6 +41,7 @@ namespace ANGI.IntegrationTests.WebApi.Filters
         [Fact]
         public async Task Login_WithNonJsonBody_ShouldReportMalformedBody()
         {
+            // STEP-01: Obtain errors through PostAndReadErrors; assert errors is equivalent to a new Dictionary<string, string[]>.
             var errors = await PostAndReadErrors("/api/v1/auth/login", "not json");
 
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
@@ -53,6 +55,7 @@ namespace ANGI.IntegrationTests.WebApi.Filters
         [Fact]
         public async Task Login_WithTruncatedJson_ShouldUseOnlyVietnameseMessages()
         {
+            // STEP-01: Obtain errors through PostAndReadErrors; assert errors.Values.SelectMany(filtered) only holds items matching the condition.
             var errors = await PostAndReadErrors("/api/v1/auth/login", "{\"email\":");
 
             errors.Values.SelectMany(messages => messages).Should().OnlyContain(message =>
@@ -65,6 +68,7 @@ namespace ANGI.IntegrationTests.WebApi.Filters
         [Fact]
         public async Task Login_WithWrongValueType_ShouldReportTheField()
         {
+            // STEP-01: Obtain errors through PostAndReadErrors; assert errors has key "email" and errors.WhoseValue equals InvalidValueMessage.
             var errors = await PostAndReadErrors("/api/v1/auth/login", "{\"email\":5,\"password\":\"Password1\"}");
 
             errors.Should().ContainKey("email")
@@ -76,6 +80,7 @@ namespace ANGI.IntegrationTests.WebApi.Filters
         [Fact]
         public async Task Login_WithNullFields_ShouldUseValidatorMessages()
         {
+            // STEP-01: Obtain errors through PostAndReadErrors; assert errors is equivalent to a new Dictionary<string, string[]>.
             var errors = await PostAndReadErrors("/api/v1/auth/login", "{\"email\":null,\"password\":null}");
 
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>

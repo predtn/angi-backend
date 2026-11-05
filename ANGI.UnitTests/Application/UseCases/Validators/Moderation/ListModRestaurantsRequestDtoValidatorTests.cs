@@ -20,6 +20,7 @@ public sealed class ListModRestaurantsRequestDtoValidatorTests
     [InlineData(1, -1, false)]
     [InlineData(1, 101, false)]
     public void ValidatesPagination(int page, int size, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new ListModRestaurantsRequestDtoValidator().Validate(new ListModRestaurantsRequestDto { Page = page, PageSize = size }).IsValid.Should().Be(valid);
 
     // TEST-02: Accept every documented filter string and reject empty, numeric and wrong-case values.
@@ -40,8 +41,10 @@ public sealed class ListModRestaurantsRequestDtoValidatorTests
     [InlineData("ModerationStatus", "", false)]
     public void ValidatesEnumFilters(string field, string value, bool valid)
     {
+        // STEP-01: Create request as ListModRestaurantsRequestDto and call GetProperty().SetValue.
         var request = new ListModRestaurantsRequestDto();
         typeof(ListModRestaurantsRequestDto).GetProperty(field)!.SetValue(request, value);
+        // STEP-02: Assert the validator.Validate().IsValid is valid.
         new ListModRestaurantsRequestDtoValidator().Validate(request).IsValid.Should().Be(valid);
     }
 }

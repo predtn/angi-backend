@@ -25,18 +25,23 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Approve_ShouldPersistAtomicMenuReplacement()
     {
+        // STEP-01: Create seed through SeedAsync, get client from ClientAsync and get baseline from OutboxCountAsync.
         var seed = await SeedAsync();
         using var client = await ClientAsync(seed.Mod);
         var baseline = await OutboxCountAsync();
+        // STEP-02: Send POST {Root}/{seed.Submission}/approve with a body of reviewNote and keep response.
         using var response = await client.PostAsJsonAsync($"{Root}/{seed.Submission}/approve", new { reviewNote = "Approved menu" });
+        // STEP-03: Obtain result through DataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await DataAsync<ApproveMenuSubmissionResponseDto>(response);
+        // STEP-04: Assert result.Status is "approved", result.ReviewedBy.Id is seed.Mod, result.ReviewedAt is not null and 3 more.
         result.Status.Should().Be("approved");
         result.ReviewedBy!.Id.Should().Be(seed.Mod);
         result.ReviewedAt.Should().NotBeNull();
         result.CreatedDishIds.Should().ContainSingle();
         result.UpdatedDishIds.Should().BeEquivalentTo(new[] { seed.Edited, seed.PriceOnly });
         result.RemovedDishIds.Should().BeEquivalentTo(new[] { seed.Removed, seed.HiddenRemoved });
+        // STEP-05: Assert in the database edited.Name is "Edited dish", edited.IsAvailable is false, edited.LikeCount is 12, edited.DislikeCount is 3 and 18 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var dishes = await db.Dishes.Include(x => x.DishTags).Where(x => x.RestaurantId == seed.Restaurant).ToListAsync();
@@ -77,7 +82,9 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
                 (OutboxEventType.DishDeactivated, $"dish:{seed.Removed}")
             });
         });
+        // STEP-06: Send POST {Root}/{seed.Submission}/approve with a body of and keep repeated.
         using var repeated = await client.PostAsJsonAsync($"{Root}/{seed.Submission}/approve", new { });
+        // STEP-07: Assert ErrorAsync confirms SUBMISSION_NOT_PENDING and OutboxCountAsync() is baseline + 3.
         await ErrorAsync(repeated, HttpStatusCode.Conflict, "SUBMISSION_NOT_PENDING");
         (await OutboxCountAsync()).Should().Be(baseline + 3);
     }
@@ -87,18 +94,24 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Reject_ShouldPreserveMenu()
     {
+        // STEP-01: Create seed through SeedAsync, get client from ClientAsync, get before from MenuSnapshotAsync and get baseline from OutboxCountAsync.
         var seed = await SeedAsync();
         using var client = await ClientAsync(seed.Mod);
         var before = await MenuSnapshotAsync(seed.Restaurant);
         var baseline = await OutboxCountAsync();
+        // STEP-02: Send POST {Root}/{seed.Submission}/reject with a body of reviewNote and keep response.
         using var response = await client.PostAsJsonAsync($"{Root}/{seed.Submission}/reject", new { reviewNote = "Please fix descriptions" });
+        // STEP-03: Obtain result through DataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await DataAsync<MenuSubmissionDto>(response);
+        // STEP-04: Assert result.Status is "rejected", result.ReviewNote is "Please fix descriptions" and result.ReviewedBy.Id is seed.Mod.
         result.Status.Should().Be("rejected");
         result.ReviewNote.Should().Be("Please fix descriptions");
         result.ReviewedBy!.Id.Should().Be(seed.Mod);
+        // STEP-05: Assert MenuSnapshotAsync() is before and OutboxCountAsync() is baseline.
         (await MenuSnapshotAsync(seed.Restaurant)).Should().Be(before);
         (await OutboxCountAsync()).Should().Be(baseline);
+        // STEP-06: Assert in the database Where(filtered).ToListAsync() only holds items matching the condition and 3 more.
         await factory.ExecuteDbAsync(async db =>
         {
             (await db.MenuSubmissionItems.Where(x => x.SubmissionId == seed.Submission).ToListAsync())
@@ -114,11 +127,15 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Detail_ShouldReturnDocumentedDiff()
     {
+        // STEP-01: Create seed through SeedAsync and get client from ClientAsync.
         var seed = await SeedAsync();
         using var client = await ClientAsync(seed.Mod);
+        // STEP-02: Send GET {Root}/{seed.Submission} and keep response.
         using var response = await client.GetAsync($"{Root}/{seed.Submission}");
+        // STEP-03: Obtain detail through DataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var detail = await DataAsync<ModMenuSubmissionDetailDto>(response);
+        // STEP-04: Assert detail.Restaurant.Id is seed.Restaurant, detail.Items.Count(filtered) is 1, detail.Items.Count(filtered) is 2 and 6 more.
         detail.Restaurant.Id.Should().Be(seed.Restaurant);
         detail.Items.Count(x => x.Change == "new").Should().Be(1);
         detail.Items.Count(x => x.Change == "edited").Should().Be(2);
@@ -129,6 +146,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
         detail.Items.Where(x => x.Change != "edited").Should().OnlyContain(x => x.Before == null);
         detail.RemovedDishes.Select(x => x.Id).Should().BeEquivalentTo(new[] { seed.Removed, seed.HiddenRemoved });
         detail.Items.Select(x => x.SortOrder).Should().BeInAscendingOrder();
+        // STEP-05: Read json from the response; assert json.RootElement.data.TryGetProperty() is false.
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         json.RootElement.GetProperty("data").TryGetProperty("submission", out _).Should().BeFalse();
     }
@@ -138,6 +156,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task List_ShouldFilterAndPaginate()
     {
+        // STEP-01: Create seed through SeedAsync, get client from ClientAsync and seed or update rows directly in the test database.
         var seed = await SeedAsync();
         using var client = await ClientAsync(seed.Mod);
         await factory.ExecuteDbAsync(async db =>
@@ -146,13 +165,17 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
                 db.MenuSubmissions.Add(new MenuSubmission { RestaurantId = seed.Restaurant, CreatedBy = seed.Owner, Status = status });
             await db.SaveChangesAsync();
         });
+        // STEP-02: Send GET Root and keep response.
         using var response = await client.GetAsync(Root);
+        // STEP-03: Obtain page through DataAsync; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var page = await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(response);
+        // STEP-04: Assert page.TotalItems is 1, page.Page is 1, page.PageSize is 20, page.Items has exactly one matching item and 1 more.
         page.TotalItems.Should().Be(1);
         page.Page.Should().Be(1);
         page.PageSize.Should().Be(20);
         page.Items.Should().ContainSingle().Which.Should().BeEquivalentTo(new { NewCount = 1, EditedCount = 2, RemovedCount = 2 });
+        // STEP-05: Assert for each status, DataAsync succeeds, selected.TotalItems is 1 and selected.Items has exactly one matching item.
         foreach (var status in new[] { "approved", "rejected" })
         {
             using var filtered = await client.GetAsync($"{Root}?status={status}&restaurantId={seed.Restaurant}&pageSize=1");
@@ -160,19 +183,30 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
             selected.TotalItems.Should().Be(1);
             selected.Items.Should().ContainSingle(x => x.Status == status);
         }
+        // STEP-06: Send GET {Root}?restaurantId=999999 and keep missingRestaurant.
         using var missingRestaurant = await client.GetAsync($"{Root}?restaurantId=999999");
+        // STEP-07: Assert DataAsync succeeds and DataAsync().TotalItems is 0.
         (await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(missingRestaurant)).TotalItems.Should().Be(0);
+        // STEP-08: Send GET {Root}?page=2&pageSize=1 and keep beyond.
         using var beyond = await client.GetAsync($"{Root}?page=2&pageSize=1");
+        // STEP-09: Obtain empty through DataAsync; assert empty.Items is empty and empty.TotalPages is 1.
         var empty = await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(beyond);
         empty.Items.Should().BeEmpty();
         empty.TotalPages.Should().Be(1);
+        // STEP-10: Seed or update rows directly in the test database.
         await factory.ExecuteDbAsync(async db =>
             await db.Restaurants.Where(x => x.Id == seed.Restaurant).ExecuteUpdateAsync(x => x.SetProperty(r => r.DeletedAt, DateTime.UtcNow)));
+        // STEP-11: Send GET Root and keep deleted.
         using var deleted = await client.GetAsync(Root);
+        // STEP-12: Assert DataAsync succeeds and DataAsync().TotalItems is 0.
         (await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(deleted)).TotalItems.Should().Be(0);
+        // STEP-13: Send GET {Root}/{seed.Submission} and keep detail.
         using var detail = await client.GetAsync($"{Root}/{seed.Submission}");
+        // STEP-14: Assert ErrorAsync confirms SUBMISSION_NOT_FOUND.
         await ErrorAsync(detail, HttpStatusCode.NotFound, "SUBMISSION_NOT_FOUND");
+        // STEP-15: Send POST {Root}/{seed.Submission}/approve with a body of and keep approve.
         using var approve = await client.PostAsJsonAsync($"{Root}/{seed.Submission}/approve", new { });
+        // STEP-16: Assert ErrorAsync confirms SUBMISSION_NOT_FOUND.
         await ErrorAsync(approve, HttpStatusCode.NotFound, "SUBMISSION_NOT_FOUND");
     }
 
@@ -181,6 +215,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Permissions_ShouldUseDatabaseState()
     {
+        // STEP-01: Create seed through SeedAsync, get mod from ClientAsync and seed or update rows directly in the test database.
         var seed = await SeedAsync();
         using var mod = await ClientAsync(seed.Mod);
         await factory.ExecuteDbAsync(async db =>
@@ -189,32 +224,43 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
             db.UserPermissions.Add(new UserPermission { UserId = seed.Mod, PermissionId = permission.Id, Effect = PermissionEffect.Deny });
             await db.SaveChangesAsync();
         });
+        // STEP-02: Assert for each path, ErrorAsync confirms FORBIDDEN and for each decision, ErrorAsync confirms FORBIDDEN.
         foreach (var path in new[] { Root, $"{Root}/{seed.Submission}" })
             await ErrorAsync(await mod.GetAsync(path), HttpStatusCode.Forbidden, "FORBIDDEN");
         foreach (var decision in new[] { "approve", "reject" })
             await ErrorAsync(await mod.PostAsJsonAsync($"{Root}/{seed.Submission}/{decision}", new { reviewNote = "Reason" }), HttpStatusCode.Forbidden, "FORBIDDEN");
 
+        // STEP-03: Seed or update rows directly in the test database.
         await factory.ExecuteDbAsync(async db =>
         {
             var permission = await db.Permissions.SingleAsync(x => x.Code == "MENU_APPROVE");
             await db.RolePermissions.Where(x => x.RoleId == 3 && x.PermissionId == permission.Id).ExecuteDeleteAsync();
             await db.UserPermissions.Where(x => x.UserId == seed.Mod).ExecuteDeleteAsync();
         });
+        // STEP-04: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.GetAsync(Root), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-05: Seed or update rows directly in the test database.
         await factory.ExecuteDbAsync(async db =>
         {
             var permission = await db.Permissions.SingleAsync(x => x.Code == "MENU_APPROVE");
             db.UserPermissions.Add(new UserPermission { UserId = seed.Mod, PermissionId = permission.Id, Effect = PermissionEffect.Allow });
             await db.SaveChangesAsync();
         });
+        // STEP-06: Assert mod.GetAsync().StatusCode is HttpStatusCode.OK.
         (await mod.GetAsync(Root)).StatusCode.Should().Be(HttpStatusCode.OK);
+        // STEP-07: Get admin from ClientAsync.
         using var admin = await ClientAsync(seed.Admin);
+        // STEP-08: Assert admin.GetAsync().StatusCode is HttpStatusCode.OK.
         (await admin.GetAsync(Root)).StatusCode.Should().Be(HttpStatusCode.OK);
+        // STEP-09: Seed or update rows directly in the test database.
         await factory.ExecuteDbAsync(async db =>
             await db.Users.Where(x => x.Id == seed.Mod).ExecuteUpdateAsync(x => x.SetProperty(u => u.RoleId, (short)1)));
+        // STEP-10: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.GetAsync(Root), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-11: Seed or update rows directly in the test database.
         await factory.ExecuteDbAsync(async db =>
             await db.Users.Where(x => x.Id == seed.Admin).ExecuteUpdateAsync(x => x.SetProperty(u => u.RoleId, (short)1)));
+        // STEP-12: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await admin.GetAsync(Root), HttpStatusCode.Forbidden, "FORBIDDEN");
     }
 
@@ -223,10 +269,12 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Errors_ShouldMatchHttpContract()
     {
+        // STEP-01: Create seed through SeedAsync, create anonymous through factory.CreateClient, get owner from ClientAsync and get mod from ClientAsync.
         var seed = await SeedAsync();
         using var anonymous = factory.CreateClient();
         using var owner = await ClientAsync(seed.Owner);
         using var mod = await ClientAsync(seed.Mod);
+        // STEP-02: Assert for each path, ErrorAsync confirms UNAUTHORIZED, ErrorAsync confirms FORBIDDEN, for each decision, ErrorAsync confirms UNAUTHORIZED and 4 more.
         foreach (var path in new[] { Root, $"{Root}/{seed.Submission}" })
         {
             await ErrorAsync(await anonymous.GetAsync(path), HttpStatusCode.Unauthorized, "UNAUTHORIZED");
@@ -246,6 +294,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
         foreach (var query in new[] { "page=0", "pageSize=0", "pageSize=101", "status=draft", "status=cancelled", "restaurantId=0", "page=2147483647&pageSize=100", "page=abc" })
             await ErrorAsync(await mod.GetAsync($"{Root}?{query}"), HttpStatusCode.BadRequest, "VALIDATION_FAILED");
         await ErrorAsync(await mod.GetAsync($"{Root}/-1"), HttpStatusCode.NotFound, "SUBMISSION_NOT_FOUND");
+        // STEP-03: Assert in the database db.Notifications.CountAsync() is 0, db.AuditLogs.CountAsync(filtered) is 0 and 1 more.
         await factory.ExecuteDbAsync(async db =>
         {
             (await db.Notifications.CountAsync()).Should().Be(0);
@@ -259,8 +308,10 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Decisions_NonPending_ShouldConflict()
     {
+        // STEP-01: Create seed through SeedAsync and get mod from ClientAsync.
         var seed = await SeedAsync();
         using var mod = await ClientAsync(seed.Mod);
+        // STEP-02: Assert in the database for each status, ErrorAsync confirms SUBMISSION_NOT_PENDING.
         foreach (var status in new[] { MenuSubmissionStatus.Draft, MenuSubmissionStatus.Approved, MenuSubmissionStatus.Rejected, MenuSubmissionStatus.Cancelled })
         {
             await factory.ExecuteDbAsync(async db =>
@@ -275,6 +326,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task ConcurrentDecisions_ShouldAllowOneWinner()
     {
+        // STEP-01: Assert in the database for each competitor, outcomes.Count(filtered) is 1, outcomes.Count(filtered) is 1 and 2 more.
         foreach (var competitor in new[] { "approve", "reject", "cancel" })
         {
             var seed = await SeedAsync();
@@ -304,6 +356,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Approve_SaveFailure_ShouldRollBackEverything()
     {
+        // STEP-01: Create seed through SeedAsync, get mod from ClientAsync, get before from MenuSnapshotAsync, get baseline from OutboxCountAsync and 1 more.
         var seed = await SeedAsync();
         using var mod = await ClientAsync(seed.Mod);
         var before = await MenuSnapshotAsync(seed.Restaurant);
@@ -311,10 +364,13 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
         await factory.ExecuteDbAsync(async db =>
             await db.MenuSubmissionItems.Where(x => x.SubmissionId == seed.Submission && x.SourceDishId == null)
                 .ExecuteUpdateAsync(x => x.SetProperty(i => i.TagIds, new short[] { short.MaxValue })));
+        // STEP-02: Send POST {Root}/{seed.Submission}/approve with a body of and keep response.
         using var response = await mod.PostAsJsonAsync($"{Root}/{seed.Submission}/approve", new { });
+        // STEP-03: Assert ErrorAsync confirms INTERNAL_ERROR, MenuSnapshotAsync() is before and OutboxCountAsync() is baseline.
         await ErrorAsync(response, HttpStatusCode.InternalServerError, "INTERNAL_ERROR");
         (await MenuSnapshotAsync(seed.Restaurant)).Should().Be(before);
         (await OutboxCountAsync()).Should().Be(baseline);
+        // STEP-04: Assert in the database submission.Status is MenuSubmissionStatus.Pending, submission.ReviewedBy is null, submission.ReviewedAt is null and 3 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var submission = await db.MenuSubmissions.SingleAsync();
@@ -332,6 +388,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task Decisions_ValidNoteBoundaries_ShouldSucceed()
     {
+        // STEP-01: Assert for each decision, response.StatusCode is HttpStatusCode.OK, DataAsync succeeds and DataAsync().ReviewNote has length 1000.
         foreach (var decision in new[] { "approve", "reject" })
         {
             var seed = await SeedAsync();
@@ -347,6 +404,7 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
     [PostgresEndToEndFact]
     public async Task List_EqualTimestamps_ShouldPaginateStably()
     {
+        // STEP-01: Create seed through SeedAsync, get mod from ClientAsync and get secondId from factory.ExecuteDbAsync.
         var seed = await SeedAsync();
         using var mod = await ClientAsync(seed.Mod);
         var secondId = await factory.ExecuteDbAsync(async db =>
@@ -373,15 +431,20 @@ public sealed class MenuSubmissionsControllerTests(PostgresApiFactory factory) :
             await db.SaveChangesAsync();
             return second.Id;
         });
+        // STEP-02: Send GET {Root}?page=1&pageSize=1 and keep firstPage.
         using var firstPage = await mod.GetAsync($"{Root}?page=1&pageSize=1");
+        // STEP-03: Send GET {Root}?page=2&pageSize=1 and keep secondPage.
         using var secondPage = await mod.GetAsync($"{Root}?page=2&pageSize=1");
+        // STEP-04: Obtain firstResult through DataAsync and secondResult through DataAsync; assert firstResult.TotalItems is 2, firstResult.TotalPages is 2 and 2 more.
         var firstResult = await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(firstPage);
         var secondResult = await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(secondPage);
         firstResult.TotalItems.Should().Be(2);
         firstResult.TotalPages.Should().Be(2);
         firstResult.Items.Single().Id.Should().Be(seed.Submission);
         secondResult.Items.Single().Id.Should().Be(secondId);
+        // STEP-05: Send GET {Root}?restaurantId={seed.Restaurant} and keep filtered.
         using var filtered = await mod.GetAsync($"{Root}?restaurantId={seed.Restaurant}");
+        // STEP-06: Assert DataAsync succeeds and DataAsync().Items has exactly one matching item.
         (await DataAsync<ANGI.Application.Common.Models.Paged<ModMenuSubmissionCardDto>>(filtered))
             .Items.Should().ContainSingle(x => x.Id == seed.Submission);
     }

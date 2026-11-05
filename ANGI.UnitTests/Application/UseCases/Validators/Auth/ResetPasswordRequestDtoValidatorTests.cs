@@ -14,10 +14,13 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData(64)]
         public void Validate_WithBoundaryLengthPassword_ShouldBeValid(int length)
         {
+            // STEP-01: Derive password from "A1" + new string('x', length - 2).
             var password = "A1" + new string('x', length - 2);
 
+            // STEP-02: Validate ValidRequest(password) and keep result.
             var result = Validator().Validate(ValidRequest(password));
 
+            // STEP-03: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
 
@@ -28,10 +31,13 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData(65)]
         public void Validate_WithOutOfRangePasswordLength_ShouldBeInvalid(int length)
         {
+            // STEP-01: Derive password from "A1" + new string('x', length - 2).
             var password = "A1" + new string('x', length - 2);
 
+            // STEP-02: Validate ValidRequest(password) and keep result.
             var result = Validator().Validate(ValidRequest(password));
 
+            // STEP-03: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(ResetPasswordRequestDto.NewPassword));
         }
@@ -44,11 +50,14 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public void Validate_WithMissingToken_ShouldBeInvalid(string? token)
         {
+            // STEP-01: Create request through ValidRequest and set request.Token to token.
             var request = ValidRequest();
             request.Token = token!;
 
+            // STEP-02: Validate request and keep result.
             var result = Validator().Validate(request);
 
+            // STEP-03: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(ResetPasswordRequestDto.Token));
         }
@@ -61,8 +70,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public void Validate_WithMissingPassword_ShouldBeInvalid(string? password)
         {
+            // STEP-01: Validate ValidRequest(password!) and keep result.
             var result = Validator().Validate(ValidRequest(password!));
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(ResetPasswordRequestDto.NewPassword));
         }
@@ -72,8 +83,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithDigitsOnlyPassword_ShouldBeInvalid()
         {
+            // STEP-01: Validate ValidRequest("12345678") and keep result.
             var result = Validator().Validate(ValidRequest("12345678"));
 
+            // STEP-02: Assert result.IsValid is false.
             result.IsValid.Should().BeFalse();
         }
 
@@ -82,8 +95,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithLettersOnlyPassword_ShouldBeInvalid()
         {
+            // STEP-01: Validate ValidRequest("Password") and keep result.
             var result = Validator().Validate(ValidRequest("Password"));
 
+            // STEP-02: Assert result.IsValid is false.
             result.IsValid.Should().BeFalse();
         }
 

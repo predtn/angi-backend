@@ -19,6 +19,7 @@ public sealed class GetMyRoadmapsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidRequest_ShouldReturnOwnedRoadmapPage()
     {
+        // STEP-01: Create expected as Paged<RoadmapSummaryDto>.
         var expected = new Paged<RoadmapSummaryDto>
         {
             Items = [new RoadmapSummaryDto { Id = 88, Title = "Trip" }],
@@ -27,16 +28,21 @@ public sealed class GetMyRoadmapsUseCaseTests
             TotalItems = 11,
             TotalPages = 2
         };
+        // STEP-02: Mock IRoadmapRepository; stub repository.GetByUserAsync.
         var repository = new Mock<IRoadmapRepository>();
         repository.Setup(item => item.GetByUserAsync(12, 2, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, 12);
 
+        // STEP-04: Run useCase.ExecuteAsync with GetMyRoadmapsRequestDto { Page = 2, PageSize = 10 } and keep result.
         var result = await useCase.ExecuteAsync(
             new GetMyRoadmapsRequestDto { Page = 2, PageSize = 10 },
             CancellationToken.None);
 
+        // STEP-05: Assert result is the same instance as expected.
         result.Should().BeSameAs(expected);
+        // STEP-06: Verify GetByUserAsync is called once.
         repository.Verify(item => item.GetByUserAsync(12, 2, 10, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -48,14 +54,19 @@ public sealed class GetMyRoadmapsUseCaseTests
     [InlineData(1, 101)]
     public async Task ExecuteAsync_WithInvalidPagination_ShouldThrowValidationException(int page, int pageSize)
     {
+        // STEP-01: Mock IRoadmapRepository.
         var repository = new Mock<IRoadmapRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, 12);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new GetMyRoadmapsRequestDto { Page = page, PageSize = pageSize },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-05: Verify GetByUserAsync is never called.
         repository.Verify(
             item => item.GetByUserAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -66,12 +77,17 @@ public sealed class GetMyRoadmapsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IRoadmapRepository.
         var repository = new Mock<IRoadmapRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, null);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty GetMyRoadmapsRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(new GetMyRoadmapsRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify GetByUserAsync is never called.
         repository.Verify(
             item => item.GetByUserAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);

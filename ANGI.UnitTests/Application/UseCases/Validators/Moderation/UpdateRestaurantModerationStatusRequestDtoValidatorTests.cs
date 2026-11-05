@@ -18,7 +18,9 @@ public sealed class UpdateRestaurantModerationStatusRequestDtoValidatorTests
     [InlineData("suspended", 1000)]
     public void AcceptsValidBoundaries(string status, int length)
     {
+        // STEP-01: Create request as UpdateRestaurantModerationStatusRequestDto.
         var request = new UpdateRestaurantModerationStatusRequestDto { ModerationStatus = status, Reason = new string('a', length) };
+        // STEP-02: Assert the validator.Validate().IsValid is true.
         new UpdateRestaurantModerationStatusRequestDtoValidator().Validate(request).IsValid.Should().BeTrue();
     }
 
@@ -33,7 +35,9 @@ public sealed class UpdateRestaurantModerationStatusRequestDtoValidatorTests
     [InlineData(null)]
     public void RejectsInvalidStatuses(string? status)
     {
+        // STEP-01: Create request as UpdateRestaurantModerationStatusRequestDto.
         var request = new UpdateRestaurantModerationStatusRequestDto { ModerationStatus = status!, Reason = "reason" };
+        // STEP-02: Assert the validator.Validate().Errors has exactly one matching item.
         new UpdateRestaurantModerationStatusRequestDtoValidator().Validate(request).Errors.Should().ContainSingle(x => x.PropertyName == "ModerationStatus");
     }
 
@@ -46,7 +50,9 @@ public sealed class UpdateRestaurantModerationStatusRequestDtoValidatorTests
     [InlineData("too-long")]
     public void RejectsInvalidReasons(string? reason)
     {
+        // STEP-01: Create request as UpdateRestaurantModerationStatusRequestDto.
         var request = new UpdateRestaurantModerationStatusRequestDto { ModerationStatus = "visible", Reason = reason == "too-long" ? new string('a', 1001) : reason! };
+        // STEP-02: Assert the validator.Validate().Errors has exactly one matching item.
         new UpdateRestaurantModerationStatusRequestDtoValidator().Validate(request).Errors.Should().ContainSingle(x => x.PropertyName == "Reason");
     }
 }

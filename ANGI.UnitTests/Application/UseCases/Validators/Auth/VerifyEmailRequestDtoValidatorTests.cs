@@ -12,9 +12,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithToken_ShouldBeValid()
         {
+            // STEP-01: Validate VerifyEmailRequestDto { Token = a test value } and keep result.
             var result = new VerifyEmailRequestDtoValidator().Validate(
                 new VerifyEmailRequestDto { Token = "opaque-token" });
 
+            // STEP-02: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
 
@@ -23,8 +25,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithEmptyToken_ShouldBeInvalid()
         {
+            // STEP-01: Validate an empty VerifyEmailRequestDto and keep result.
             var result = new VerifyEmailRequestDtoValidator().Validate(new VerifyEmailRequestDto());
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(VerifyEmailRequestDto.Token));
         }
@@ -37,9 +41,11 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public void Validate_WithMissingToken_ShouldBeInvalid(string? token)
         {
+            // STEP-01: Validate VerifyEmailRequestDto { Token = token } and keep result.
             var result = new VerifyEmailRequestDtoValidator().Validate(
                 new VerifyEmailRequestDto { Token = token! });
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(VerifyEmailRequestDto.Token));
         }

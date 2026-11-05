@@ -17,8 +17,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task Lookup_EscapesWildcardsAndSeparatesUnavailableFromMissing()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database matches has exactly one matching item, matches[0].Id is seed.DishId, matches[0].Available is false and 3 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var dish = await db.Dishes.SingleAsync(x => x.Id == seed.DishId);
@@ -43,8 +45,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task CandidateLimit_ComesAfterAllAgentTagsAndMealCompatibility()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database candidates equals correct.Id and named equals correct.Id.
         await factory.ExecuteDbAsync(async db =>
         {
             var first = new Tag { Code = "agent_one", Name = "One", TagType = TagType.Category };
@@ -71,8 +75,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task Provinces_ComeFromPublicRestaurantsAndNearestWins()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database repository.GetProvincesAsync() equals province, repository.NearestProvinceAsync() is province and 2 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var repository = new AgentCatalogRepository(db);

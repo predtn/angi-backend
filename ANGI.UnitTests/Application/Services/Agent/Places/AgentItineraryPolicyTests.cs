@@ -16,8 +16,10 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngay 1 o Hoan Kiem. ngay 2 di Lang Bac. ngay 3 den Hoang Mai", "Hoan Kiem", "Lang Bac", "Hoang Mai")]
     public void Stops_ReportedItineraries_ReadsOnePlacePerDay(string content, string first, string second, string third)
     {
+        // STEP-01: Get stops from AgentItineraryPolicy.Stops.
         var stops = AgentItineraryPolicy.Stops(content);
 
+        // STEP-02: Assert stops.Select(filtered) equals first, stops.Select(filtered) equals 1 and stops only holds items matching the condition.
         stops.Select(stop => stop.Place).Should().Equal(first, second, third);
         stops.Select(stop => stop.Days.Single()).Should().Equal((short)1, (short)2, (short)3);
         stops.Should().OnlyContain(stop => stop.Explicit);
@@ -31,6 +33,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("Ngày 1 đến ngày 3 ở Ba Đình", new short[] { 1, 2, 3 })]
     [InlineData("ngày 2 tới 4 ở Long Biên", new short[] { 2, 3, 4 })]
     public void Stops_DayRange_ExpandsToEveryDay(string content, short[] days) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops().Single().Days equals days.
         AgentItineraryPolicy.Stops(content).Single().Days.Should().Equal(days);
 
     // TEST-03: Food, taste, meals, budgets, dates, restaurants and day 0 or 31 are not stops; these are the wordings the normal planning flow must keep reading.
@@ -39,6 +42,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngày 1 ăn hải sản")][InlineData("ngày 2 chỉ đồ uống")][InlineData("ngày 3 theo bạn quyết định")][InlineData("ngày 1 cay nhẹ")]
     [InlineData("bữa tối ngày 1 ở Hoàn Kiếm")][InlineData("3 ngày 1 triệu")][InlineData("500k 1 ngày 2 bữa")][InlineData("ngày 15/11 ở Hà Nội")]
     [InlineData("ngày 1 ở quán Phở Thìn")][InlineData("ngày 0 ở Cầu Giấy")][InlineData("ngày 101 ở Cầu Giấy")][InlineData("lập lịch cho tôi")]
+    // STEP-01: Assert AgentItineraryPolicy.Stops() is empty.
     public void Stops_FoodBudgetOrDate_IsNotAPlace(string content) => AgentItineraryPolicy.Stops(content).Should().BeEmpty();
 
     // TEST-04: Words after the place are dropped; covers food, a closing word, money and a district written with its prefix.
@@ -50,6 +54,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("Ngày 1 tôi ở quận Hoàn Kiếm", "Hoàn Kiếm")]
     [InlineData("Ngày 1 gần phố Huế", "phố Huế")]
     public void Stops_TextAroundPlace_KeepsOnlyThePlace(string content, string place) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops().Single().Place is place.
         AgentItineraryPolicy.Stops(content).Single().Place.Should().Be(place);
 
     // TEST-05: Only a going word, a colon or a list marks a stop as meant to be a place; a bare single name is not explicit.
@@ -60,6 +65,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngày 1 tôi đi Cầu Giấy", true)]
     [InlineData("ngày 1 Cầu Giấy, ngày 2 Tây Hồ", true)]
     public void Stops_ExplicitOnlyWithGoingWordColonOrList(string content, bool expected) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops()[0].Explicit is expected.
         AgentItineraryPolicy.Stops(content)[0].Explicit.Should().Be(expected);
 
     // TEST-06: One area for the whole trip; covers an "ở" phrase, money after it, a bare answer only when asked, and vague, restaurant or too long replies.
@@ -75,6 +81,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ăn ở quán phở", false, null)]
     [InlineData("mình muốn hỏi thêm một vài điều nữa về chuyến đi", true, null)]
     public void TripArea_ReadsOnlyARealArea(string content, bool asked, string? expected) =>
+        // STEP-01: Assert AgentItineraryPolicy.TripArea() is expected.
         AgentItineraryPolicy.TripArea(content, asked).Should().Be(expected);
 
     // TEST-07: A new itinerary keeps other days, replaces restated days, clears days set to the whole province and grows the trip only when it must.
@@ -82,10 +89,12 @@ public sealed class AgentItineraryPolicyTests
     [Fact]
     public void Apply_MergesDaysAndGrowsTripOnlyWhenNeeded()
     {
+        // STEP-01: Create state as AgentState and get applied from AgentItineraryPolicy.Apply.
         var state = new AgentState { Province = "Hà Nội", NumDays = 4, DayAreas = [Area(1, "A"), Area(2, "B"), Area(3, "C")] };
 
         var applied = AgentItineraryPolicy.Apply(state, new("Hà Nội", [Area(2, "Mới")], null, [3], [], 3));
 
+        // STEP-02: Assert applied.DayAreas.Select(filtered) equals ((short)1, "A"), applied.NumDays is 4 and AgentItineraryPolicy.Apply() matches the condition.
         applied.DayAreas!.Select(area => (area.DayNumber, area.Label)).Should().Equal(((short)1, "A"), ((short)2, "Mới"));
         applied.NumDays.Should().Be(4);
         AgentItineraryPolicy.Apply(new AgentState(), new("Hà Nội", [Area(3, "X")], null, [], [], 3)).Should().Match<AgentState>(x => x.NumDays == 3 && x.Province == "Hà Nội");
@@ -96,8 +105,10 @@ public sealed class AgentItineraryPolicyTests
     [Fact]
     public void Apply_MovedDay_DropsItsWidenedMeals()
     {
+        // STEP-01: Create state as AgentState.
         var state = new AgentState { Province = "Hà Nội", NumDays = 2, WidenedMeals = [new(1, "lunch", 8m), new(2, "lunch", 8m)] };
 
+        // STEP-02: Assert AgentItineraryPolicy.Apply().WidenedMeals equals a new AgentWidenedMeal and AgentItineraryPolicy.Apply().WidenedMeals is null.
         AgentItineraryPolicy.Apply(state, new("Hà Nội", [Area(1, "Mới")], null, [], [], 0)).WidenedMeals.Should().Equal(new AgentWidenedMeal(2, "lunch", 8m));
         AgentItineraryPolicy.Apply(state, new("Hà Nội", [], new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m), [], [], 0)).WidenedMeals.Should().BeNull();
     }
@@ -107,8 +118,10 @@ public sealed class AgentItineraryPolicyTests
     [Fact]
     public void Apply_TripArea_BecomesPinnedOrigin()
     {
+        // STEP-01: Get applied from AgentItineraryPolicy.Apply.
         var applied = AgentItineraryPolicy.Apply(new AgentState(), new("Hà Nội", [], new("Hà Nội", "Cầu Giấy", 21.03m, 105.79m, 3m), [], [], 0));
 
+        // STEP-02: Assert applied matches the condition.
         applied.Should().Match<AgentState>(x => x.OriginMode == "pinned" && x.OriginLabel == "Cầu Giấy" && x.OriginLatitude == 21.03m && x.RadiusKm == 3m && x.Province == "Hà Nội" && x.NamedAreaLabel == "Cầu Giấy");
     }
 
@@ -117,10 +130,12 @@ public sealed class AgentItineraryPolicyTests
     [Fact]
     public void Note_StatesEachDayAndWhatCouldNotBeFound()
     {
+        // STEP-01: Create state as AgentState and get note from AgentItineraryPolicy.Note.
         var state = new AgentState { Province = "Hà Nội", NumDays = 4, DayAreas = [Area(1, "Hoàn Kiếm"), Area(3, "Hòa Lạc") with { RadiusKm = 30m }] };
 
         var note = AgentItineraryPolicy.Note(state, new("Hà Nội", state.DayAreas!, null, [], ["Đảo Xa"], 3));
 
+        // STEP-02: Assert note contains the expected text, AgentItineraryPolicy.Note() is the expected text and AgentItineraryPolicy.Note() is null.
         note.Should().Contain("ngày 1 quanh Hoàn Kiếm").And.Contain("ngày 3 quanh Hòa Lạc (quanh đó còn ít quán").And.Contain("30 km")
             .And.Contain("“Đảo Xa”").And.Contain("toàn Hà Nội").And.Contain("Những ngày còn lại trong 4 ngày");
         AgentItineraryPolicy.Note(new AgentState(), new(null, [], null, [], ["Đảo Xa"], 0)).Should().Be("Mình chưa tìm được quán quanh “Đảo Xa”.");
@@ -133,8 +148,10 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("hoàn kiếm", true)][InlineData("HOAN KIEM", true)][InlineData("Cầu Giấy", true)][InlineData("Phở Thìn", false)]
     public void IsKnownPlace_MatchesDayAndOriginLabels(string name, bool expected)
     {
+        // STEP-01: Create state as AgentState.
         var state = new AgentState { DayAreas = [Area(1, "Hoàn Kiếm")], OriginLabel = "Cầu Giấy" };
 
+        // STEP-02: Assert AgentItineraryPolicy.IsKnownPlace() is expected.
         AgentItineraryPolicy.IsKnownPlace(state, name).Should().Be(expected);
     }
 
@@ -159,8 +176,10 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("xin chào", null, false)]
     public void BareArea_OnlyWhenTheMessageJustNamesAPlace(string content, string? name, bool searchable)
     {
+        // STEP-01: Get area from AgentItineraryPolicy.BareArea.
         var area = AgentItineraryPolicy.BareArea(content);
 
+        // STEP-02: Assert .Name is name, depending on name is null, area is null and area.Value.Searchable is searchable.
         area?.Name.Should().Be(name);
         if (name is null) area.Should().BeNull();
         else area!.Value.Searchable.Should().Be(searchable);
@@ -185,6 +204,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("không", new short[0])]
     [InlineData("chốt lịch", new short[0])]
     public void AnsweredDays_ReadsOnlyAnAnswer(string content, short[] expected) =>
+        // STEP-01: Assert AgentItineraryPolicy.AnsweredDays() equals expected.
         AgentItineraryPolicy.AnsweredDays(content, 4).Should().Equal(expected);
 
     // TEST-14: A day can be moved with the change verb before or after it; a dish name in the same wording stays out because only explicit stops may use the map.
@@ -194,6 +214,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngày 2 đổi sang Cầu Giấy", "Cầu Giấy")]
     [InlineData("ngày 2 chuyển sang khu Tây Hồ", "Tây Hồ")]
     public void Stops_ChangeWording_ReadsThePlace(string content, string place) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops().Single().Place is place.
         AgentItineraryPolicy.Stops(content).Single().Place.Should().Be(place);
 
     // TEST-15: The change verb alone never allows a map search for the place.
@@ -202,6 +223,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngày 2 đổi sang bún chả", false)]
     [InlineData("ngày 2 đổi sang khu Tây Hồ", true)]
     public void Stops_ChangeWording_ExplicitOnlyWithPlaceWord(string content, bool expected) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops().Single().Explicit is expected.
         AgentItineraryPolicy.Stops(content).Single().Explicit.Should().Be(expected);
 
     // TEST-16: With accents the words after a place are matched on accented text, so names ending in a look-alike stay whole; without accents the old matching applies.
@@ -213,6 +235,7 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("Ngày 1 đi Hồ Gươm ở Hoàn Kiếm", "Hồ Gươm")]
     [InlineData("ngay 1 o hoan kiem an pho", "hoan kiem")]
     public void Stops_NameEndingLikeAFiller_StaysWhole(string content, string place) =>
+        // STEP-01: Assert AgentItineraryPolicy.Stops().Single().Place is place.
         AgentItineraryPolicy.Stops(content).Single().Place.Should().Be(place);
 
     // TEST-17: A complaint names its day and the right place; covers both messages of conversation 121, a bare complaint, one with no day, and a day found by its label.
@@ -226,8 +249,10 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("nhầm rồi, phải là Cầu Giấy", new short[0], "Cầu Giấy")]
     public void Correction_ReadsDayAndRightPlace(string content, short[] days, string? place)
     {
+        // STEP-01: Derive correction from AgentItineraryPolicy.Correction().
         var correction = AgentItineraryPolicy.Correction(content, new AgentState { NumDays = 3, DayAreas = [Area(1, "Hồ Gươm")] })!;
 
+        // STEP-02: Assert correction.Days equals days and correction.Place is place.
         correction.Days.Should().Equal(days);
         correction.Place.Should().Be(place);
     }
@@ -243,8 +268,10 @@ public sealed class AgentItineraryPolicyTests
     [InlineData("ngày 1 sai", false)]
     public void Correction_NotAboutAPlace_ReturnsNull(string content, bool withPlaces)
     {
+        // STEP-01: Create state as AgentState.
         var state = new AgentState { NumDays = 3, DayAreas = withPlaces ? [Area(1, "Hồ Gươm")] : null };
 
+        // STEP-02: Assert AgentItineraryPolicy.Correction() is null.
         AgentItineraryPolicy.Correction(content, state).Should().BeNull();
     }
 
@@ -252,6 +279,7 @@ public sealed class AgentItineraryPolicyTests
     /// <summary>Ensures a wrongly located place is visible in the first reply.</summary>
     [Fact]
     public void Describe_District_IsShown() =>
+        // STEP-01: Assert AgentItineraryPolicy.Describe() is the expected text.
         AgentItineraryPolicy.Describe(Area(1, "Lăng Bác") with { District = "Ba Đình" }).Should().Be("ngày 1 quanh Lăng Bác (khu Ba Đình)");
 
     /// <summary>Builds a day area at a fixed Hà Nội point.</summary>

@@ -19,6 +19,7 @@ public sealed class ListModMenuSubmissionsRequestDtoValidatorTests
     [InlineData("", false)]
     [InlineData(null, false)]
     public void Validate_Status(string? status, bool expected) =>
+        // STEP-01: Assert the validator.Validate().IsValid is expected.
         new ListModMenuSubmissionsRequestDtoValidator().Validate(
             new ListModMenuSubmissionsRequestDto { Status = status! }).IsValid.Should().Be(expected);
 
@@ -35,6 +36,7 @@ public sealed class ListModMenuSubmissionsRequestDtoValidatorTests
     [InlineData(int.MaxValue, 100, false)]
     [InlineData(int.MaxValue, 1, true)]
     public void Validate_Paging(int page, int size, bool expected) =>
+        // STEP-01: Assert the validator.Validate().IsValid is expected.
         new ListModMenuSubmissionsRequestDtoValidator().Validate(
             new ListModMenuSubmissionsRequestDto { Page = page, PageSize = size }).IsValid.Should().Be(expected);
 
@@ -47,6 +49,7 @@ public sealed class ListModMenuSubmissionsRequestDtoValidatorTests
     [InlineData(1L, true)]
     [InlineData(long.MaxValue, true)]
     public void Validate_RestaurantId(long? id, bool expected) =>
+        // STEP-01: Assert the validator.Validate().IsValid is expected.
         new ListModMenuSubmissionsRequestDtoValidator().Validate(
             new ListModMenuSubmissionsRequestDto { RestaurantId = id }).IsValid.Should().Be(expected);
 }

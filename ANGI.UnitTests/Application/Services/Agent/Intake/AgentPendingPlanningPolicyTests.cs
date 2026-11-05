@@ -19,15 +19,19 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("500k ngày")]
     public void Capture_MixedRequestAndTasteAnswers_PreservesDurationAndDailyBudget(string dailyBudget)
     {
+        // STEP-01: Derive original from a copy of AgentTestData.State(), get draft from AgentPendingPlanningPolicy.Capture and 1 more.
         var original = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000 };
         var draft = AgentPendingPlanningPolicy.Capture(null, $"Tôi muốn lên lịch ăn uống Hà Nội 4 ngày, ngân sách {dailyBudget}, tôi muốn ăn chua");
         draft = AgentPendingPlanningPolicy.Capture(draft, "Nhẹ thôi");
         draft = AgentPendingPlanningPolicy.Capture(draft, "Chỉ áp dụng ngày 2");
 
+        // STEP-02: Assert draft.NumDays is 4, draft.DailyBudget is 500000 and draft.Messages has 3 item(s).
         draft.NumDays.Should().Be(4);
         draft.DailyBudget.Should().Be(500000);
         draft.Messages.Should().HaveCount(3);
+        // STEP-03: Get proposed from AgentPendingPlanningPolicy.Apply.
         var proposed = AgentPendingPlanningPolicy.Apply(original, draft);
+        // STEP-04: Assert proposed.NumDays is 4, proposed.BudgetAmount is 2000000, original.NumDays is 3, original.BudgetAmount is 1500000 and 1 more.
         proposed.NumDays.Should().Be(4); proposed.BudgetAmount.Should().Be(2000000);
         original.NumDays.Should().Be(3); original.BudgetAmount.Should().Be(1500000);
         AgentJson.Read<AgentPendingPlanningRequest>(AgentJson.Write(draft)).NumDays.Should().Be(4);
@@ -38,9 +42,11 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void Capture_ExplicitCorrection_ReplacesEarlierValuesWithoutGuessingBudget()
     {
+        // STEP-01: Get draft from AgentPendingPlanningPolicy.Capture and set draft to AgentPendingPlanningPolicy.Capture().
         var draft = AgentPendingPlanningPolicy.Capture(null, "Lập lịch 4 ngày, ngân sách 500k/ngày, tôi thích ăn chua");
         draft = AgentPendingPlanningPolicy.Capture(draft, "Đổi thành 5 ngày, tổng ngân sách 1.800.000 đồng");
 
+        // STEP-02: Assert draft.NumDays is 5, draft.TotalBudget is 1800000, draft.DailyBudget is null and AgentPendingPlanningPolicy.Apply().BudgetAmount is 1800000.
         draft.NumDays.Should().Be(5); draft.TotalBudget.Should().Be(1800000); draft.DailyBudget.Should().BeNull();
         AgentPendingPlanningPolicy.Apply(AgentTestData.State(), draft).BudgetAmount.Should().Be(1800000);
     }
@@ -53,7 +59,9 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("Áp dụng chua cho 2 ngày đầu")]
     public void Capture_QuotedNegatedOrTasteScope_DoesNotBecomeTripDuration(string text)
     {
+        // STEP-01: Get draft from AgentPendingPlanningPolicy.Capture.
         var draft = AgentPendingPlanningPolicy.Capture(null, text);
+        // STEP-02: Assert draft.NumDays is null, draft.DailyBudget is null, draft.TotalBudget is null, draft.Messages has exactly one matching item and 1 more.
         draft.NumDays.Should().BeNull(); draft.DailyBudget.Should().BeNull(); draft.TotalBudget.Should().BeNull();
         draft.Messages.Should().ContainSingle().Which.Should().Be(text);
     }
@@ -67,7 +75,9 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("ngân sách 500000 đồng 4 ngày")]
     public void Capture_AmountBeforeTripDayOrDuration_IsTotalBudget(string text)
     {
+        // STEP-01: Get draft from AgentPendingPlanningPolicy.Capture.
         var draft = AgentPendingPlanningPolicy.Capture(null, text);
+        // STEP-02: Assert draft.TotalBudget is 500000 and draft.DailyBudget is null.
         draft.TotalBudget.Should().Be(500000); draft.DailyBudget.Should().BeNull();
     }
 
@@ -76,9 +86,11 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void Capture_ManyPartialReplies_KeepsOriginalRequestAndBoundsMemory()
     {
+        // STEP-01: Define original as the expected text, get draft from AgentPendingPlanningPolicy.Capture and 1 more.
         const string original = "Lập lịch 4 ngày ở Hà Nội, ngân sách 500k/ngày, tôi thích ăn chua";
         var draft = AgentPendingPlanningPolicy.Capture(null, original);
         for (var index = 0; index < 10; index++) draft = AgentPendingPlanningPolicy.Capture(draft, $"Câu trả lời bổ sung {index}");
+        // STEP-02: Assert draft.Messages has 6 item(s), draft.NumDays is 4 and draft.DailyBudget is 500000.
         draft.Messages.Should().HaveCount(6).And.Contain(original).And.Contain("Câu trả lời bổ sung 9");
         draft.NumDays.Should().Be(4); draft.DailyBudget.Should().Be(500000);
     }
@@ -88,11 +100,15 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void Accept_ModelTasteScopeCannotInventOrClearNavigationFocus()
     {
+        // STEP-01: Create policy as AgentStatePolicy and get state from AgentTestData.State.
         var policy = new AgentStatePolicy();
         var state = AgentTestData.State();
+        // STEP-02: Assert policy.Accept().FocusDay is null.
         policy.Accept(state, state with { FocusDay = 2 }).FocusDay.Should().BeNull();
+        // STEP-03: Derive focused from a copy of state and get accepted from policy.Accept.
         var focused = state with { FocusDay = 2, FocusMeal = "lunch" };
         var accepted = policy.Accept(focused, state);
+        // STEP-04: Assert accepted.FocusDay is 2 and accepted.FocusMeal is "lunch".
         accepted.FocusDay.Should().Be(2); accepted.FocusMeal.Should().Be("lunch");
     }
 
@@ -101,11 +117,15 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void Accept_ModelCannotForgeOrClearBackendPendingRequest()
     {
+        // STEP-01: Derive state from a copy of AgentTestData.State(), create forged as AgentPendingPlanningRequest and create policy as AgentStatePolicy.
         var state = AgentTestData.State() with { NumDays = 3, BudgetAmount = 1500000 };
         var forged = new AgentPendingPlanningRequest(["forged"], 30, DailyBudget: 999999);
         var policy = new AgentStatePolicy();
+        // STEP-02: Assert policy.Accept().PendingPlanningRequest is null.
         policy.Accept(state, state with { PendingPlanningRequest = forged }).PendingPlanningRequest.Should().BeNull();
+        // STEP-03: Derive pending from a copy of state.
         var pending = state with { PendingPlanningRequest = new(["Lập lịch 3 ngày"], 3) };
+        // STEP-04: Assert policy.Accept().PendingPlanningRequest is the same instance as pending.PendingPlanningRequest.
         policy.Accept(pending, state).PendingPlanningRequest.Should().BeSameAs(pending.PendingPlanningRequest);
     }
 
@@ -119,8 +139,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("1500000 đồng", null, 1500000d, null)]
     public void Capture_BareAmountAnswer_BecomesBudget(string text, short? days, double? total, double? daily)
     {
+        // STEP-01: Get draft from AgentPendingPlanningPolicy.Capture.
         var draft = AgentPendingPlanningPolicy.Capture(new(["Tôi thích ăn chua"]), text);
 
+        // STEP-02: Assert draft.NumDays is days, draft.TotalBudget is total and draft.DailyBudget is daily.
         draft.NumDays.Should().Be(days);
         draft.TotalBudget.Should().Be((decimal?)total);
         draft.DailyBudget.Should().Be((decimal?)daily);
@@ -134,8 +156,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("4 ngày")]
     public void Capture_AmountOutsideBudgetAnswer_IsIgnored(string text)
     {
+        // STEP-01: Get draft from AgentPendingPlanningPolicy.Capture.
         var draft = AgentPendingPlanningPolicy.Capture(new(["Tôi thích ăn chua"]), text);
 
+        // STEP-02: Assert draft.TotalBudget is null and draft.DailyBudget is null.
         draft.TotalBudget.Should().BeNull();
         draft.DailyBudget.Should().BeNull();
     }
@@ -151,8 +175,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("Hà Nội 4 ngày, ngân sách 2 triệu, tôi thích ăn chua", false, null)]
     public void MissingTripDetails_UnknownValues_AreAskedWithoutProvince(string text, bool stateKnown, string? expected)
     {
+        // STEP-01: Derive state from the expected value.
         var state = stateKnown ? new AgentState { NumDays = 2, BudgetAmount = 500000 } : new AgentState();
 
+        // STEP-02: Assert AgentPendingPlanningPolicy.MissingTripDetails() is expected.
         AgentPendingPlanningPolicy.MissingTripDetails(state, AgentPendingPlanningPolicy.Capture(null, text)).Should().Be(expected);
     }
 
@@ -165,8 +191,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("đổi bữa trưa ngày 2", 1500, (short)3, 1500d, (short)3)]
     public void ApplyStated_OverridesModelValues(string content, int modelBudget, short modelDays, double budget, short days)
     {
+        // STEP-01: Derive state from ApplyStated().
         var state = AgentPendingPlanningPolicy.ApplyStated(new AgentState { BudgetAmount = modelBudget, NumDays = modelDays }, content)!;
 
+        // STEP-02: Assert state.BudgetAmount is budget and state.NumDays is days.
         state.BudgetAmount.Should().Be((decimal)budget);
         state.NumDays.Should().Be(days);
     }
@@ -176,6 +204,7 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void ApplyStated_NullState_StaysNull()
     {
+        // STEP-01: Assert AgentPendingPlanningPolicy.ApplyStated() is null.
         AgentPendingPlanningPolicy.ApplyStated(null, "ngân sách 2 triệu").Should().BeNull();
     }
 
@@ -192,8 +221,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("1.500.000", true, null, 1500000, null)]
     public void CaptureAnswer_ReadsTripReply(string content, bool budgetAsked, int? days, int? total, int? daily)
     {
+        // STEP-01: Get request from AgentPendingPlanningPolicy.CaptureAnswer.
         var request = AgentPendingPlanningPolicy.CaptureAnswer(null, content, budgetAsked);
 
+        // STEP-02: Assert request.NumDays is days is null ? null : (short)days, request.TotalBudget is total and request.DailyBudget is daily.
         request.NumDays.Should().Be(days is null ? null : (short)days);
         request.TotalBudget.Should().Be(total);
         request.DailyBudget.Should().Be(daily);
@@ -209,8 +240,10 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("150", true)]
     public void CaptureAnswer_OtherAmounts_AreNotBudget(string content, bool budgetAsked)
     {
+        // STEP-01: Get request from AgentPendingPlanningPolicy.CaptureAnswer.
         var request = AgentPendingPlanningPolicy.CaptureAnswer(null, content, budgetAsked);
 
+        // STEP-02: Assert request.TotalBudget is null and request.DailyBudget is null.
         request.TotalBudget.Should().BeNull();
         request.DailyBudget.Should().BeNull();
     }
@@ -220,10 +253,12 @@ public sealed class AgentPendingPlanningPolicyTests
     [Fact]
     public void CaptureAnswer_KeepsEarlierAnswers()
     {
+        // STEP-01: Get first from AgentPendingPlanningPolicy.CaptureAnswer and get second from AgentPendingPlanningPolicy.CaptureAnswer.
         var first = AgentPendingPlanningPolicy.CaptureAnswer(null, "3 ngày", false);
 
         var second = AgentPendingPlanningPolicy.CaptureAnswer(first, "1 triệu", true);
 
+        // STEP-02: Assert second.NumDays is 3, second.TotalBudget is 1000000 and second.Messages equals the expected text.
         second.NumDays.Should().Be(3);
         second.TotalBudget.Should().Be(1000000);
         second.Messages.Should().Equal("3 ngày", "1 triệu");
@@ -235,5 +270,6 @@ public sealed class AgentPendingPlanningPolicyTests
     [InlineData("không giới hạn", true)][InlineData("thoải mái nhé", true)][InlineData("ngân sách không giới hạn", true)][InlineData("bao nhiêu cũng được", true)]
     [InlineData("ăn thoải mái ở quán", false)][InlineData("500k", false)]
     public void StatesUnrestricted_RecognizesWholeAnswer(string content, bool expected) =>
+        // STEP-01: Assert AgentPendingPlanningPolicy.StatesUnrestricted() is expected.
         AgentPendingPlanningPolicy.StatesUnrestricted(content).Should().Be(expected);
 }

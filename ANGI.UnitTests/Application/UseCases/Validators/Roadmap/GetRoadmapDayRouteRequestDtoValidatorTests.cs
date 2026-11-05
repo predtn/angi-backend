@@ -18,8 +18,10 @@ public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
     [InlineData("CYCLING")]
     public async Task Validate_WithSupportedProfile_ShouldSucceed(string profile)
     {
+        // STEP-01: Validate GetRoadmapDayRouteRequestDto { Profile = profile } and keep result.
         var result = await _validator.ValidateAsync(new GetRoadmapDayRouteRequestDto { Profile = profile });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -30,12 +32,14 @@ public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
     [InlineData(90, 180)]
     public async Task Validate_WithCoordinateBoundaries_ShouldSucceed(decimal latitude, decimal longitude)
     {
+        // STEP-01: Validate GetRoadmapDayRouteRequestDto { OriginLat = latitude, OriginLng = longitude } and keep result.
         var result = await _validator.ValidateAsync(new GetRoadmapDayRouteRequestDto
         {
             OriginLat = latitude,
             OriginLng = longitude
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -51,12 +55,14 @@ public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
         decimal longitude,
         string propertyName)
     {
+        // STEP-01: Validate GetRoadmapDayRouteRequestDto { OriginLat = latitude, OriginLng = longitude } and keep result.
         var result = await _validator.ValidateAsync(new GetRoadmapDayRouteRequestDto
         {
             OriginLat = latitude,
             OriginLng = longitude
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == propertyName);
     }
 
@@ -67,12 +73,15 @@ public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
     [InlineData(false)]
     public async Task Validate_WithOnlyOneCoordinate_ShouldFailOnMissingCoordinate(bool hasLatitude)
     {
+        // STEP-01: Derive request from the expected value.
         var request = hasLatitude
             ? new GetRoadmapDayRouteRequestDto { OriginLat = 10m }
             : new GetRoadmapDayRouteRequestDto { OriginLng = 106m };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error =>
             error.PropertyName == (hasLatitude ? "OriginLng" : "OriginLat"));
     }
@@ -86,8 +95,10 @@ public sealed class GetRoadmapDayRouteRequestDtoValidatorTests
     [InlineData("flying")]
     public async Task Validate_WithUnsupportedProfile_ShouldFail(string? profile)
     {
+        // STEP-01: Validate GetRoadmapDayRouteRequestDto { Profile = profile } and keep result.
         var result = await _validator.ValidateAsync(new GetRoadmapDayRouteRequestDto { Profile = profile });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Profile");
     }
 }

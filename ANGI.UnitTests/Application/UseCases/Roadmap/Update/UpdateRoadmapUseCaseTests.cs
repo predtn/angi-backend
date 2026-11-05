@@ -21,17 +21,21 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenNumDaysIncreases_ShouldAddTrailingDaysAndCommit()
     {
+        // STEP-01: Create roadmap through CreateRoadmap and create fixture through CreateFixture.
         var roadmap = CreateRoadmap(2);
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { NumDays = 4 } and keep result.
         var result = await fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { NumDays = 4 },
             CancellationToken.None);
 
+        // STEP-03: Assert roadmap.NumDays is 4, roadmap.Days.Select(filtered).Order() equals 1 and result.Itinerary has 4 item(s).
         roadmap.NumDays.Should().Be(4);
         roadmap.Days.Select(day => day.DayNumber).Order().Should().Equal(1, 2, 3, 4);
         result.Itinerary.Should().HaveCount(4);
+        // STEP-04: Verify SaveChangesAsync is called once and CommitAsync is called once.
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -41,14 +45,17 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenTrailingDaysAreEmpty_ShouldRemoveThem()
     {
+        // STEP-01: Create roadmap through CreateRoadmap and create fixture through CreateFixture.
         var roadmap = CreateRoadmap(4);
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { NumDays = 2 }.
         await fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { NumDays = 2 },
             CancellationToken.None);
 
+        // STEP-03: Assert roadmap.Days.Select(filtered).Order() equals 1 and roadmap.NumDays is 2.
         roadmap.Days.Select(day => day.DayNumber).Order().Should().Equal(1, 2);
         roadmap.NumDays.Should().Be(2);
     }
@@ -58,17 +65,21 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRemovedDayHasItem_ShouldThrowDayNotEmpty()
     {
+        // STEP-01: Create roadmap through CreateRoadmap, add a RoadmapItem to roadmap.Days.Single(filtered).Items and create fixture through CreateFixture.
         var roadmap = CreateRoadmap(3);
         roadmap.Days.Single(day => day.DayNumber == 3).Items.Add(new RoadmapItem { Id = 91 });
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { NumDays = 2 } in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { NumDays = 2 },
             CancellationToken.None);
 
+        // STEP-03: Assert act throws ConflictException, the thrown exception.ErrorCode is "DAY_NOT_EMPTY" and roadmap.Days has 3 item(s).
         (await act.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("DAY_NOT_EMPTY");
         roadmap.Days.Should().HaveCount(3);
+        // STEP-04: Verify SaveChangesAsync is never called and CommitAsync is never called.
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -78,13 +89,16 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenOwnedRoadmapDoesNotExist_ShouldThrowRoadmapNotFound()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture(null);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { Title = "New title" } in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(
             404,
             new UpdateRoadmapRequestDto { Title = "New title" },
             CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
     }
 
@@ -97,6 +111,7 @@ public sealed class UpdateRoadmapUseCaseTests
         string requestedMode,
         RoadmapOriginMode expectedMode)
     {
+        // STEP-01: Create roadmap through CreateRoadmap, set roadmap.OriginMode to RoadmapOriginMode.Pinned, set roadmap.OriginLatitude to 10m and 3 more.
         var roadmap = CreateRoadmap(1);
         roadmap.OriginMode = RoadmapOriginMode.Pinned;
         roadmap.OriginLatitude = 10m;
@@ -104,11 +119,13 @@ public sealed class UpdateRoadmapUseCaseTests
         roadmap.OriginLabel = "Hotel";
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { OriginMode = requestedMode }.
         await fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { OriginMode = requestedMode },
             CancellationToken.None);
 
+        // STEP-03: Assert roadmap.OriginMode is expectedMode, roadmap.OriginLatitude is null, roadmap.OriginLongitude is null and roadmap.OriginLabel is null.
         roadmap.OriginMode.Should().Be(expectedMode);
         roadmap.OriginLatitude.Should().BeNull();
         roadmap.OriginLongitude.Should().BeNull();
@@ -120,17 +137,20 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenUpdatingOnePinnedCoordinate_ShouldRetainOtherCoordinate()
     {
+        // STEP-01: Create roadmap through CreateRoadmap, set roadmap.OriginMode to RoadmapOriginMode.Pinned, set roadmap.OriginLatitude to 10m and 2 more.
         var roadmap = CreateRoadmap(1);
         roadmap.OriginMode = RoadmapOriginMode.Pinned;
         roadmap.OriginLatitude = 10m;
         roadmap.OriginLongitude = 106m;
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { OriginLatitude = 11m }.
         await fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { OriginLatitude = 11m },
             CancellationToken.None);
 
+        // STEP-03: Assert roadmap.OriginLatitude is 11m and roadmap.OriginLongitude is 106m.
         roadmap.OriginLatitude.Should().Be(11m);
         roadmap.OriginLongitude.Should().Be(106m);
     }
@@ -140,16 +160,20 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenPinnedCoordinatesAreIncomplete_ShouldThrowValidationException()
     {
+        // STEP-01: Create roadmap through CreateRoadmap and create fixture through CreateFixture.
         var roadmap = CreateRoadmap(1);
         var fixture = CreateFixture(roadmap);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with UpdateRoadmapRequestDto { OriginMode = "pinned", OriginLatitude = 10m } in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto { OriginMode = "pinned", OriginLatitude = 10m },
             CancellationToken.None);
 
+        // STEP-03: Assert act throws ValidationException and exception.Errors contains a matching item.
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().Contain(error => error.PropertyName == "OriginLongitude");
+        // STEP-04: Verify SaveChangesAsync is never called.
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -158,6 +182,7 @@ public sealed class UpdateRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithExistingItems_ShouldMapCompleteCalculatedDetail()
     {
+        // STEP-01: Create roadmap through CreateRoadmap, set roadmap.StartDate to a new DateOnly, set roadmap.BudgetAmount to 40_000 and 6 more.
         var roadmap = CreateRoadmap(1);
         roadmap.StartDate = new DateOnly(2026, 10, 10);
         roadmap.BudgetAmount = 40_000;
@@ -185,11 +210,13 @@ public sealed class UpdateRoadmapUseCaseTests
         day.Items.Add(item);
         var fixture = CreateFixture(roadmap, new Dictionary<long, FeedbackValue> { [31] = FeedbackValue.Like });
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync with an empty UpdateRoadmapRequestDto and keep result.
         var result = await fixture.UseCase.ExecuteAsync(
             roadmap.Id,
             new UpdateRoadmapRequestDto(),
             CancellationToken.None);
 
+        // STEP-03: Assert result.Overview.TotalEstimatedCost is 50_000, result.Budget.Remaining is -10_000, result.Budget.IsOverBudget is true and 2 more.
         result.Overview.TotalEstimatedCost.Should().Be(50_000);
         result.Budget.Remaining.Should().Be(-10_000);
         result.Budget.IsOverBudget.Should().BeTrue();

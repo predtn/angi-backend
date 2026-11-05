@@ -19,6 +19,7 @@ public sealed class AddRoadmapItemRequestDtoValidatorTests
     [InlineData("late_night")]
     public void Validate_WithDocumentedValues_ShouldPass(string mealSlot)
     {
+        // STEP-01: Assert _validator.Validate().IsValid is true.
         _validator.Validate(new AddRoadmapItemRequestDto
         {
             DishId = 1,
@@ -44,12 +45,14 @@ public sealed class AddRoadmapItemRequestDtoValidatorTests
     [InlineData(1, "Breakfast", "MealSlot")]
     public void Validate_WithInvalidValue_ShouldFailOnThatField(int dishId, string? mealSlot, string field)
     {
+        // STEP-01: Validate AddRoadmapItemRequestDto { DishId = dishId, MealSlot = mealSlot } and keep result.
         var result = _validator.Validate(new AddRoadmapItemRequestDto
         {
             DishId = dishId,
             MealSlot = mealSlot!
         });
 
+        // STEP-02: Assert result.Errors contains a matching item and result.Errors.Count(filtered) is 1.
         result.Errors.Should().Contain(error => error.PropertyName == field);
         if (string.IsNullOrEmpty(mealSlot))
         {

@@ -44,19 +44,27 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("dismissed", false, ReportStatus.Dismissed, 1)]
     public async Task ClosesSelectedReports(string outcome, bool related, ReportStatus expected, int count)
     {
+        // STEP-01: Create world as ModerationTestContext and get reports from Setup.
         var world = new ModerationTestContext();
         var reports = Setup(world);
+        // STEP-02: Run Create().ExecuteAsync and keep response.
         var response = await Create(world).ExecuteAsync(88, new() { Outcome = outcome, ResolutionAction = "none", ApplyToRelatedReports = related }, default);
+        // STEP-03: Assert reports[0].Status is expected and reports[0].HandledBy is 3.
         reports[0].Status.Should().Be(expected);
         reports[0].HandledBy.Should().Be(3);
+        // STEP-04: Assert reports[0].HandledAt is world.Clock.GetUtcNow().UtcDateTime, reports[1].Status is InReview and reports[2].Status is ReportStatus.Resolved.
         reports[0].HandledAt.Should().Be(world.Clock.GetUtcNow().UtcDateTime);
         reports[1].Status.Should().Be(related ? expected : ReportStatus.InReview);
         reports[2].Status.Should().Be(ReportStatus.Resolved);
+        // STEP-05: Assert response.Status is outcome.
         response.Status.Should().Be(outcome);
+        // STEP-06: Verify Add is called times and AddNotification is called 1 times.
         world.Audit.Verify(x => x.Add(It.Is<AuditLogEntry>(a => a.Action == AuditActions.ReportResolved)), Times.Exactly(count));
         world.Repository.Verify(x => x.AddNotification(It.Is<Domain.Entities.Notification>(n => n.Type == "REPORT_RESOLVED")), Times.Exactly(count + 1));
+        // STEP-07: Verify SaveChangesAsync is called once and CommitAsync is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        // STEP-08: Verify world receives no other calls.
         world.Cache.VerifyNoOtherCalls();
     }
 
@@ -67,10 +75,15 @@ public sealed class ResolveReportUseCaseTests
     [InlineData(ReportStatus.Dismissed)]
     public async Task RejectsClosedReports(ReportStatus status)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world)[0].Status = status;
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "hide_restaurant" }, default);
+        // STEP-04: Assert action throws ConflictException and the thrown exception.ErrorCode is "REPORT_CLOSED".
         (await action.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("REPORT_CLOSED");
+        // STEP-05: Verify SaveChangesAsync is never called and world receives no other calls.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         world.Audit.VerifyNoOtherCalls();
     }
@@ -84,10 +97,15 @@ public sealed class ResolveReportUseCaseTests
     [InlineData(ReportTargetType.Blog, "suspend_restaurant")]
     public async Task RejectsMismatchedAction(ReportTargetType type, string resolutionAction)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world, type);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = resolutionAction }, default);
+        // STEP-04: Assert action throws BadRequestException and the thrown exception.ErrorCode is "ACTION_NOT_ALLOWED_FOR_TARGET".
         (await action.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("ACTION_NOT_ALLOWED_FOR_TARGET");
+        // STEP-05: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -98,10 +116,15 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("suspend_restaurant", RestaurantModerationStatus.Suspended)]
     public async Task AppliesRestaurantAction(string resolutionAction, RestaurantModerationStatus status)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world);
+        // STEP-03: Run Create().ExecuteAsync.
         await Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = resolutionAction }, default);
+        // STEP-04: Assert world.Restaurant.ModerationStatus is status.
         world.Restaurant.ModerationStatus.Should().Be(status);
+        // STEP-05: Verify SaveChangesAsync is called once and Add is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         world.Audit.Verify(x => x.Add(It.Is<AuditLogEntry>(a => a.EntityType == "restaurant")), Times.Once);
     }
@@ -113,12 +136,17 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("remove_blog", BlogStatus.Removed, "BLOG_REMOVED")]
     public async Task AppliesBlogAction(string resolutionAction, BlogStatus expected, string auditAction)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Create blog as Blog; stub the mock and world.LockBlogAsync.
         Setup(world, ReportTargetType.Blog);
         var blog = new Blog { Id = 7, AuthorId = 12 };
         world.Repository.Setup(x => x.LockBlogAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(blog);
+        // STEP-03: Run Create().ExecuteAsync.
         await Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = resolutionAction }, default);
+        // STEP-04: Assert blog.Status is expected.
         blog.Status.Should().Be(expected);
+        // STEP-05: Verify Add is called once.
         world.Audit.Verify(x => x.Add(It.Is<AuditLogEntry>(a => a.Action == auditAction)), Times.Once);
     }
 
@@ -130,19 +158,28 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("ban_user", SanctionType.Ban, UserStatus.Banned)]
     public async Task AppliesAccountSanction(string resolutionAction, SanctionType expectedType, UserStatus expectedStatus)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock.
         Setup(world);
+        // STEP-03: Create user as User and create session as UserSession.
         var user = new User { Id = 12, Status = UserStatus.Active, Role = new Role { Code = "RESTAURANT_OWNER" } };
         var session = new UserSession { Id = 1, UserId = 12 };
+        // STEP-04: Declare committed to capture a call argument; stub world.LockUserAsync, world.GetSessionsAsync and world.CommitAsync.
         world.Repository.Setup(x => x.LockUserAsync(12, It.IsAny<CancellationToken>())).ReturnsAsync(user);
         world.Repository.Setup(x => x.GetSessionsAsync(12, It.IsAny<CancellationToken>())).ReturnsAsync([session]);
         var committed = false;
         world.Transaction.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>())).Callback(() => committed = true).Returns(Task.CompletedTask);
+        // STEP-05: Assert committed is true.
         world.Cache.Setup(x => x.Invalidate(12)).Callback(() => committed.Should().BeTrue());
+        // STEP-06: Run Create().ExecuteAsync.
         await Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = resolutionAction,
             SuspendUntil = world.Clock.GetUtcNow().AddHours(1).ToOffset(TimeSpan.FromHours(7)), ResolutionNote = " reason " }, default);
+        // STEP-07: Assert user.Status is expectedStatus.
         user.Status.Should().Be(expectedStatus);
+        // STEP-08: Verify AddSanction is called once.
         world.Repository.Verify(x => x.AddSanction(It.Is<UserSanction>(s => s.Type == expectedType && s.ReportId == 88 && s.Reason == "reason" && s.StartsAt.Kind == DateTimeKind.Utc)), Times.Once);
+        // STEP-09: Assert session.RevokedAt is null and 2 more; verify Invalidate is never called and 1 more.
         if (expectedType == SanctionType.Warn)
         {
             session.RevokedAt.Should().BeNull();
@@ -165,11 +202,16 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("REPORT_RESTAURANT_HANDLE", "ban_user")]
     public async Task RejectsMissingPermissions(string permission, string resolutionAction)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock and world.GetEffectivePermissionsAsync.
         Setup(world);
         world.Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>())).ReturnsAsync([permission]);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = resolutionAction, SuspendUntil = world.Clock.GetUtcNow().AddHours(1) }, default);
+        // STEP-04: Assert action throws ForbiddenException and the thrown exception.ErrorCode is "FORBIDDEN".
         (await action.Should().ThrowAsync<ForbiddenException>()).Which.ErrorCode.Should().Be("FORBIDDEN");
+        // STEP-05: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -178,9 +220,13 @@ public sealed class ResolveReportUseCaseTests
     [Fact]
     public async Task MissingReportDoesNotStartTransaction()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(404, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
+        // STEP-03: Assert action throws NotFoundException and the thrown exception.ErrorCode is "REPORT_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        // STEP-04: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -191,15 +237,21 @@ public sealed class ResolveReportUseCaseTests
     [InlineData(true)]
     public async Task FailureDoesNotInvalidateCache(bool failCommit)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock, world.LockUserAsync and world.GetSessionsAsync.
         Setup(world);
         world.Repository.Setup(x => x.LockUserAsync(12, It.IsAny<CancellationToken>())).ReturnsAsync(new User
         { Id = 12, Status = UserStatus.Active, Role = new Role { Code = "RESTAURANT_OWNER" } });
         world.Repository.Setup(x => x.GetSessionsAsync(12, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        // STEP-03: When failCommit, call world.Transaction.Setup(filtered).ThrowsAsync.
         if (failCommit) world.Transaction.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("commit"));
         else world.UnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("save"));
+        // STEP-04: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "ban_user" }, default);
+        // STEP-05: Assert action throws InvalidOperationException.
         await action.Should().ThrowAsync<InvalidOperationException>();
+        // STEP-06: Verify world receives no other calls and DisposeAsync is called once.
         world.Cache.VerifyNoOtherCalls();
         world.Transaction.Verify(x => x.DisposeAsync(), Times.Once);
     }
@@ -212,12 +264,17 @@ public sealed class ResolveReportUseCaseTests
     [InlineData("RESTAURANT_OWNER", UserStatus.Banned, "USER_ALREADY_BANNED")]
     public async Task RejectsProtectedAccounts(string role, UserStatus status, string code)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub the mock and world.LockUserAsync.
         Setup(world);
         world.Repository.Setup(x => x.LockUserAsync(12, It.IsAny<CancellationToken>())).ReturnsAsync(new User
         { Id = 12, Role = new Role { Code = role }, Status = status });
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "ban_user" }, default);
+        // STEP-04: Assert action throws AppException and the thrown exception.ErrorCode is code.
         (await action.Should().ThrowAsync<AppException>()).Which.ErrorCode.Should().Be(code);
+        // STEP-05: Verify AddSanction is never called and SaveChangesAsync is never called.
         world.Repository.Verify(x => x.AddSanction(It.IsAny<UserSanction>()), Times.Never);
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -227,14 +284,18 @@ public sealed class ResolveReportUseCaseTests
     [Fact]
     public async Task ResolvesReportClaimedByCurrentModerator()
     {
+        // STEP-01: Create world as ModerationTestContext, get reports from Setup, set reports[0].Status to ReportStatus.InReview and set reports[0].HandledBy to 3.
         var world = new ModerationTestContext();
         var reports = Setup(world);
         reports[0].Status = ReportStatus.InReview;
         reports[0].HandledBy = 3; // Claimed by current user (3)
+        // STEP-02: Run Create().ExecuteAsync and keep response.
         var response = await Create(world).ExecuteAsync(88, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
+        // STEP-03: Assert reports[0].Status is ReportStatus.Resolved, reports[0].HandledBy is 3 and response.Status is "resolved".
         reports[0].Status.Should().Be(ReportStatus.Resolved);
         reports[0].HandledBy.Should().Be(3);
         response.Status.Should().Be("resolved");
+        // STEP-04: Verify SaveChangesAsync is called once and CommitAsync is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         world.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -244,10 +305,15 @@ public sealed class ResolveReportUseCaseTests
     [Fact]
     public async Task RejectsNonExistentReportWith404NotFound()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub world.GetReportTargetAsync.
         world.Repository.Setup(x => x.GetReportTargetAsync(99999, It.IsAny<CancellationToken>())).ReturnsAsync((ReportTarget?)null);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(99999, new() { Outcome = "resolved", ResolutionAction = "none" }, default);
+        // STEP-04: Assert action throws NotFoundException and the thrown exception.ErrorCode is "REPORT_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("REPORT_NOT_FOUND");
+        // STEP-05: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 }

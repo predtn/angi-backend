@@ -14,6 +14,7 @@ public sealed class CreateModRequestDtoValidatorTests
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     public async Task Validate_WithValidDisplayNameBoundaries_ShouldPass(string displayName)
     {
+        // STEP-01: Validate CreateModRequestDto { Email, DisplayName, PermissionOverrides } and keep result.
         var result = await new CreateModRequestDtoValidator().ValidateAsync(new CreateModRequestDto
         {
             Email = "mod@angi.vn",
@@ -21,6 +22,7 @@ public sealed class CreateModRequestDtoValidatorTests
             PermissionOverrides = null
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -31,12 +33,14 @@ public sealed class CreateModRequestDtoValidatorTests
     [InlineData("not-an-email")]
     public async Task Validate_WithInvalidEmail_ShouldFail(string email)
     {
+        // STEP-01: Validate CreateModRequestDto { Email = email, DisplayName = "Valid Name" } and keep result.
         var result = await new CreateModRequestDtoValidator().ValidateAsync(new CreateModRequestDto
         {
             Email = email,
             DisplayName = "Valid Name"
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(CreateModRequestDto.Email));
     }
 
@@ -48,12 +52,14 @@ public sealed class CreateModRequestDtoValidatorTests
     [InlineData("Valid\u0001Name")]
     public async Task Validate_WithInvalidDisplayName_ShouldFail(string displayName)
     {
+        // STEP-01: Validate CreateModRequestDto { Email = "mod@angi.vn", DisplayName = displayName } and keep result.
         var result = await new CreateModRequestDtoValidator().ValidateAsync(new CreateModRequestDto
         {
             Email = "mod@angi.vn",
             DisplayName = displayName
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(CreateModRequestDto.DisplayName));
     }
 
@@ -62,6 +68,7 @@ public sealed class CreateModRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithInvalidOverrides_ShouldFailEveryInvalidRegion()
     {
+        // STEP-01: Validate CreateModRequestDto { Email, DisplayName, PermissionOverrides } and keep result.
         var result = await new CreateModRequestDtoValidator().ValidateAsync(new CreateModRequestDto
         {
             Email = "mod@angi.vn",
@@ -75,6 +82,7 @@ public sealed class CreateModRequestDtoValidatorTests
             ]
         });
 
+        // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.ErrorMessage.Contains("null", StringComparison.Ordinal));
         result.Errors.Should().Contain(error => error.ErrorMessage.Contains("một lần", StringComparison.Ordinal));

@@ -15,6 +15,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     [InlineData("selection-empty")][InlineData("selection-long")][InlineData("command-null")][InlineData("command-invalid")][InlineData("state")]
     public void Validate_InvalidTransport_Fails(string area)
     {
+        // STEP-01: Create request through Valid and apply the case selected by area.
         var request = Valid();
         switch (area)
         {
@@ -31,6 +32,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
             case "command-invalid": request.Command = "delete_roadmap"; break;
             default: request.ConfirmedState = new AgentState { NumDays = 101 }; break;
         }
+        // STEP-02: Assert the validator.Validate().IsValid is false.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeFalse();
     }
 
@@ -40,7 +42,9 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     [InlineData("chat")][InlineData("alternative")][InlineData("discard")][InlineData("reset")]
     public void Validate_AllowedCommand_Succeeds(string command)
     {
+        // STEP-01: Create request through Valid, set request.Command to command, set request.Content to a test value and set request.SelectedItemKey to a test value.
         var request = Valid(); request.Command = command; request.Content = new('x', 4000); request.SelectedItemKey = new('x', 100);
+        // STEP-02: Assert the validator.Validate().IsValid is true.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 
@@ -52,10 +56,12 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     [InlineData("history")]
     public void Validate_ForgedBackendMetadata_Fails(string field)
     {
+        // STEP-01: Create state as AgentState, create request through Valid and set request.ConfirmedState to a test value.
         var state = new AgentState();
         var request = Valid();
         request.ConfirmedState = field switch { "pending" => state with { PendingStateChange = state },
             "version" => state with { SourceRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(1) }, _ => state with { HistoryStartSequence = 1 } };
+        // STEP-02: Assert the validator.Validate().IsValid is false.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeFalse();
     }
 
@@ -69,7 +75,9 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     [InlineData(long.MaxValue)]
     public void Validate_PositiveNumericIdentity_Succeeds(long clientMessageId)
     {
+        // STEP-01: Create request through Valid and set request.ClientMessageId to clientMessageId.
         var request = Valid(); request.ClientMessageId = clientMessageId;
+        // STEP-02: Assert the validator.Validate().IsValid is true.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 
@@ -81,7 +89,9 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
     [InlineData(null, 1L)]
     public void Validate_OptionalIdentityAndVersion_Succeeds(long? messageId, long? version)
     {
+        // STEP-01: Create request as SendAgentMessageRequestDto.
         var request = new SendAgentMessageRequestDto { Content = "Tôi muốn ăn ở Việt Nam", ClientMessageId = messageId, ExpectedConversationVersion = version };
+        // STEP-02: Assert the validator.Validate().IsValid is true.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeTrue();
     }
 }

@@ -37,18 +37,23 @@ public sealed class BlogsControllerTests
     [Fact]
     public async Task Create_ShouldRequireTravelerAndReturnCreatedResponse()
     {
+        // STEP-01: Get authorize from GetCustomAttributes().Cast().Single.
         var authorize = typeof(BlogsController)
             .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
             .Cast<AuthorizeAttribute>()
             .Single();
+        // STEP-02: Assert authorize.Roles is "TRAVELER".
         authorize.Roles.Should().Be("TRAVELER");
+        // STEP-03: Create expected as BlogDetailDto and create request as CreateBlogRequestDto.
         var expected = new BlogDetailDto { Id = 45, Title = "Chuyến đi" };
         var request = new CreateBlogRequestDto { Title = "Chuyến đi", Content = "Nội dung" };
+        // STEP-04: Create source as CancellationTokenSource; mock IGetPublicBlogsUseCase and ICreateBlogUseCase; stub useCase.ExecuteAsync.
         var getPublicBlogsUseCase = new Mock<IGetPublicBlogsUseCase>();
         var useCase = new Mock<ICreateBlogUseCase>();
         using var source = new CancellationTokenSource();
         useCase.Setup(item => item.ExecuteAsync(request, source.Token)).ReturnsAsync(expected);
 
+        // STEP-05: Create action through new BlogsController().Create.
         var action = await new BlogsController(
             getPublicBlogsUseCase.Object,
             useCase.Object,
@@ -60,9 +65,11 @@ public sealed class BlogsControllerTests
             Mock.Of<IUnlikeBlogUseCase>(),
             Mock.Of<ICreateBlogCommentUseCase>()).Create(request, source.Token);
 
+        // STEP-06: Assert action is ObjectResult, result.StatusCode is 201, result.Value is ApiResponse<BlogDetailDto> and 1 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
         result.Value.Should().BeOfType<ApiResponse<BlogDetailDto>>().Which.Data.Should().BeSameAs(expected);
+        // STEP-07: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(request, source.Token), Times.Once);
     }
 

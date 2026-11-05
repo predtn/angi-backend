@@ -19,13 +19,19 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task GetAsync_CalledTwice_ShouldReadDatabaseOnce()
         {
+            // STEP-01: Configure the stubs through SetupStatus.
             SetupStatus(UserStatus.Active);
+            // STEP-02: Create the AccountStatusCache under test as cache.
             var cache = new AccountStatusCache(_memoryCache, _repository.Object);
 
+            // STEP-03: Send GET 12.
             await cache.GetAsync(12, CancellationToken.None);
+            // STEP-04: Send GET 12 and keep account.
             var account = await cache.GetAsync(12, CancellationToken.None);
 
+            // STEP-05: Assert account.Status is UserStatus.Active.
             account!.Status.Should().Be(UserStatus.Active);
+            // STEP-06: Verify GetAccountStatusAsync is called once.
             _repository.Verify(x => x.GetAccountStatusAsync(12, It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -34,14 +40,21 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task GetAsync_AfterInvalidate_ShouldReturnNewStatus()
         {
+            // STEP-01: Configure the stubs through SetupStatus.
             SetupStatus(UserStatus.Active);
+            // STEP-02: Create the AccountStatusCache under test as cache.
             var cache = new AccountStatusCache(_memoryCache, _repository.Object);
+            // STEP-03: Send GET 12.
             await cache.GetAsync(12, CancellationToken.None);
 
+            // STEP-04: Configure the stubs through SetupStatus.
             SetupStatus(UserStatus.Banned);
+            // STEP-05: Run cache.Invalidate.
             cache.Invalidate(12);
+            // STEP-06: Send GET 12 and keep account.
             var account = await cache.GetAsync(12, CancellationToken.None);
 
+            // STEP-07: Assert account.Status is UserStatus.Banned.
             account!.Status.Should().Be(UserStatus.Banned);
         }
 
@@ -50,13 +63,18 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task GetAsync_WithMissingUser_ShouldNotCacheNull()
         {
+            // STEP-01: Stub repository.GetAccountStatusAsync.
             _repository.Setup(x => x.GetAccountStatusAsync(12, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((AccountStatusSnapshot?)null);
+            // STEP-02: Create the AccountStatusCache under test as cache.
             var cache = new AccountStatusCache(_memoryCache, _repository.Object);
 
+            // STEP-03: Send GET 12.
             await cache.GetAsync(12, CancellationToken.None);
+            // STEP-04: Send GET 12.
             await cache.GetAsync(12, CancellationToken.None);
 
+            // STEP-05: Verify GetAccountStatusAsync is called 2 times.
             _repository.Verify(x => x.GetAccountStatusAsync(12, It.IsAny<CancellationToken>()), Times.Exactly(2));
         }
 

@@ -42,8 +42,10 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [Fact]
     public async Task Create_WithoutToken_ShouldReturnUnauthorizedEnvelope()
     {
+        // STEP-01: Send POST /api/v1/blogs with a request body and keep response.
         using var response = await _factory.CreateClient().PostAsJsonAsync("/api/v1/blogs", ValidBody());
 
+        // STEP-02: Assert response.StatusCode is HttpStatusCode.Unauthorized and AssertError confirms UNAUTHORIZED.
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         await AssertError(response, "UNAUTHORIZED");
     }
@@ -53,14 +55,17 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [Fact]
     public async Task Create_WithWrongRole_ShouldReturnForbiddenEnvelope()
     {
+        // STEP-01: Build a POST /api/v1/blogs request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/blogs")
         {
             Content = JsonContent.Create(ValidBody())
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("RESTAURANT_OWNER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertError confirms FORBIDDEN.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertError(response, "FORBIDDEN");
     }
@@ -70,21 +75,28 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [Fact]
     public async Task Create_WithValidTravelerRequest_ShouldReturnCompleteCreatedEnvelope()
     {
+        // STEP-01: Build a POST /api/v1/blogs request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/blogs")
         {
             Content = JsonContent.Create(ValidBody())
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.Created.
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Derive root from document.RootElement.
         var root = document.RootElement;
+        // STEP-05: Assert root.success is true, root.message.ValueKind is JsonValueKind.Null and root.errorCode.ValueKind is JsonValueKind.Null.
         root.GetProperty("success").GetBoolean().Should().BeTrue();
         root.GetProperty("message").ValueKind.Should().Be(JsonValueKind.Null);
         root.GetProperty("errorCode").ValueKind.Should().Be(JsonValueKind.Null);
+        // STEP-06: Get data from root.GetProperty.
         var data = root.GetProperty("data");
+        // STEP-07: Assert data.id is 45, data.author.displayName is the expected text, data.images.length is 2 and 3 more.
         data.GetProperty("id").GetInt64().Should().Be(45);
         data.GetProperty("author").GetProperty("displayName").GetString().Should().Be("Nguyễn An");
         data.GetProperty("images").GetArrayLength().Should().Be(2);
@@ -92,6 +104,7 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
             .GetProperty("items")[0].GetProperty("mealSlot").GetString().Should().Be("breakfast");
         data.GetProperty("likedByMe").GetBoolean().Should().BeFalse();
         data.GetProperty("isMine").GetBoolean().Should().BeTrue();
+        // STEP-08: Assert _factory.Stub.LastRequest.CoverMediaId is 9400, _factory.Stub.LastRequest.ImageMediaIds equals 9401 and 1 more.
         _factory.Stub.LastRequest!.CoverMediaId.Should().Be(9400);
         _factory.Stub.LastRequest.ImageMediaIds.Should().Equal(9401, 9402);
         _factory.Stub.LastRequest.RoadmapId.Should().Be(88);
@@ -106,6 +119,7 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [InlineData("title=x", "application/x-www-form-urlencoded")]
     public async Task Create_WithInvalidBody_ShouldReturnValidationEnvelope(string? body, string? contentType)
     {
+        // STEP-01: Build a POST /api/v1/blogs request, attach the bearer token to request and when body is not null, set request.Content to a new StringContent.
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/blogs");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
         if (body is not null)
@@ -113,8 +127,10 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
             request.Content = new StringContent(body, Encoding.UTF8, contentType!);
         }
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertError confirms VALIDATION_FAILED.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
         await AssertError(response, "VALIDATION_FAILED");
     }
@@ -124,14 +140,17 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [Fact]
     public async Task Create_WhenRoadmapIsUnavailable_ShouldReturnNotFoundEnvelope()
     {
+        // STEP-01: Build a POST /api/v1/blogs request and attach the bearer token to request.
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/blogs")
         {
             Content = JsonContent.Create(new { title = "Bài", content = "Nội dung", roadmapId = 404L })
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.NotFound and AssertError confirms ROADMAP_NOT_FOUND.
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertError(response, "ROADMAP_NOT_FOUND");
     }
@@ -141,15 +160,21 @@ public sealed class BlogsHttpContractTests : IClassFixture<BlogsApiFactory>
     [Fact]
     public async Task OpenApiDocument_ShouldContainBlogCreateOperationAndSchemas()
     {
+        // STEP-01: Send GET /openapi/v1.json and keep response.
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
 
+        // STEP-02: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-03: Get operation from RootElement.paths./api/v1/blogs.GetProperty.
         var operation = document.RootElement.GetProperty("paths").GetProperty("/api/v1/blogs").GetProperty("post");
+        // STEP-04: Assert operation.requestBody.content.TryGetProperty() is true and operation.responses.TryGetProperty() is true.
         operation.GetProperty("requestBody").GetProperty("content")
             .TryGetProperty("application/json", out _).Should().BeTrue();
         operation.GetProperty("responses").TryGetProperty("201", out _).Should().BeTrue();
+        // STEP-05: Get schemas from document.RootElement.components.GetProperty.
         var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+        // STEP-06: Assert schemas.EnumerateObject().Any(filtered) is true.
         schemas.EnumerateObject().Any(schema => schema.Value.TryGetProperty("properties", out var properties) &&
             properties.TryGetProperty("imageMediaIds", out _)).Should().BeTrue();
         schemas.EnumerateObject().Any(schema => schema.Value.TryGetProperty("properties", out var properties) &&
