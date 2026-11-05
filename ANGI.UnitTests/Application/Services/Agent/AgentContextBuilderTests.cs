@@ -102,4 +102,22 @@ public sealed class AgentContextBuilderTests
         // STEP-02: Assert AgentContextBuilder.StateFromRoadmap().Province is null.
         AgentContextBuilder.StateFromRoadmap(roadmap).Province.Should().BeNull();
     }
+
+    // TEST-06: A client's confirmed state can neither invent the mark of an offered dish nor keep one the stored state holds.
+    /// <summary>That mark changes how "ok" is read, so only the backend may set it.</summary>
+    [Fact]
+    public async Task BuildAsync_ConfirmedState_DropsOfferedDishMark()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and create builder as AgentContextBuilder.
+        var fixture = new ANGI.UnitTests.Application.UseCases.Agent.AgentUseCaseFixture();
+        var builder = new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object);
+        // STEP-02: Create request carrying a confirmed state with the mark.
+        var request = new SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "ok", ConfirmedState = AgentTestData.State() with { DishOffered = true } };
+
+        // STEP-03: Run builder.BuildAsync and keep result.
+        var result = await builder.BuildAsync(fixture.Conversation, request, CancellationToken.None);
+
+        // STEP-04: Assert result.State.DishOffered is null.
+        result.State.DishOffered.Should().BeNull();
+    }
 }

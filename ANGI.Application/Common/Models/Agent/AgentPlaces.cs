@@ -10,7 +10,6 @@ public sealed record AgentPlaceCandidate(string Name, string? Address, string? T
 public sealed record AgentPlaceMatch(string Province, string Label, decimal Latitude, decimal Longitude, decimal RadiusKm, string? District = null);
 
 /// <summary>A complaint that a day is in the wrong place: which days it names, and the right place when the message states one.</summary>
-public sealed record AgentPlaceCorrection(short[] Days, string? Place);
 
 /// <summary>A place named for one or more days of the trip.</summary>
 public sealed record AgentItineraryStop(short[] Days, string Place, bool Explicit);

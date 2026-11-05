@@ -50,7 +50,8 @@ internal sealed class AgentUseCaseFixture
     public AgentOrchestrator Orchestrator()
     {
         var catalog = AgentTestData.Validator(AgentTestData.Dish());
-        var policy = new AgentStatePolicy();
+        catalog.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<ANGI.Application.Common.Models.Discovery.DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<int>());
+        var policy = new AgentConstraintGuard();
         var tools = new AgentToolExecutor(catalog.Dishes.Object, catalog.Tags.Object,
             Mock.Of<ANGI.Application.Common.Interfaces.Services.Recommendation.IRecommendationService>(), policy,
             new(catalog.Routes.Object), Limits, Telemetry);

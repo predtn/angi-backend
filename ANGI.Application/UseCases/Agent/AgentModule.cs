@@ -22,7 +22,7 @@ public static class AgentModule
     public static IServiceCollection AddAgentUseCases(this IServiceCollection services)
     {
         services.TryAddSingleton<AgentLimits>();
-        services.AddScoped<AgentStatePolicy>();
+        services.AddScoped<AgentConstraintGuard>();
         services.AddScoped<AgentPreferenceService>();
         services.AddScoped<AgentContextBuilder>();
         services.AddScoped<AgentProposalBuilder>();

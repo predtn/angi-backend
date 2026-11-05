@@ -76,7 +76,7 @@ public sealed class AgentPreferenceServiceTests
         var current = new AgentState { Preferences = new() { Initialized = true, BaselineVector = baseline } };
         var proposed = current with { TasteTargets = [new("sweet", .5)], Preferences = new()
             { Initialized = true, BaselineVector = Enumerable.Repeat(1d, 12).ToArray() } };
-        var accepted = new AgentStatePolicy().Accept(current, proposed);
+        var accepted = new AgentConstraintGuard().Accept(current, proposed);
         // STEP-02: Assert accepted.Preferences.EffectiveVector[0] is .5, accepted.Preferences.EffectiveVector[5] is .25 and 1 more.
         accepted.Preferences!.EffectiveVector![0].Should().Be(.5);
         accepted.Preferences.EffectiveVector[5].Should().Be(.25);

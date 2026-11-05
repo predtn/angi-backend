@@ -22,8 +22,8 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Create request as AgentMealRequest.
         var request = new AgentMealRequest(null, null, "Bún Chả", null, []);
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Placeable() equals request.
-        AgentNamedRequestPolicy.Placeable(State(request), [message]).Should().Equal(request);
+        // STEP-02: Assert AgentConstraintGuard.PlaceableRequests() equals request.
+        AgentConstraintGuard.PlaceableRequests(State(request), [message]).Should().Equal(request);
     }
 
     // TEST-02: Explicit every-meal wording naming that dish keeps the wide scope; covers "mọi bữa", "cả chuyến chỉ ăn" and unaccented wording.
@@ -34,8 +34,8 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData("tat ca deu an bun cha")]
     public void Placeable_EveryMealWording_KeepsWideScope(string message)
     {
-        // STEP-01: Assert AgentNamedRequestPolicy.Placeable() is empty.
-        AgentNamedRequestPolicy.Placeable(State(new AgentMealRequest(null, null, "Bún Chả", null, [])), [message]).Should().BeEmpty();
+        // STEP-01: Assert AgentConstraintGuard.PlaceableRequests() is empty.
+        AgentConstraintGuard.PlaceableRequests(State(new AgentMealRequest(null, null, "Bún Chả", null, [])), [message]).Should().BeEmpty();
     }
 
     // TEST-03: Meal-level requests and requests without a name are never placeable.
@@ -46,8 +46,8 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Get state from State.
         var state = State(new AgentMealRequest(1, "lunch", "Bún Chả", null, []), new AgentMealRequest(null, null, null, null, [5]));
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Placeable() is empty.
-        AgentNamedRequestPolicy.Placeable(state, ["phải có Bún Chả"]).Should().BeEmpty();
+        // STEP-02: Assert AgentConstraintGuard.PlaceableRequests() is empty.
+        AgentConstraintGuard.PlaceableRequests(state, ["phải có Bún Chả"]).Should().BeEmpty();
     }
 
     // TEST-04: Lunch comes first among declared meals; covers declared meals, a reduced declaration and legacy state without declared meals.
@@ -58,8 +58,8 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData(new string[0], new[] { "lunch", "dinner", "breakfast" })]
     public void Meals_FollowPreferenceWithinDeclaredMeals(string[] declared, string[] expected)
     {
-        // STEP-01: Assert AgentNamedRequestPolicy.Meals() equals expected.
-        AgentNamedRequestPolicy.Meals(AgentTestData.State() with { MealSlots = declared }).Should().Equal(expected);
+        // STEP-01: Assert AgentConstraintGuard.PlaceableMeals() equals expected.
+        AgentConstraintGuard.PlaceableMeals(AgentTestData.State() with { MealSlots = declared }).Should().Equal(expected);
     }
 
     // TEST-05: The first free position is chosen; covers a free trip, an occupied first position, a day-level request and no free position.
@@ -72,11 +72,11 @@ public sealed class AgentNamedRequestPolicyTests
         var occupied = new AgentMealRequest(1, "lunch", "Bún Chả", null, []);
         var dayLevel = new AgentMealRequest(2, null, "Phở", null, []);
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Slot() is ((short)1, "lunch"), AgentNamedRequestPolicy.Slot() is ((short)2, "lunch") and 1 more.
-        AgentNamedRequestPolicy.Slot(State(wide), wide, ["lunch"]).Should().Be(((short)1, "lunch"));
-        AgentNamedRequestPolicy.Slot(State(wide, occupied), wide, ["lunch"]).Should().Be(((short)2, "lunch"));
-        AgentNamedRequestPolicy.Slot(State(dayLevel, occupied), dayLevel, ["lunch"]).Should().Be(((short)2, "lunch"));
-        AgentNamedRequestPolicy.Slot(State(wide) with { NumDays = 1 }, new AgentMealRequest(1, null, "Phở", null, []), []).Should().BeNull();
+        // STEP-02: Assert AgentConstraintGuard.PlaceSlot() is ((short)1, "lunch"), AgentConstraintGuard.PlaceSlot() is ((short)2, "lunch") and 1 more.
+        AgentConstraintGuard.PlaceSlot(State(wide), wide, ["lunch"]).Should().Be(((short)1, "lunch"));
+        AgentConstraintGuard.PlaceSlot(State(wide, occupied), wide, ["lunch"]).Should().Be(((short)2, "lunch"));
+        AgentConstraintGuard.PlaceSlot(State(dayLevel, occupied), dayLevel, ["lunch"]).Should().Be(((short)2, "lunch"));
+        AgentConstraintGuard.PlaceSlot(State(wide) with { NumDays = 1 }, new AgentMealRequest(1, null, "Phở", null, []), []).Should().BeNull();
     }
 
     // TEST-06: Placing moves the name to the meal while tags and differentFromPlan keep their wide scope.
@@ -87,7 +87,7 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Create wide as AgentMealRequest and derive requests from Place().MealRequests.
         var wide = new AgentMealRequest(null, null, "Phở", null, [5], DifferentFromPlan: true);
 
-        var requests = AgentNamedRequestPolicy.Place(State(wide), wide, 2, "dinner").MealRequests;
+        var requests = AgentConstraintGuard.PlaceRequest(State(wide), wide, 2, "dinner").MealRequests;
 
         // STEP-02: Assert requests is equivalent to the expected items.
         requests.Should().BeEquivalentTo(new[]
@@ -105,14 +105,14 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Create placed as AgentMealRequest.
         var placed = new AgentMealRequest(1, "lunch", "Phở", null, []);
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Retain().MealRequests equals placed and AgentNamedRequestPolicy.Retain() is null.
-        AgentNamedRequestPolicy.Retain(State(new AgentMealRequest(null, null, "PHỞ", null, [])), [placed])!.MealRequests.Should().Equal(placed);
-        AgentNamedRequestPolicy.Retain(State(), [placed])!.MealRequests.Should().Equal(placed);
-        AgentNamedRequestPolicy.Retain(null, [placed]).Should().BeNull();
+        // STEP-02: Assert AgentConstraintGuard.RetainPlacements().MealRequests equals placed and AgentConstraintGuard.RetainPlacements() is null.
+        AgentConstraintGuard.RetainPlacements(State(new AgentMealRequest(null, null, "PHỞ", null, [])), [placed])!.MealRequests.Should().Equal(placed);
+        AgentConstraintGuard.RetainPlacements(State(), [placed])!.MealRequests.Should().Equal(placed);
+        AgentConstraintGuard.RetainPlacements(null, [placed]).Should().BeNull();
         // STEP-03: Get untouched from State.
         var untouched = State(new AgentMealRequest(null, null, "Phở", null, []));
-        // STEP-04: Assert AgentNamedRequestPolicy.Retain() is the same instance as untouched.
-        AgentNamedRequestPolicy.Retain(untouched, []).Should().BeSameAs(untouched);
+        // STEP-04: Assert AgentConstraintGuard.RetainPlacements() is the same instance as untouched.
+        AgentConstraintGuard.RetainPlacements(untouched, []).Should().BeSameAs(untouched);
     }
 
     // TEST-08: A later model state cannot keep the old meal of a moved request.
@@ -123,8 +123,8 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Create moved as AgentMealRequest.
         var moved = new AgentMealRequest(1, "dinner", null, "Lẩu Bò", []);
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Retain().MealRequests equals moved.
-        AgentNamedRequestPolicy.Retain(State(new AgentMealRequest(1, "lunch", null, "Lẩu Bò", [])), [moved])!.MealRequests.Should().Equal(moved);
+        // STEP-02: Assert AgentConstraintGuard.RetainPlacements().MealRequests equals moved.
+        AgentConstraintGuard.RetainPlacements(State(new AgentMealRequest(1, "lunch", null, "Lẩu Bò", [])), [moved])!.MealRequests.Should().Equal(moved);
     }
 
     // TEST-09: Only a meal the user did not name may move; covers a backend placement, a meal the user named in any message and an unnamed request.
@@ -137,8 +137,8 @@ public sealed class AgentNamedRequestPolicyTests
         var named = new AgentMealRequest(2, "lunch", null, "Lẩu Gà", []);
         var state = State(placedByBackend, named, new AgentMealRequest(3, "lunch", null, null, [5]));
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Relocatable() equals placedByBackend.
-        AgentNamedRequestPolicy.Relocatable(state, ["nhất định phải ăn ở Lẩu Bò", "bữa trưa ngày 2 ăn ở Lẩu Gà"]).Should().Equal(placedByBackend);
+        // STEP-02: Assert AgentConstraintGuard.RelocatableRequests() equals placedByBackend.
+        AgentConstraintGuard.RelocatableRequests(state, ["nhất định phải ăn ở Lẩu Bò", "bữa trưa ngày 2 ăn ở Lẩu Gà"]).Should().Equal(placedByBackend);
     }
 
     // TEST-10: The turn-start constraints move only when they hold the same request; covers a held request and one added this turn.
@@ -149,8 +149,8 @@ public sealed class AgentNamedRequestPolicyTests
         // STEP-01: Create wide as AgentMealRequest.
         var wide = new AgentMealRequest(null, null, "Phở", null, []);
 
-        // STEP-02: Assert AgentNamedRequestPolicy.Rebase().MealRequests equals a new AgentMealRequest and AgentNamedRequestPolicy.Rebase().MealRequests is empty.
-        AgentNamedRequestPolicy.Rebase(State(wide), wide, 1, "lunch").MealRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
-        AgentNamedRequestPolicy.Rebase(State(), wide, 1, "lunch").MealRequests.Should().BeEmpty();
+        // STEP-02: Assert AgentConstraintGuard.RebasePlacement().MealRequests equals a new AgentMealRequest and AgentConstraintGuard.RebasePlacement().MealRequests is empty.
+        AgentConstraintGuard.RebasePlacement(State(wide), wide, 1, "lunch").MealRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
+        AgentConstraintGuard.RebasePlacement(State(), wide, 1, "lunch").MealRequests.Should().BeEmpty();
     }
 }

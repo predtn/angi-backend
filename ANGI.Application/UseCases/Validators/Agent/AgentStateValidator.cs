@@ -8,6 +8,8 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
 {
     public static readonly string[] Meals = ["breakfast", "lunch", "dinner", "snack", "late_night"];
     public const decimal MaxMoney = 99999999999999m;
+    /// <summary>Below this a price ceiling is a unit slip ("50" for 50k), which would silently find nothing.</summary>
+    public const decimal MinPlausiblePrice = 1000m;
     public const int MaxDays = Domain.Entities.Roadmap.MaxNumDays;
     /// <summary>A day holds at most 24 items, the most one route can carry.</summary>
     public const int MaxItems = MaxDays * 24;

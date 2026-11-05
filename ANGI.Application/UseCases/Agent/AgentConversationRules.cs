@@ -62,7 +62,7 @@ public static class AgentConversationRules
         OriginLatitude = Number(state.OriginLatitude), OriginLongitude = Number(state.OriginLongitude), RadiusKm = Number(state.RadiusKm),
         DayAreas = state.DayAreas is { Length: > 0 } areas ? areas.OrderBy(x => x.DayNumber).Select(x => x with { Latitude = Number(x.Latitude)!.Value,
             Longitude = Number(x.Longitude)!.Value, RadiusKm = Number(x.RadiusKm)!.Value }).ToArray() : null,
-        PendingDayArea = null, NamedAreaLabel = null, WidenedMeals = null, PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, PlanningIntake = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
+        PendingDayArea = null, NamedAreaLabel = null, WidenedMeals = null, PendingStateChange = null, PendingPlanningRequest = null, PendingSave = null, DishOffered = null, PlanningIntake = null, SourceRoadmapUpdatedAt = null, HistoryStartSequence = null,
         ReplacedDishNames = null
     };
 

@@ -80,17 +80,6 @@ public static class AgentMealScopePolicy
         return changed ? proposed with { TasteOverrides = [.. overrides] } : proposed;
     }
 
-    /// <summary>Asks which meal is meant when a numbered meal exceeds the meals planned per day, or returns null.</summary>
-    public static string? Question(string content, AgentState state)
-    {
-        // STEP-01: Return null early when Read().OutOfRange is false.
-        if (!Read(content, state).OutOfRange) return null;
-        // STEP-02: Prepare slots through Slots.
-        var slots = Slots(state);
-        // STEP-03: Return the formatted text.
-        return $"Mỗi ngày trong lịch có {slots.Length} bữa ({string.Join(", ", slots.Select(AgentReplyBuilder.Meal))}). Bạn muốn chọn bữa nào?";
-    }
-
     // "Bữa N" đếm theo các bữa đã khai báo, sắp theo thứ tự sáng → khuya; chưa khai báo thì mặc định sáng, trưa, tối.
     private static string[] Slots(AgentState state) => state.MealSlots.Length > 0
         ? AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray() : DefaultMeals;

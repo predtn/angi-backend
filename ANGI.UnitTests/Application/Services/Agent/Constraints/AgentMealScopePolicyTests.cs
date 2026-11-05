@@ -51,27 +51,7 @@ public sealed class AgentMealScopePolicyTests
         references.Days.Should().Equal((short)3);
     }
 
-    // TEST-04: A meal number beyond the meals per day is out of range and produces a question listing the meals; covers bữa 4 with the default
-    // three meals, bữa 4 with four declared meals and bữa 0.
-    /// <summary>Makes the backend ask instead of guessing when a numbered meal does not exist in the plan.</summary>
-    [Theory]
-    [InlineData("Đổi bữa 4 ngày 1", null, true)]
-    [InlineData("Đổi bữa 4 ngày 1", new[] { "breakfast", "lunch", "dinner", "snack" }, false)]
-    [InlineData("Đổi bữa 0 ngày 1", null, true)]
-    public void Question_MealNumberBeyondPlan_AsksWhichMeal(string content, string[]? mealSlots, bool asks)
-    {
-        // STEP-01: Create state as AgentState and get question from AgentMealScopePolicy.Question.
-        var state = new AgentState { MealSlots = mealSlots ?? [] };
-
-        var question = AgentMealScopePolicy.Question(content, state);
-
-        // STEP-02: Assert AgentMealScopePolicy.Read().OutOfRange is asks, depending on asks, question is the expected text and question is null.
-        AgentMealScopePolicy.Read(content, state).OutOfRange.Should().Be(asks);
-        if (asks) question.Should().Be("Mỗi ngày trong lịch có 3 bữa (bữa sáng, bữa trưa, bữa tối). Bạn muốn chọn bữa nào?");
-        else question.Should().BeNull();
-    }
-
-    // TEST-05: A whole-day override newly proposed for a day whose meals were named becomes one override per named meal with the same targets.
+    // TEST-04: A whole-day override newly proposed for a day whose meals were named becomes one override per named meal with the same targets.
     /// <summary>Checks the narrowing keeps the targets and splits them over every meal the user named for that day.</summary>
     [Fact]
     public void Narrow_NewWholeDayOverride_BecomesNamedMealOverrides()
@@ -88,7 +68,7 @@ public sealed class AgentMealScopePolicyTests
         narrowed.TasteOverrides.Should().OnlyContain(x => x.Targets.SequenceEqual(targets));
     }
 
-    // TEST-06: Narrowing leaves the state untouched when it cannot be sure; covers the same day also named without a meal, an override already
+    // TEST-05: Narrowing leaves the state untouched when it cannot be sure; covers the same day also named without a meal, an override already
     // stored in the current state, an existing override for the named meal, no meal wording and a null proposal.
     /// <summary>Ensures narrowing never rewrites a whole-day taste the user actually asked for or an older taste.</summary>
     [Theory]
@@ -114,7 +94,7 @@ public sealed class AgentMealScopePolicyTests
         else narrowed.Should().BeSameAs(proposed);
     }
 
-    // TEST-07: Evidence is the retained clarification messages when present, otherwise the current message only when it declares a taste;
+    // TEST-06: Evidence is the retained clarification messages when present, otherwise the current message only when it declares a taste;
     // covers pending messages, a taste declaration and an edit request.
     /// <summary>Limits narrowing to wording that is about taste, so "đổi bữa 1 ngày 1" cannot re-scope a stored taste.</summary>
     [Theory]

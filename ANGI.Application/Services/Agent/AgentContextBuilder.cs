@@ -21,7 +21,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
-                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, PlanningIntake = stored.PlanningIntake,
+                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
                 DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
             : stored;
         var roadmap = conversation.RoadmapId is { } id

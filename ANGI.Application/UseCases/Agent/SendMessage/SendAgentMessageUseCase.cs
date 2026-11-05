@@ -136,10 +136,10 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         telemetry.Record("claimed", id, message.TurnId, attemptId);
         try
         {
-            // STEP-30: Prepare prepared, context and control from AgentChatPolicy.DraftControl.
+            // STEP-30: Prepare prepared, context and control from AgentConfirmationPolicy.DraftControl.
             AgentPreparedTurn prepared;
             AgentContext? context = null;
-            var control = request.Command is "discard" or "reset" ? request.Command : AgentChatPolicy.DraftControl(request.Content);
+            var control = request.Command is "discard" or "reset" ? request.Command : AgentConfirmationPolicy.DraftControl(request.Content);
             // STEP-31: When control is "discard" or "reset", prepare state through AgentJson.Read, check whether control is "reset" and more.
             if (control is "discard" or "reset")
             {
@@ -162,48 +162,35 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 context.AttemptId = attemptId;
                 // Câu hỏi lưu chỉ sống đúng một lượt: mọi tin nhắn không trả lời nó đều kết thúc việc chờ, để "ok" về sau không lưu nhầm.
                 var pendingSave = context.State.PendingSave;
-                context.State = context.State with { PendingSave = null };
+                // Lời mời thêm món cũng chỉ sống một lượt.
+                context.DishOffered = context.State.DishOffered == true;
+                context.State = context.State with { PendingSave = null, DishOffered = null };
+                var today = AgentConfirmationPolicy.Today(clock);
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
-                if (context.State.PendingStateChange is { } stalePending && AgentChatPolicy.AcceptsChange(request.Content) &&
-                    stalePending.SourceRoadmapUpdatedAt != context.State.SourceRoadmapUpdatedAt)
-                    prepared = new("Lịch vừa thay đổi sau câu hỏi xác nhận. Bạn nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất nhé.",
-                        context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
-                else if (context.State.PendingStateChange is { } pending && AgentChatPolicy.AcceptsChange(request.Content))
-                {
-                    context.State = pending with { PendingQuestion = null, PendingStateChange = null,
-                        FocusDay = context.State.FocusDay, FocusMeal = context.State.FocusMeal };
-                    context.ReplanAfterConfirmation = true;
-                    prepared = await orchestrator.RunAsync(context, ct);
-                }
-                else if (context.State.PendingStateChange is not null && AgentChatPolicy.RejectsChange(request.Content))
-                    prepared = new("Đã giữ nguyên các điều kiện trước đó.", context.State with { PendingQuestion = null, PendingStateChange = null }, null, null);
-                // Từ chối một câu hỏi làm rõ khi đã có lịch: đóng câu hỏi, không gọi LLM, để lịch hiện tại lưu được ngay.
-                else if (context.State.PendingQuestion is not null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
-                    context.CurrentProposal?.Status == "ready" && AgentChatPolicy.DismissesQuestion(request.Content))
-                    // Về đúng điều kiện của bản đề xuất: một yêu cầu đổi chưa thành lịch (ví dụ quán không có món cho bữa đó) sẽ không còn chặn việc lưu.
-                    prepared = new("Mình giữ nguyên lịch hiện tại nhé. Ưng rồi thì cứ bảo mình chốt.", context.CurrentProposal.Snapshot.State with { PendingQuestion = null }, null, null);
-                else if (AgentChatPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
+                if (AgentConfirmationPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
                     context.State.PendingQuestion is null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
                     AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
                     prepared = new("Lịch hiện tại ở thẻ bên dưới, bạn xem lại nhé. Ưng rồi thì cứ bảo mình chốt.", context.State, null, null);
-                // Việc lưu và câu hỏi ngày đi không cần LLM: chỉ backend được quyết định ghi roadmap.
-                else if (AgentSavePolicy.Decide(context, pendingSave, AgentDatePolicy.Today(clock)) is { } save)
-                {
-                    if (save.Commit)
-                    {
-                        var proposal = context.CurrentProposal!;
-                        var commit = await committer.PrepareAsync(conversation, userId, new ConfirmAgentProposalRequestDto
-                            { ProposalId = proposal.ProposalId, ProposalVersion = proposal.Version, StartDate = save.StartDate }, true, ct);
-                        prepared = new(AgentReplyBuilder.Saved(proposal.Snapshot.State.NumDays, save.StartDate ?? context.State.StartDate ?? proposal.Snapshot.State.StartDate),
-                            context.State, null, null, "confirm", commit);
-                    }
-                    else prepared = new(save.Reply!, context.State with { PendingSave = save.Pending }, null, null);
-                }
+                // Câu lưu đầy đủ và ngày viết bằng số không phụ thuộc cách nói, nên không cần gọi LLM: chỉ backend được quyết định ghi roadmap.
+                else if (AgentConfirmationPolicy.DecideSave(context, pendingSave, today) is { } save)
+                    prepared = await SaveTurnAsync(conversation, userId, context, save, ct);
                 else
                 {
+                    // Model đọc mọi cách nói; backend chỉ cho câu trả lời đó có hiệu lực khi đang có đúng câu hỏi này.
+                    context.AwaitedAnswer = AgentConfirmationPolicy.Awaited(context.State, context.CurrentProposal, pendingSave);
+                    var asked = context.State;
                     prepared = await orchestrator.RunAsync(context, ct);
+                    if (prepared.Answer is { } answer)
+                        prepared = await AnswerTurnAsync(conversation, userId, context, asked, pendingSave, answer, today, ct);
+                    else if (prepared.Action == "request_save")
+                    {
+                        // Muốn lưu nghĩa là không còn cần câu hỏi làm rõ đang mở, nên về đúng điều kiện của bản đề xuất. Việc này chưa ghi gì: bước sau vẫn hỏi trước khi lưu.
+                        context.State = context.AwaitedAnswer == AgentConfirmationPolicy.AwaitingQuestion ? context.CurrentProposal!.Snapshot.State with { PendingQuestion = null } : asked;
+                        prepared = await SaveTurnAsync(conversation, userId, context, AgentConfirmationPolicy.RequestSave(context, today), ct);
+                    }
                     // Lời chào hay câu ngoài phạm vi không trả lời câu hỏi lưu nhưng cũng không hủy nó.
-                    if (pendingSave is not null && prepared.Action is "chat" or "food_info" or "out_of_scope")
+                    // Vừa gợi ý món thì khác: "ok" tiếp theo là đáp lời mời đó, không được hiểu thành đồng ý lưu lịch.
+                    else if (pendingSave is not null && prepared.State.DishOffered != true && prepared.Action is "chat" or "food_info" or "out_of_scope")
                         prepared = prepared with { State = prepared.State with { PendingSave = pendingSave } };
                 }
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
@@ -212,7 +199,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             }
             // STEP-32: When context exists and prepared.Snapshot exists, set prepared.
             // Mọi đường tạo bản nháp, kể cả không qua model, đều đi qua đây nên phần giới thiệu luôn khớp với món cuối cùng.
-            if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentGroundedReply.AttachNotes(drafted, context) };
+            if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentReplyGuard.AttachNotes(drafted, context) };
             // STEP-33: Return the result of FinishAsync.
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
@@ -225,6 +212,47 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             await FailAsync(id, userId, message, attemptId);
             throw;
         }
+    }
+
+    /// <summary>Turns a save step into a turn: a commit prepared for the question's exact proposal, or a reply that may keep waiting.</summary>
+    private async Task<AgentPreparedTurn> SaveTurnAsync(AgentConversation conversation, int userId, AgentContext context, AgentSaveDecision save, CancellationToken ct)
+    {
+        // STEP-01: Return the new result early when the step does not commit.
+        if (!save.Commit) return new(save.Reply!, context.State with { PendingSave = save.Pending }, null, null);
+        // STEP-02: Prepare proposal and commit through committer.PrepareAsync.
+        var proposal = context.CurrentProposal!;
+        var commit = await committer.PrepareAsync(conversation, userId, new ConfirmAgentProposalRequestDto
+            { ProposalId = proposal.ProposalId, ProposalVersion = proposal.Version, StartDate = save.StartDate }, true, ct);
+        // STEP-03: Return the new result.
+        return new(AgentReplyBuilder.Saved(proposal.Snapshot.State.NumDays, save.StartDate ?? context.State.StartDate ?? proposal.Snapshot.State.StartDate),
+            context.State, null, null, "confirm", commit);
+    }
+
+    /// <summary>Carries out what the model read in a reply to the open question; the same steps run whatever words the user chose.</summary>
+    private async Task<AgentPreparedTurn> AnswerTurnAsync(AgentConversation conversation, int userId, AgentContext context, AgentState asked, AgentPendingSave? pendingSave,
+        AgentAnswer answer, DateOnly today, CancellationToken ct)
+    {
+        // STEP-01: Keep the state the question was asked in, and read nothing else from this model call.
+        context.State = asked;
+        context.AwaitedAnswer = null;
+        // STEP-02: Return the result of SaveTurnAsync early when the answer is about saving.
+        if (asked.PendingStateChange is null && AgentConfirmationPolicy.IsCurrent(pendingSave, context.CurrentProposal))
+            return await SaveTurnAsync(conversation, userId, context, AgentConfirmationPolicy.AnswerSave(context, pendingSave!, answer, today), ct);
+        // STEP-03: When a staged change waits, drop it on a refusal or when the roadmap moved since the question.
+        if (asked.PendingStateChange is { } change)
+        {
+            if (answer.Kind == AgentConfirmationPolicy.Decline)
+                return new("Đã giữ nguyên các điều kiện trước đó.", asked with { PendingQuestion = null, PendingStateChange = null }, null, null);
+            if (change.SourceRoadmapUpdatedAt != asked.SourceRoadmapUpdatedAt)
+                return new("Lịch vừa thay đổi sau câu hỏi xác nhận. Bạn nêu lại điều kiện muốn đổi để mình kiểm tra bản mới nhất nhé.",
+                    asked with { PendingQuestion = null, PendingStateChange = null }, null, null);
+            // STEP-04: Apply the staged change and plan again, the only answer that needs another model call.
+            context.State = change with { PendingQuestion = null, PendingStateChange = null, FocusDay = asked.FocusDay, FocusMeal = asked.FocusMeal };
+            context.ReplanAfterConfirmation = true;
+            return await orchestrator.RunAsync(context, ct);
+        }
+        // STEP-05: Return to the proposal's own conditions: a declined clarification no longer blocks saving.
+        return new("Mình giữ nguyên lịch hiện tại nhé. Ưng rồi thì cứ bảo mình chốt.", context.CurrentProposal!.Snapshot.State with { PendingQuestion = null }, null, null);
     }
 
     private async Task<AgentState> ResetStateAsync(AgentConversation conversation, long sequence, CancellationToken ct)
@@ -309,8 +337,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         // STEP-12: When previous exists, prepared.Snapshot is missing, prepared.Commit is missing and 2 more condition(s), set prepared.
         // clarify/answer hoặc validation có lỗi không tạo snapshot mới: giữ proposal cũ để xem lại.
         // State mới vẫn được lưu; Confirm sẽ kiểm tra nó có còn khớp proposal trước khi cho commit.
+        // Một câu hỏi đã cho thấy lịch chưa đổi và thẻ bản nháp vẫn đang hiện; chỉ báo khi lượt này không lập được lịch.
         if (previous is not null && prepared.Snapshot is null && prepared.Commit is null &&
-            prepared.Action is null && prepared.State.PendingQuestion is not null)
+            prepared.Action is null && prepared.State.PendingQuestion is not null && !prepared.Reply.TrimEnd().EndsWith('?'))
             prepared = prepared with { Reply = prepared.Reply + "\nBản đề xuất trước đó được giữ lại; chưa có lịch cập nhật cho yêu cầu này." };
         // STEP-13: Update conversation: State.
         conversation.State = AgentJson.Write(prepared.State);

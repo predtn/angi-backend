@@ -60,6 +60,11 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
         await Public().Where(x => x.ProvinceName != null)
             .Select(x => new AgentCatalogPlace(x.ProvinceName!, x.AddressLine, x.Latitude, x.Longitude)).ToArrayAsync(ct);
 
+    /// <inheritdoc />
+    public async Task<string[]> GetDishNamesAsync(CancellationToken ct) =>
+        await context.Dishes.AsNoTracking().Where(x => Public().Select(r => r.Id).Contains(x.RestaurantId) && x.Status != DishStatus.Hidden && x.Status != DishStatus.Removed)
+            .Select(x => x.Name).ToArrayAsync(ct);
+
     /// <summary>Restricts every catalog read to verified restaurants that moderation has not hidden.</summary>
     private IQueryable<Domain.Entities.Restaurant> Public() => context.Restaurants.AsNoTracking().Where(x =>
         x.VerificationStatus == RestaurantVerificationStatus.Verified && x.ModerationStatus == RestaurantModerationStatus.Visible);

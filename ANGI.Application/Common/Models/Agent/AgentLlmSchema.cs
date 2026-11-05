@@ -5,24 +5,26 @@ namespace ANGI.Application.Common.Models.Agent;
 /// <summary>Defines the strict provider-independent output and tool allowlist contracts.</summary>
 public static class AgentLlmSchema
 {
+    private static readonly object TasteTarget = Obj(new()
+    {
+        ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number"), ["levelQuote"] = Nullable(Scalar("string"))
+    });
+
     public static readonly object State = Obj(new()
     {
         ["schemaVersion"] = Scalar("integer"), ["province"] = Nullable(Scalar("string")),
         ["numDays"] = Nullable(Scalar("integer")), ["title"] = Scalar("string"),
-        ["startDate"] = Nullable(Scalar("string")), ["budgetAmount"] = Nullable(Scalar("number")),
+        ["startDate"] = Nullable(Scalar("string")), ["budgetAmount"] = Nullable(Scalar("number")), ["budgetQuote"] = Nullable(Scalar("string")),
         ["budgetUnrestricted"] = Scalar("boolean"), ["maxPricePerMeal"] = Nullable(Scalar("number")),
         ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")),
         ["originMode"] = Choice("none", "pinned", "gps"), ["originLatitude"] = Nullable(Scalar("number")),
         ["originLongitude"] = Nullable(Scalar("number")), ["originLabel"] = Nullable(Scalar("string")),
         ["radiusKm"] = Nullable(Scalar("number")), ["note"] = Nullable(Scalar("string")),
-        ["tasteTargets"] = ArrayOf(Obj(new()
-        {
-            ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number")
-        })),
+        ["tasteTargets"] = ArrayOf(TasteTarget),
         ["tasteOverrides"] = ArrayOf(Obj(new()
         {
             ["dayNumber"] = Scalar("integer"), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
-            ["targets"] = ArrayOf(Obj(new() { ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number") }))
+            ["targets"] = ArrayOf(TasteTarget)
         })),
         ["mealRequests"] = ArrayOf(Obj(new()
         {
@@ -50,9 +52,12 @@ public static class AgentLlmSchema
     // Điều kiện được phép tạo/sửa và tính hợp lệ dữ liệu còn được Builder/StatePolicy/Validator kiểm tra.
     public static readonly object Output = Obj(new()
     {
-        ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation", "chat", "food_info", "out_of_scope"), ["reply"] = Scalar("string"),
+        ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation", "request_save", "use_tool", "chat", "food_info", "out_of_scope"), ["reply"] = Scalar("string"),
+        ["tool"] = Nullable(Choice("search_catalog", "get_recommendation", "estimate_day_route", "suggest_dish", "locate_places")),
+        ["pendingAnswer"] = Nullable(Choice("accept", "decline", "defer", "unclear")),
+        ["answerStartDate"] = Nullable(Scalar("string")), ["answerEndDate"] = Nullable(Scalar("string")),
         ["suggestedDish"] = Nullable(Scalar("string")),
-        ["clarification"] = Nullable(Choice("trip_details", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general")),
+        ["clarification"] = Nullable(Choice("trip_details", "place_scope", "preferences", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general")),
         ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
         ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
@@ -82,7 +87,18 @@ public static class AgentLlmSchema
             ["dayNumber"] = Scalar("integer"), ["profile"] = Choice("driving", "walking", "cycling"),
             ["orderedItems"] = ArrayOf(Obj(new() { ["itemKey"] = Scalar("string"), ["dishId"] = Scalar("integer") }))
         }),
-        ["get_roadmap"] = Obj(new() { ["roadmapId"] = Scalar("integer") })
+        ["get_roadmap"] = Obj(new() { ["roadmapId"] = Scalar("integer") }),
+        ["suggest_dish"] = Obj(new()
+        {
+            ["province"] = Nullable(Scalar("string")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+            ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["maxPrice"] = Nullable(Scalar("number")), ["count"] = Scalar("integer"),
+            ["tasteTargets"] = ArrayOf(TasteTarget), ["area"] = Nullable(Scalar("string"))
+        }),
+        ["locate_places"] = Obj(new()
+        {
+            ["tripArea"] = Nullable(Scalar("string")),
+            ["stops"] = ArrayOf(Obj(new() { ["days"] = ArrayOf(Scalar("integer")), ["place"] = Nullable(Scalar("string")) }))
+        })
     };
 
     /// <summary>Builds an object schema whose properties are all required and whose extra fields are rejected.</summary>

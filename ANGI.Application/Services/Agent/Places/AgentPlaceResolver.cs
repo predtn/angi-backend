@@ -1,14 +1,17 @@
 using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Discovery;
+using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.Services.Agent.Intake;
 
 namespace ANGI.Application.Services.Agent.Places;
 
 /// <summary>
-/// Locates places the user named, without a provider call. Catalog addresses come first because they are free and exact for districts, wards and
+/// Locates places the user named, without a provider call, and applies them to the trip. Catalog addresses come first because they are free and exact for districts, wards and
 /// streets; a map search covers landmarks, and its answer is used only when its name really contains what the user wrote.
 /// </summary>
 public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSearchService? search = null)
@@ -48,77 +51,67 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     // Bản đồ trả các loại này cho cả chuỗi vô nghĩa ("asdkjh, Hà Nội" ra "Hà Nội"): chúng không chỉ một nơi cụ thể.
     private static readonly HashSet<string> TooBroad = new(["place", "region", "country", "district"], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Reads the places of the current message; null when it names none, or nothing that could be located and was clearly meant as a place.</summary>
-    public async Task<AgentTripPlaces?> ReadAsync(AgentContext context, IReadOnlyCollection<string> provinces, CancellationToken ct)
+    /// <summary>Locates the places as the model read them from the user's words; what cannot be located is returned as unresolved.</summary>
+    public async Task<AgentTripPlaces> LocateAsync(string? tripArea, AgentLocateStop[] stops, AgentState state, IReadOnlyCollection<string> provinces, CancellationToken ct)
     {
-        // STEP-01: Prepare state, content, stops through AgentItineraryPolicy.Stops, opened and 5 more.
-        var state = context.State;
-        var content = context.Request.Content;
-        var stops = AgentItineraryPolicy.Stops(content);
-        var opened = state.PlanningIntake is not null;
-        var asked = opened && (string.IsNullOrWhiteSpace(state.Province) || state.PlanningIntake == AgentIntakePolicy.Scope);
-        var planning = opened || AgentIntakePolicy.StatesPlan(content);
-        // Chưa có lịch mà chỉ nói "ở Hoàn Kiếm": hiểu là khu vực của cả chuyến và bắt đầu hỏi tiếp.
-        var bare = stops.Length > 0 || planning ? null : AgentItineraryPolicy.BareArea(content);
-        // "vị trí hiện tại" và "toàn thành phố" không phải tên địa điểm, không tra bản đồ.
-        var notAPlace = AgentIntakePolicy.StatesHere(content) || state.PlanningIntake == AgentIntakePolicy.Scope && AgentIntakePolicy.StatesWholeProvince(content, state.Province);
-        var areaName = stops.Length > 0 || notAPlace ? null : planning ? AgentItineraryPolicy.TripArea(content, asked) : bare?.Name;
-        // STEP-02: Return null early when stops.Length is 0 and areaName is missing.
-        if (stops.Length == 0 && areaName is null) return null;
-        // STEP-03: Load restaurants through catalog.GetPublicPlacesAsync.
+        // STEP-01: Load restaurants.
         var restaurants = await catalog.GetPublicPlacesAsync(ct);
-        // STEP-04: Prepare province from AgentIntakePolicy.Plain.
-        var province = state.Province ?? AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(content), provinces);
-
-        // STEP-05: When stops.Length is 0, return null early when IsProvince(provinces, ...) holds, prepare area through ResolveAsync and 1 more action(s).
-        if (stops.Length == 0)
+        // STEP-02: When stops were read, return them located; a stop with no place is a day with no fixed place.
+        if (stops.Length > 0)
         {
-            if (IsProvince(areaName!, provinces)) return null;
-            var area = await ResolveAsync(areaName!, province, planning || bare?.Searchable == true, restaurants, ct);
-            return area is null ? null : new(area.Province, [], area, [], [], 0);
+            var read = stops.Select(stop => new AgentItineraryStop(stop.Days ?? [], stop.Place?.Trim() ?? "", !string.IsNullOrWhiteSpace(stop.Place))).ToArray();
+            return await LocateStopsAsync(read, state.Province, provinces, restaurants, ct) ?? new(state.Province, [], null, [], [], 0);
         }
+        // STEP-03: Return the province alone when the area named is the province itself.
+        if (IsProvince(tripArea!, provinces)) return new(AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(tripArea!), provinces), [], null, [], [], 0);
+        // STEP-04: Return the located area, or the name as unresolved.
+        var area = await ResolveAsync(tripArea!, state.Province, true, restaurants, ct);
+        return area is null ? new(state.Province, [], null, [], [tripArea!], 0) : new(area.Province, [], area, [], [], 0);
+    }
 
-        // STEP-06: For each stop in stops.Where(filtered), leave the loop when ResolveAsync() exists.
+    private async Task<AgentTripPlaces?> LocateStopsAsync(AgentItineraryStop[] stops, string? province, IReadOnlyCollection<string> provinces, AgentCatalogPlace[] restaurants, CancellationToken ct)
+    {
+        // STEP-01: For each stop in stops.Where(filtered), leave the loop when ResolveAsync() exists.
         // Xác định tỉnh trước từ các nơi có trong địa chỉ quán, để kết quả không phụ thuộc thứ tự: "Ngày 1 Hòa Lạc, ngày 2 Hoàn Kiếm" cũng tra Hòa Lạc trong Hà Nội.
-        foreach (var stop in stops.Where(stop => province is null && !IsProvince(stop.Place, provinces)))
+        foreach (var stop in stops.Where(stop => province is null && stop.Place.Length > 0 && !IsProvince(stop.Place, provinces)))
             if (await ResolveAsync(stop.Place, null, false, restaurants, ct) is { } local) { province = local.Province; break; }
-        // STEP-07: Prepare dayAreas as List<AgentDayArea>, wholeProvince as List<short> and unresolved as List<string>.
+        // STEP-02: Prepare dayAreas as List<AgentDayArea>, wholeProvince as List<short> and unresolved as List<string>.
         var dayAreas = new List<AgentDayArea>();
         var wholeProvince = new List<short>();
         var unresolved = new List<string>();
-        // STEP-08: Go through each stop in stops.
+        // STEP-03: Go through each stop in stops.
         foreach (var stop in stops)
         {
-            // STEP-09: When IsProvince(stop.Place, provinces) holds or AgentItineraryPolicy.IsOpenDay(stop.Place) holds, set province, call wholeProvince.AddRange and 1 more action(s).
-            if (IsProvince(stop.Place, provinces) || AgentItineraryPolicy.IsOpenDay(stop.Place))
+            // STEP-04: When the stop has no place, IsProvince(stop.Place, provinces) holds or IsOpenDay(stop.Place) holds, set province, call wholeProvince.AddRange and 1 more action(s).
+            if (stop.Place.Length == 0 || IsProvince(stop.Place, provinces) || IsOpenDay(stop.Place))
             {
-                province ??= AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(stop.Place), provinces);
+                if (stop.Place.Length > 0) province ??= AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(stop.Place), provinces);
                 wholeProvince.AddRange(stop.Days);
                 continue;
             }
-            // STEP-10: Call ResolveAsync and keep match.
+            // STEP-05: Call ResolveAsync and keep match.
             var match = await ResolveAsync(stop.Place, province, stop.Explicit, restaurants, ct);
-            // STEP-11: Skip this round when match is missing.
+            // STEP-06: Skip this round when match is missing.
             if (match is null)
             {
                 // "ngày 1 cay nhẹ" không có động từ đi lại và không phải địa điểm: để luồng thường đọc, không báo là địa danh lạ.
                 if (stop.Explicit) unresolved.Add(stop.Place);
                 continue;
             }
-            // STEP-12: Set province.
+            // STEP-07: Set province.
             province ??= match.Province;
-            // STEP-13: Add the built entries to dayAreas.
+            // STEP-08: Add the built entries to dayAreas.
             dayAreas.AddRange(stop.Days.Select(day => new AgentDayArea(day, match.Label, match.Latitude, match.Longitude, match.RadiusKm, match.District)));
         }
-        // STEP-14: Return null early when dayAreas.Count is 0, wholeProvince.Count is 0 and unresolved.Count is 0.
+        // STEP-09: Return null early when dayAreas.Count is 0, wholeProvince.Count is 0 and unresolved.Count is 0.
         if (dayAreas.Count == 0 && wholeProvince.Count == 0 && unresolved.Count == 0) return null;
-        // STEP-15: Prepare byDay through GroupBy(filtered).Select(filtered).ToArray and lastDay through DefaultIfEmpty().Max.
+        // STEP-10: Prepare byDay through GroupBy(filtered).Select(filtered).ToArray and lastDay through DefaultIfEmpty().Max.
         // Mỗi ngày một nơi: tên nêu sau cùng là tên người dùng chốt.
         var byDay = dayAreas.GroupBy(x => x.DayNumber).Select(group => group.Last()).ToArray();
         // Ngày có nơi đến chưa tìm được vẫn thuộc chuyến đi: người dùng đã nêu ngày đó, chỉ là chọn quán trong toàn tỉnh.
         var lastDay = stops.Where(stop => stop.Explicit || stop.Days.Any(day => byDay.Any(x => x.DayNumber == day) || wholeProvince.Contains(day)))
             .SelectMany(stop => stop.Days).DefaultIfEmpty((short)0).Max();
-        // STEP-16: Return the new result.
+        // STEP-11: Return the new result.
         return new(province, byDay, null, wholeProvince.Distinct().ToArray(), unresolved.Distinct().ToArray(), lastDay);
     }
 
@@ -134,8 +127,8 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     {
         // STEP-01: Prepare term through WithoutProvince.
         var term = WithoutProvince(AgentIntakePolicy.Plain(place), province);
-        // STEP-02: Return null early when term.Length < MinPlaceLength or AgentItineraryPolicy.IsOpenDay(place) holds.
-        if (term.Length < MinPlaceLength || AgentItineraryPolicy.IsOpenDay(place)) return null;
+        // STEP-02: Return null early when term.Length < MinPlaceLength or IsOpenDay(place) holds.
+        if (term.Length < MinPlaceLength || IsOpenDay(place)) return null;
         // STEP-03: Prepare inProvince from restaurants.Where and label through InvariantCulture.TextInfo.ToTitleCase.
         var inProvince = province is null ? restaurants : restaurants.Where(x => string.Equals(x.Province.Trim(), province.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
         var label = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(place.Trim().ToLowerInvariant());
@@ -208,7 +201,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         var radius = RadiusSteps.FirstOrDefault(step => distances.Count(x => x.Km <= (double)step) >= EnoughRestaurants, largest);
         // STEP-04: Return the new result.
         return new(distances[0].Province, label, decimal.Round(latitude, 6), decimal.Round(longitude, 6), radius,
-            radius > AgentItineraryPolicy.WideRadiusKm ? null : District(distances[0].Address, label));
+            radius > WideRadiusKm ? null : District(distances[0].Address, label));
     }
 
     /// <summary>The district of the nearest restaurant, from the second to last address part; null when it would only repeat the place's own name.</summary>
@@ -252,7 +245,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     }
 
     /// <summary>The name is the province itself ("Hà Nội", "HN"), which means the whole province rather than an area inside it.</summary>
-    private static bool IsProvince(string place, IReadOnlyCollection<string> provinces)
+    public static bool IsProvince(string place, IReadOnlyCollection<string> provinces)
     {
         var words = AgentIntakePolicy.Plain(place);
         return AgentIntakePolicy.FindProvince(words, provinces) is { } province && (words == AgentIntakePolicy.Plain(province) || words.Length <= MaxProvinceAlias);
@@ -261,4 +254,100 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     /// <summary>Drops a trailing province, so "Hoàn Kiếm Hà Nội" is looked up as "Hoàn Kiếm".</summary>
     private static string WithoutProvince(string words, string? province) =>
         province is not null && AgentIntakePolicy.Plain(province) is var name && words.EndsWith($" {name}", StringComparison.Ordinal) ? words[..^(name.Length + 1)] : words;
+
+    // Applying places to the trip
+
+    /// <summary>Above this radius the place has few restaurants nearby, and the reply says how far the search reaches.</summary>
+    public const decimal WideRadiusKm = 12m;
+
+    // Ngày không có nơi cụ thể: chọn quán trong toàn tỉnh. "Tự Do" không phải địa danh, tra bản đồ sẽ ra chỗ bất kỳ ("tủ đồ" bỏ dấu cũng là "tu do").
+    private static readonly Regex OpenDay = new(@"^(?:tu do|tuy y|tuy thich|chua biet|chua ro|chua co ke hoach|khong co ke hoach|chua quyet dinh|linh hoat|dau cung duoc|di dau cung duoc|o dau cung duoc|nghi ngoi)$", RegexOptions.CultureInvariant);
+
+    /// <summary>Applies the located places: days move to them, and the trip grows when a later day was named.</summary>
+    public static AgentState Apply(AgentState state, AgentTripPlaces trip)
+    {
+        // STEP-01: Prepare stated through DayAreas.Select(filtered).Concat().ToHashSet, areas through Concat().OrderBy(filtered).ToArray and more.
+        var stated = trip.DayAreas.Select(x => x.DayNumber).Concat(trip.WholeProvinceDays).ToHashSet();
+        var areas = (state.DayAreas ?? []).Where(x => !stated.Contains(x.DayNumber)).Concat(trip.DayAreas).OrderBy(x => x.DayNumber).ToArray();
+        // Ngày đã chuyển nơi thì tìm lại từ đầu, bán kính đã nới cho nơi cũ không còn giá trị.
+        var widened = trip.TripArea is not null ? [] : (state.WidenedMeals ?? []).Where(x => !stated.Contains(x.DayNumber)).ToArray();
+        var applied = state with
+        {
+            Province = state.Province ?? trip.Province,
+            NumDays = trip.LastDay > (state.NumDays ?? 0) ? trip.LastDay : state.NumDays,
+            DayAreas = areas.Length > 0 ? areas : null,
+            WidenedMeals = widened.Length > 0 ? widened : null
+        };
+        // STEP-02: Return one of two results depending on trip.TripArea exists.
+        return trip.TripArea is { } area ? applied with { OriginMode = "pinned", OriginLatitude = area.Latitude, OriginLongitude = area.Longitude,
+            OriginLabel = area.Label, RadiusKm = area.RadiusKm, NamedAreaLabel = area.Label } : applied;
+    }
+
+    /// <summary>Tells the user how the message was understood, so a wrong reading or an unknown place shows before any dish is chosen.</summary>
+    public static string? Note(AgentState state, AgentTripPlaces trip)
+    {
+        // STEP-01: Prepare known, province through AgentReplyBuilder.Safe and parts as List<string>.
+        var known = state.Province ?? trip.Province;
+        var province = AgentReplyBuilder.Safe(known);
+        var parts = new List<string>();
+        // STEP-02: When trip.TripArea exists, call parts.Add.
+        if (trip.TripArea is { } area)
+            parts.Add($"Mình ghi nhận khu vực {AgentReplyBuilder.Safe(area.Label)}{(area.District is { } district ? $" (khu {AgentReplyBuilder.Safe(district)})" : "")}, mình sẽ ưu tiên quán trong khoảng {area.RadiusKm:0} km quanh đó.");
+        // STEP-03: When state.DayAreas has the expected shape and trip.DayAreas.Length > 0, call parts.Add.
+        if (state.DayAreas is { Length: > 0 } areas && trip.DayAreas.Length > 0)
+            parts.Add($"Mình ghi nhận hành trình ở {province}: {string.Join("; ", areas.Select(Describe))}.");
+        // STEP-04: When trip.Unresolved.Length > 0, prepare unknown through string.Join and call parts.Add.
+        if (trip.Unresolved.Length > 0)
+        {
+            var unknown = string.Join(", ", trip.Unresolved.Select(place => $"“{AgentReplyBuilder.Safe(place)}”"));
+            parts.Add(known is null ? $"Mình chưa tìm được quán quanh {unknown}."
+                : $"Mình chưa tìm được quán quanh {unknown} nên phần đó sẽ chọn trong toàn {province}; bạn có thể nhắn lại tên khu khác.");
+        }
+        // STEP-05: When state.DayAreas has the expected shape, state.NumDays exists and named.Length < total, call parts.Add.
+        if (state.DayAreas is { Length: > 0 } named && state.NumDays is { } total && named.Length < total)
+            parts.Add($"Những ngày còn lại trong {total} ngày, mình chọn trong toàn {province}.");
+        // STEP-06: Return one of two results depending on parts.Count is 0.
+        return parts.Count == 0 ? null : string.Join(' ', parts);
+    }
+
+    /// <summary>One day of the itinerary for chat; says how far the search reaches when the place has few restaurants nearby.</summary>
+    public static string Describe(AgentDayArea area) => $"ngày {area.DayNumber} quanh {AgentReplyBuilder.Safe(area.Label)}" +
+        (area.District is { } district ? $" (khu {AgentReplyBuilder.Safe(district)})" : "") +
+        (area.RadiusKm > WideRadiusKm ? $" (quanh đó còn ít quán nên mình chọn quán gần nhất, trong khoảng {area.RadiusKm:0} km)" : "");
+
+    /// <summary>True when a day has no fixed place ("đi tự do", "chưa biết"), so its dishes come from the whole province.</summary>
+    public static bool IsOpenDay(string place) => OpenDay.IsMatch(Fold(place.Normalize(NormalizationForm.FormC)).Trim());
+
+    /// <summary>One sentence per place, meal and radius for the meals of this plan that had to look further out than their place's radius.</summary>
+    public static IEnumerable<string> WidenedNotes(AgentSnapshot snapshot)
+    {
+        var state = snapshot.State;
+        return (state.WidenedMeals ?? []).Where(meal => snapshot.Items.Any(item => item.DayNumber == meal.DayNumber && item.MealSlot == meal.MealSlot))
+            .Select(meal =>
+            {
+                var place = state.DayAreas?.FirstOrDefault(area => area.DayNumber == meal.DayNumber);
+                return (Meal: meal, Label: place?.Label ?? state.NamedAreaLabel, Radius: place?.RadiusKm ?? state.RadiusKm);
+            })
+            .Where(x => x.Label is not null && x.Radius.HasValue)
+            .GroupBy(x => (x.Label, x.Radius, x.Meal.MealSlot, x.Meal.RadiusKm))
+            .Select(group => $"Quanh {AgentReplyBuilder.Safe(group.Key.Label)} trong {group.Key.Radius:0} km chưa có món cho {AgentReplyBuilder.Meal(group.Key.MealSlot)} " +
+                $"ngày {string.Join(", ", group.Select(x => x.Meal.DayNumber).Order())}, nên bữa đó mình chọn quán trong khoảng {group.Key.RadiusKm:0} km.");
+    }
+
+    /// <summary>True when the name is a place the itinerary already holds, so it must not be searched as a dish or restaurant.</summary>
+    public static bool IsKnownPlace(AgentState state, string name)
+    {
+        var folded = Fold(name.Normalize(NormalizationForm.FormC)).Trim();
+        return (state.DayAreas ?? []).Select(x => x.Label).Append(state.OriginLabel).OfType<string>().Any(label => Fold(label.Normalize(NormalizationForm.FormC)) == folded);
+    }
+
+    /// <summary>Lowercases and removes accents one character at a time, so positions match the original text and labels keep the user's spelling.</summary>
+    internal static string Fold(string text) => string.Create(text.Length, text, (target, source) =>
+    {
+        for (var index = 0; index < source.Length; index++)
+        {
+            var lower = char.ToLowerInvariant(source[index]);
+            target[index] = lower == 'đ' ? 'd' : lower.ToString().Normalize(NormalizationForm.FormD)[0];
+        }
+    });
 }

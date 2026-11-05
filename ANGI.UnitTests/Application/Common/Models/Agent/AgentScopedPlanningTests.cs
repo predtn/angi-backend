@@ -305,11 +305,11 @@ public sealed class AgentScopedPlanningTests
         // STEP-01: Create fixture as AgentUseCaseFixture, get source from AgentTestData.Snapshot and get context from AgentTestData.Context.
         var fixture = new AgentUseCaseFixture();
         var source = AgentTestData.Snapshot(AgentTestData.Item() with { Price = 50000 });
-        var context = AgentTestData.Context(source);
+        var context = AgentTestData.Context(source); context.Request.Content = "ngày 1 cay rất nhiều, chỉ cho gợi ý sau";
         // STEP-02: Stub fixture.RunAsync.
         fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer() with { State = context.State with {
-                PreferenceApplication = "future", TasteOverrides = [new(1, null, [new("spicy", 1)])] } }));
+                PreferenceApplication = "future", TasteOverrides = [new(1, null, [new("spicy", 1, "cay rất nhiều")])] } }));
         // STEP-03: Get result from fixture.Orchestrator().RunAsync.
         var result = await fixture.Orchestrator().RunAsync(context, default);
         // STEP-04: Assert result.Snapshot is not null, result.Snapshot.Items[0].DishId is source.Items[0].DishId and 4 more.
@@ -324,11 +324,11 @@ public sealed class AgentScopedPlanningTests
     public async Task TasteUpdateAnswer_CannotClaimOldProposalWasUpdated()
     {
         // STEP-01: Create fixture as AgentUseCaseFixture and get context from AgentTestData.Context.
-        var fixture = new AgentUseCaseFixture(); var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        var fixture = new AgentUseCaseFixture(); var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item())); context.Request.Content = "ngày 1 cay rất nhiều";
         // STEP-02: Stub fixture.RunAsync.
         fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Đã cập nhật tất cả") with {
-                State = context.State with { TasteOverrides = [new(1, null, [new("spicy", 1)])] } }));
+                State = context.State with { TasteOverrides = [new(1, null, [new("spicy", 1, "cay rất nhiều")])] } }));
         // STEP-03: Get result from fixture.Orchestrator().RunAsync.
         var result = await fixture.Orchestrator().RunAsync(context, default);
         // STEP-04: Assert result.Snapshot is null, result.State.PendingQuestion is not null and result.Reply contains the expected text.
