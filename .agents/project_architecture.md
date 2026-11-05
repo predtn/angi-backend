@@ -236,7 +236,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
 | `RoadmapGeneration` | `PollSeconds` (2) |
 | `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
-| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (8), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20), `MaxCandidates` (2000), `MaxRanked` (200), `LlmTimeoutSeconds` (60), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (60), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
+| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (8), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20 tin chat gửi cho model, không tính dòng tool), `MaxTranscriptMessages` (1000 tin chat trả về màn hình), `MaxCandidates` (2000), `MaxRanked` (200), `LlmTimeoutSeconds` (60), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (60), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.

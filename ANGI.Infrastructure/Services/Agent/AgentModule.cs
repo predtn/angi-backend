@@ -39,6 +39,7 @@ public static class AgentModule
     private static bool Valid(AgentLimits limits) => limits.MaxToolRounds is >= 1 and <= 10 && limits.MaxToolCalls is >= 1 and <= 20 &&
         limits.MaxLlmCalls >= 2 && limits.MaxLlmCalls <= 20 && limits.MaxMessageLength is >= 1 and <= 4000 &&
         limits.MaxContextCharacters is >= 4000 and <= 500000 && limits.MaxHistoryMessages is >= 1 and <= 100 &&
+        limits.MaxTranscriptMessages >= limits.MaxHistoryMessages && limits.MaxTranscriptMessages <= 5000 &&
         limits.MaxCandidates is >= 1 and <= 2000 && limits.MaxRanked is >= 1 and <= 200 &&
         limits.LlmTimeoutSeconds is >= 1 and <= 300 && limits.TimeoutSeconds is >= 1 and <= 300 &&
         limits.LeaseSeconds > limits.TimeoutSeconds && limits.LeaseSeconds <= 600 &&

@@ -20,6 +20,7 @@ public sealed class AgentModuleTests
     [InlineData("MaxMessageLength", "0")][InlineData("MaxMessageLength", "4001")]
     [InlineData("MaxContextCharacters", "3999")][InlineData("MaxContextCharacters", "500001")]
     [InlineData("MaxHistoryMessages", "0")][InlineData("MaxHistoryMessages", "101")]
+    [InlineData("MaxTranscriptMessages", "19")][InlineData("MaxTranscriptMessages", "5001")]
     [InlineData("MaxCandidates", "0")][InlineData("MaxCandidates", "2001")]
     [InlineData("MaxRanked", "0")][InlineData("MaxRanked", "201")]
     [InlineData("TimeoutSeconds", "0")][InlineData("TimeoutSeconds", "301")]

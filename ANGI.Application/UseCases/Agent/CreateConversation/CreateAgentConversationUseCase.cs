@@ -71,7 +71,7 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                 }
                 // STEP-18: Prepare current, then load history through repository.GetCompletedHistoryAsync.
                 var current = AgentJson.Read<AgentState>(existing.State);
-                var history = await repository.GetCompletedHistoryAsync(existing.Id, limits.MaxHistoryMessages, ct);
+                var history = await repository.GetCompletedHistoryAsync(existing.Id, limits.MaxTranscriptMessages, ct);
                 // STEP-19: Prepare proposal from repository.GetProposalSnapshotAsync.
                 var proposal = existing.CurrentProposalId is { } currentId
                     ? await repository.GetProposalSnapshotAsync(existing.Id, currentId, ct) : null;

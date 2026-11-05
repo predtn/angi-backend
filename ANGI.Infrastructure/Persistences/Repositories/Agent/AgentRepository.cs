@@ -72,9 +72,9 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
         return conversation.LastMessageSequence = checked(Math.Max(conversation.LastMessageSequence, stored) + 1);
     }
 
-    /// <summary>Reads only completed turns, maintaining transcript order inside the bounded window.</summary>
+    /// <summary>Reads only what the user and the assistant said in completed turns, in transcript order; tool rows never count against the window.</summary>
     public async Task<AgentMessage[]> GetCompletedHistoryAsync(long conversationId, int limit, CancellationToken ct) =>
-        (await context.AgentMessages.AsNoTracking().Where(x => x.ConversationId == conversationId &&
+        (await context.AgentMessages.AsNoTracking().Where(x => x.ConversationId == conversationId && x.Role != AgentMessageRole.Tool &&
             context.AgentMessages.Any(user => user.ConversationId == conversationId && user.TurnId == x.TurnId &&
                 user.Role == AgentMessageRole.User && user.ProcessingStatus == AgentProcessingStatus.Completed))
             .OrderByDescending(x => x.SequenceNo).Take(limit).ToArrayAsync(ct)).OrderBy(x => x.SequenceNo).ToArray();
