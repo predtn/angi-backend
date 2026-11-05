@@ -172,14 +172,35 @@ remain committable. All saved dishes still go through the existing transactional
 
 ## Grounded replies
 
-LLM reply text is an internal draft and is not forwarded as factual user-visible text. The one exception,
-decided by the project owner on 2026-11-02, is `action=chat`: a social reply states no fact, so it is shown after
-`AgentSmallTalkPolicy` rejects anything with digits, prices, a claimed change, a link, markup, internal terms or
-more than 200 characters, falling back to a fixed sentence.
-A whole-message greeting, thanks or "who are you" gets a fixed reply before any LLM call ("Chào bạn, mình là ANGI…").
+The model reads and words every chat message; the backend guards from behind (project owner, 2026-11-05). `action=chat` is shown after
+`AgentReplyGuard` rejects anything with digits, prices, a claimed change, a link, markup, internal terms or more than 200 characters,
+falling back to a fixed sentence. Greetings, thanks, help, vague edits, a bare "ok", taste level and scope, novelty and a meal the plan does
+not have reach the model and get no backend reply first; the model words `edit_scope`, `general`, `taste_*`, `novelty` and `trip_details` questions.
+Questions resting on what the backend observed (coverage, budget, catalog choice) stay fixed.
+Still handled before the model until they are moved: moving a day of an existing plan to a named place, removing a named item, and saving.
 `action=food_info` answers a general question about what a named dish is like (taste, main ingredients, origin, how it
 is eaten) from the model's common knowledge. The backend drops the wording if it states a number, a health or allergy claim,
 a change or an internal term, and offers to find the dish.
+
+A request for a dish idea (`gợi ý một món`, `hôm nay ăn gì`) is not a trip: it never asks for place, duration or budget.
+The model calls `suggest_dish` once, then writes
+the reply in a second call around slots (`{name1}`, `{restaurant1}`, `{price1}`, `{address1}`, `{meals1}`, then `{name2}`...), which the backend fills
+from the tool's facts. When the model leaves out a dish's address, or the meals of a dish that only suits some meals, the backend adds them, so the user always knows where to go.
+A place the user names for the idea (`nhà tôi ở Cầu Giấy`) goes to the tool's `area`, which the backend locates and searches around; a place it cannot locate is reported, not ignored.
+The reply is shown only if every dish has its name, restaurant and price slots kept together, the words around the
+slots state no number, name or dish the user did not write, and it claims a taste ranking only when `personalized=true`; otherwise, or when
+that call fails, the fixed reply is shown with no retry. A taste stated in the request goes to `tasteTargets` for that ranking only, and a
+taste with no level means 0.75 there (user decision on 2026-11-05); it is not saved, and it does not change the rule for plans.
+The reply says how it read such a taste and invites a change. `personalized` is true only when the user has a taste profile and reco confirms
+it ranked with the vector, because reco ignores the vector of a user with no interactions. No grant is issued and the plan and state stay unchanged.
+Stating a taste with no plan, place, duration, budget or open question anywhere (`tôi thích ngọt`) is read by the model as a request for an idea
+rather than opening the planning questions (user decision on 2026-11-05). Dishes already in the plan are left out unless nothing else fits, and the reply
+invites adding the dish by naming its day and meal. `DishOffered` marks that for one turn, so "ok" is read against the offer: it is not a bare
+acknowledgement, and an open save question is dropped so that "ok" cannot save the plan. Adding uses the ordinary edit path to a new preview; nothing
+is written until the user saves. A question about the user's own
+favourites (`món sở trường của tôi là gì`) is `action=chat`: ANGI holds no such data, so the model says so and offers a suggestion;
+a chat, answer or worded clarify reply is replaced when it uses a word that starts at least 5 catalog dish names and nothing it may
+quote backs it. Rare dish words are not checked, because many are everyday words (`vui lòng`, `ba ngày`).
 
 A point pinned on the roadmap gives the province and a search circle of at least 10 km, so a new plan does not ask where to
 eat. A model state that leaves province, duration, budget or pin empty keeps the current value; only a pin the user names can
@@ -191,26 +212,33 @@ summaries, and fetches no route legs in chat. A source over 60 items reaches the
 (`sourceIsPartial`, `sourceItemCount`).
 
 `action=out_of_scope` covers anything outside dishes, restaurants and the food itinerary, including general food
-knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always exactly: "Việc này
-nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi." For a food question, the
+knowledge the system holds no data for (recipes, nutrition, a dish's history). Its reply is always backend wording, one of
+`AgentReplyGuard.OutOfScopeReplies` chosen by turn (decided by the project owner on 2026-11-04); no model text is shown. For a food question, the
 nullable `suggestedDish` adds one offer to find that dish, only when the user's own message names it.
 Both actions run before state acceptance and return the state from the start of the turn: they cannot change a
 constraint, close an open question or join the pending planning request, and the current proposal stays savable.
-A greeting repeats the question still open; the refusal stays verbatim.
+A greeting and a refusal both repeat the question still open.
 A new preview is announced in a few sentences (place, days, total, empty meals, required disclosures); an edit names
 what changed and says the rest stayed. Its dishes are shown by the proposal card and map, never repeated in chat. The
-itinerary is listed in chat only for a request to see a saved plan (`AgentChatPolicy.IsPlanViewRequest`) with no ready
+itinerary is listed in chat only for a request to see a saved plan (`AgentConfirmationPolicy.IsPlanViewRequest`) with no ready
 proposal on screen.
 Decided by the project owner on 2026-11-03: the model also words `answer` replies, `edit_scope` and `general`
-clarifications (when no tool ran and no trip detail is missing) and a fact-free opener for a preview. `AgentGroundedReply`
+clarifications (when no tool ran and no trip detail is missing) and a fact-free opener for a preview. `AgentReplyGuard`
 shows that wording only if every number and mid-sentence capitalized name appears in the plan, trip state, this turn's
 tool results or the user's message, and it makes no change claim, internal term, link or unbacked claim (opening hours,
-fame). It cannot detect an invented lowercase dish name. Any failure shows the fixed reply. Taste, novelty, budget,
-coverage and catalog questions stay fixed because state or evidence depends on their exact text.
+fame). It catches an invented lowercase dish name only when that word starts at least 5 catalog dish names. Any failure shows the fixed reply. Budget,
+coverage and catalog questions stay fixed because they rest on what the backend observed. Taste and novelty questions are worded by the model since
+2026-11-05. A taste level the model adds or changes in state must carry `levelQuote`, the user's own words for it: the backend checks the words were
+written and say more than the taste itself, drops the quote, and otherwise refuses the ranking and the proposal so the model asks instead. `suggest_dish` is exempt because it saves nothing.
+A preview's opening sentence is worded by the model around `{total}`, `{numDays}`, `{place}` and, for an edit, `{changes}`, filled once the plan is validated, so no extra provider call is needed. A sentence that lacks `{total}`, lacks `{changes}` on an edit, or whose own words state a number, name or dish falls back to the fixed summary. Disclosures (missing meals, no budget, rating fallback, tastes applied, substitutions) stay backend-written after it.
+Decided by the project owner on 2026-11-04: the model also words a `trip_details` question about a missing duration or budget when
+the place is known; the place question stays fixed. A stated "sẽ đổi" is a promise only the backend may make, but it is allowed in a question.
+`chat` and `food_info` replies that look like code are dropped, and a `chat` reply naming something nobody stated is too. A `reply_replaced`
+event, without the text, records each time a check drops the model's wording.
 
-Saving is handled by `AgentSavePolicy` without the model, also decided on 2026-11-03. Saving with no known start date
+Saving is handled by `AgentConfirmationPolicy` without the model, also decided on 2026-11-03. Saving with no known start date
 asks for one and names the planned days; the answer ("3/11", "từ 3/11 đến 5/11", "ngày mai", "thứ 7 tuần sau", read by
-`AgentDatePolicy` in Vietnam time) saves at once. A date already past or a range whose length differs from the plan is
+`AgentConfirmationPolicy` in Vietnam time) saves at once. A date already past or a range whose length differs from the plan is
 asked again and never changes the plan; "đổi thành N ngày" is a normal constraint change. "Để sau" saves with no date,
 because `roadmaps.start_date` stays nullable. A bare "lưu" with a known date asks "Mình lưu lịch hiện tại … nhé?", and a
 short yes ("ok", "ừ", "đúng rồi") then saves. Backend-owned `pendingSave` ties that yes to the exact proposal ID and
@@ -255,6 +283,22 @@ Verified locally: 2591 backend unit tests; 50 existing Agent/PostgreSQL integrat
 configured reco service and was skipped. Provider interpretation is covered with deterministic stubs,
 not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_20261030.
 
+## Pre-plan questions read by the model (user decision on 2026-11-05)
+
+Replaces the reading of the answers described in the 2026-11-03 section below; the steps and their order did not change.
+
+- The model reads every message of a new trip and words the questions: place (`trip_details`), scope after a bare province (`place_scope`), duration and budget (`trip_details`), then preferences (`preferences`). `planningIntake` records the stage from the kind of question, so the frontend's quick replies still work.
+- The backend keeps the order from state alone, never from the wording: `get_recommendation` and a proposal wait until the place, duration and budget are known and the preferences question was asked or the state already holds a taste or request; a trip submitted through the constraints form plans at once. A question ahead of its turn is replaced by the backend's question for what is missing, and wording that fails its check shows the fixed question of that kind.
+- Places go through the `locate_places` tool: the model passes the names it read, and the backend finds the coordinates, radius and district, stores them and shows its own note above the next question. Over an existing plan the tool is refused, because moving a day keeps its own path.
+- A province outside the catalog is dropped, and the reply names where ANGI has data. Stated numbers still override the model's reading through `AgentIntakePolicy.CaptureRequest`.
+- With no plan, stating or correcting the place and duration, or leaving an unset budget open, needs no confirmation; a budget already set still does.
+- Shared coordinates and a pinned point carry no language and stay outside the model; a point with no restaurant nearby gets its fixed answer with no provider call.
+- Asking for one dish while the questions are open closes them. Cost: roughly one call per question, four or more per new plan, where these turns used to be free.
+
+## Conversation history (2026-11-05)
+
+Tool rows no longer count against history. `Agent:MaxHistoryMessages` (20) bounds the user and assistant messages sent to the model, and `Agent:MaxTranscriptMessages` (1000) bounds those returned to the chat screen, so a reload restores the conversation. Before this a reload showed 12 of the 50 messages of conversation 158, and the model lost what the user had said after a few tool-heavy turns.
+
 ## Pre-plan questions and empty replies (2026-11-03)
 
 - A new plan (no ready proposal and no saved item) asks in a fixed order without a provider call: place, then
@@ -267,6 +311,11 @@ not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_
   coordinates and asks for a place.
 - A long reply that answers nothing closes the questions and goes to the model. Changing a duration the roadmap
   holds, or a budget with no limit, still needs the existing separate confirmation.
+- Decided by the project owner on 2026-11-04: at the duration/budget question, any reply stating no value goes to the model whatever its length
+  (`intakeAside`), because spoken wordings cannot be listed. Budget is optional in chat, as in RM-06 and RM-10: a user who has not decided
+  (`chưa chốt ngân sách`) continues under `budgetUnrestricted=true` with no second confirmation, and the reply and the proposal card say no budget
+  applies. Once the trip is settled this way, the preferences question still comes before any plan: the backend asks it, and `get_recommendation`
+  returns `missing_trip_details` until then. A reply at the scope question keeps its old behaviour.
 - `reply` may be empty for any action: the backend has fixed wording for all of them. Treating it as malformed made
   `out_of_scope` (`huong dan toi`) spend 2-4 calls and end in a 503. A bare request for help is answered without a
   call. Output still unusable after its repair, and invalid model state, ask again instead of returning 503.
@@ -274,7 +323,7 @@ not a live-model accuracy guarantee. Dedicated database: angi_agent_scoped_test_
 
 ## Itinerary by day and places inside a province (2026-11-03)
 
-- `Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác` is read by `AgentItineraryPolicy` without a provider call and stored in the
+- `Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác` is read by `AgentPlaceResolver` without a provider call and stored in the
   backend-owned `AgentState.dayAreas` (JSONB, no migration). Clients and the model cannot write it. A day without an area
   uses the whole province or the trip origin. One area without a day (`ở Cầu Giấy`) becomes the existing pinned origin
   and radius. The province is inferred from the places; a day past the known duration extends the trip, and days the
