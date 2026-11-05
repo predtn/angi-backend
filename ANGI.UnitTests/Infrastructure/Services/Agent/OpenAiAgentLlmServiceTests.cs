@@ -687,7 +687,7 @@ public sealed class OpenAiAgentLlmServiceTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    // TEST-40: The read step offers no tools, sends real chat turns with the latest message last, and only the rules of its stage; covers a new trip and a waiting answer.
+    // TEST-29: The read step offers no tools, sends real chat turns with the latest message last, and only the rules of its stage; covers a new trip and a waiting answer.
     /// <summary>The model reads the message without holding a tool it could reach for.</summary>
     [Theory]
     [InlineData(null, "# 4. A new trip", "# 8. Building the proposal")]
@@ -725,7 +725,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-41: The forced step offers only the named tool and must call it.
+    // TEST-30: The forced step offers only the named tool and must call it.
     /// <summary>After reading, the model cannot pick a different tool.</summary>
     [Fact]
     public async Task RunAsync_ForcedStep_OffersOnlyTheNamedTool()

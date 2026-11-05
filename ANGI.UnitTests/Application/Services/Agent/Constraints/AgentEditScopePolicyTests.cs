@@ -7,7 +7,7 @@ namespace ANGI.UnitTests.Application.Services.Agent.Constraints;
 /// <summary>Verifies edits that name nothing are clarified by the backend while every edit with a real target still reaches the model.</summary>
 public sealed class AgentEditScopePolicyTests
 {
-    // TEST-06: Pointing words are not catalog names; covers "cái này", "món đó", a real dish and empty text.
+    // TEST-01: Pointing words are not catalog names; covers "cái này", "món đó", a real dish and empty text.
     /// <summary>Stops a lookup that could only report a false "not found".</summary>
     [Theory]
     [InlineData("cái này", true)]

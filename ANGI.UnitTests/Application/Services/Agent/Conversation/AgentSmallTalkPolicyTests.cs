@@ -7,7 +7,7 @@ namespace ANGI.UnitTests.Application.Services.Agent.Conversation;
 /// <summary>Verifies AgentReplyGuard answers social messages, refuses out-of-scope requests and only forwards safe model wording.</summary>
 public sealed class AgentSmallTalkPolicyTests
 {
-    // TEST-06: A safe social reply from the model is shown; covers trimming, a missing reply and a word that looks like money.
+    // TEST-01: A safe social reply from the model is shown; covers trimming, a missing reply and a word that looks like money.
     /// <summary>Lets the assistant sound natural when the wording cannot state a false fact.</summary>
     [Theory]
     [InlineData("  Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!  ", "Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!")]
@@ -17,7 +17,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is expected.
         AgentReplyGuard.ChatReply(reply, "", AgentTestData.State()).Should().Be(expected);
 
-    // TEST-07: Length boundaries decide between the model reply and the fallback; covers 500 and 501 characters.
+    // TEST-02: Length boundaries decide between the model reply and the fallback; covers 500 and 501 characters.
     /// <summary>Keeps a social reply short and bounds what model text can reach the user.</summary>
     [Theory]
     [InlineData(500, true)][InlineData(501, false)]
@@ -30,7 +30,7 @@ public sealed class AgentSmallTalkPolicyTests
         AgentReplyGuard.ChatReply(reply, "", AgentTestData.State()).Should().Be(shown ? reply : AgentReplyGuard.ChatFallback);
     }
 
-    // TEST-08: Unsafe model wording falls back to the fixed reply; covers empty text, digits, prices, a claimed save or change, a URL, markup, a line break and internal terms.
+    // TEST-03: Unsafe model wording falls back to the fixed reply; covers empty text, digits, prices, a claimed save or change, a URL, markup, a line break and internal terms.
     /// <summary>Ensures provider prose can never state prices, promise a change or leak internal vocabulary.</summary>
     [Theory]
     [InlineData("   ")][InlineData("Món này 50 nghìn")][InlineData("Giá chỉ vài đồng thôi")][InlineData("Mình đã lưu lịch cho bạn")][InlineData("Mình vừa đổi món rồi nhé")]
@@ -39,7 +39,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is AgentReplyGuard.ChatFallback.
         AgentReplyGuard.ChatReply(reply, "", AgentTestData.State()).Should().Be(AgentReplyGuard.ChatFallback);
 
-    // TEST-09: An open question is repeated after a model-written social reply and after the fallback.
+    // TEST-04: An open question is repeated after a model-written social reply and after the fallback.
     /// <summary>Keeps the reminder independent of whether the model wording was accepted.</summary>
     [Theory]
     [InlineData("Mình vẫn ổn nhé!", "Mình vẫn ổn nhé!")][InlineData("Giá 50k", AgentReplyGuard.ChatFallback)]
@@ -52,7 +52,7 @@ public sealed class AgentSmallTalkPolicyTests
         AgentReplyGuard.ChatReply(reply, "", state).Should().Be($"{shown}\nBạn muốn đổi món nào?");
     }
 
-    // TEST-10: The refusal is the owner's exact sentence whenever no dish is offered; covers null, empty, one letter, 41 characters, digits,
+    // TEST-05: The refusal is the owner's exact sentence whenever no dish is offered; covers null, empty, one letter, 41 characters, digits,
     // a dish the user never wrote and generic food words.
     /// <summary>Pins the agreed wording and rejects any suggestion the user's own message does not support.</summary>
     [Theory]
@@ -68,7 +68,7 @@ public sealed class AgentSmallTalkPolicyTests
         reply.Should().Be("Việc này nằm ngoài khả năng của mình rồi. Mình chỉ giúp được về món ăn, quán và lịch ăn uống thôi.");
     }
 
-    // TEST-11: A general food question naming a dish adds one offer to find that dish; covers accents, no accents and the 40-character maximum.
+    // TEST-06: A general food question naming a dish adds one offer to find that dish; covers accents, no accents and the 40-character maximum.
     /// <summary>Turns a refusal into a next step the assistant can really perform, using only the user's own words.</summary>
     [Theory]
     [InlineData("Cách nấu phở?", "phở")][InlineData("cach nau pho", "phở")][InlineData("Công thức bún bò Huế", " bún bò Huế ")]
@@ -77,7 +77,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.OutOfScopeReply() does not contain the expected text.
         AgentReplyGuard.OutOfScopeReply(content, dish, new AgentState(), null).Should().NotContain("chỉ giúp được về món ăn").And.EndWith($"Bạn có muốn mình tìm quán {dish.Trim()} không?");
 
-    // TEST-12: A description of a dish is shown with an offer to find it; a number or health claim falls back to the fixed line, because neither comes from ANGI data.
+    // TEST-07: A description of a dish is shown with an offer to find it; a number or health claim falls back to the fixed line, because neither comes from ANGI data.
     /// <summary>Lets the model describe a dish without letting it state facts the backend cannot check.</summary>
     [Theory]
     [InlineData("Mì Quảng thường có vị đậm đà, nước dùng sền sệt.", true)]
@@ -93,7 +93,7 @@ public sealed class AgentSmallTalkPolicyTests
         result.Should().StartWith(shown ? reply : AgentReplyGuard.FoodInfoFallback).And.EndWith("Bạn có muốn mình tìm quán Mì Quảng trên ANGI không?");
     }
 
-    // TEST-13: Refusals rotate by turn; covers no turn, each variant, wrapping around, and two consecutive chat turns differing.
+    // TEST-08: Refusals rotate by turn; covers no turn, each variant, wrapping around, and two consecutive chat turns differing.
     /// <summary>Keeps repeated refusals from reading the same while the same turn always replays the same wording.</summary>
     [Theory]
     [InlineData(null, 0)][InlineData(0L, 0)][InlineData(1L, 1)][InlineData(2L, 2)][InlineData(3L, 0)]
@@ -107,7 +107,7 @@ public sealed class AgentSmallTalkPolicyTests
         AgentReplyGuard.OutOfScopeReply("Giải toán", null, new AgentState(), (turn ?? 0) + 2).Should().NotBe(reply);
     }
 
-    // TEST-14: A refusal repeats the open question; covers the fixed refusal and the named-dish refusal.
+    // TEST-09: A refusal repeats the open question; covers the fixed refusal and the named-dish refusal.
     /// <summary>The user sees why the request was declined and where the conversation is waiting.</summary>
     [Theory]
     [InlineData("Giải toán", null)][InlineData("Cách nấu phở", "phở")]
@@ -120,7 +120,7 @@ public sealed class AgentSmallTalkPolicyTests
         AgentReplyGuard.OutOfScopeReply(content, dish, state, null).Should().EndWith("\nBạn đi mấy ngày?");
     }
 
-    // TEST-15: Natural replies to "tôi đói" are shown; these were replaced because accents were stripped ("đã đói" read as "đã đổi", "vừa thấy" as "vừa thay") or because they named food or a number.
+    // TEST-10: Natural replies to "tôi đói" are shown; these were replaced because accents were stripped ("đã đói" read as "đã đổi", "vừa thấy" as "vừa thay") or because they named food or a number.
     /// <summary>A social reply changes nothing, so it may talk like a person: only a claim the backend alone can make is stopped.</summary>
     [Theory]
     [InlineData("Bạn đã đói rồi à? Để mình kiếm gì cho bạn ăn nhé.")]
@@ -134,7 +134,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is reply.
         AgentReplyGuard.ChatReply(reply, "tôi đói", new AgentState()).Should().Be(reply);
 
-    // TEST-16: A claim only the backend can make still falls back; covers a change with accents, a price in several forms and code.
+    // TEST-11: A claim only the backend can make still falls back; covers a change with accents, a price in several forms and code.
     /// <summary>Keeps the rule that a social reply never states a price or a change, without reading anything else in it.</summary>
     [Theory]
     [InlineData("Mình đã đổi món rồi nha")][InlineData("Mình vừa thêm món vào lịch")][InlineData("Phở chỉ 50k thôi")][InlineData("Tô này 45.000 đồng")]
@@ -143,7 +143,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is the fallback.
         AgentReplyGuard.ChatReply(reply, "", new AgentState()).Should().Be(AgentReplyGuard.ChatFallback);
 
-    // TEST-16B: A chat reply naming something nobody stated falls back, while names from the user, the trip and ANGI stay.
+    // TEST-12: A chat reply naming something nobody stated falls back, while names from the user, the trip and ANGI stay.
     /// <summary>Stops an out-of-scope answer the model labelled as small talk, the one mistake here that breaks ANGI's scope.</summary>
     [Theory]
     [InlineData("Thủ đô của Pháp là Paris.", false)][InlineData("Chào Minh, mình nghe đây!", true)][InlineData("Chuyến đi Đà Nẵng vui nha!", true)][InlineData("Vâng, mình là ANGI nè!", true)]
@@ -151,7 +151,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is the expected value.
         AgentReplyGuard.ChatReply(reply, "Chào, mình là Minh", new AgentState { Province = "Đà Nẵng" }).Should().Be(shown ? reply : AgentReplyGuard.ChatFallback);
 
-    // TEST-17: A dish description falls back when it writes code; a proper name stays, because where a dish comes from is part of describing it.
+    // TEST-13: A dish description falls back when it writes code; a proper name stays, because where a dish comes from is part of describing it.
     /// <summary>Applies the code check without blocking a real description of a dish.</summary>
     [Theory]
     [InlineData("Mì Quảng thường có nguồn gốc từ Quảng Nam.", true)][InlineData("Bạn dùng print(\"mì\") nhé.", false)]
@@ -159,7 +159,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.FoodInfoReply() is the expected value.
         AgentReplyGuard.FoodInfoReply(reply, "Mì Quảng là gì?", null, new AgentState()).Should().Be(shown ? reply : AgentReplyGuard.FoodInfoFallback);
 
-    // TEST-18: A refused social reply is reported with the rule it broke; covers empty, too long, markup, a claim, code, a name and a shown reply.
+    // TEST-14: A refused social reply is reported with the rule it broke; covers empty, too long, markup, a claim, code, a name and a shown reply.
     /// <summary>The first reply of a conversation was replaced with no way of knowing why.</summary>
     [Theory]
     [InlineData("", 0, "empty")]
@@ -173,7 +173,7 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatIssue() is issue.
         AgentReplyGuard.ChatIssue(reply + new string('!', padding), "alo", new AgentState()).Should().Be(issue);
 
-    // TEST-19: A dish description names the rule it broke, and a proper name stays allowed.
+    // TEST-15: A dish description names the rule it broke, and a proper name stays allowed.
     /// <summary>Where a dish comes from is part of describing it, so names are not a reason here.</summary>
     [Theory]
     [InlineData("Phở thường ngon lắm.", null)]

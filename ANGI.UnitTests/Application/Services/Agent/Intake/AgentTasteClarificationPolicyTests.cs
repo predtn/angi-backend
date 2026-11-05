@@ -11,7 +11,7 @@ namespace ANGI.UnitTests.Application.Services.Agent.Intake;
 /// <summary>Checks that direct taste requests are clarified before ranking, without changing reco or profile weights, and that novelty wording is clarified instead of being looked up as a dish name or turned into an invented filter.</summary>
 public sealed class AgentTasteClarificationPolicyTests
 {
-    // TEST-09: Only a declared taste preference counts as taste wording; covers a declaration, an edit request and a negated preference.
+    // TEST-01: Only a declared taste preference counts as taste wording; covers a declaration, an edit request and a negated preference.
     /// <summary>Limits meal-scope narrowing evidence to messages that actually state a taste.</summary>
     [Theory]
     [InlineData("Tôi thích ăn chua vừa cho bữa 2 ngày 1", true)]
@@ -23,7 +23,7 @@ public sealed class AgentTasteClarificationPolicyTests
         AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
     }
 
-    // TEST-10: Look-alike words typed with diacritics never become a taste, while correct spellings and unaccented messages still do;
+    // TEST-02: Look-alike words typed with diacritics never become a taste, while correct spellings and unaccented messages still do;
     // covers chưa, mận, đang, cây, tuổi, accented chua/mặn/ngọt, and fully unaccented text.
     /// <summary>Prevents "món chưa ăn bao giờ" from being read as a sour preference because diacritics were stripped before matching.</summary>
     [Theory]
@@ -42,7 +42,7 @@ public sealed class AgentTasteClarificationPolicyTests
         AgentTasteClarificationPolicy.StatesTaste(content).Should().Be(expected);
     }
 
-    // TEST-11: Mentioned tastes are listed by display name once each and look-alike words are ignored; covers two tastes and a "chưa" message.
+    // TEST-03: Mentioned tastes are listed by display name once each and look-alike words are ignored; covers two tastes and a "chưa" message.
     /// <summary>Supplies the taste names used by the backend-rendered taste questions.</summary>
     [Theory]
     [InlineData("Đừng cay quá, ít ngọt thôi, cay vừa", new[] { "cay", "ngọt" })]

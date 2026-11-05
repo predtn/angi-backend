@@ -249,7 +249,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
-    // TEST-09: A coverage claim without an observed empty meal triggers one repair, and the repaired patch becomes the proposal without the false claim.
+    // TEST-08: A coverage claim without an observed empty meal triggers one repair, and the repaired patch becomes the proposal without the false claim.
     /// <summary>Ensures a model's coverage intent is not treated as evidence of missing catalog choices.</summary>
     [Fact]
     public async Task RunAsync_UnsupportedCoverage_RepairsAndBuildsUpdatedProposal()
@@ -276,7 +276,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-10: Repeated unsupported coverage claims end in a planning-incomplete reply that keeps the source and never blames the catalog; covers a one-call and a two-call budget.
+    // TEST-09: Repeated unsupported coverage claims end in a planning-incomplete reply that keeps the source and never blames the catalog; covers a one-call and a two-call budget.
     /// <summary>Bounds coverage repairs by the LLM call limit and keeps the previous proposal intact.</summary>
     [Theory]
     [InlineData(1)]
@@ -303,7 +303,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(maxCalls));
     }
 
-    // TEST-11: An observed empty meal produces a question naming that day/meal and its required tags, without the model's invented cause.
+    // TEST-10: An observed empty meal produces a question naming that day/meal and its required tags, without the model's invented cause.
     /// <summary>Allows coverage clarification only when backend tool results actually observed a missing meal.</summary>
     [Fact]
     public async Task RunAsync_ObservedMissingMeal_AsksAboutThatMealWithoutInventedCause()
@@ -327,7 +327,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-12: Explanation and clarification use existing context without calling ranking or routes.
+    // TEST-11: Explanation and clarification use existing context without calling ranking or routes.
     /// <summary>Checks the no-reranking path for ordinary conversational answers.</summary>
     [Theory]
     [InlineData("answer")][InlineData("clarify")]
@@ -345,7 +345,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-13: Repair one invalid schema response and reject a second invalid response.
+    // TEST-12: Repair one invalid schema response and reject a second invalid response.
     /// <summary>Checks both successful repair and the single-repair ceiling.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -363,7 +363,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-14: A hallucinated dish never produces a new ready proposal or overwrites the source snapshot.
+    // TEST-13: A hallucinated dish never produces a new ready proposal or overwrites the source snapshot.
     /// <summary>Verifies deterministic validation after a structurally valid model output.</summary>
     [Fact]
     public async Task RunAsync_HallucinatedDish_ReturnsBlockingValidation()
@@ -378,7 +378,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull(); result.Validation!.Errors.Should().NotBeEmpty();
     }
 
-    // TEST-15: Context size and cancellation prevent uncontrolled provider work.
+    // TEST-14: Context size and cancellation prevent uncontrolled provider work.
     /// <summary>Checks resource caps before an LLM request and preserves caller cancellation.</summary>
     [Fact]
     public async Task RunAsync_OversizedContextAndCancellation_StopBeforeProvider()
@@ -399,7 +399,7 @@ public sealed class AgentOrchestratorTests
         llm.VerifyNoOtherCalls();
     }
 
-    // TEST-16: The total backend timeout cancels a slow provider and reports a controlled unavailable result.
+    // TEST-15: The total backend timeout cancels a slow provider and reports a controlled unavailable result.
     /// <summary>Verifies processing is bounded independently of provider HTTP timeouts.</summary>
     [Fact]
     public async Task RunAsync_TotalTimeout_CancelsSlowProvider()
@@ -414,7 +414,7 @@ public sealed class AgentOrchestratorTests
         (await act.Should().ThrowAsync<ServiceUnavailableException>()).Which.ErrorCode.Should().Be("AGENT_UNAVAILABLE");
     }
 
-    // TEST-17: Repeated tools stop at the round, aggregate-call and total-LLM-call caps.
+    // TEST-16: Repeated tools stop at the round, aggregate-call and total-LLM-call caps.
     /// <summary>Verifies backend execution limits against a provider that never returns a final answer.</summary>
     [Theory]
     [InlineData("rounds", 2)][InlineData("calls", 1)][InlineData("llm", 2)]
@@ -442,7 +442,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(expectedCalls));
     }
 
-    // TEST-18: Structurally valid model state with invalid business bounds asks the user again, keeping the turn's state, instead of a service error.
+    // TEST-17: Structurally valid model state with invalid business bounds asks the user again, keeping the turn's state, instead of a service error.
     /// <summary>Verifies invalid model-enriched state cannot escape as user validation, a 503 or a ready state.</summary>
     [Fact]
     public async Task RunAsync_InvalidModelState_AsksAgainWithoutChangingState()
@@ -461,7 +461,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-19: A model may request draft controls but cannot use those actions to also mutate state or items.
+    // TEST-18: A model may request draft controls but cannot use those actions to also mutate state or items.
     /// <summary>Checks the chat intent allowlist and keeps backend lifecycle effects separate from proposal deltas.</summary>
     [Theory]
     [InlineData("discard_proposal", "discard")]
@@ -478,7 +478,7 @@ public sealed class AgentOrchestratorTests
         result.Action.Should().Be(expected); result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
 
-    // TEST-20: A model cannot authorize its own relaxed constraints, even when it sets its consent flag.
+    // TEST-19: A model cannot authorize its own relaxed constraints, even when it sets its consent flag.
     /// <summary>Turns relaxation into a persisted confirmation question rather than a provider error or automatic change.</summary>
     [Fact]
     public async Task RunAsync_RelaxedState_StagesHumanConsent()
@@ -497,7 +497,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
 
-    // TEST-21: Non-schema failures never enter repair, including quota, transport, refusal and truncated output.
+    // TEST-20: Non-schema failures never enter repair, including quota, transport, refusal and truncated output.
     /// <summary>Protects free provider quota while retaining a reason-specific API failure.</summary>
     [Theory]
     [InlineData(AgentLlmFailureKind.Configuration)][InlineData(AgentLlmFailureKind.Authentication)]
@@ -521,7 +521,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), true, It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-22: An unclassified missing response cannot be assumed to contain repairable model output.
+    // TEST-21: An unclassified missing response cannot be assumed to contain repairable model output.
     /// <summary>Fails closed without spending another provider request on an unknown failure.</summary>
     [Fact]
     public async Task RunAsync_NullResult_DoesNotRepair()
@@ -537,7 +537,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-23: One transient provider 503 is retried once and the recovered answer is rebuilt by the backend.
+    // TEST-22: One transient provider 503 is retried once and the recovered answer is rebuilt by the backend.
     /// <summary>Verifies classified temporary provider failures are retried within the turn deadline.</summary>
     [Fact]
     public async Task RunAsync_Transient503_RetriesWithoutRepeatingTools()
@@ -553,7 +553,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-24: Persistent provider 503 responses stop after two retries and surface a provider error.
+    // TEST-23: Persistent provider 503 responses stop after two retries and surface a provider error.
     /// <summary>Caps transient retries so an outage cannot consume the LLM call budget.</summary>
     [Fact]
     public async Task RunAsync_Repeated503_StopsAfterTwoRetries()
@@ -569,7 +569,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
-    // TEST-25: A short per-minute 429 is retried once while a daily quota 429 fails immediately; covers rate_limit and daily_quota_exceeded.
+    // TEST-24: A short per-minute 429 is retried once while a daily quota 429 fails immediately; covers rate_limit and daily_quota_exceeded.
     /// <summary>Distinguishes recoverable rate limits from exhausted quota before spending another provider call.</summary>
     [Theory]
     [InlineData("rate_limit", true)]
@@ -588,7 +588,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()), Times.Exactly(recover ? 2 : 1));
     }
 
-    // TEST-26: A complete create_proposal selection over an existing proposal updates it with fresh ranking provenance and no repair call.
+    // TEST-25: A complete create_proposal selection over an existing proposal updates it with fresh ranking provenance and no repair call.
     /// <summary>Accepts create_proposal in update mode as a scoped snapshot instead of forcing a patch repair.</summary>
     [Fact]
     public async Task RunAsync_CompleteSelectionOverExistingProposal_UpdatesWithoutActionRepair()
@@ -612,7 +612,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-27: Caller cancellation during a provider call propagates without repair or an availability fallback.
+    // TEST-26: Caller cancellation during a provider call propagates without repair or an availability fallback.
     /// <summary>Keeps the UI Stop action distinct from server or provider timeouts.</summary>
     [Fact]
     public async Task RunAsync_CallerCancellationDuringProvider_Propagates()
@@ -629,7 +629,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-28: Failure telemetry includes safe diagnostic categories and timing without leaking prompt content.
+    // TEST-27: Failure telemetry includes safe diagnostic categories and timing without leaking prompt content.
     /// <summary>Makes future provider failures distinguishable without logging raw requests or upstream bodies.</summary>
     [Fact]
     public async Task RunAsync_ProviderFailure_RecordsSafeDiagnostics()
@@ -657,7 +657,7 @@ public sealed class AgentOrchestratorTests
         AgentJson.Write(captured).Should().NotContain("private-prompt");
     }
 
-    // TEST-29: A dish repeated on day 2 is swapped for an unused authorized dish without another LLM call, and a repeat with no unused alternative stays and is disclosed by the repeat note; covers both cases.
+    // TEST-28: A dish repeated on day 2 is swapped for an unused authorized dish without another LLM call, and a repeat with no unused alternative stays and is disclosed by the repeat note; covers both cases.
     /// <summary>Keeps multi-day plans varied for free while never blocking a plan whose ranked candidates cannot avoid a repeat.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -684,7 +684,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-30: A proposal rejected only for exceeding the trip budget ends in a question about the budget with the observed figures
+    // TEST-29: A proposal rejected only for exceeding the trip budget ends in a question about the budget with the observed figures
     // when the repaired output gives up (empty proposal), still exceeds the budget, or asks a budget clarification; covers all three.
     /// <summary>Turns "the dishes do not fit the budget" into a question the user can answer instead of a generic invalid-proposal error.</summary>
     [Theory]
@@ -720,7 +720,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-31: A budget clarification without an observed over-budget proposal is repaired once, and the repaired proposal is built.
+    // TEST-30: A budget clarification without an observed over-budget proposal is repaired once, and the repaired proposal is built.
     /// <summary>Keeps the model from asking the user to raise the budget before the backend has seen a proposal exceed it.</summary>
     [Fact]
     public async Task RunAsync_UnsupportedBudgetClarification_RepairsAndBuildsProposal()
@@ -746,7 +746,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-32: An empty proposal before any validation is repaired once without blaming the budget; a second empty proposal ends in a question, not an invalid-proposal error.
+    // TEST-31: An empty proposal before any validation is repaired once without blaming the budget; a second empty proposal ends in a question, not an invalid-proposal error.
     /// <summary>Keeps a model that gives up twice from surfacing "Lịch đề xuất không hợp lệ" to the user.</summary>
     [Fact]
     public async Task RunAsync_EmptyProposalTwiceBeforeValidation_AsksInsteadOfFailing()
@@ -772,7 +772,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-33: An empty proposal with no issued candidates asks for recommendations while tools remain, and ends without another LLM call once tools are closed; covers both.
+    // TEST-32: An empty proposal with no issued candidates asks for recommendations while tools remain, and ends without another LLM call once tools are closed; covers both.
     /// <summary>Points the repair at the real gap (no candidates) and never spends a paid call that cannot fetch them.</summary>
     [Theory]
     [InlineData(false)][InlineData(true)]
@@ -797,7 +797,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(toolsClosed ? 1 : 2));
     }
 
-    // TEST-34: After an empty-proposal repair, a full proposal rejected by validation still gets its own repair and the corrected proposal is built.
+    // TEST-33: After an empty-proposal repair, a full proposal rejected by validation still gets its own repair and the corrected proposal is built.
     /// <summary>Keeps the empty-proposal repair from consuming the repair reserved for validation errors.</summary>
     [Fact]
     public async Task RunAsync_EmptyProposalRepair_KeepsValidationRepairAvailable()
@@ -826,7 +826,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
-    // TEST-35: A recommendation requested before the budget is known ends the turn with the fixed budget question, keeps the accepted taste
+    // TEST-34: A recommendation requested before the budget is known ends the turn with the fixed budget question, keeps the accepted taste
     // and makes no further LLM call instead of failing with AGENT_UNAVAILABLE.
     /// <summary>Protects the user's taste answer and the turn itself when the model asks for recommendations too early.</summary>
     [Fact]
@@ -852,7 +852,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-36: A whole-day taste proposed for "bữa 2 ngày 1" is stored as lunch of day 1, while an override already in state is not
+    // TEST-35: A whole-day taste proposed for "bữa 2 ngày 1" is stored as lunch of day 1, while an override already in state is not
     // narrowed by later edit wording such as "bữa 1 ngày 1"; covers both.
     /// <summary>Checks final-output narrowing applies only to the taste scope the model proposes from the user's taste wording this turn.</summary>
     [Theory]
@@ -881,7 +881,7 @@ public sealed class AgentOrchestratorTests
             .Should().Equal(((short)1, newTaste ? "lunch" : null));
     }
 
-    // TEST-37: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
+    // TEST-36: A repeat whose own grant has no unused dish is replaced from the backend-held reserve of the same ranked request without
     // another LLM call, and the reserve dish keeps its provenance in the snapshot.
     /// <summary>Prevents a small per-day grant from forcing a repeat while the ranked list still holds unused dishes.</summary>
     [Fact]
@@ -912,7 +912,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-39: A restaurant the catalog cannot find is asked about without being kept in mealRequests, so naming another restaurant
+    // TEST-37: A restaurant the catalog cannot find is asked about without being kept in mealRequests, so naming another restaurant
     // next turn is a new request rather than a constraint change; a tag the turn added for that meal is kept.
     /// <summary>Stops an unfound name ("Hương Sen Phố Cổ") from turning the user's next choice into a "xác nhận thay đổi" question.</summary>
     [Fact]
@@ -940,7 +940,7 @@ public sealed class AgentOrchestratorTests
             request.RestaurantName == null && request.DayNumber == 1 && request.MealSlot == "dinner" && request.TagIds.Single() == 53);
     }
 
-    // TEST-41: An answer closes any older question, because the model read the message and moved on; covers an offer and a taste question.
+    // TEST-38: An answer closes any older question, because the model read the message and moved on; covers an offer and a taste question.
     /// <summary>A question left open would be repeated and would block saving the plan.</summary>
     [Theory]
     [InlineData("Bạn có muốn xem lựa chọn khác không?")]
@@ -962,7 +962,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingQuestion.Should().BeNull();
     }
 
-    // TEST-44: A proposal only over budget is repaired from cheaper ranked dishes without another provider call, and the reply discloses the swap.
+    // TEST-39: A proposal only over budget is repaired from cheaper ranked dishes without another provider call, and the reply discloses the swap.
     /// <summary>Fixes a low budget ending in "raise your budget" although cheaper dishes had been ranked.</summary>
     [Fact]
     public async Task RunAsync_OverBudgetWithCheaperDish_RepairsWithoutProvider()
@@ -988,7 +988,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-45: A budget of the wrong size gets one repair: a corrected figure is taken, and a repeated one is dropped instead of reaching the trip.
+    // TEST-40: A budget of the wrong size gets one repair: a corrected figure is taken, and a repeated one is dropped instead of reaching the trip.
     /// <summary>Prevents the 1,500 đồng budget the model produced for "500k 1 ngày", without any pattern reading the user's wording to override it.</summary>
     [Theory]
     [InlineData(1000000, 1000000)]
@@ -1013,7 +1013,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-46: A model-written social reply is shown, while its state, items and changes are ignored; covers a safe reply and one falling back for stating a price.
+    // TEST-41: A model-written social reply is shown, while its state, items and changes are ignored; covers a safe reply and one falling back for stating a price.
     /// <summary>Ensures a social turn can sound natural but can never alter the trip or the plan.</summary>
     [Theory]
     [InlineData("Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!", "Mình vẫn ổn, cảm ơn bạn đã hỏi nhé!")]
@@ -1040,7 +1040,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-47: "Hướng dẫn bóc cam" gets the owner's exact refusal in one call, whether or not a plan exists, ignoring the model's draft, state and items.
+    // TEST-42: "Hướng dẫn bóc cam" gets the owner's exact refusal in one call, whether or not a plan exists, ignoring the model's draft, state and items.
     /// <summary>Guarantees out-of-scope requests are refused instead of printing the plan or asking for trip details.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -1067,7 +1067,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-48: A general food question is refused with an offer to find the dish the user named; covers a dish in the message and one the model invented.
+    // TEST-43: A general food question is refused with an offer to find the dish the user named; covers a dish in the message and one the model invented.
     /// <summary>Gives a useful next step while keeping the offer tied to the user's own words.</summary>
     [Theory]
     [InlineData("phở", "Mình chưa hướng dẫn được phần này vì ANGI không có dữ liệu về công thức, dinh dưỡng hay sức khỏe. Bạn có muốn mình tìm quán phở không?")]
@@ -1086,7 +1086,7 @@ public sealed class AgentOrchestratorTests
         (await Create(llm.Object).RunAsync(context, default)).Reply.Should().Be(expected);
     }
 
-    // TEST-49: An off-topic reply to an open taste question keeps that question and does not join the request being planned.
+    // TEST-44: An off-topic reply to an open taste question keeps that question and does not join the request being planned.
     /// <summary>Prevents "bóc cam" from clearing the taste question or being read as part of the trip request.</summary>
     [Fact]
     public async Task RunAsync_OutOfScopeDuringTasteQuestion_KeepsQuestionAndPlanningRequest()
@@ -1111,7 +1111,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingPlanningRequest.Should().Be(pending);
     }
 
-    // TEST-50: A question answered by the model no longer dumps the plan; a request to see it over a saved plan still lists it.
+    // TEST-45: A question answered by the model no longer dumps the plan; a request to see it over a saved plan still lists it.
     /// <summary>Verifies the end-to-end behaviour of the answer action for both kinds of message.</summary>
     [Theory]
     [InlineData("Vì sao chọn món này?", false)]
@@ -1133,7 +1133,7 @@ public sealed class AgentOrchestratorTests
         if (!listed) result.Reply.Should().Be(AgentReplyBuilder.AnswerUnavailable);
     }
 
-    // TEST-51: An empty reply is not a failure: refusals and social messages use the backend's fixed text in one call; this was the "hướng dẫn tôi" 503.
+    // TEST-46: An empty reply is not a failure: refusals and social messages use the backend's fixed text in one call; this was the "hướng dẫn tôi" 503.
     /// <summary>Reproduces conversation 88: the model left reply empty because the backend owns the refusal, which cost repairs and ended in a 503.</summary>
     [Theory]
     [InlineData("out_of_scope", AgentReplyGuard.OutOfScope)]
@@ -1156,7 +1156,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-52: An empty reply on a clarify turn also falls back to the fixed wording without a repair call; an empty answer is covered by RunAsync_EmptyAnswer_IsWrittenOnce.
+    // TEST-47: An empty reply on a clarify turn also falls back to the fixed wording without a repair call; an empty answer is covered by RunAsync_EmptyAnswer_IsWrittenOnce.
     /// <summary>Ensures no paid repair call is spent on a question the backend can word itself.</summary>
     [Theory]
     [InlineData("clarify")]
@@ -1177,7 +1177,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-53: Output still unusable after its one repair asks the user again; the state is unchanged and telemetry never holds the model's text.
+    // TEST-48: Output still unusable after its one repair asks the user again; the state is unchanged and telemetry never holds the model's text.
     /// <summary>Bounds paid calls at two and replaces the old 503 with a question the user can answer.</summary>
     [Fact]
     public async Task RunAsync_UnusableOutputAfterRepair_AsksAgainWithoutLeakingText()
@@ -1201,7 +1201,7 @@ public sealed class AgentOrchestratorTests
         telemetry.Verify(x => x.Record("invalid_output", 7, It.IsAny<long?>(), It.IsAny<long?>(), It.Is<object?>(data => !System.Text.Json.JsonSerializer.Serialize(data, (System.Text.Json.JsonSerializerOptions?)null).Contains("xxx"))), Times.Exactly(2));
     }
 
-    // TEST-54: Items attached to a question are dropped rather than failing the turn, and never reach a proposal.
+    // TEST-49: Items attached to a question are dropped rather than failing the turn, and never reach a proposal.
     /// <summary>A clarify or answer can never edit a plan, so its stray items are simply ignored.</summary>
     [Fact]
     public async Task RunAsync_QuestionWithItems_IgnoresItems()
@@ -1220,7 +1220,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotBeNullOrWhiteSpace();
     }
 
-    // TEST-55: Discard or reset carrying a state or items is refused without a service error and without discarding anything.
+    // TEST-50: Discard or reset carrying a state or items is refused without a service error and without discarding anything.
     /// <summary>Keeps draft controls from also mutating the plan, while the user still gets an answer.</summary>
     [Fact]
     public async Task RunAsync_ControlWithPayload_AsksAgain()
@@ -1239,7 +1239,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Be(AgentReplyGuard.NotUnderstood);
     }
 
-    // TEST-56: The reported flow: the model words each question and the backend records how far it got; a title holding a place does not answer it, and a stated daily budget is multiplied.
+    // TEST-51: The reported flow: the model words each question and the backend records how far it got; a title holding a place does not answer it, and a stated daily budget is multiplied.
     /// <summary>Walks the whole intake over an empty three-day roadmap whose title names Hà Nội.</summary>
     [Fact]
     public async Task RunAsync_NewPlan_ModelAsksPlaceThenScopeThenPreferences()
@@ -1277,7 +1277,7 @@ public sealed class AgentOrchestratorTests
         preferences.State.PendingQuestion.Should().Be(preferences.Reply);
     }
 
-    // TEST-57: The order holds whatever the model tries: asking about preferences or scope before the trip is known gets the backend's question for what is missing, with no further call.
+    // TEST-52: The order holds whatever the model tries: asking about preferences or scope before the trip is known gets the backend's question for what is missing, with no further call.
     /// <summary>Only the wording belongs to the model; the steps and their order stay fixed.</summary>
     [Theory]
     [InlineData("preferences", null, "Bạn muốn trải nghiệm ẩm thực")]
@@ -1299,7 +1299,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-58: Words that fail the check show the backend's own question of that kind, so a bad reply never loses the step.
+    // TEST-53: Words that fail the check show the backend's own question of that kind, so a bad reply never loses the step.
     /// <summary>Covers each question the model now words.</summary>
     [Theory]
     [InlineData("trip_details", null)]
@@ -1317,7 +1317,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Be(clarification switch { "trip_details" => AgentIntakePolicy.PlaceQuestion, "place_scope" => AgentIntakePolicy.ScopeQuestion("Hà Nội"), _ => AgentIntakePolicy.PreferencesQuestion });
     }
 
-    // TEST-59: Answering the preference question closes the intake and plans in the same turn; "không" reaches the model marked as adding no requirement.
+    // TEST-54: Answering the preference question closes the intake and plans in the same turn; "không" reaches the model marked as adding no requirement.
     /// <summary>Ensures "không" is not read as a dismissal and that the plan is not blocked as an unrequested change on an empty roadmap.</summary>
     [Fact]
     public async Task RunAsync_PreferenceAnswer_ClosesIntakeAndPlans()
@@ -1342,7 +1342,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingQuestion.Should().BeNull();
     }
 
-    // TEST-60: A model that asks again right after the intake gets one repair and then plans; a second question is shown without a third call.
+    // TEST-55: A model that asks again right after the intake gets one repair and then plans; a second question is shown without a third call.
     /// <summary>Bounds the extra paid call to one while protecting the user from being asked what they just answered.</summary>
     [Fact]
     public async Task RunAsync_ModelAsksAgainAfterIntake_RepairsOnce()
@@ -1364,7 +1364,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-61: Current location resolves the province from the nearest restaurant and limits candidates to 10 km before the model runs; an uncovered location needs no model call.
+    // TEST-56: Current location resolves the province from the nearest restaurant and limits candidates to 10 km before the model runs; an uncovered location needs no model call.
     /// <summary>Keeps recommendations geographic without a map provider call, and never keeps coordinates the trip cannot use.</summary>
     [Theory]
     [InlineData("Hà Nội")]
@@ -1397,7 +1397,7 @@ public sealed class AgentOrchestratorTests
         }
     }
 
-    // TEST-62: A province ANGI has no data for says where it has data and asks again, whatever the model wrote; an aside keeps the place in the questions.
+    // TEST-57: A province ANGI has no data for says where it has data and asks again, whatever the model wrote; an aside keeps the place in the questions.
     /// <summary>Ensures the questions neither start somewhere with no restaurants nor trap a user who changed the subject.</summary>
     [Fact]
     public async Task RunAsync_UnansweredPlace_RepeatsOrStepsAside()
@@ -1419,7 +1419,7 @@ public sealed class AgentOrchestratorTests
         aside.Reply.Should().EndWith(AgentIntakePolicy.PlaceQuestion);
     }
 
-    // TEST-63: A message stating everything is taken whole and only what is missing is asked; a plan attempted before the preferences question gets it, and a stated taste goes to its own question.
+    // TEST-58: A message stating everything is taken whole and only what is missing is asked; a plan attempted before the preferences question gets it, and a stated taste goes to its own question.
     /// <summary>Ensures nobody is asked again for what they already wrote in one sentence, while no step is skipped.</summary>
     [Fact]
     public async Task RunAsync_AllFactsInOneMessage_AsksOnlyWhatIsMissing()
@@ -1448,7 +1448,7 @@ public sealed class AgentOrchestratorTests
         taste.State.PlanningIntake.Should().BeNull();
     }
 
-    // TEST-64: With no plan to disturb, the user's own answer is applied without asking them to confirm what they just said; a budget already set is still protected.
+    // TEST-59: With no plan to disturb, the user's own answer is applied without asking them to confirm what they just said; a budget already set is still protected.
     /// <summary>Answering the questions with a new duration or "no limit", including slang, moves straight on, because the model read it.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 5 ngày", 5, false)]
@@ -1468,7 +1468,7 @@ public sealed class AgentOrchestratorTests
         result.State.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-65: An invalid duration in an answer repeats the validator's message and keeps the question open.
+    // TEST-60: An invalid duration in an answer repeats the validator's message and keeps the question open.
     /// <summary>Ensures a bad answer is explained to the user instead of failing the turn.</summary>
     [Fact]
     public async Task RunAsync_InvalidAnswer_ExplainsLimit()
@@ -1483,7 +1483,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
     }
 
-    // TEST-66: A plan already on screen skips the questions without reading provinces or places; only the reply check reads dish names.
+    // TEST-61: A plan already on screen skips the questions without reading provinces or places; only the reply check reads dish names.
     /// <summary>Ensures edits keep their existing path and ask nothing extra.</summary>
     [Fact]
     public async Task RunAsync_ExistingPlan_SkipsIntake()
@@ -1504,7 +1504,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-67: The reported itinerary reaches the budget question with every day placed: the model reads the days, the backend locates them and says so above the model's question.
+    // TEST-62: The reported itinerary reaches the budget question with every day placed: the model reads the days, the backend locates them and says so above the model's question.
     /// <summary>Replays the start of conversation 94, without searching places as restaurants.</summary>
     [Fact]
     public async Task RunAsync_ReportedItinerary_LocatesThenAsksBudget()
@@ -1523,7 +1523,7 @@ public sealed class AgentOrchestratorTests
         result.State.DayAreas.Should().HaveCount(3);
     }
 
-    // TEST-68: A longer trip keeps its duration and says what the unnamed days will do, which is how a four-day roadmap frame met a three-day itinerary.
+    // TEST-63: A longer trip keeps its duration and says what the unnamed days will do, which is how a four-day roadmap frame met a three-day itinerary.
     /// <summary>Ensures the mismatch of conversations 94 and 158 is stated to the user instead of silently planning a day they did not mention.</summary>
     [Fact]
     public async Task RunAsync_ItineraryShorterThanTrip_StatesTheRemainingDays()
@@ -1541,7 +1541,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("Những ngày còn lại trong 4 ngày, mình chọn trong toàn Hà Nội.");
     }
 
-    // TEST-69: A named area answers the place question and is searched around; an unknown one is reported with no province, so nothing is planned somewhere wrong.
+    // TEST-64: A named area answers the place question and is searched around; an unknown one is reported with no province, so nothing is planned somewhere wrong.
     /// <summary>Replays "Hai bà trưng", which used to end in "chưa nhận ra địa điểm", and an unknown name beside it.</summary>
     [Theory]
     [InlineData("Hai bà trưng", "khu vực Hai Bà Trưng", true)]
@@ -1562,7 +1562,7 @@ public sealed class AgentOrchestratorTests
         else result.State.Province.Should().BeNull();
     }
 
-    // TEST-70: Over a plan a day moves through locate_places only as far as the plan allows; covers a whole-trip area, a day past the trip, and a place the day already has.
+    // TEST-65: Over a plan a day moves through locate_places only as far as the plan allows; covers a whole-trip area, a day past the trip, and a place the day already has.
     /// <summary>The model reads "ngày 9 ở Hoàn Kiếm"; the backend decides what it may change, and an unchanged itinerary forces no replan.</summary>
     [Theory]
     [InlineData("area")]
@@ -1589,7 +1589,7 @@ public sealed class AgentOrchestratorTests
         if (area == "past") context.Exchanges.Single().Results[0].GetProperty("outsideTrip")[0].GetInt16().Should().Be(9);
     }
 
-    // TEST-71: A model that sends an unusable proposal twice on a new plan no longer fails the turn with PROPOSAL_NOT_COMMITTABLE: the backend assembles the plan for no further call.
+    // TEST-66: A model that sends an unusable proposal twice on a new plan no longer fails the turn with PROPOSAL_NOT_COMMITTABLE: the backend assembles the plan for no further call.
     /// <summary>Reproduces the "bản nháp không đủ điều kiện" error of conversation 94's failed turn, which forced a second paid attempt.</summary>
     [Fact]
     public async Task RunAsync_UnusableProposalTwiceOnNewPlan_BackendAssemblesPlan()
@@ -1613,7 +1613,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-72: The same failure on an edit keeps the plan on screen, savable and unchanged, instead of an error.
+    // TEST-67: The same failure on an edit keeps the plan on screen, savable and unchanged, instead of an error.
     /// <summary>Ensures a model failure never destroys or blocks the plan the user already reviewed.</summary>
     [Fact]
     public async Task RunAsync_UnusableProposalTwiceOnExistingPlan_KeepsPlan()
@@ -1638,7 +1638,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-73: A place the model read over an existing plan moves that day through locate_places, and the proposal for it is accepted.
+    // TEST-68: A place the model read over an existing plan moves that day through locate_places, and the proposal for it is accepted.
     /// <summary>Ensures "ngày 1 tôi ở Hoàn Kiếm" changes the plan in whatever wording the model understood it.</summary>
     [Fact]
     public async Task RunAsync_ItineraryOnExistingPlan_MovesDayAndAcceptsProposal()
@@ -1671,7 +1671,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Items.Single().DishId.Should().Be(2);
     }
 
-    // TEST-80: A trip only to a place with no restaurants says so through the backend's note, keeps no province and lets the model ask again.
+    // TEST-69: A trip only to a place with no restaurants says so through the backend's note, keeps no province and lets the model ask again.
     /// <summary>Ensures "Ngày 1 đi Đà Nẵng" is answered honestly instead of planning in Hà Nội or asking as if nothing was said.</summary>
     [Fact]
     public async Task RunAsync_OnlyPlaceOutsideCatalog_SaysSoAndAsks()
@@ -1689,7 +1689,7 @@ public sealed class AgentOrchestratorTests
         result.State.DayAreas.Should().BeNull();
     }
 
-    // TEST-81: The itineraries of conversations 121 and 158 read Hồ Gươm at the lake, keep a free day for the whole province and still ask about preferences.
+    // TEST-70: The itineraries of conversations 121 and 158 read Hồ Gươm at the lake, keep a free day for the whole province and still ask about preferences.
     /// <summary>Replays the message that put day 1 in Hà Đông and made day 3 a place called "Tự Do".</summary>
     [Fact]
     public async Task RunAsync_ItineraryWithFreeDay_ReadsCorrectly()
@@ -1711,7 +1711,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("Những ngày còn lại trong 3 ngày, mình chọn trong toàn Hà Nội.").And.EndWith("Bạn có khẩu vị riêng gì không?");
     }
 
-    // TEST-85: Complaints about a dish, and any plan without itinerary places, keep the model's normal edit flow.
+    // TEST-71: Complaints about a dish, and any plan without itinerary places, keep the model's normal edit flow.
     /// <summary>Guards the rule that the new correction case does not take over edits handled before.</summary>
     [Theory]
     [InlineData("bữa trưa ngày 1 sai vị rồi", true)]
@@ -1734,7 +1734,7 @@ public sealed class AgentOrchestratorTests
         context.ItineraryChanged.Should().BeFalse();
     }
 
-    // TEST-86: Changing taste after a proposal replans with the new taste, keeps the itinerary places although the model's state cannot carry them, and accepts the new dishes.
+    // TEST-72: Changing taste after a proposal replans with the new taste, keeps the itinerary places although the model's state cannot carry them, and accepts the new dishes.
     /// <summary>Covers the question "người dùng bỗng đổi khẩu vị khi đã có đề xuất": every changed position needs a fresh search under the new taste.</summary>
     [Fact]
     public async Task RunAsync_TasteChangedOnProposalWithItinerary_ReplansAndKeepsPlaces()
@@ -1767,7 +1767,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Notes.Should().Contain(note => note.Contains("ngọt mức nhẹ"));
     }
 
-    // TEST-87: A bare taste the model acted on without a level changes no dish: the model gets one repair and then the question is asked; covers the model asking after the repair and insisting.
+    // TEST-73: A bare taste the model acted on without a level changes no dish: the model gets one repair and then the question is asked; covers the model asking after the repair and insisting.
     /// <summary>"thích ăn cay" changes nothing on the plan until the user gives its level.</summary>
     [Theory]
     [InlineData(true)]
@@ -1792,7 +1792,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-88: The current location shared at the scope question keeps its coordinates and radius through the model's next question.
+    // TEST-74: The current location shared at the scope question keeps its coordinates and radius through the model's next question.
     /// <summary>Ensures the location button works at this question, where the province is already known.</summary>
     [Fact]
     public async Task RunAsync_ScopeAnsweredByLocation_KeepsCoordinates()
@@ -1809,7 +1809,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.OriginMode == "gps" && x.RadiusKm == 10m && x.PlanningIntake == AgentIntakePolicy.Details);
     }
 
-    // TEST-89: The roadmap of conversation 138 has a pin and no province: the pin answers "ở đâu" and gives the search circle, and the backend says so above the model's question.
+    // TEST-75: The roadmap of conversation 138 has a pin and no province: the pin answers "ở đâu" and gives the search circle, and the backend says so above the model's question.
     /// <summary>This message used to ask for a place the user had already chosen on the map.</summary>
     [Fact]
     public async Task RunAsync_PinnedRoadmapWithoutProvince_UsesPinInsteadOfAskingPlace()
@@ -1825,7 +1825,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.RadiusKm == 10m && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
     }
 
-    // TEST-90: A pin far from every restaurant says so and asks for a place, keeping the pin; covers the only case where the place question remains.
+    // TEST-76: A pin far from every restaurant says so and asks for a place, keeping the pin; covers the only case where the place question remains.
     /// <summary>Ensures the question is honest instead of looking as if the pin was never seen.</summary>
     [Fact]
     public async Task RunAsync_PinOutsideCatalog_SaysSoAndAsksPlace()
@@ -1841,7 +1841,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.Province == null && x.OriginLatitude == 10m);
     }
 
-    // TEST-91: A trip that already has a province keeps its search as it is, so a user who widened the search is not narrowed again.
+    // TEST-77: A trip that already has a province keeps its search as it is, so a user who widened the search is not narrowed again.
     /// <summary>Only the first contact with a pin fills the circle.</summary>
     [Fact]
     public async Task RunAsync_PinWithProvince_KeepsSearch()
@@ -1856,7 +1856,7 @@ public sealed class AgentOrchestratorTests
         result.State.RadiusKm.Should().BeNull();
     }
 
-    // TEST-92: A dish suggested in the middle of the planning questions keeps the trip values and the open question, which is repeated.
+    // TEST-78: A dish suggested in the middle of the planning questions keeps the trip values and the open question, which is repeated.
     /// <summary>In conversation 160 "tôi không biết" was misread as asking for a dish and the plan being built was lost; one wrong reading must not cost the user their place.</summary>
     [Fact]
     public async Task RunAsync_DishSuggestionDuringIntake_KeepsQuestionAndTrip()
@@ -1885,7 +1885,7 @@ public sealed class AgentOrchestratorTests
         return llm;
     }
 
-    // TEST-92B: A chat message is read with no tools, a named tool is then the only one, and following calls have all tools again.
+    // TEST-79: A chat message is read with no tools, a named tool is then the only one, and following calls have all tools again.
     /// <summary>A model holding tools calls one even when none fits: "1 + 1 bằng mấy" once became a dish suggestion.</summary>
     [Fact]
     public async Task RunAsync_ChatMessage_ReadsThenForcesTheNamedTool()
@@ -1904,7 +1904,7 @@ public sealed class AgentOrchestratorTests
         context.Exchanges.Should().ContainSingle();
     }
 
-    // TEST-92C: The steps that already know the work skip the read; covers a button command, a submitted form and a replan after confirmation.
+    // TEST-80: The steps that already know the work skip the read; covers a button command, a submitted form and a replan after confirmation.
     /// <summary>Reading again would only spend a call on a message that carries no new meaning.</summary>
     [Theory]
     [InlineData("button")][InlineData("form")][InlineData("replan")]
@@ -1925,7 +1925,7 @@ public sealed class AgentOrchestratorTests
         seen.Should().Equal((AgentTurnPhase.Act, null));
     }
 
-    // TEST-92D: A broken read is repaired as a read; any other repair may need tools; and a tool named outside the read is not used.
+    // TEST-81: A broken read is repaired as a read; any other repair may need tools; and a tool named outside the read is not used.
     /// <summary>Keeps the no-tools step through a schema repair without trapping a repair that needs data.</summary>
     [Fact]
     public async Task RunAsync_ReadRepairs_KeepOrLeaveTheRead()
@@ -1943,7 +1943,7 @@ public sealed class AgentOrchestratorTests
         seen.Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Read, null), (AgentTurnPhase.Act, null));
     }
 
-    // TEST-92F: An empty answer gets one chance to be written, still in the read step; a second empty one falls back to the fixed line; a reply is never rewritten.
+    // TEST-82: An empty answer gets one chance to be written, still in the read step; a second empty one falls back to the fixed line; a reply is never rewritten.
     /// <summary>In conversation 193 "giữ nguyên" with nothing waiting got "Mình chưa trả lời cụ thể được câu này".</summary>
     [Theory]
     [InlineData("Ừ, mình giữ nguyên lịch nhé.", 2, "Ừ, mình giữ nguyên lịch nhé.")]
@@ -1965,7 +1965,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-92G: Agreeing with nothing waiting never reaches the user as a claim: with a ready plan it becomes a wish to save, which only asks; with no plan it stays an answer.
+    // TEST-83: Agreeing with nothing waiting never reaches the user as a claim: with a ready plan it becomes a wish to save, which only asks; with no plan it stays an answer.
     /// <summary>Conversation 194 answered "chốt đi" with "Chốt nhé!" and saved nothing.</summary>
     [Theory]
     [InlineData("ready", "request_save")]
@@ -1985,7 +1985,7 @@ public sealed class AgentOrchestratorTests
         result.Action.Should().Be(action);
     }
 
-    // TEST-92E: A tool asked for outside the read step is refused with the usual question, not run.
+    // TEST-84: A tool asked for outside the read step is refused with the usual question, not run.
     /// <summary>Stops the use_tool action from becoming a way round the tool limits.</summary>
     [Fact]
     public async Task RunAsync_UseToolOutsideRead_IsNotRun()
@@ -2003,7 +2003,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-93: A dish already suggested in this conversation is left out, so asking again gives another one.
+    // TEST-85: A dish already suggested in this conversation is left out, so asking again gives another one.
     /// <summary>"Bất kì" must not repeat the same dish forever.</summary>
     [Fact]
     public async Task RunAsync_RepeatedSuggestion_GivesAnotherDish()
@@ -2020,7 +2020,7 @@ public sealed class AgentOrchestratorTests
         result.State.DishOffered.Should().BeTrue();
     }
 
-    // TEST-94: The model reads every message that used to get a backend reply, and its own wording is shown; covers greetings, thanks, help, vague edits, a bare "ok", tastes, novelty and a missing meal, with no trip, over an empty roadmap and over a plan.
+    // TEST-86: The model reads every message that used to get a backend reply, and its own wording is shown; covers greetings, thanks, help, vague edits, a bare "ok", tastes, novelty and a missing meal, with no trip, over an empty roadmap and over a plan.
     /// <summary>The user asked for the model to hold the conversation, with the backend guarding from behind.</summary>
     [Theory]
     [InlineData("none", "alo")]
@@ -2062,7 +2062,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-95: The model's question about a taste or a vague edit is shown and stays open, and it opens no planning questions over an empty roadmap; an invented figure falls back to the fixed question.
+    // TEST-87: The model's question about a taste or a vague edit is shown and stays open, and it opens no planning questions over an empty roadmap; an invented figure falls back to the fixed question.
     /// <summary>"Nhẹ" must continue this exchange, not start asking for the trip's place, duration and budget.</summary>
     [Theory]
     [InlineData("taste_intensity", "Bạn thích cay nhẹ hay vừa?", true)]
@@ -2087,7 +2087,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().BeNull();
     }
 
-    // TEST-96: A suggestion with conditions costs two provider calls: the model reads the conditions, then words the reply from the tool's facts; a state it returns is ignored.
+    // TEST-88: A suggestion with conditions costs two provider calls: the model reads the conditions, then words the reply from the tool's facts; a state it returns is ignored.
     /// <summary>The user reads the model's own sentence while the plan and trip values stay untouched.</summary>
     [Fact]
     public async Task RunAsync_ConditionedSuggestion_ShowsModelWordingAndKeepsState()
@@ -2112,7 +2112,7 @@ public sealed class AgentOrchestratorTests
         context.ToolsClosed.Should().BeTrue();
     }
 
-    // TEST-97: A question about what a dish is like is answered, and neither that answer nor a refused recipe contradicts itself; covers the message of the bug report.
+    // TEST-89: A question about what a dish is like is answered, and neither that answer nor a refused recipe contradicts itself; covers the message of the bug report.
     /// <summary>"Mì Quảng có vị như thế nào" used to get "mình chỉ giúp được về món ăn".</summary>
     [Theory]
     [InlineData("food_info", "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng thường đậm đà, nước dùng sền sệt.", "Mì Quảng thường đậm đà")]
@@ -2136,7 +2136,7 @@ public sealed class AgentOrchestratorTests
         result.State.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-98: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
+    // TEST-90: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
     /// <summary>Only a real change reaches the confirmation question.</summary>
     [Fact]
     public async Task RunAsync_ModelLeavesTripValuesEmpty_KeepsThemWithoutConfirmation()
@@ -2157,7 +2157,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.PendingStateChange == null && x.NumDays == 7 && x.BudgetAmount == 3500000 && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
     }
 
-    // TEST-99: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
+    // TEST-91: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
     /// <summary>Keeps the explicit way out of a pinned search.</summary>
     [Fact]
     public async Task RunAsync_UserRemovesPin_StillAsksToConfirm()
@@ -2178,7 +2178,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingStateChange!.OriginMode.Should().Be("none");
     }
 
-    // TEST-100: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
+    // TEST-92: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
     /// <summary>A model reply cannot hold hundreds of items, so these trips would otherwise end in a truncated output.</summary>
     [Theory]
     [InlineData(15)]
@@ -2221,7 +2221,7 @@ public sealed class AgentOrchestratorTests
             It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-101: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-93: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]
@@ -2237,7 +2237,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotContain("Số ngày phải");
     }
 
-    // TEST-102: A user who has not decided a budget gets no second confirmation and no plan yet: the preferences question comes next, states the missing budget, and costs one call.
+    // TEST-94: A user who has not decided a budget gets no second confirmation and no plan yet: the preferences question comes next, states the missing budget, and costs one call.
     /// <summary>Budget is optional in chat, while the order of the questions before a plan stays the same.</summary>
     [Fact]
     public async Task RunAsync_UndecidedBudget_AsksPreferencesWithoutConfirmation()
@@ -2264,7 +2264,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-103: A model that jumps to ranking with the budget undecided is stopped by the tool, so the preferences question still comes first and no further call is made.
+    // TEST-95: A model that jumps to ranking with the budget undecided is stopped by the tool, so the preferences question still comes first and no further call is made.
     /// <summary>Guards the order of the steps against the model, not only through the prompt.</summary>
     [Fact]
     public async Task RunAsync_UndecidedBudgetThenRecommendation_StillAsksPreferencesFirst()
@@ -2288,7 +2288,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-104: The model's question about missing trip details is shown when backed, and replaced by the fixed one when it invents a figure; the question stays open in both.
+    // TEST-96: The model's question about missing trip details is shown when backed, and replaced by the fixed one when it invents a figure; the question stays open in both.
     /// <summary>The wording may answer what the user said, while the facts stay checked.</summary>
     [Theory]
     [InlineData("Không sao đâu, bạn ước chừng một mức cho mỗi người được không?", true)]
@@ -2310,7 +2310,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
     }
 
-    // TEST-105: Before a plan exists the model still cannot drop a budget the user gave: the unrestricted state waits for the user's confirmation.
+    // TEST-97: Before a plan exists the model still cannot drop a budget the user gave: the unrestricted state waits for the user's confirmation.
     /// <summary>Only an unset budget may be left open without asking, so the exception cannot be used to skip a limit.</summary>
     [Fact]
     public async Task RunAsync_UnrestrictedOverAStatedBudget_StillNeedsConfirmation()
@@ -2331,7 +2331,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingStateChange!.BudgetUnrestricted.Should().BeTrue();
     }
 
-    // TEST-106: An off-topic or social reply during the budget question keeps the question and the whole request, so the next message continues where the user left off.
+    // TEST-98: An off-topic or social reply during the budget question keeps the question and the whole request, so the next message continues where the user left off.
     /// <summary>Passing the reply to the model must not lose the user's place in the questions.</summary>
     [Theory]
     [InlineData("out_of_scope")][InlineData("chat")]
@@ -2353,7 +2353,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().EndWith(BudgetQuestionState().PendingQuestion);
     }
 
-    // TEST-107: A chat turn over code or an unbacked name shows the fixed reply and logs the replacement without the wording; shown wording and refusals log nothing.
+    // TEST-99: A chat turn over code or an unbacked name shows the fixed reply and logs the replacement without the wording; shown wording and refusals log nothing.
     /// <summary>Lets reviews measure how often the checks block the model, and never stores what the model wrote.</summary>
     [Theory]
     [InlineData("chat", "print(\"hello\")", true)]
@@ -2383,7 +2383,7 @@ public sealed class AgentOrchestratorTests
             It.Is<object>(data => System.Text.Json.JsonSerializer.Serialize(data, AgentJson.Options).Contains(reply.StartsWith("print") ? "\"reason\":\"code\"" : "\"reason\":\"name\""))), Times.Once);
     }
 
-    // TEST-108: Consecutive refusals in one conversation use different fixed wordings and show no model text.
+    // TEST-100: Consecutive refusals in one conversation use different fixed wordings and show no model text.
     /// <summary>Keeps repeated refusals from reading like a machine while nothing the model wrote reaches the user.</summary>
     [Fact]
     public async Task RunAsync_ConsecutiveRefusals_VaryWithoutModelText()
@@ -2402,7 +2402,7 @@ public sealed class AgentOrchestratorTests
         replies.Should().OnlyHaveUniqueItems().And.BeSubsetOf(AgentReplyGuard.OutOfScopeReplies);
     }
 
-    // TEST-109: Wording that fails its check shows the fixed reply and logs the replacement; covers a written price, a missing restaurant, an extra dish in lower case and an unranked taste claim.
+    // TEST-101: Wording that fails its check shows the fixed reply and logs the replacement; covers a written price, a missing restaurant, an extra dish in lower case and an unranked taste claim.
     /// <summary>The user always gets a true sentence, and a failed check costs no extra call.</summary>
     [Theory]
     [InlineData("Mình gợi ý {name1} ở {restaurant1}, {price1}, khoảng 45.000 đồng nhé.")]
@@ -2427,7 +2427,7 @@ public sealed class AgentOrchestratorTests
         telemetry.Verify(x => x.Record("reply_replaced", context.ConversationId, context.TurnId, context.AttemptId, It.IsAny<object>()), Times.Once);
     }
 
-    // TEST-110: When the wording call yields nothing usable the dish is still given, with no retry; covers invalid output, a provider failure that normally retries and a further tool request.
+    // TEST-102: When the wording call yields nothing usable the dish is still given, with no retry; covers invalid output, a provider failure that normally retries and a further tool request.
     /// <summary>The dish is already chosen, so a failed wording call must not become an error or spend more calls.</summary>
     [Theory]
     [InlineData("invalid")]
@@ -2455,7 +2455,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-111: A turn timeout during the wording call still gives the dish; the caller's own cancellation is rethrown instead.
+    // TEST-103: A turn timeout during the wording call still gives the dish; the caller's own cancellation is rethrown instead.
     /// <summary>Only the backend's deadline falls back; a client that left must not get a reply stored for it.</summary>
     [Theory]
     [InlineData(false)]
@@ -2479,7 +2479,7 @@ public sealed class AgentOrchestratorTests
         else (await act()).Reply.Should().StartWith("Mình gợi ý Dish 1 ở Real restaurant");
     }
 
-    // TEST-112: With no provider call left for the wording, the fixed reply is shown at once.
+    // TEST-104: With no provider call left for the wording, the fixed reply is shown at once.
     /// <summary>Keeps the call limit binding without losing the dish already chosen.</summary>
     [Fact]
     public async Task RunAsync_NoCallLeftForWording_ShowsFixedReply()
@@ -2499,7 +2499,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-113: With no dish found the model words it, unless it names a dish nothing backs or the call fails; covers a plain sentence, an invented dish and a failure.
+    // TEST-105: With no dish found the model words it, unless it names a dish nothing backs or the call fails; covers a plain sentence, an invented dish and a failure.
     /// <summary>The one case with no facts is where a model could offer a dish ANGI does not have.</summary>
     [Theory]
     [InlineData("Trên ANGI chưa có món nào hợp, bạn thử bỏ bớt điều kiện nhé.", true)]
@@ -2520,7 +2520,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Be(shown ? reply : AgentDishSuggestionPolicy.NothingFound);
     }
 
-    // TEST-114: A question about the user's own favourites is worded by the model; in an answer, a guess at a dish in lower case is replaced because an answer states facts of the plan.
+    // TEST-106: A question about the user's own favourites is worded by the model; in an answer, a guess at a dish in lower case is replaced because an answer states facts of the plan.
     /// <summary>A social reply may mention food, so the prompt carries the rule there; an answer with no plan behind it still cannot name one.</summary>
     [Theory]
     [InlineData("chat", "Mình chưa biết món bạn thích nhất, để mình gợi ý theo khẩu vị của bạn nhé?", true)]
@@ -2546,7 +2546,7 @@ public sealed class AgentOrchestratorTests
         catalog.Verify(x => x.GetDishNamesAsync(It.IsAny<CancellationToken>()), action == "answer" ? Times.Once() : Times.Never());
     }
 
-    // TEST-115: Over a plan even a request with no conditions goes to the model, leaves out the plan's dish, invites adding the suggestion, marks the offer and changes nothing else.
+    // TEST-107: Over a plan even a request with no conditions goes to the model, leaves out the plan's dish, invites adding the suggestion, marks the offer and changes nothing else.
     /// <summary>"Vừa lập xong, gợi ý 1 món bất kì" used to repeat a dish of the plan and offer no way to add it.</summary>
     [Fact]
     public async Task RunAsync_PlainSuggestionOverPlan_InvitesAddingAnotherDish()
@@ -2568,7 +2568,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-116: When the wording call fails over a plan, the fixed reply still invites adding the dish; with no plan it does not.
+    // TEST-108: When the wording call fails over a plan, the fixed reply still invites adding the dish; with no plan it does not.
     /// <summary>The way into the plan must not depend on the model answering, and there is no plan to add to without one.</summary>
     [Theory]
     [InlineData(true, "Muốn cho vào lịch thì nhắn mình ngày và bữa nhé.")]
@@ -2587,7 +2587,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().EndWith(ending);
     }
 
-    // TEST-118: A plan proposed with a taste level the user never stated gets one repair, then the question goes to the user with nothing changed; a model that then asks is shown.
+    // TEST-109: A plan proposed with a taste level the user never stated gets one repair, then the question goes to the user with nothing changed; a model that then asks is shown.
     /// <summary>"Tôi thích ăn cay" must not become spicy=0.75 in a plan, which is the invention conversation 10 suffered from.</summary>
     [Theory]
     [InlineData(true)]
@@ -2616,7 +2616,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-119: A question from the model drops a guessed level without a repair, and a level the user stated is stored without its quote.
+    // TEST-110: A question from the model drops a guessed level without a repair, and a level the user stated is stored without its quote.
     /// <summary>A question costs no second call, and the quote must never reach stored state or a comparison of constraints.</summary>
     [Theory]
     [InlineData("clarify", null, false)]
@@ -2640,7 +2640,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-120: A preview shows the model's sentence filled with the final plan's total; a sentence that fails its check falls back to the fixed summary and logs the replacement.
+    // TEST-111: A preview shows the model's sentence filled with the final plan's total; a sentence that fails its check falls back to the fixed summary and logs the replacement.
     /// <summary>Makes previews read naturally at no extra provider call, since the slots are filled after the backend's checks.</summary>
     [Theory]
     [InlineData("Lịch xong rồi nè, tổng khoảng {total}, bạn xem rồi chốt nhé!", true)]

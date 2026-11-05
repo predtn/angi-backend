@@ -7,6 +7,7 @@ namespace ANGI.UnitTests.Application.Services.Agent.Conversation;
 /// <summary>Checks explicit chat authorization separately from unconstrained natural-language model output.</summary>
 public sealed class AgentChatPolicyTests
 {
+    // TEST-01: A staged change question invites a plain "ok" or "thôi" instead of asking for a formal confirmation.
     /// <summary>The question itself tells people a plain answer is enough.</summary>
     [Fact]
     public void StageChange_InvitesAPlainAnswer()
@@ -18,7 +19,7 @@ public sealed class AgentChatPolicyTests
             .Should().Contain("“ok”").And.Contain("“thôi”").And.NotContain("xác nhận thay đổi");
     }
 
-    // TEST-01: Whole-message save instructions support Vietnamese accents and polite variants.
+    // TEST-02: Whole-message save instructions support Vietnamese accents and polite variants.
     /// <summary>Allows explicit saving without requiring a frontend command or proposal identifier.</summary>
     [Theory]
     [InlineData("lưu lịch trình này")]
@@ -31,7 +32,7 @@ public sealed class AgentChatPolicyTests
     // STEP-01: Assert AgentConfirmationPolicy.IsSaveRequest() is true.
     public void IsSaveRequest_ExplicitInstruction_Authorizes(string text) => AgentConfirmationPolicy.IsSaveRequest(text).Should().BeTrue();
 
-    // TEST-02: Negated, quoted, conditional and vague agreement text never authorizes an official write.
+    // TEST-03: Negated, quoted, conditional and vague agreement text never authorizes an official write.
     /// <summary>Prevents model interpretation or substring matching from turning ordinary chat into a commit.</summary>
     [Theory]
     [InlineData("đồng ý")]
@@ -48,7 +49,7 @@ public sealed class AgentChatPolicyTests
     // STEP-01: Assert AgentConfirmationPolicy.IsSaveRequest() is false.
     public void IsSaveRequest_UncertainText_DoesNotAuthorize(string text) => AgentConfirmationPolicy.IsSaveRequest(text).Should().BeFalse();
 
-    // TEST-03: A request to preview before saving counts as a review request, while its negated form does not, so neither authorizes a commit.
+    // TEST-04: A request to preview before saving counts as a review request, while its negated form does not, so neither authorizes a commit.
     /// <summary>Ensures a preview request is routed to review instead of being treated as permission to save.</summary>
     [Fact]
     public void IsReviewRequest_PreviewBeforeSaving_DoesNotAuthorizeCommit()
@@ -58,7 +59,7 @@ public sealed class AgentChatPolicyTests
         AgentConfirmationPolicy.IsReviewRequest("đừng lập lịch giúp tôi để chốt lịch").Should().BeFalse();
     }
 
-    // TEST-04: Constraint consent stages a detached proposal without changing the current hard limit.
+    // TEST-05: Constraint consent stages a detached proposal without changing the current hard limit.
     /// <summary>Ensures an explicit next-turn answer is required even when the model claims consent.</summary>
     [Fact]
     public void StageChange_Relaxation_KeepsCurrentConstraints()
@@ -76,7 +77,7 @@ public sealed class AgentChatPolicyTests
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
 
-    // TEST-05: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
+    // TEST-06: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
     /// <summary>Ensures the user can see exactly which meal request the model wants to change before agreeing.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -95,7 +96,7 @@ public sealed class AgentChatPolicyTests
         else reply.Should().NotContain("Bản lịch");
     }
 
-    // TEST-06: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
+    // TEST-07: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
     /// <summary>Prevents the user from being told to answer a question the message does not show.</summary>
     [Theory]
     [InlineData("question")][InlineData("change")][InlineData("planning")]
@@ -113,7 +114,7 @@ public sealed class AgentChatPolicyTests
         else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
     }
 
-    // TEST-07: Only a request to see the plan counts as a view request; covers accents, no accents, both word orders, a greeting and a question about the plan.
+    // TEST-08: Only a request to see the plan counts as a view request; covers accents, no accents, both word orders, a greeting and a question about the plan.
     /// <summary>The plan is listed again only for these messages, so an unrelated question never receives the whole itinerary.</summary>
     [Theory]
     [InlineData("Xem lịch", true)][InlineData("cho mình xem lại lịch", true)][InlineData("xem lo trinh", true)][InlineData("Liệt kê đề xuất", true)]

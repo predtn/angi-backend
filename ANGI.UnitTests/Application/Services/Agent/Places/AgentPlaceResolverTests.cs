@@ -90,7 +90,7 @@ public sealed class AgentPlaceResolverTests
         trip.Unresolved.Should().Equal("Phú Quốc");
     }
 
-    // TEST-07: Naming the province means the whole province: a trip answer stays province-wide, and a day is cleared rather than bound to the city centre.
+    // TEST-05: Naming the province means the whole province: a trip answer stays province-wide, and a day is cleared rather than bound to the city centre.
     /// <summary>Ensures "ở Hà Nội" keeps meaning the whole city.</summary>
     [Fact]
     public async Task LocateAsync_ProvinceNamed_MeansWholeProvince()
@@ -103,7 +103,7 @@ public sealed class AgentPlaceResolverTests
         trip.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-08: One area named for the whole trip is located; the province itself means no area, and a name nowhere on ANGI comes back as unresolved.
+    // TEST-06: One area named for the whole trip is located; the province itself means no area, and a name nowhere on ANGI comes back as unresolved.
     /// <summary>The model read the place; the backend still owns where it is.</summary>
     [Fact]
     public async Task LocateAsync_TripArea_LocatesOrReportsIt()
@@ -123,7 +123,7 @@ public sealed class AgentPlaceResolverTests
         unknown.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-09: The radius is the smallest step holding enough restaurants; a thin area takes a wider step than a dense one.
+    // TEST-07: The radius is the smallest step holding enough restaurants; a thin area takes a wider step than a dense one.
     /// <summary>Ensures a thin district still has enough restaurants for every meal.</summary>
     [Fact]
     public async Task LocateAsync_ThinArea_TakesWiderRadius()
@@ -135,7 +135,7 @@ public sealed class AgentPlaceResolverTests
         trip!.DayAreas.Single().RadiusKm.Should().Be(8m);
     }
 
-    // TEST-10: Stops the model read are located day by day; a stop with no place is a day with no fixed place, the province comes from the first place known, and a place the map cannot confirm is unresolved.
+    // TEST-08: Stops the model read are located day by day; a stop with no place is a day with no fixed place, the province comes from the first place known, and a place the map cannot confirm is unresolved.
     /// <summary>Replays "ngày 1 Hồ Gươm, ngày 2 Lăng Bác, ngày 3 tự do" as the model passes it, with no map request for known landmarks.</summary>
     [Fact]
     public async Task LocateAsync_Stops_LocatesEachDay()
@@ -157,7 +157,7 @@ public sealed class AgentPlaceResolverTests
         trip.LastDay.Should().Be(4);
     }
 
-    // TEST-11: Locating one area leaves out the whole province, and the map is used only when the caller allows it.
+    // TEST-09: Locating one area leaves out the whole province, and the map is used only when the caller allows it.
     /// <summary>Ensures "đổi sang khu Hà Nội" is not treated as a smaller area inside the province.</summary>
     [Fact]
     public async Task LocateAsync_ProvinceOrUnsearchedName_ReturnsNull()
@@ -171,7 +171,7 @@ public sealed class AgentPlaceResolverTests
         (await Resolver(search.Object).LocateAsync("Cầu Giấy", "Hà Nội", false, Provinces, default))!.Label.Should().Be("Cầu Giấy");
     }
 
-    // TEST-12: Other provinces and well-known destinations are never located inside the trip's province, even though the map offers a business with that name; covers accents, no accents and a "thành phố" prefix.
+    // TEST-10: Other provinces and well-known destinations are never located inside the trip's province, even though the map offers a business with that name; covers accents, no accents and a "thành phố" prefix.
     /// <summary>Reproduces "Đà Nẵng, Hà Nội" returning a Hà Nội place, which would have planned the day in the wrong city.</summary>
     [Theory]
     [InlineData("Đà Nẵng")]
@@ -191,7 +191,7 @@ public sealed class AgentPlaceResolverTests
         trip.Unresolved.Should().Equal(place);
     }
 
-    // TEST-13: A street named after another city stays a street here, with or without its name in an address; the map still answers when addresses do not.
+    // TEST-11: A street named after another city stays a street here, with or without its name in an address; the map still answers when addresses do not.
     /// <summary>Ensures blocking "Huế" does not block "phố Huế", a real Hà Nội street.</summary>
     [Fact]
     public async Task LocateAsync_StreetNamedAfterCity_IsStillAPlace()
@@ -211,7 +211,7 @@ public sealed class AgentPlaceResolverTests
         bareStreet!.DayAreas.Single().Longitude.Should().Be(105.79m);
     }
 
-    // TEST-14: A place only the map knows resolves whatever its position in the itinerary and without a stated province; covers it first, and alone.
+    // TEST-12: A place only the map knows resolves whatever its position in the itinerary and without a stated province; covers it first, and alone.
     /// <summary>Reproduces "Ngày 1 đi Hòa Lạc, ngày 2 đi Văn Miếu", where the first stop was searched across the whole country and lost.</summary>
     [Theory]
     [InlineData(true, 2)]
@@ -232,7 +232,7 @@ public sealed class AgentPlaceResolverTests
         trip.Unresolved.Should().BeEmpty();
     }
 
-    // TEST-15: A business that only carries the phrase in its name proves nothing; covers one business, scattered businesses, and a phrase found only in an address.
+    // TEST-13: A business that only carries the phrase in its name proves nothing; covers one business, scattered businesses, and a phrase found only in an address.
     /// <summary>Reproduces "Hồ Gươm Plaza" in Hà Đông and "1001 tủ đồ" read as "Tự Do": the place is reported instead of moving the day to the wrong district.</summary>
     [Theory]
     [InlineData("one-business")]
@@ -259,7 +259,7 @@ public sealed class AgentPlaceResolverTests
         trip.Unresolved.Should().Equal("Thủy Tiên");
     }
 
-    // TEST-16: Strong map evidence is used; covers an area type, a business named exactly that, and most businesses sitting together, whose middle becomes the place.
+    // TEST-14: Strong map evidence is used; covers an area type, a business named exactly that, and most businesses sitting together, whose middle becomes the place.
     /// <summary>Keeps "Times City", "Đại học Bách Khoa" and "Hòa Lạc" working under the stricter rule.</summary>
     [Theory]
     [InlineData("area", 21.0)]
@@ -285,7 +285,7 @@ public sealed class AgentPlaceResolverTests
         trip!.DayAreas.Single().Latitude.Should().Be((decimal)latitude);
     }
 
-    // TEST-17: Known landmarks and a free day never reach the map, with or without accents.
+    // TEST-15: Known landmarks and a free day never reach the map, with or without accents.
     /// <summary>Ensures Hồ Gươm is at the lake however the map answers, and "đi tự do" means the whole province.</summary>
     [Theory]
     [InlineData("Hồ Gươm", 21.0287)]
@@ -303,7 +303,7 @@ public sealed class AgentPlaceResolverTests
         trip!.DayAreas.Single().Latitude.Should().Be((decimal)latitude);
     }
 
-    // TEST-18: A free day is the whole province and still counts as a day of the trip; covers several wordings.
+    // TEST-16: A free day is the whole province and still counts as a day of the trip; covers several wordings.
     /// <summary>Replays "Ngày 3 : Tôi đi tự do", which used to bind the day to an unrelated point.</summary>
     [Theory]
     [InlineData(null)]
@@ -324,7 +324,7 @@ public sealed class AgentPlaceResolverTests
         trip.LastDay.Should().Be(2);
     }
 
-    // TEST-19: The district of the nearest restaurant is reported so a wrong location shows; it is left out when it repeats the name or the search is wide.
+    // TEST-17: The district of the nearest restaurant is reported so a wrong location shows; it is left out when it repeats the name or the search is wide.
     /// <summary>Ensures "Hồ Gươm (khu Hà Đông)" would have been visible before any dish was chosen.</summary>
     [Fact]
     public async Task LocateAsync_District_ShownOnlyWhenItAddsSomething()
