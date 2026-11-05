@@ -95,17 +95,20 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
         int pageSize,
         CancellationToken ct)
     {
+        // STEP-01: Prepare query through ThenInclude(filtered).Where.
         var query = _context.MenuSubmissions
             .AsNoTracking()
             .Include(submission => submission.Reviewer)
                 .ThenInclude(reviewer => reviewer!.AvatarMedia)
             .Where(submission => submission.Restaurant.OwnerId == ownerId);
 
+        // STEP-02: When status has a value, set query.
         if (status.HasValue)
         {
             query = query.Where(submission => submission.Status == status.Value);
         }
 
+        // STEP-03: Call query.LongCountAsync and keep totalItems and Skip().Take().ToListAsync and keep items.
         var totalItems = await query.LongCountAsync(ct);
         var items = await query
             .OrderByDescending(submission => submission.CreatedAt)
@@ -114,6 +117,7 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
             .Take(pageSize)
             .ToListAsync(ct);
 
+        // STEP-04: Return the collected values.
         return (items, totalItems);
     }
 
@@ -149,6 +153,7 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
         long submissionId,
         CancellationToken ct)
     {
+        // STEP-01: Call FromSqlInterpolated().FirstOrDefaultAsync and keep submission.
         var submission = await _context.MenuSubmissions
             .FromSqlInterpolated($$"""
                 SELECT submission.*
@@ -162,6 +167,7 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
                 """)
             .FirstOrDefaultAsync(ct);
 
+        // STEP-02: When submission exists, call Entry().Collection(filtered).LoadAsync.
         if (submission is not null)
         {
             await _context.Entry(submission)
@@ -169,6 +175,7 @@ public sealed class RestaurantMenuRepository : IRestaurantMenuRepository
                 .LoadAsync(ct);
         }
 
+        // STEP-03: Return submission.
         return submission;
     }
 

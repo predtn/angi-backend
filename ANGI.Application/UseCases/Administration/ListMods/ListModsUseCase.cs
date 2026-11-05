@@ -27,8 +27,10 @@ public sealed class ListModsUseCase : IListModsUseCase
         ListModsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare status, then load page through repository.GetModsAsync.
         var status = request.Status switch
         {
             "active" => UserStatus.Active,
@@ -41,6 +43,7 @@ public sealed class ListModsUseCase : IListModsUseCase
             request.Page,
             request.PageSize,
             ct);
+        // STEP-03: Return the result of AdministrationModMapper.ToPagedDto.
         return AdministrationModMapper.ToPagedDto(page);
     }
 }

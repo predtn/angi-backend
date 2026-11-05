@@ -24,6 +24,7 @@ public sealed class GetRoadmapDetailUseCase : IGetRoadmapDetailUseCase
     /// <summary>Loads an owned roadmap, current item feedback, and all calculated RM-03 sections.</summary>
     public async Task<RoadmapDetailDto> ExecuteAsync(long roadmapId, CancellationToken ct)
     {
+        // STEP-01: Prepare userId, roadmap and itemIds, then load feedback through roadmapRepository.GetFeedbackByItemIdsAsync.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem roadmap.");
         var roadmap = await _roadmapRepository.GetOwnedDetailAsync(roadmapId, userId, ct)
@@ -31,6 +32,7 @@ public sealed class GetRoadmapDetailUseCase : IGetRoadmapDetailUseCase
         var itemIds = roadmap.Days.SelectMany(day => day.Items).Select(item => item.Id).ToArray();
         var feedback = await _roadmapRepository.GetFeedbackByItemIdsAsync(userId, itemIds, ct);
 
+        // STEP-02: Return the result of RoadmapMapper.Map.
         return RoadmapMapper.Map(roadmap, feedback);
     }
 }

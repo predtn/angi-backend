@@ -21,12 +21,15 @@ public sealed class AgentStatePolicy
     /// </summary>
     public static AgentState? WithoutErased(AgentState? proposed, AgentState current, string content)
     {
+        // STEP-01: Return null early when proposed is missing.
         if (proposed is null) return null;
+        // STEP-02: Prepare plain through Normalize().ToLowerInvariant().Replace, keepsOrigin from NamesOrigin.IsMatch and origin.
         var plain = new string(content.Normalize(NormalizationForm.FormD).Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
             .Normalize(NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd');
         var keepsOrigin = !NamesOrigin.IsMatch(plain);
         var origin = keepsOrigin && proposed.OriginMode == "none" && current.OriginMode != "none"
             ? proposed with { OriginMode = current.OriginMode, OriginLatitude = current.OriginLatitude, OriginLongitude = current.OriginLongitude, OriginLabel = current.OriginLabel } : proposed;
+        // STEP-03: Return a copy of origin with updated fields.
         return origin with
         {
             Province = string.IsNullOrWhiteSpace(proposed.Province) ? current.Province : proposed.Province,
@@ -39,31 +42,46 @@ public sealed class AgentStatePolicy
     /// <summary>Requires a backend-staged human confirmation before relaxing an existing trip requirement.</summary>
     public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
     {
+        // STEP-01: Return current early when proposed is missing and current.PendingPlanningRequest is missing.
         if (proposed is null && current.PendingPlanningRequest is null) return current;
+        // STEP-02: Set proposed.
         proposed ??= current;
+        // STEP-03: When proposed.PendingPlanningRequest is not current.PendingPlanningRequest and more.
         if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake)
             proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake };
+        // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
             proposed = proposed with { FocusDay = current.FocusDay, FocusMeal = current.FocusMeal };
+        // STEP-05: When current.PendingPlanningRequest exists, set proposed.
         if (current.PendingPlanningRequest is { } pendingRequest)
             proposed = AgentPendingPlanningPolicy.Apply(proposed, pendingRequest);
+        // STEP-06: When proposed.Preferences is not current.Preferences, set proposed.
         // Provider and client state can only change targets; trusted vectors always come from reco.
         if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
+        // STEP-07: When ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) does not hold or ReferenceEquals(proposed.SkippedMeals and more.
         if (!ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) || !ReferenceEquals(proposed.SkippedMeals, current.SkippedMeals))
             proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
+        // STEP-08: Prepare movedProvince from Trim, numDays and areas from current.DayAreas ?? [].Where.
         // Nơi đến theo ngày do backend đọc từ lời người dùng, model không được ghi. Đổi tỉnh hoặc rút ngắn chuyến thì bỏ các nơi đến không còn áp dụng.
         var movedProvince = current.Province is not null && !string.Equals(current.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
         var numDays = proposed.NumDays;
         var areas = movedProvince ? [] : (current.DayAreas ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
+        // STEP-09: When areas.SequenceEqual(...) does not hold, set proposed.
         if (!areas.SequenceEqual(proposed.DayAreas ?? [])) proposed = proposed with { DayAreas = areas.Length > 0 ? areas : null };
+        // STEP-10: Prepare widened from current.WidenedMeals ?? [].Where.
         var widened = movedProvince ? [] : (current.WidenedMeals ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
+        // STEP-11: When widened.SequenceEqual(...) does not hold, set proposed.
         if (!widened.SequenceEqual(proposed.WidenedMeals ?? [])) proposed = proposed with { WidenedMeals = widened.Length > 0 ? widened : null };
+        // STEP-12: When proposed.PendingDayArea is not current.PendingDayArea or proposed.NamedAreaLabel is not current.NamedAreaLabel, set proposed.
         if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel)
             proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel };
+        // STEP-13: Validate proposed.
         new AgentStateValidator().ValidateAndThrow(proposed);
+        // STEP-14: When proposed.Preferences.Initialized is true, set proposed.
         if (proposed.Preferences?.Initialized == true)
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
+        // STEP-15: Prepare confirmed and relaxed from AgentScopedPlanning.Slots.
         var confirmed = baseline ?? current;
         var relaxed = confirmed.Province is not null && !string.Equals(confirmed.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
             || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
@@ -83,9 +101,12 @@ public sealed class AgentStatePolicy
             })
             || confirmed.RadiusKm.HasValue && (!proposed.RadiusKm.HasValue || proposed.RadiusKm > confirmed.RadiusKm)
             || confirmed.OriginMode != "none" && (proposed.OriginMode != confirmed.OriginMode || proposed.OriginLatitude != confirmed.OriginLatitude || proposed.OriginLongitude != confirmed.OriginLongitude);
+        // STEP-16: Throw AgentStateChangeRequiredException when relaxed is true.
         if (relaxed) throw new AgentStateChangeRequiredException(proposed);
+        // STEP-17: Return proposed early when proposed.PendingStateChange is current.PendingStateChange and more.
         if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapUpdatedAt == current.SourceRoadmapUpdatedAt &&
             proposed.HistoryStartSequence == current.HistoryStartSequence) return proposed;
+        // STEP-18: Return a copy of proposed with updated fields.
         return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt,
             HistoryStartSequence = current.HistoryStartSequence };
     }

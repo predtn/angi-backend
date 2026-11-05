@@ -49,12 +49,17 @@ namespace ANGI.Application.UseCases.Auth.ResetPassword
         /// <summary>Executes AUTH-09 atomically so a valid token can change the password only once.</summary>
         public async Task ExecuteAsync(ResetPasswordRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare tokenHash through tokenService.HashUserToken.
             var tokenHash = _tokenService.HashUserToken(request.Token);
+            // STEP-03: Open the database transaction.
             await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+            // STEP-04: Load userToken through authenticationRepository.GetUserTokenByHashForUpdateAsync.
             var userToken = await _authenticationRepository.GetUserTokenByHashForUpdateAsync(tokenHash, ct);
 
+            // STEP-05: Throw BadRequestException when userToken is missing, userToken.Purpose is not UserTokenPurpose.PasswordReset or userToken.UsedAt has a value.
             if (userToken is null ||
                 userToken.Purpose != UserTokenPurpose.PasswordReset ||
                 userToken.UsedAt.HasValue)
@@ -62,21 +67,27 @@ namespace ANGI.Application.UseCases.Auth.ResetPassword
                 throw new BadRequestException(TokenInvalidCode, TokenInvalidMessage);
             }
 
+            // STEP-06: Prepare now from timeProvider.GetUtcNow.
             var now = _timeProvider.GetUtcNow().UtcDateTime;
+            // STEP-07: Throw BadRequestException when userToken.ExpiresAt <= now.
             if (userToken.ExpiresAt <= now)
             {
                 throw new BadRequestException(TokenExpiredCode, TokenExpiredMessage);
             }
 
+            // STEP-08: Set userToken.UsedAt and userToken.User.PasswordHash.
             userToken.UsedAt = now;
             userToken.User.PasswordHash = _passwordService.Hash(request.NewPassword);
 
+            // STEP-09: Load activeSessions through authenticationRepository.GetActiveSessionsAsync.
             var activeSessions = await _authenticationRepository.GetActiveSessionsAsync(userToken.UserId, ct);
+            // STEP-10: For each session in activeSessions, set session.RevokedAt.
             foreach (var session in activeSessions)
             {
                 session.RevokedAt = now;
             }
 
+            // STEP-11: Record audit action AuditActions.PasswordReset.
             _auditLogService.Add(new AuditLogEntry
             {
                 Action = AuditActions.PasswordReset,
@@ -87,7 +98,9 @@ namespace ANGI.Application.UseCases.Auth.ResetPassword
                 ActorRole = userToken.User.Role.Code
             });
 
+            // STEP-12: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
+            // STEP-13: Commit the transaction.
             await transaction.CommitAsync(ct);
         }
     }

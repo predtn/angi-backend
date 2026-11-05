@@ -35,14 +35,17 @@ namespace ANGI.Infrastructure.Services.Auth
         /// <summary>Validates signature, expiry, audience, subject, email, and Google's email-verification claim.</summary>
         public async Task<GoogleIdentity> VerifyIdTokenAsync(string idToken, CancellationToken ct)
         {
+            // STEP-01: Throw the error from InvalidToken when _settings.ClientId is blank.
             if (string.IsNullOrWhiteSpace(_settings.ClientId))
             {
                 throw InvalidToken();
             }
 
+            // STEP-02: Prepare payload.
             GoogleJsonWebSignature.Payload payload;
             try
             {
+                // STEP-03: Call validateToken().WaitAsync and keep payload.
                 payload = await _validateToken(
                         idToken,
                         new GoogleJsonWebSignature.ValidationSettings
@@ -53,9 +56,11 @@ namespace ANGI.Infrastructure.Services.Auth
             }
             catch (InvalidJwtException)
             {
+                // STEP-04: On InvalidJwtException, throw the error from InvalidToken.
                 throw InvalidToken();
             }
 
+            // STEP-05: Throw the error from InvalidToken when payload.Subject is blank, payload.Email is blank or payload.EmailVerified is false.
             if (string.IsNullOrWhiteSpace(payload.Subject) ||
                 string.IsNullOrWhiteSpace(payload.Email) ||
                 !payload.EmailVerified)
@@ -63,6 +68,7 @@ namespace ANGI.Infrastructure.Services.Auth
                 throw InvalidToken();
             }
 
+            // STEP-06: Return a new GoogleIdentity.
             return new GoogleIdentity(payload.Subject, payload.Email, payload.Name);
         }
 

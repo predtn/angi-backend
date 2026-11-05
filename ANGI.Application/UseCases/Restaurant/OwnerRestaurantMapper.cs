@@ -17,6 +17,7 @@ internal static class OwnerRestaurantMapper
         TimeProvider timeProvider,
         IReadOnlyDictionary<long, string>? mediaUrlOverrides = null)
     {
+        // STEP-01: Prepare latestVerification through ThenByDescending(filtered).FirstOrDefault and openMenuSubmission through ThenByDescending(filtered).FirstOrDefault.
         var latestVerification = restaurant.Verifications
             .OrderByDescending(item => item.SubmittedAt)
             .ThenByDescending(item => item.Id)
@@ -27,6 +28,7 @@ internal static class OwnerRestaurantMapper
             .ThenByDescending(item => item.Id)
             .FirstOrDefault();
 
+        // STEP-02: Return a new OwnerRestaurantDto.
         return new OwnerRestaurantDto
         {
             Id = restaurant.Id,
@@ -95,27 +97,32 @@ internal static class OwnerRestaurantMapper
         MediaFile? media,
         IReadOnlyDictionary<long, string>? mediaUrlOverrides)
     {
+        // STEP-01: Return null early when mediaId has no value.
         if (!mediaId.HasValue)
         {
             return null;
         }
 
+        // STEP-02: Return url early when mediaUrlOverrides exists and mediaUrlOverrides has an entry for mediaId.Value.
         if (mediaUrlOverrides is not null && mediaUrlOverrides.TryGetValue(mediaId.Value, out var url))
         {
             return url;
         }
 
+        // STEP-03: Return one of two results depending on media.Id is mediaId.Value.
         return media?.Id == mediaId.Value ? media.Url : null;
     }
 
     /// <summary>Determines whether any configured interval is open at the current Vietnam time.</summary>
     internal static bool IsOpenNow(IEnumerable<RestaurantBusinessHour> hours, TimeProvider timeProvider)
     {
+        // STEP-01: Prepare vietnamNow through timeProvider.GetUtcNow().ToOffset, currentDay, previousDay and currentTime through TimeOnly.FromDateTime.
         var vietnamNow = timeProvider.GetUtcNow().ToOffset(TimeSpan.FromHours(7));
         var currentDay = (short)vietnamNow.DayOfWeek;
         var previousDay = (short)((currentDay + 6) % 7);
         var currentTime = TimeOnly.FromDateTime(vietnamNow.DateTime);
 
+        // STEP-02: Return the computed condition.
         return hours.Any(hour =>
             hour.DayOfWeek == currentDay &&
             (hour.CloseTime > hour.OpenTime

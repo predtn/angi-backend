@@ -55,21 +55,30 @@ public static class AgentItineraryPolicy
     /// <summary>Finds the day-by-day places in a message, in order; food or taste wording for a day is never a stop.</summary>
     public static AgentItineraryStop[] Stops(string content)
     {
+        // STEP-01: Prepare text through content.Normalize, folded through Fold, headers through DayHeader.Matches and stops as List<AgentItineraryStop>.
         var text = content.Normalize(NormalizationForm.FormC);
         var folded = Fold(text);
         var headers = DayHeader.Matches(folded);
         var stops = new List<AgentItineraryStop>();
+        // STEP-02: Repeat while index < headers.Count.
         for (var index = 0; index < headers.Count; index++)
         {
+            // STEP-03: Prepare header, start and clauseEnd through folded.IndexOfAny.
             var header = headers[index];
             var start = header.Index + header.Length;
             var clauseEnd = folded.IndexOfAny([',', ';', '.', '!', '?', '\n'], start);
+            // STEP-04: When clauseEnd < 0, set clauseEnd.
             if (clauseEnd < 0) clauseEnd = folded.Length;
+            // STEP-05: When index + 1 < headers.Count, set clauseEnd.
             if (index + 1 < headers.Count) clauseEnd = Math.Min(clauseEnd, headers[index + 1].Index);
+            // STEP-06: Prepare days through Days.
             var days = Days(header);
+            // STEP-07: Skip this round when days.Length is 0 or Place() is not { } found.
             if (days.Length == 0 || Place(text, folded, start, clauseEnd) is not { } found) continue;
+            // STEP-08: Add the built entry to stops.
             stops.Add(new(days, found.Name, header.Groups["colon"].Success || found.Going));
         }
+        // STEP-09: Return one of two results depending on stops.Count >= 2.
         // Một danh sách "Ngày 1 A, ngày 2 B" đã rõ là hành trình dù không có động từ nào.
         return stops.Count >= 2 ? stops.Select(stop => stop with { Explicit = true }).ToArray() : stops.ToArray();
     }
@@ -77,18 +86,25 @@ public static class AgentItineraryPolicy
     /// <summary>Finds one area for the whole trip ("ở Cầu Giấy"); a short reply to the place question may be the bare name ("Hai Bà Trưng").</summary>
     public static string? TripArea(string content, bool asked)
     {
+        // STEP-01: Prepare text through content.Normalize and folded through Fold.
         var text = content.Normalize(NormalizationForm.FormC);
         var folded = Fold(text);
+        // STEP-02: When AreaPhrase.Matches().LastOrDefault() exists, run the branch below.
         if (AreaPhrase.Matches(folded).LastOrDefault() is { } phrase)
         {
+            // STEP-03: Prepare group, inner through Regex.Matches().LastOrDefault and start.
             var group = phrase.Groups["place"];
             // "ở Hà Nội khu Cầu Giấy": nơi cụ thể nhất là cụm sau từ chỉ nơi cuối cùng.
             var inner = Regex.Matches(group.Value, @"\s(?:o|tai|quanh|khu vuc|khu|gan)\s", RegexOptions.CultureInvariant).LastOrDefault();
             var start = group.Index + (inner is null ? 0 : inner.Index + inner.Length);
+            // STEP-04: Return Place().Name.
             return Place(text, folded, start, group.Index + group.Length)?.Name;
         }
+        // STEP-05: Return null early when asked is false or folded.Split().Length > MaxBareAnswerWords.
         if (!asked || folded.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length > MaxBareAnswerWords) return null;
+        // STEP-06: Prepare end through folded.IndexOfAny.
         var end = folded.IndexOfAny([',', ';', '.', '!', '?', '\n']);
+        // STEP-07: Return Place().Name.
         return Place(text, folded, 0, end < 0 ? folded.Length : end)?.Name;
     }
 
@@ -98,30 +114,39 @@ public static class AgentItineraryPolicy
     /// </summary>
     public static (string Name, bool Searchable)? BareArea(string content)
     {
+        // STEP-01: Prepare text through content.Normalize, folded through Fold, going through GoingArea.Match, change from ChangeArea.Match and 1 more.
         var text = content.Normalize(NormalizationForm.FormC);
         var folded = Fold(text);
         var going = GoingArea.Match(folded);
         var change = going.Success ? Match.Empty : ChangeArea.Match(folded);
         var group = (going.Success ? going : change).Groups["place"];
+        // STEP-02: Return null early when group.Success is false or Place() is not { } found.
         if (!group.Success || Place(text, folded, group.Index, group.Index + group.Length) is not { } found) return null;
+        // STEP-03: Return the collected values.
         return (found.Name, going.Success || change.Groups["trip"].Success || group.Value.StartsWith("khu", StringComparison.Ordinal));
     }
 
     /// <summary>Reads the reply to "ngày nào?": "ngày 2", "ngày 1 và 3", "2", "cả chuyến". Empty when the reply is about something else or names no day of the trip.</summary>
     public static short[] AnsweredDays(string content, short numDays)
     {
+        // STEP-01: Prepare folded through Fold().Trim().TrimEnd.
         var folded = Fold(content.Normalize(NormalizationForm.FormC)).Trim().TrimEnd('.', '!', '?', ' ');
+        // STEP-02: Return the result of Range().Select(filtered).ToArray early when folded matches WholeTripAnswer.
         if (WholeTripAnswer.IsMatch(folded)) return Enumerable.Range(1, numDays).Select(day => (short)day).ToArray();
+        // STEP-03: Prepare answer from BareDays.IsMatch and headers through DayHeader.Matches.
         var answer = BareDays.IsMatch(folded) ? $"ngay {folded}" : folded;
         var headers = DayHeader.Matches(answer);
+        // STEP-04: Return the collected items early when headers.Count is 0 or DayHeader.Replace().Split().Any matches the filter.
         // "ngày 2 ăn phở" là yêu cầu khác có nhắc ngày, không phải câu trả lời.
         if (headers.Count == 0 || DayHeader.Replace(answer, " ").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Any(word => !AnswerFillers.Contains(word))) return [];
+        // STEP-05: Return the result of Where(filtered).Distinct().Order().ToArray.
         return headers.SelectMany(Days).Where(day => day <= numDays).Distinct().Order().ToArray();
     }
 
     /// <summary>Applies what the message said: days move to their new places, and the trip grows when the itinerary names a later day.</summary>
     public static AgentState Apply(AgentState state, AgentTripPlaces trip)
     {
+        // STEP-01: Prepare stated through DayAreas.Select(filtered).Concat().ToHashSet, areas through Concat().OrderBy(filtered).ToArray and more.
         var stated = trip.DayAreas.Select(x => x.DayNumber).Concat(trip.WholeProvinceDays).ToHashSet();
         var areas = (state.DayAreas ?? []).Where(x => !stated.Contains(x.DayNumber)).Concat(trip.DayAreas).OrderBy(x => x.DayNumber).ToArray();
         // Ngày đã chuyển nơi thì tìm lại từ đầu, bán kính đã nới cho nơi cũ không còn giá trị.
@@ -133,6 +158,7 @@ public static class AgentItineraryPolicy
             DayAreas = areas.Length > 0 ? areas : null,
             WidenedMeals = widened.Length > 0 ? widened : null
         };
+        // STEP-02: Return one of two results depending on trip.TripArea exists.
         return trip.TripArea is { } area ? applied with { OriginMode = "pinned", OriginLatitude = area.Latitude, OriginLongitude = area.Longitude,
             OriginLabel = area.Label, RadiusKm = area.RadiusKm, NamedAreaLabel = area.Label } : applied;
     }
@@ -140,21 +166,27 @@ public static class AgentItineraryPolicy
     /// <summary>Tells the user how the message was understood, so a wrong reading or an unknown place shows before any dish is chosen.</summary>
     public static string? Note(AgentState state, AgentTripPlaces trip)
     {
+        // STEP-01: Prepare known, province through AgentReplyBuilder.Safe and parts as List<string>.
         var known = state.Province ?? trip.Province;
         var province = AgentReplyBuilder.Safe(known);
         var parts = new List<string>();
+        // STEP-02: When trip.TripArea exists, call parts.Add.
         if (trip.TripArea is { } area)
             parts.Add($"Mình ghi nhận khu vực {AgentReplyBuilder.Safe(area.Label)}{(area.District is { } district ? $" (khu {AgentReplyBuilder.Safe(district)})" : "")}, mình sẽ ưu tiên quán trong khoảng {area.RadiusKm:0} km quanh đó.");
+        // STEP-03: When state.DayAreas has the expected shape and trip.DayAreas.Length > 0, call parts.Add.
         if (state.DayAreas is { Length: > 0 } areas && trip.DayAreas.Length > 0)
             parts.Add($"Mình ghi nhận hành trình ở {province}: {string.Join("; ", areas.Select(Describe))}.");
+        // STEP-04: When trip.Unresolved.Length > 0, prepare unknown through string.Join and call parts.Add.
         if (trip.Unresolved.Length > 0)
         {
             var unknown = string.Join(", ", trip.Unresolved.Select(place => $"“{AgentReplyBuilder.Safe(place)}”"));
             parts.Add(known is null ? $"Mình chưa tìm được quán quanh {unknown}."
                 : $"Mình chưa tìm được quán quanh {unknown} nên phần đó sẽ chọn trong toàn {province}; bạn có thể nhắn lại tên khu khác.");
         }
+        // STEP-05: When state.DayAreas has the expected shape, state.NumDays exists and named.Length < total, call parts.Add.
         if (state.DayAreas is { Length: > 0 } named && state.NumDays is { } total && named.Length < total)
             parts.Add($"Những ngày còn lại trong {total} ngày, mình chọn trong toàn {province}.");
+        // STEP-06: Return one of two results depending on parts.Count is 0.
         return parts.Count == 0 ? null : string.Join(' ', parts);
     }
 
@@ -172,27 +204,36 @@ public static class AgentItineraryPolicy
     /// </summary>
     public static AgentPlaceCorrection? Correction(string content, AgentState state)
     {
+        // STEP-01: Return null early when state.DayAreas is not { Length: > 0 } areas.
         if (state.DayAreas is not { Length: > 0 } areas) return null;
+        // STEP-02: Prepare text through content.Normalize and folded through Fold.
         var text = content.Normalize(NormalizationForm.FormC);
         var folded = Fold(text);
+        // STEP-03: Return null early when folded does not match CorrectionWords, folded matches DishWords or text contains a message.
         if (!CorrectionWords.IsMatch(folded) || DishWords.IsMatch(folded) || text.Contains("quán", StringComparison.OrdinalIgnoreCase)) return null;
+        // STEP-04: Prepare days through Where(filtered).Distinct().ToArray.
         var days = DayHeader.Matches(folded).SelectMany(Days).Where(day => day <= state.NumDays).Distinct().ToArray();
+        // STEP-05: When days.Length is 0, set days.
         if (days.Length == 0) days = areas.Where(area => folded.Contains(Fold(area.Label.Normalize(NormalizationForm.FormC)), StringComparison.Ordinal)).Select(area => area.DayNumber).ToArray();
+        // STEP-06: For each phrase in CorrectedPlace.Matches(), prepare group and return the new result early when Place() exists and IsOpenDay(found.Name) does not hold.
         foreach (Match phrase in CorrectedPlace.Matches(folded))
         {
             var group = phrase.Groups["place"];
             if (Place(text, folded, group.Index, group.Index + group.Length) is { } found && !IsOpenDay(found.Name)) return new(days, found.Name);
         }
+        // STEP-07: Return the new result.
         return new(days, null);
     }
 
     /// <summary>Says where the plan is searching and how to fix it, for a complaint the backend cannot resolve alone; costs no provider call and leaves the plan savable.</summary>
     public static string CorrectionHelp(AgentState state, short[] days, string? unknownPlace)
     {
+        // STEP-01: Prepare shown through Where(filtered).OrderBy(filtered).ToArray, day from shown.FirstOrDefault, current from AgentReplyBuilder.Safe and more.
         var shown = (state.DayAreas ?? []).Where(area => days.Length == 0 || days.Contains(area.DayNumber)).OrderBy(area => area.DayNumber).ToArray();
         var day = days.Length > 0 ? days[0] : shown.FirstOrDefault()?.DayNumber ?? 1;
         var current = shown.Length > 0 ? $"Hiện mình đang tìm quán: {string.Join("; ", shown.Select(Describe))}. " : $"Ngày {day} hiện đang chọn trong toàn {AgentReplyBuilder.Safe(state.Province)}. ";
         var unknown = unknownPlace is null ? "" : $"Mình chưa định vị được “{AgentReplyBuilder.Safe(unknownPlace)}”. ";
+        // STEP-02: Return the formatted text.
         return $"{unknown}{current}Nếu sai địa điểm, bạn nhắn “Ngày {day} ở” kèm tên khu hoặc địa danh đúng, ví dụ “Ngày {day} ở Hoàn Kiếm”. Nếu muốn đổi món, bạn nhắn ví dụ “đổi bữa trưa ngày {day} sang món khác” nhé.";
     }
 
@@ -231,27 +272,37 @@ public static class AgentItineraryPolicy
 
     private static short[] Days(Match header)
     {
+        // STEP-01: Return the collected items early when header.Groups["from"].Value does not parse or from is < 1 or > MaxDay.
         if (!short.TryParse(header.Groups["from"].Value, out var from) || from is < 1 or > MaxDay) return [];
+        // STEP-02: Return the collected items early when header.Groups["to"].Success is false, header.Groups["to"].Value does not parse or to is < 1 or > MaxDay.
         if (!header.Groups["to"].Success || !short.TryParse(header.Groups["to"].Value, out var to) || to is < 1 or > MaxDay) return [from];
+        // STEP-03: Return one of two results depending on from is to early when header.Groups["joiner"].Value is "va" or "," or "&".
         if (header.Groups["joiner"].Value is "va" or "," or "&") return from == to ? [from] : [from, to];
+        // STEP-04: Return one of two results depending on to < from.
         return to < from ? [] : Enumerable.Range(from, to - from + 1).Select(day => (short)day).ToArray();
     }
 
     private static (string Name, bool Going)? Place(string text, string folded, int start, int end)
     {
+        // STEP-01: Prepare clause, lead through Lead.Match, bodyStart, body and 2 more.
         var clause = folded[start..end];
         var lead = Lead.Match(clause);
         var bodyStart = lead.Success ? lead.Length : 0;
         var body = clause[bodyStart..];
         var original = text.Substring(start + bodyStart, body.Length).ToLowerInvariant();
         var tail = original == body ? Tail.Match(body) : AccentedTail.Match(original);
+        // STEP-02: When tail.Success is true, set body.
         if (tail.Success) body = body[..tail.Index];
+        // STEP-03: Prepare name through text.Substring().Trim and plain through body.Trim.
         var name = text.Substring(start + bodyStart, body.Length).Trim();
         var plain = body.Trim();
+        // STEP-04: Return the collected values early when plain matches OpenDay.
         if (OpenDay.IsMatch(plain)) return (name, true);
+        // STEP-05: Return null early when plain.Length < 2, name.Length > MaxPlaceLength, plain matches NotPlace or 3 more condition(s).
         // "quán" là tên quán, do luồng tìm quán xử lý; không nhầm với "quận" vì so trên chữ gốc có dấu.
         if (plain.Length < 2 || name.Length > MaxPlaceLength || NotPlace.IsMatch(plain) || Vague.Contains(plain) ||
             text.Substring(start, end - start).Contains("quán", StringComparison.OrdinalIgnoreCase) || AgentTasteClarificationPolicy.StatesTaste(name)) return null;
+        // STEP-06: Return the collected values.
         return (name, lead.Success && GoingWords.IsMatch(lead.Value));
     }
 }

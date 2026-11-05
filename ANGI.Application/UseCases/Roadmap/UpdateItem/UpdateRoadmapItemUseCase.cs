@@ -42,11 +42,15 @@ public sealed class UpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
         UpdateRoadmapItemRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để sửa món trong roadmap.");
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare currentItem, then call ResolveDestinationDayAsync and keep destinationDay.
         var currentItem = await _roadmapRepository.LockAndGetOwnedItemAsync(roadmapId, itemId, userId, ct)
             ?? throw ItemNotFound();
         var destinationDay = await ResolveDestinationDayAsync(
@@ -55,15 +59,19 @@ public sealed class UpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
             currentItem.RoadmapDay,
             request.DayId,
             ct);
+        // STEP-05: Prepare mealSlot from ParseMealSlot, sortOrder, resultItem, replacementDish and 1 more.
         var mealSlot = request.MealSlot is null ? currentItem.MealSlot : ParseMealSlot(request.MealSlot);
         var sortOrder = request.SortOrder ?? currentItem.SortOrder;
 
         RoadmapItem resultItem;
         Dish? replacementDish = null;
         IReadOnlyDictionary<long, FeedbackValue>? feedback = null;
+        // STEP-06: When request.DishId has a value, run the branch below.
         if (request.DishId.HasValue)
         {
+            // STEP-07: Load replacementDish through dishRepository.GetPublicDetailAsync.
             replacementDish = await _dishRepository.GetPublicDetailAsync(request.DishId.Value, ct);
+            // STEP-08: Reject with DISH_NOT_AVAILABLE when replacementDish is missing, replacementDish.IsAvailable is false or Restaurant.OperatingStatus is not RestaurantOperatingStatus.Open.
             if (replacementDish is null ||
                 !replacementDish.IsAvailable ||
                 replacementDish.Restaurant.OperatingStatus != RestaurantOperatingStatus.Open)
@@ -73,6 +81,7 @@ public sealed class UpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
                     "Món không còn khả dụng để thay thế trong roadmap.");
             }
 
+            // STEP-09: Set resultItem.
             resultItem = new RoadmapItem
             {
                 RoadmapDayId = destinationDay.Id,
@@ -83,12 +92,15 @@ public sealed class UpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
                 Source = RoadmapItemSource.Manual,
                 RecoRequestId = request.RecoRequestId
             };
+            // STEP-10: Mark currentItem for removal through roadmapRepository.RemoveItem and queue resultItem through roadmapRepository.AddItem.
             _roadmapRepository.RemoveItem(currentItem);
             _roadmapRepository.AddItem(resultItem);
         }
         else
         {
+            // STEP-11: Otherwise, set feedback, set currentItem.RoadmapDayId and 4 more action(s).
             feedback = await _roadmapRepository.GetFeedbackByItemIdsAsync(userId, [currentItem.Id], ct);
+            // STEP-12: Set currentItem.RoadmapDayId, currentItem.RoadmapDay, currentItem.MealSlot, currentItem.SortOrder and 1 more.
             currentItem.RoadmapDayId = destinationDay.Id;
             currentItem.RoadmapDay = destinationDay;
             currentItem.MealSlot = mealSlot;
@@ -96,15 +108,20 @@ public sealed class UpdateRoadmapItemUseCase : IUpdateRoadmapItemUseCase
             resultItem = currentItem;
         }
 
+        // STEP-13: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-14: When replacementDish exists, set resultItem.Dish.
         if (replacementDish is not null)
         {
             // Persist only DishId: attaching the no-tracking response graph can conflict with the old tracked dish graph.
             resultItem.Dish = replacementDish;
         }
 
+        // STEP-15: Prepare result through RoadmapMapper.MapItem.
         var result = RoadmapMapper.MapItem(destinationDay, resultItem, feedback);
+        // STEP-16: Commit the transaction.
         await transaction.CommitAsync(ct);
+        // STEP-17: Return result.
         return result;
     }
 

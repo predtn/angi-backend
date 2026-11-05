@@ -22,11 +22,14 @@ internal static class MenuReviewDecision
     public static void Record(MenuSubmission submission, int reviewerId, string? note, bool approved,
         TimeProvider timeProvider, IMenuReviewRepository repository, IAuditLogService auditLog)
     {
+        // STEP-01: Prepare oldStatus.
         var oldStatus = submission.Status;
+        // STEP-02: Update submission: Status, ReviewedBy, ReviewedAt and ReviewNote.
         submission.Status = approved ? MenuSubmissionStatus.Approved : MenuSubmissionStatus.Rejected;
         submission.ReviewedBy = reviewerId;
         submission.ReviewedAt = timeProvider.GetUtcNow().UtcDateTime;
         submission.ReviewNote = note;
+        // STEP-03: Queue a new ANGI.Domain.Entities.Notification through repository.AddNotification.
         repository.AddNotification(new ANGI.Domain.Entities.Notification
         {
             RecipientId = submission.Restaurant.OwnerId,
@@ -35,6 +38,7 @@ internal static class MenuReviewDecision
             Body = note,
             Data = JsonSerializer.Serialize(new { submission_id = submission.Id, restaurant_id = submission.RestaurantId })
         });
+        // STEP-04: Record audit action AuditActions.MenuApproved and AuditActions.MenuRejected.
         auditLog.Add(new AuditLogEntry
         {
             Action = approved ? AuditActions.MenuApproved : AuditActions.MenuRejected,

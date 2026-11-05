@@ -27,15 +27,18 @@ namespace ANGI.WebApi.Middlewares
 
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
+            // STEP-01: Stop here when HttpMethods.IsPost(context.Request.Method) does not hold or context.Request.Path differs from LoginPath.
             if (!HttpMethods.IsPost(context.Request.Method) || !context.Request.Path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase))
             {
                 await next(context);
                 return;
             }
 
+            // STEP-02: Prepare key through GetKey and now through timeProvider.GetUtcNow.
             var key = GetKey(context);
             var now = _timeProvider.GetUtcNow();
 
+            // STEP-03: When TryGetActiveWindow(key, now, ...) holds and window.Failures >= _settings.LoginPermitLimit, prepare retryAfterSeconds through Math.Max and more.
             if (TryGetActiveWindow(key, now, out var window) && window.Failures >= _settings.LoginPermitLimit)
             {
                 var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((window.ExpiresAt - now).TotalSeconds));
@@ -45,14 +48,17 @@ namespace ANGI.WebApi.Middlewares
 
             try
             {
+                // STEP-04: Call next.
                 await next(context);
             }
             catch (UnauthorizedException exception) when (exception.ErrorCode == InvalidCredentialsCode)
             {
+                // STEP-05: On UnauthorizedException when exception.ErrorCode is InvalidCredentialsCode, call RegisterFailure and rethrow the caught exception.
                 RegisterFailure(key, now);
                 throw;
             }
 
+            // STEP-06: When context.Response.StatusCode is StatusCodes.Status200OK, call cache.Remove.
             if (context.Response.StatusCode == StatusCodes.Status200OK)
             {
                 _cache.Remove(key);
@@ -61,13 +67,16 @@ namespace ANGI.WebApi.Middlewares
 
         private bool TryGetActiveWindow(string key, DateTimeOffset now, out FailureWindow window)
         {
+            // STEP-01: Return true early when _cache has an entry for key, cached exists and cached.ExpiresAt > now.
             if (_cache.TryGetValue(key, out FailureWindow? cached) && cached is not null && cached.ExpiresAt > now)
             {
                 window = cached;
                 return true;
             }
 
+            // STEP-02: Set window.
             window = null!;
+            // STEP-03: Return false.
             return false;
         }
 
@@ -90,8 +99,10 @@ namespace ANGI.WebApi.Middlewares
 
         private static string GetKey(HttpContext context)
         {
+            // STEP-01: Prepare email and ip from ToString.
             var email = context.Items[RateLimitPartitionMiddleware.EmailItemKey] as string ?? "unknown-email";
             var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown-ip";
+            // STEP-02: Return the formatted text.
             return $"login-failures:{email}|ip:{ip}";
         }
 

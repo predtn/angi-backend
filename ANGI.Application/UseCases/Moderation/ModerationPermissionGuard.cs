@@ -15,15 +15,18 @@ internal static class ModerationPermissionGuard
         IVerificationReviewRepository repository,
         CancellationToken ct)
     {
+        // STEP-01: Prepare userId.
         var userId = currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này.");
 
+        // STEP-02: Reject with FORBIDDEN when currentUserService.Role is not "MOD" or repository.HasEffectivePermissionAsync() is false.
         if (currentUserService.Role != "MOD" ||
             !await repository.HasEffectivePermissionAsync(userId, RestaurantVerify, ct))
         {
             throw new ForbiddenException("FORBIDDEN", "Bạn không có quyền duyệt hồ sơ xác minh nhà hàng.");
         }
 
+        // STEP-03: Return userId.
         return userId;
     }
 }

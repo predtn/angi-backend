@@ -48,18 +48,25 @@ namespace ANGI.Application.UseCases.Auth.Refresh
         /// </summary>
         public async Task<AuthResultDto> ExecuteAsync(RefreshTokenRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare refreshTokenHash through tokenService.HashRefreshToken.
             var refreshTokenHash = _tokenService.HashRefreshToken(request.RefreshToken);
+            // STEP-03: Open the database transaction.
             await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+            // STEP-04: Load session through authenticationRepository.GetSessionByRefreshTokenHashForUpdateAsync.
             var session = await _authenticationRepository.GetSessionByRefreshTokenHashForUpdateAsync(refreshTokenHash, ct);
+            // STEP-05: Prepare now from timeProvider.GetUtcNow.
             var now = _timeProvider.GetUtcNow().UtcDateTime;
 
+            // STEP-06: Throw the error from InvalidRefreshToken when session is missing.
             if (session is null)
             {
                 throw InvalidRefreshToken();
             }
 
+            // STEP-07: When session.RevokedAt has a value, call RevokeAllActiveSessionsAsync, call transaction.CommitAsync and 1 more action(s).
             if (session.RevokedAt.HasValue)
             {
                 await RevokeAllActiveSessionsAsync(session.UserId, now, ct);
@@ -67,15 +74,22 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 throw InvalidRefreshToken();
             }
 
+            // STEP-08: When session.ExpiresAt <= now or session.User.Status is not UserStatus.Active, run the branch below.
             if (session.ExpiresAt <= now || session.User.Status != UserStatus.Active)
             {
+                // STEP-09: Update session: RevokedAt.
                 session.RevokedAt = now;
+                // STEP-10: Save the pending changes.
                 await _unitOfWork.SaveChangesAsync(ct);
+                // STEP-11: Commit the transaction.
                 await transaction.CommitAsync(ct);
+                // STEP-12: Throw the error from InvalidRefreshToken.
                 throw InvalidRefreshToken();
             }
 
+            // STEP-13: Update session: RevokedAt.
             session.RevokedAt = now;
+            // STEP-14: Prepare refreshToken through tokenService.CreateRefreshToken and newSession as UserSession.
             var refreshToken = _tokenService.CreateRefreshToken();
             var newSession = new UserSession
             {
@@ -85,11 +99,15 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 IpAddress = session.IpAddress,
                 ExpiresAt = refreshToken.ExpiresAt
             };
+            // STEP-15: Queue newSession through authenticationRepository.AddSession.
             _authenticationRepository.AddSession(newSession);
 
+            // STEP-16: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
+            // STEP-17: Commit the transaction.
             await transaction.CommitAsync(ct);
 
+            // STEP-18: Prepare accessToken and tokens, then load needsPreferenceSurvey through GetNeedsPreferenceSurveyAsync.
             // Rotation creates a new session row, so the new access token carries its id as claim sid.
             var accessToken = _tokenService.CreateAccessToken(session.User, newSession.Id);
             var tokens = new AuthenticationTokens(
@@ -100,18 +118,22 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 refreshToken.ExpiresAt);
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(session.User, ct);
+            // STEP-19: Return the result of AuthenticationResponseMapper.Map.
             return AuthenticationResponseMapper.Map(session.User, tokens, needsPreferenceSurvey);
         }
 
         /// <summary>Revokes every active session when reuse of an old refresh token is detected.</summary>
         private async Task RevokeAllActiveSessionsAsync(int userId, DateTime now, CancellationToken ct)
         {
+            // STEP-01: Load activeSessions through authenticationRepository.GetActiveSessionsAsync.
             var activeSessions = await _authenticationRepository.GetActiveSessionsAsync(userId, ct);
+            // STEP-02: For each activeSession in activeSessions, set activeSession.RevokedAt.
             foreach (var activeSession in activeSessions)
             {
                 activeSession.RevokedAt = now;
             }
 
+            // STEP-03: When activeSessions.Count > 0, call unitOfWork.SaveChangesAsync.
             if (activeSessions.Count > 0)
             {
                 await _unitOfWork.SaveChangesAsync(ct);
@@ -121,12 +143,15 @@ namespace ANGI.Application.UseCases.Auth.Refresh
         /// <summary>Gets the Traveler survey status so refresh returns the same user shape as login.</summary>
         private async Task<bool?> GetNeedsPreferenceSurveyAsync(User user, CancellationToken ct)
         {
+            // STEP-01: Return null early when user.Role.Code differs from TravelerRole.
             if (!string.Equals(user.Role.Code, TravelerRole, StringComparison.Ordinal))
             {
                 return null;
             }
 
+            // STEP-02: Load status through recommendationService.GetSurveyStatusAsync.
             var status = await _recommendationService.GetSurveyStatusAsync(user.Id, ct);
+            // STEP-03: Return one of two results depending on status is missing.
             return status is null ? null : !status.Completed;
         }
 

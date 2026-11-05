@@ -26,12 +26,15 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int pageSize,
         CancellationToken ct)
     {
+        // STEP-01: Prepare query, then call query.LongCountAsync and keep totalItems.
         var query = _context.Roadmaps
             .AsNoTracking()
             .Where(roadmap => roadmap.UserId == userId);
         var totalItems = await query.LongCountAsync(ct);
+        // STEP-02: Prepare totalPages from Math.Ceiling.
         var totalPages = (int)Math.Ceiling((double)totalItems / pageSize);
 
+        // STEP-03: Return a new Paged<RoadmapSummaryDto> early when page > totalPages.
         if (page > totalPages)
         {
             return new Paged<RoadmapSummaryDto>
@@ -44,6 +47,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
             };
         }
 
+        // STEP-04: Prepare skip, then call Skip().Take().Select(filtered).ToArrayAsync and keep items.
         var skip = PageOffset.Of(page, pageSize);
 
         var items = await query
@@ -90,6 +94,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
             })
             .ToArrayAsync(ct);
 
+        // STEP-05: Return a new Paged<RoadmapSummaryDto>.
         return new Paged<RoadmapSummaryDto>
         {
             Items = items,
@@ -112,6 +117,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int userId,
         CancellationToken ct)
     {
+        // STEP-01: Call context.Database.ExecuteSqlInterpolatedAsync.
         await _context.Database.ExecuteSqlInterpolatedAsync($$"""
             SELECT 1
             FROM core.roadmaps
@@ -121,9 +127,12 @@ public sealed class RoadmapRepository : IRoadmapRepository
             FOR UPDATE
             """, ct);
 
+        // STEP-02: Prepare tracked through context.Roadmaps.Local.FirstOrDefault.
         var tracked = _context.Roadmaps.Local.FirstOrDefault(roadmap => roadmap.Id == roadmapId);
+        // STEP-03: When tracked exists, call context.Entry().ReloadAsync.
         if (tracked is not null) await _context.Entry(tracked).ReloadAsync(ct);
 
+        // STEP-04: Return the result of AsSplitQuery().FirstOrDefaultAsync.
         return await _context.Roadmaps
             .IgnoreQueryFilters()
             .Where(roadmap => roadmap.Id == roadmapId &&
@@ -309,6 +318,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int userId,
         CancellationToken ct)
     {
+        // STEP-01: Call context.Database.ExecuteSqlInterpolatedAsync.
         await _context.Database.ExecuteSqlInterpolatedAsync($$"""
             SELECT 1
             FROM core.roadmaps
@@ -318,18 +328,22 @@ public sealed class RoadmapRepository : IRoadmapRepository
             FOR UPDATE
             """, ct);
 
+        // STEP-02: Load roadmapExists through context.Roadmaps.AsNoTracking().AnyAsync.
         var roadmapExists = await _context.Roadmaps
             .AsNoTracking()
             .AnyAsync(roadmap => roadmap.Id == roadmapId && roadmap.UserId == userId, ct);
+        // STEP-03: Return the collected values early when roadmapExists is false.
         if (!roadmapExists)
         {
             return (false, null);
         }
 
+        // STEP-04: Call Where(filtered).Include(filtered).FirstOrDefaultAsync and keep day.
         var day = await _context.RoadmapDays
             .Where(value => value.Id == dayId && value.RoadmapId == roadmapId)
             .Include(value => value.Items)
             .FirstOrDefaultAsync(ct);
+        // STEP-05: Return the collected values.
         return (true, day);
     }
 
@@ -404,6 +418,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
         int userId,
         CancellationToken ct)
     {
+        // STEP-01: Call context.Database.ExecuteSqlInterpolatedAsync.
         // Use the same parent-before-child lock order as Agent confirmation and all other roadmap mutations.
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM core.roadmaps WHERE id = {roadmapId} AND user_id = {userId} AND deleted_at IS NULL FOR UPDATE", ct);
         await _context.Database.ExecuteSqlInterpolatedAsync($$"""
@@ -418,6 +433,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
             FOR UPDATE OF item
             """, ct);
 
+        // STEP-02: Return the result of context.RoadmapItems.FirstOrDefaultAsync.
         return await _context.RoadmapItems.FirstOrDefaultAsync(
             item => item.Id == itemId &&
                     item.RoadmapDay.RoadmapId == roadmapId &&
@@ -448,8 +464,10 @@ public sealed class RoadmapRepository : IRoadmapRepository
         FeedbackValue value,
         CancellationToken ct)
     {
+        // STEP-01: Prepare dish through context.Dishes.Where.
         // One UPDATE with the increment in SQL, so concurrent feedback on the same dish never loses a count.
         var dish = _context.Dishes.Where(item => item.Id == dishId);
+        // STEP-02: When value is FeedbackValue.Like, call dish.ExecuteUpdateAsync; otherwise call dish.ExecuteUpdateAsync.
         if (value == FeedbackValue.Like)
         {
             await dish.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LikeCount, item => item.LikeCount + 1), ct);
@@ -459,10 +477,12 @@ public sealed class RoadmapRepository : IRoadmapRepository
             await dish.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DislikeCount, item => item.DislikeCount + 1), ct);
         }
 
+        // STEP-03: Call AsNoTracking().Select(filtered).SingleAsync and keep counts.
         var counts = await dish
             .AsNoTracking()
             .Select(item => new { item.LikeCount, item.DislikeCount })
             .SingleAsync(ct);
+        // STEP-04: Return the collected values.
         return (counts.LikeCount, counts.DislikeCount);
     }
 }

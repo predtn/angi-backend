@@ -13,19 +13,26 @@ public sealed class AgentRouteEstimator(IRouteService routes)
     public async Task<AgentDayRoute> EstimateAsync(AgentState state, short dayNumber, AgentItem[] items,
         RouteProfile profile, CancellationToken ct)
     {
+        // STEP-01: Reject with PROPOSAL_NOT_COMMITTABLE when items.Length > 24 or items.Any matches the filter.
         if (items.Length > 24 || items.Any(x => !x.Latitude.HasValue || !x.Longitude.HasValue ||
             x.Latitude < -90 || x.Latitude > 90 || x.Longitude < -180 || x.Longitude > 180))
             throw new ConflictException("PROPOSAL_NOT_COMMITTABLE", "Tuyến thiếu tọa độ hợp lệ hoặc vượt giới hạn điểm.");
+        // STEP-02: Prepare origin and skipped from NearbyArea.DistanceKm.
         RouteCoordinate? origin = state.OriginLatitude is { } lat && state.OriginLongitude is { } lng
             ? new(lat, lng) : null;
         var skipped = origin is not null && items.Length > 0 && NearbyArea.DistanceKm(origin.Latitude, origin.Longitude,
             items[0].Latitude!.Value, items[0].Longitude!.Value) > 30;
+        // STEP-03: When skipped is true, set origin.
         if (skipped) origin = null;
+        // STEP-04: Prepare destinations, then call routes.CalculateRouteAsync and keep result.
         var destinations = items.Select(x => new RouteCoordinate(x.Latitude!.Value, x.Longitude!.Value)).ToArray();
         var result = await routes.CalculateRouteAsync(origin, destinations, profile, ct);
+        // STEP-05: Prepare expectedLegs through Math.Max.
         var expectedLegs = Math.Max(0, destinations.Length + (origin is null ? 0 : 1) - 1);
+        // STEP-06: Reject with AGENT_UNAVAILABLE when result.Legs.Count is not expectedLegs or result.Legs.Any matches the filter.
         if (result.Legs.Count != expectedLegs || result.Legs.Any(x => x.DistanceMeters < 0 || x.DurationSeconds < 0))
             throw new ServiceUnavailableException("AGENT_UNAVAILABLE", "Không kiểm tra được kết quả tuyến đường.");
+        // STEP-07: Return the new result.
         return new(dayNumber, result.IsEstimated, skipped, result.Legs);
     }
 }

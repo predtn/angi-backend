@@ -45,15 +45,20 @@ public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
         ReplaceModPermissionsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare actorId.
         var actorId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Yêu cầu đăng nhập.");
 
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare current, then load catalog through repository.GetCatalogAsync.
         var current = await _repository.GetModPermissionsAsync(userId, ct)
             ?? throw new NotFoundException("MOD_NOT_FOUND", "Không tìm thấy tài khoản Mod.");
         var catalog = await _repository.GetCatalogAsync(ct);
+        // STEP-05: Prepare permissionByCode, replacements and replacementSnapshots, then call repository.ReplaceModOverridesAsync.
         var permissionByCode = AdministrationPermissionRules.ResolveGrantable(
             request.Overrides.Select(item => item.PermissionCode),
             catalog);
@@ -77,6 +82,7 @@ public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
             _timeProvider.GetUtcNow().UtcDateTime,
             replacements,
             ct);
+        // STEP-06: Record audit action AuditActions.ModPermissionsChanged.
         _auditLogService.Add(new AuditLogEntry
         {
             Action = AuditActions.ModPermissionsChanged,
@@ -86,9 +92,12 @@ public sealed class ReplaceModPermissionsUseCase : IReplaceModPermissionsUseCase
             OldValues = new { Overrides = ToAuditValues(current.Overrides) },
             NewValues = new { Overrides = ToAuditValues(replacementSnapshots) }
         });
+        // STEP-07: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-08: Commit the transaction.
         await transaction.CommitAsync(ct);
 
+        // STEP-09: Return the result of AdministrationPermissionMapper.ToModPermissionsDto.
         return AdministrationPermissionMapper.ToModPermissionsDto(current.RoleDefaults, replacementSnapshots);
     }
 

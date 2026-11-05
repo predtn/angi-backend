@@ -40,6 +40,7 @@ namespace ANGI.Infrastructure.Services.Auth
         /// <summary>Creates an access token with the user claims and the session id (claim sid).</summary>
         public IssuedAccessToken CreateAccessToken(User user, long sessionId)
         {
+            // STEP-01: Prepare now from timeProvider.GetUtcNow, accessTokenExpiresAt through now.AddMinutes, signingKey as SymmetricSecurityKey, claims from Guid.NewGuid and 1 more.
             var now = _timeProvider.GetUtcNow().UtcDateTime;
             var accessTokenExpiresAt = now.AddMinutes(_settings.AccessTokenMinutes);
             var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.SecretKey));
@@ -62,6 +63,7 @@ namespace ANGI.Infrastructure.Services.Auth
                 expires: accessTokenExpiresAt,
                 signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256));
 
+            // STEP-02: Return a new IssuedAccessToken.
             return new IssuedAccessToken(new JwtSecurityTokenHandler().WriteToken(jwt), accessTokenExpiresAt);
         }
 

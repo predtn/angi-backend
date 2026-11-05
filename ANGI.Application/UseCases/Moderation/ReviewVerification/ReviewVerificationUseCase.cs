@@ -51,28 +51,39 @@ public sealed class ReviewVerificationUseCase : IReviewVerificationUseCase
         ReviewVerificationRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
+        // STEP-02: Check the caller's permission through ModerationPermissionGuard.RequireAsync.
         var reviewerId = await ModerationPermissionGuard.RequireAsync(_currentUserService, _repository, ct);
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
 
+        // STEP-04: Prepare verification from repository.LockForDecisionAsync.
         var verification = await _repository.LockForDecisionAsync(verificationId, ct)
             ?? throw new NotFoundException("VERIFICATION_NOT_FOUND", "Không tìm thấy hồ sơ xác minh.");
+        // STEP-05: Reject with VERIFICATION_ALREADY_REVIEWED when verification.Status is not VerificationStatus.Pending.
         if (verification.Status != VerificationStatus.Pending)
         {
             throw new ConflictException("VERIFICATION_ALREADY_REVIEWED", "Hồ sơ xác minh đã được xử lý.");
         }
 
+        // STEP-06: Prepare oldRestaurantStatus, decision and note, then call ApplyDecision.
         var oldRestaurantStatus = verification.Restaurant.VerificationStatus;
         var decision = request.Decision.ToLowerInvariant();
         var note = string.IsNullOrWhiteSpace(request.ReviewNote) ? null : request.ReviewNote.Trim();
         ApplyDecision(verification, decision, reviewerId, note, _timeProvider.GetUtcNow().UtcDateTime);
+        // STEP-07: Load repository.LoadReviewerAsync.
         await _repository.LoadReviewerAsync(verification, ct);
 
+        // STEP-08: Queue the built entries through repository.AddNotification and queue verification through AddAudit.
         _repository.AddNotification(CreateNotification(verification, decision, note));
         AddAudit(verification, oldRestaurantStatus, decision, note);
+        // STEP-09: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-10: Commit the transaction.
         await transaction.CommitAsync(ct);
 
+        // STEP-11: Return the result of RestaurantVerificationMapper.Map.
         return RestaurantVerificationMapper.Map(verification, _cloudinaryService);
     }
 

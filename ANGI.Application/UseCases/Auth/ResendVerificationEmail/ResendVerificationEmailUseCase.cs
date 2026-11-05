@@ -44,16 +44,21 @@ namespace ANGI.Application.UseCases.Auth.ResendVerificationEmail
         /// </summary>
         public async Task ExecuteAsync(ResendVerificationEmailRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare normalizedEmail through request.Email.Trim().ToLowerInvariant, recipientEmail, recipientDisplayName and rawToken.
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
             string recipientEmail;
             string recipientDisplayName;
             string rawToken;
 
+            // STEP-03: Hold the scoped resource for the block below.
             await using (var transaction = await _unitOfWork.BeginTransactionAsync(ct))
             {
+                // STEP-04: Load user through authenticationRepository.GetUserByEmailForUpdateAsync.
                 var user = await _authenticationRepository.GetUserByEmailForUpdateAsync(normalizedEmail, ct);
+                // STEP-05: Stop here when user is missing, user.Status is not UserStatus.PendingVerification or user.EmailVerifiedAt has a value.
                 if (user is null ||
                     user.Status != UserStatus.PendingVerification ||
                     user.EmailVerifiedAt.HasValue)
@@ -61,17 +66,21 @@ namespace ANGI.Application.UseCases.Auth.ResendVerificationEmail
                     return;
                 }
 
+                // STEP-06: Prepare now, then load oldTokens through authenticationRepository.GetUnusedUserTokensAsync.
                 var now = _timeProvider.GetUtcNow().UtcDateTime;
                 var oldTokens = await _authenticationRepository.GetUnusedUserTokensAsync(
                     user.Id,
                     UserTokenPurpose.EmailVerify,
                     ct);
+                // STEP-07: For each oldToken in oldTokens, set oldToken.UsedAt.
                 foreach (var oldToken in oldTokens)
                 {
                     oldToken.UsedAt = now;
                 }
 
+                // STEP-08: Prepare generatedToken through tokenService.CreateUserToken.
                 var generatedToken = _tokenService.CreateUserToken();
+                // STEP-09: Queue a new UserToken through authenticationRepository.AddUserToken.
                 _authenticationRepository.AddUserToken(new UserToken
                 {
                     UserId = user.Id,
@@ -80,13 +89,17 @@ namespace ANGI.Application.UseCases.Auth.ResendVerificationEmail
                     ExpiresAt = now.Add(TokenLifetime)
                 });
 
+                // STEP-10: Save the pending changes.
                 await _unitOfWork.SaveChangesAsync(ct);
+                // STEP-11: Commit the transaction.
                 await transaction.CommitAsync(ct);
+                // STEP-12: Set recipientEmail, recipientDisplayName and rawToken.
                 recipientEmail = user.Email;
                 recipientDisplayName = user.DisplayName;
                 rawToken = generatedToken.Token;
             }
 
+            // STEP-13: Call emailService.SendEmailVerificationAsync.
             await _emailService.SendEmailVerificationAsync(
                 recipientEmail,
                 recipientDisplayName,

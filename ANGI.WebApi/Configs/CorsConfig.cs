@@ -8,10 +8,12 @@ namespace ANGI.WebApi.Configs
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            // STEP-01: Prepare allowedOrigins from configuration.GetSection.
             var allowedOrigins = configuration
                 .GetSection("Cors:AllowedOrigins")
                 .Get<string[]>() ?? [];
 
+            // STEP-02: Register AddCors.
             services.AddCors(options =>
             {
                 options.AddPolicy(PolicyName, policy =>
@@ -26,6 +28,7 @@ namespace ANGI.WebApi.Configs
                 });
             });
 
+            // STEP-03: Return services.
             return services;
         }
     }

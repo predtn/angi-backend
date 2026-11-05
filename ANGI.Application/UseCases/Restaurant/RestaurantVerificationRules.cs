@@ -24,8 +24,10 @@ internal static class RestaurantVerificationRules
         IReadOnlyList<VerificationDocumentRequestDto> documents,
         IReadOnlyCollection<MediaFile> ownedMedia)
     {
+        // STEP-01: Prepare mediaById through ownedMedia.ToDictionary and failures as List<ValidationFailure>.
         var mediaById = ownedMedia.ToDictionary(media => media.Id);
         var failures = new List<ValidationFailure>();
+        // STEP-02: While index < documents.Count, prepare document and check whether mediaById has no entry for document.MediaId or IsVerificationUpload(media.StorageKey) does not hold.
         for (var index = 0; index < documents.Count; index++)
         {
             var document = documents[index];
@@ -37,11 +39,13 @@ internal static class RestaurantVerificationRules
             }
         }
 
+        // STEP-03: Throw ValidationException when failures.Count > 0.
         if (failures.Count > 0)
         {
             throw new ValidationException(failures);
         }
 
+        // STEP-04: Return mediaById.
         return mediaById;
     }
 
@@ -69,12 +73,15 @@ internal static class RestaurantVerificationRules
     /// <summary>Recognizes the private storage-key layout produced by MEDIA-01 for verification documents.</summary>
     private static bool IsVerificationUpload(string? storageKey)
     {
+        // STEP-01: Return false early when storageKey is blank.
         if (string.IsNullOrWhiteSpace(storageKey))
         {
             return false;
         }
 
+        // STEP-02: Prepare parts through storageKey.Split.
         var parts = storageKey.Split('/', 4, StringSplitOptions.None);
+        // STEP-03: Return the computed condition.
         return parts.Length == 4 &&
             parts[0] is "image" or "raw" &&
             parts[1] == "authenticated" &&

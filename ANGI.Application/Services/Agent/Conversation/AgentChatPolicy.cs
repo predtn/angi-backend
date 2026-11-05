@@ -83,30 +83,42 @@ public static class AgentChatPolicy
     /// <summary>Stages validated proposed constraints, retaining the original state until the user confirms them.</summary>
     public static AgentPreparedTurn StageChange(AgentState current, AgentState proposed, bool hasPlan = true)
     {
+        // STEP-01: Prepare changes as List<string>.
         var changes = new List<string>();
+        // STEP-02: When current.Province is not proposed.Province, call changes.Add.
         if (current.Province != proposed.Province) changes.Add($"địa điểm: {proposed.Province ?? "chưa chọn"}");
+        // STEP-03: When current.NumDays is not proposed.NumDays, call changes.Add.
         if (current.NumDays != proposed.NumDays) changes.Add($"số ngày: {proposed.NumDays?.ToString(CultureInfo.InvariantCulture) ?? "chưa chọn"}");
+        // STEP-04: When current.BudgetAmount is not proposed.BudgetAmount or current.BudgetUnrestricted is not proposed.BudgetUnrestricted, call changes.Add.
         if (current.BudgetAmount != proposed.BudgetAmount || current.BudgetUnrestricted != proposed.BudgetUnrestricted)
             changes.Add(proposed.BudgetUnrestricted ? "ngân sách không giới hạn" : $"ngân sách: {proposed.BudgetAmount?.ToString("0", CultureInfo.InvariantCulture) ?? "chưa chọn"} đồng");
+        // STEP-05: When current.MaxPricePerMeal is not proposed.MaxPricePerMeal, call changes.Add.
         if (current.MaxPricePerMeal != proposed.MaxPricePerMeal) changes.Add($"trần giá mỗi món: {proposed.MaxPricePerMeal?.ToString("0", CultureInfo.InvariantCulture) ?? "không giới hạn"} đồng");
+        // STEP-06: When current.TagIds.SequenceEqual(proposed.TagIds) does not hold or current.ExcludeTagIds.SequenceEqual(proposed.ExcludeTagIds) does not hold, call changes.Add.
         if (!current.TagIds.SequenceEqual(proposed.TagIds) || !current.ExcludeTagIds.SequenceEqual(proposed.ExcludeTagIds)) changes.Add("bộ lọc món ăn");
+        // STEP-07: Add the built entries to changes.
         changes.AddRange(MealRequestChanges(current.MealRequests, proposed.MealRequests));
+        // STEP-08: When current.RadiusKm is not proposed.RadiusKm, current.OriginMode is not proposed.OriginMode and more.
         if (current.RadiusKm != proposed.RadiusKm || current.OriginMode != proposed.OriginMode || current.OriginLatitude != proposed.OriginLatitude || current.OriginLongitude != proposed.OriginLongitude)
             changes.Add("điểm xuất phát hoặc bán kính tìm món");
+        // STEP-09: Prepare reply from string.Join and pending.
         // Chưa có lịch xem trước/đã lưu thì không nhắc "bản lịch chưa thay đổi" để người dùng không tưởng đã có lịch.
         var reply = $"Mình đổi {string.Join("; ", changes)} nhé? Bạn nhắn “ok” để đổi hoặc “thôi” để giữ nguyên." +
             (hasPlan ? " Bản lịch hiện tại chưa thay đổi." : "");
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
             FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,
             SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
+        // STEP-10: Return the new result.
         return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending, PendingPlanningRequest = null }, null, null);
     }
 
     /// <summary>Names each trip/day/meal scope whose dish or restaurant request was added, removed or changed.</summary>
     private static IEnumerable<string> MealRequestChanges(AgentMealRequest[] current, AgentMealRequest[] proposed)
     {
+        // STEP-01: Prepare before through current.ToDictionary and after through proposed.ToDictionary.
         var before = current.ToDictionary(x => (x.DayNumber, x.MealSlot));
         var after = proposed.ToDictionary(x => (x.DayNumber, x.MealSlot));
+        // STEP-02: For each key in Keys.Union().OrderBy(filtered).ThenBy(filtered), prepare scope from AgentReplyBuilder.Meal and check whether after does not contain key.
         foreach (var key in before.Keys.Union(after.Keys).OrderBy(x => x.DayNumber ?? 0).ThenBy(x => x.MealSlot is null ? -1 : Array.IndexOf(AgentStateValidator.Meals, x.MealSlot)))
         {
             var scope = key.DayNumber is not { } day ? "toàn chuyến" : key.MealSlot is null ? $"ngày {day}" : $"{AgentReplyBuilder.Meal(key.MealSlot)} ngày {day}";

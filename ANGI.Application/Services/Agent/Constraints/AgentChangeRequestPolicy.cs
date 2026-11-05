@@ -25,24 +25,34 @@ public static class AgentChangeRequestPolicy
     /// </summary>
     public static bool IsUnrequested(string content, AgentState before, AgentState after, IReadOnlyDictionary<short, string> tagNames)
     {
+        // STEP-01: Prepare text through Normalize.
         var text = Normalize(content);
+        // STEP-02: Return false early when text matches Regex or the computed value > 0.
         if (Regex.IsMatch(text, ChangeWording, RegexOptions.CultureInvariant) || AgentTasteClarificationPolicy.MentionedTastes(content).Length > 0)
             return false;
+        // STEP-03: Prepare references through AgentMealScopePolicy.Read.
         var references = AgentMealScopePolicy.Read(content, after);
+        // STEP-04: Return false early when references.Meals.Length > 0, references.Days.Length > 0 or text matches Regex.
         if (references.Meals.Length > 0 || references.Days.Length > 0 || Regex.IsMatch(text, @"\bbua\s+(?:sang|trua|toi|phu|khuya)\b", RegexOptions.CultureInvariant))
             return false;
+        // STEP-05: Return true early when SameUserConstraints(before, after) holds.
         if (SameUserConstraints(before, after)) return true;
+        // STEP-06: Return false early when SameUserConstraints(...) does not hold.
         // Thay đổi ngoài tag/yêu cầu món (số ngày, ngân sách, khẩu vị...) do lớp ràng buộc và xác nhận riêng xử lý: không chặn ở đây.
         if (!SameUserConstraints(before with { TagIds = [], ExcludeTagIds = [], MealRequests = [] }, after with { TagIds = [], ExcludeTagIds = [], MealRequests = [] }))
             return false;
+        // STEP-07: Prepare beforeTags through before.TagIds.Concat().Concat().ToHashSet, addedTags through Where(filtered).Distinct().ToArray and more.
         var beforeTags = before.TagIds.Concat(before.ExcludeTagIds).Concat(before.MealRequests.SelectMany(x => x.TagIds)).ToHashSet();
         var addedTags = after.TagIds.Concat(after.ExcludeTagIds).Concat(after.MealRequests.SelectMany(x => x.TagIds)).Where(id => !beforeTags.Contains(id)).Distinct().ToArray();
         var beforeNames = before.MealRequests.SelectMany(x => new[] { x.DishName, x.RestaurantName }).OfType<string>().Select(Normalize).ToHashSet(StringComparer.Ordinal);
         var addedNames = after.MealRequests.SelectMany(x => new[] { x.DishName, x.RestaurantName }).OfType<string>().Select(Normalize)
             .Where(name => !beforeNames.Contains(name)).Distinct().ToArray();
+        // STEP-08: Return false early when addedTags.Length is 0 and addedNames.Length is 0.
         // Chỉ bỏ bớt yêu cầu: lớp xác nhận thay đổi ràng buộc đã hỏi người dùng, không chặn ở đây.
         if (addedTags.Length == 0 && addedNames.Length == 0) return false;
+        // STEP-09: Prepare accented through content.Normalize().ToLowerInvariant.
         var accented = content.Normalize(NormalizationForm.FormC).ToLowerInvariant();
+        // STEP-10: Return the computed condition.
         return !addedTags.Any(id => tagNames.TryGetValue(id, out var name) && TagMentioned(name, accented)) &&
             !addedNames.Any(name => NameMentioned(name, text));
     }
@@ -53,7 +63,9 @@ public static class AgentChangeRequestPolicy
     /// </summary>
     public static AgentState WithoutUnsettledNames(AgentState state, AgentState baseline)
     {
+        // STEP-01: Prepare requests as List<AgentMealRequest>.
         var requests = new List<AgentMealRequest>();
+        // STEP-02: For each request in state.MealRequests, skip this round when (request.DishName is missing and more.
         foreach (var request in state.MealRequests)
         {
             if (request.DishName is null && request.RestaurantName is null || baseline.MealRequests.Any(previous => SameNames(previous, request)))
@@ -61,6 +73,7 @@ public static class AgentChangeRequestPolicy
             var unnamed = request with { DishName = null, RestaurantName = null, RestaurantId = null };
             if (unnamed.TagIds.Length > 0 || unnamed.DifferentFromPlan) requests.Add(unnamed);
         }
+        // STEP-03: Return a copy of state with updated fields.
         return state with { MealRequests = [.. requests] };
     }
 

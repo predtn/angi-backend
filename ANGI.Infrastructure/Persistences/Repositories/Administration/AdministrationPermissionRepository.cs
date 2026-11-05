@@ -20,6 +20,7 @@ public sealed class AdministrationPermissionRepository : IAdministrationPermissi
     /// <summary>Loads the ordered permission catalog and current MOD defaults without tracking.</summary>
     public async Task<PermissionCatalogSnapshot> GetCatalogAsync(CancellationToken ct)
     {
+        // STEP-01: Prepare modRoleId, then call OrderBy(filtered).Select(filtered).ToListAsync and keep permissions and OrderBy(filtered).Select(filtered).ToListAsync and keep modDefaults.
         var modRoleId = await _context.Roles
             .AsNoTracking()
             .Where(role => role.Code == ModRoleCode)
@@ -41,22 +42,26 @@ public sealed class AdministrationPermissionRepository : IAdministrationPermissi
             .Select(item => item.Permission.Code)
             .ToListAsync(ct);
 
+        // STEP-02: Return a new PermissionCatalogSnapshot.
         return new PermissionCatalogSnapshot(modRoleId, permissions, modDefaults);
     }
 
     /// <summary>Loads an active MOD and its ordered default and override permission state.</summary>
     public async Task<ModPermissionsSnapshot?> GetModPermissionsAsync(int userId, CancellationToken ct)
     {
+        // STEP-01: Call Where(filtered).Select(filtered).SingleOrDefaultAsync and keep mod.
         var mod = await _context.Users
             .AsNoTracking()
             .Where(user => user.Id == userId && user.Role.Code == ModRoleCode)
             .Select(user => new { user.Id, user.RoleId })
             .SingleOrDefaultAsync(ct);
+        // STEP-02: Return null early when mod is missing.
         if (mod is null)
         {
             return null;
         }
 
+        // STEP-03: Call OrderBy(filtered).Select(filtered).ToListAsync and keep defaults and OrderBy(filtered).Select(filtered).ToListAsync and keep overrides.
         var defaults = await _context.RolePermissions
             .AsNoTracking()
             .Where(item => item.RoleId == mod.RoleId)
@@ -73,6 +78,7 @@ public sealed class AdministrationPermissionRepository : IAdministrationPermissi
                 item.Effect))
             .ToListAsync(ct);
 
+        // STEP-04: Return a new ModPermissionsSnapshot.
         return new ModPermissionsSnapshot(mod.Id, defaults, overrides);
     }
 
@@ -84,13 +90,17 @@ public sealed class AdministrationPermissionRepository : IAdministrationPermissi
         IReadOnlyList<PermissionOverrideChange> overrides,
         CancellationToken ct)
     {
+        // STEP-01: Call UserPermissions.Where(filtered).ToListAsync and keep existing.
         var existing = await _context.UserPermissions
             .Where(item => item.UserId == userId)
             .ToListAsync(ct);
+        // STEP-02: Prepare replacements through overrides.ToDictionary.
         var replacements = overrides.ToDictionary(item => item.PermissionId);
+        // STEP-03: Mark the built entries for removal through context.UserPermissions.RemoveRange.
         _context.UserPermissions.RemoveRange(
             existing.Where(item => !replacements.ContainsKey(item.PermissionId)));
 
+        // STEP-04: For each replacement in overrides, prepare current through existing.FirstOrDefault, skip this round when current exists and 1 more action(s).
         foreach (var replacement in overrides)
         {
             var current = existing.FirstOrDefault(item => item.PermissionId == replacement.PermissionId);
@@ -119,13 +129,18 @@ public sealed class AdministrationPermissionRepository : IAdministrationPermissi
         IReadOnlyList<short> permissionIds,
         CancellationToken ct)
     {
+        // STEP-01: Call RolePermissions.Where(filtered).ToListAsync and keep existing.
         var existing = await _context.RolePermissions
             .Where(item => item.RoleId == modRoleId)
             .ToListAsync(ct);
+        // STEP-02: Prepare replacementIds through permissionIds.ToHashSet.
         var replacementIds = permissionIds.ToHashSet();
+        // STEP-03: Mark the built entries for removal through context.RolePermissions.RemoveRange.
         _context.RolePermissions.RemoveRange(
             existing.Where(item => !replacementIds.Contains(item.PermissionId)));
+        // STEP-04: Prepare existingIds through existing.Select(filtered).ToHashSet.
         var existingIds = existing.Select(item => item.PermissionId).ToHashSet();
+        // STEP-05: Queue the built entries through context.RolePermissions.AddRange.
         _context.RolePermissions.AddRange(permissionIds
             .Where(permissionId => !existingIds.Contains(permissionId))
             .Select(permissionId => new RolePermission

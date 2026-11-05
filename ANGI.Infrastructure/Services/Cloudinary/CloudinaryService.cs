@@ -29,12 +29,15 @@ public sealed class CloudinaryService : ICloudinaryService
     /// <summary>Creates and validates the Cloudinary SDK adapter from configuration values.</summary>
     private static ICloudinaryClient CreateClient(IConfiguration configuration)
     {
+        // STEP-01: Call ArgumentNullException.ThrowIfNull.
         ArgumentNullException.ThrowIfNull(configuration);
 
+        // STEP-02: Prepare cloudName, apiKey and apiSecret.
         var cloudName = configuration["Cloudinary:CloudName"];
         var apiKey = configuration["Cloudinary:ApiKey"];
         var apiSecret = configuration["Cloudinary:ApiSecret"];
 
+        // STEP-03: Throw InvalidOperationException when cloudName is blank, apiKey is blank or apiSecret is blank.
         if (string.IsNullOrWhiteSpace(cloudName) ||
             string.IsNullOrWhiteSpace(apiKey) ||
             string.IsNullOrWhiteSpace(apiSecret))
@@ -42,6 +45,7 @@ public sealed class CloudinaryService : ICloudinaryService
             throw new InvalidOperationException("Cloudinary configuration is incomplete.");
         }
 
+        // STEP-04: Return a new CloudinaryClient.
         return new CloudinaryClient(new CloudinaryDotNet.Account(cloudName, apiKey, apiSecret));
     }
 
@@ -54,18 +58,22 @@ public sealed class CloudinaryService : ICloudinaryService
         bool isPrivate,
         CancellationToken cancellationToken)
     {
+        // STEP-01: Call ArgumentNullException.ThrowIfNull, ArgumentException.ThrowIfNullOrWhiteSpace and cancellationToken.ThrowIfCancellationRequested.
         ArgumentNullException.ThrowIfNull(file);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentException.ThrowIfNullOrWhiteSpace(mimeType);
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // STEP-02: Prepare normalizedFolder through folder.Trim().Trim.
         var normalizedFolder = folder.Trim().Trim('/');
+        // STEP-03: Throw ArgumentException when normalizedFolder.Length is 0.
         if (normalizedFolder.Length == 0)
         {
             throw new ArgumentException("Folder must contain at least one character.", nameof(folder));
         }
 
+        // STEP-04: Prepare isPdf through string.Equals, publicId from Guid.NewGuid, deliveryType, fileDescription as FileDescription and 1 more.
         var isPdf = string.Equals(mimeType, "application/pdf", StringComparison.OrdinalIgnoreCase);
         var publicId = $"{normalizedFolder}/{Guid.NewGuid():N}";
         var deliveryType = isPrivate ? "authenticated" : "upload";
@@ -74,6 +82,7 @@ public sealed class CloudinaryService : ICloudinaryService
         UploadResult result;
         try
         {
+            // STEP-05: Set result.
             result = isPdf
                 ? await _client.UploadRawAsync(new RawUploadParams
                 {
@@ -90,15 +99,18 @@ public sealed class CloudinaryService : ICloudinaryService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // STEP-06: On OperationCanceledException when cancellationToken.IsCancellationRequested is true, rethrow the caught exception.
             throw;
         }
         catch (Exception)
         {
+            // STEP-07: On Exception, reject with SERVICE_UNAVAILABLE.
             throw new ServiceUnavailableException(
                 "SERVICE_UNAVAILABLE",
                 "Dịch vụ lưu trữ tạm thời không khả dụng.");
         }
 
+        // STEP-08: Reject with SERVICE_UNAVAILABLE when result.Error exists, result.PublicId is blank or (isPdf is false and result.Format is blank).
         if (result.Error is not null ||
             string.IsNullOrWhiteSpace(result.PublicId) ||
             (!isPdf && string.IsNullOrWhiteSpace(result.Format)))
@@ -108,11 +120,13 @@ public sealed class CloudinaryService : ICloudinaryService
                 "Dịch vụ lưu trữ trả về phản hồi không hợp lệ.");
         }
 
+        // STEP-09: Prepare resourceType, assetId, storageKey and url from ToString.
         var resourceType = isPdf ? "raw" : "image";
         var assetId = isPdf ? result.PublicId : $"{result.PublicId}.{result.Format}";
         var storageKey = $"{resourceType}/{deliveryType}/{assetId}";
         var url = result.SecureUrl?.ToString();
 
+        // STEP-10: Reject with SERVICE_UNAVAILABLE when Uri.TryCreate(url, UriKind.Absolute, ...) does not hold or uri.Scheme is not Uri.UriSchemeHttps.
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             throw new ServiceUnavailableException(
@@ -120,15 +134,19 @@ public sealed class CloudinaryService : ICloudinaryService
                 "Dịch vụ lưu trữ trả về URL không hợp lệ.");
         }
 
+        // STEP-11: Return a new MediaUploadResult.
         return new MediaUploadResult(storageKey, url);
     }
 
     /// <summary>Builds a public URL or a five-minute signed URL from a stable storage key.</summary>
     public string GetUrl(string storageKey)
     {
+        // STEP-01: Call ArgumentException.ThrowIfNullOrWhiteSpace.
         ArgumentException.ThrowIfNullOrWhiteSpace(storageKey);
 
+        // STEP-02: Prepare parts through storageKey.Split.
         var parts = storageKey.Split('/', 3);
+        // STEP-03: Throw ArgumentException when parts.Length is not 3, (parts[0] is not "image" and parts[0] is not "raw"), (parts[1] is not "upload" and more.
         if (parts.Length != 3 ||
             (parts[0] != "image" && parts[0] != "raw") ||
             (parts[1] != "upload" && parts[1] != "authenticated") ||
@@ -137,16 +155,20 @@ public sealed class CloudinaryService : ICloudinaryService
             throw new ArgumentException("Invalid Cloudinary storage key.", nameof(storageKey));
         }
 
+        // STEP-04: Prepare format from Path.GetExtension.
         var format = parts[0] == "image" ? Path.GetExtension(parts[2]).TrimStart('.') : null;
+        // STEP-05: Throw ArgumentException when parts[0] is "image" and format is blank.
         if (parts[0] == "image" && string.IsNullOrWhiteSpace(format))
         {
             throw new ArgumentException("Invalid Cloudinary image storage key.", nameof(storageKey));
         }
 
+        // STEP-06: Prepare publicId.
         var publicId = parts[0] == "image"
             ? parts[2][..^(format!.Length + 1)]
             : parts[2];
 
+        // STEP-07: Return the result of client.DownloadPrivate early when parts[1] is "authenticated".
         if (parts[1] == "authenticated")
         {
             return _client.DownloadPrivate(
@@ -157,6 +179,7 @@ public sealed class CloudinaryService : ICloudinaryService
                 resourceType: parts[0]);
         }
 
+        // STEP-08: Return the result of client.BuildPublicUrl.
         return _client.BuildPublicUrl(
             parts[0],
             parts[1],

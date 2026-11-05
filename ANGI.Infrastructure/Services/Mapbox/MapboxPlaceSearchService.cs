@@ -45,35 +45,43 @@ namespace ANGI.Infrastructure.Services.Mapbox
             decimal? nearLongitude,
             CancellationToken ct)
         {
+            // STEP-01: Return the collected items early when _httpClient.BaseAddress is missing or _settings.AccessToken is blank.
             if (_httpClient.BaseAddress is null || string.IsNullOrWhiteSpace(_settings.AccessToken))
             {
                 _logger.LogWarning("Mapbox is not configured; places outside catalog addresses cannot be located.");
                 return [];
             }
 
+            // STEP-02: Prepare proximity from string.Create and cacheKey from query.ToUpperInvariant.
             var proximity = nearLatitude is { } latitude && nearLongitude is { } longitude
                 ? string.Create(CultureInfo.InvariantCulture, $"{longitude},{latitude}")
                 : null;
             var cacheKey = $"mapbox-place:{proximity}:{query.ToUpperInvariant()}";
+            // STEP-03: Return cached early when _cache has an entry for cacheKey and cached exists.
             if (_cache.TryGetValue(cacheKey, out AgentPlaceCandidate[]? cached) && cached is not null)
             {
                 return cached;
             }
 
+            // STEP-04: Prepare path from Uri.EscapeDataString.
             var path = "search/searchbox/v1/forward" +
                        $"?q={Uri.EscapeDataString(query)}&access_token={Uri.EscapeDataString(_settings.AccessToken)}" +
                        $"&country=vn&language=vi&limit={CandidateLimit}" +
                        (proximity is null ? "" : $"&proximity={proximity}");
             try
             {
+                // STEP-05: Load response through httpClient.GetAsync.
                 using var response = await _httpClient.GetAsync(path, ct);
+                // STEP-06: Return the collected items early when response.IsSuccessStatusCode is false.
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Mapbox place search failed with status {StatusCode}.", (int)response.StatusCode);
                     return [];
                 }
 
+                // STEP-07: Load body through response.Content.ReadFromJsonAsync.
                 var body = await response.Content.ReadFromJsonAsync<SearchResponse>(_jsonOptions, ct);
+                // STEP-08: Prepare candidates, then call cache.Set.
                 var candidates = (body?.Features ?? [])
                     .Where(feature => feature.Properties?.Name is not null && feature.Geometry?.Coordinates is { Length: 2 })
                     .Select(feature => new AgentPlaceCandidate(
@@ -84,21 +92,26 @@ namespace ANGI.Infrastructure.Services.Mapbox
                         feature.Geometry.Coordinates[0]))
                     .ToArray();
                 _cache.Set(cacheKey, candidates, TimeSpan.FromHours(_settings.CacheHours > 0 ? _settings.CacheHours : DefaultCacheHours));
+                // STEP-09: Return candidates.
                 return candidates;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                // STEP-10: On OperationCanceledException when ct.IsCancellationRequested is false, call logger.LogWarning.
                 _logger.LogWarning("Mapbox place search did not answer within {TimeoutMilliseconds} ms.", _settings.TimeoutMilliseconds);
             }
             catch (HttpRequestException exception)
             {
+                // STEP-11: On HttpRequestException, call logger.LogWarning.
                 _logger.LogWarning("Mapbox place search could not be reached: {Status}.", exception.StatusCode);
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
+                // STEP-12: On Exception when exception is one of the listed values, call logger.LogWarning.
                 _logger.LogWarning(exception, "Mapbox place search returned an unreadable body.");
             }
 
+            // STEP-13: Return the collected items.
             return [];
         }
 

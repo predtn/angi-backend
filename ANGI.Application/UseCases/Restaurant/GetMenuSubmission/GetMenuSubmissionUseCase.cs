@@ -22,10 +22,12 @@ public sealed class GetMenuSubmissionUseCase : IGetMenuSubmissionUseCase
     /// <summary>Loads items, derives their change type, and finds removed current dishes.</summary>
     public async Task<MenuSubmissionDetailDto> ExecuteAsync(long submissionId, CancellationToken ct)
     {
+        // STEP-01: Prepare ownerId and submission from repository.GetSubmissionDetailsAsync.
         var ownerId = _currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem bản menu.");
         var submission = await _repository.GetSubmissionDetailsAsync(ownerId, submissionId, ct)
             ?? throw new NotFoundException("SUBMISSION_NOT_FOUND", "Không tìm thấy bản menu.");
+        // STEP-02: Return the result of RestaurantMenuMapper.MapSubmissionDetail.
         return RestaurantMenuMapper.MapSubmissionDetail(submission);
     }
 }

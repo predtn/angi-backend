@@ -37,13 +37,18 @@ public sealed class ListVerificationsUseCase : IListVerificationsUseCase
         ListVerificationsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
+        // STEP-02: Check the caller's permission through ModerationPermissionGuard.RequireAsync.
         await ModerationPermissionGuard.RequireAsync(_currentUserService, _repository, ct);
 
+        // STEP-03: Update request: Status and Province.
         request.Status = request.Status.ToLowerInvariant();
         request.Province = string.IsNullOrWhiteSpace(request.Province) ? null : request.Province.Trim();
+        // STEP-04: Load (items, totalItems) through repository.ListAsync.
         var (items, totalItems) = await _repository.ListAsync(request, ct);
 
+        // STEP-05: Return a new Paged<ModVerificationCardDto>.
         return new Paged<ModVerificationCardDto>
         {
             Items = items.Select(item => ModerationVerificationMapper.MapCard(

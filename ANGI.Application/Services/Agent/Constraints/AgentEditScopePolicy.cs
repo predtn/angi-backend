@@ -25,14 +25,19 @@ public static class AgentEditScopePolicy
     /// <summary>Returns the fixed edit-scope question for an edit without any target while a plan exists, or null.</summary>
     public static string? Question(AgentContext context)
     {
+        // STEP-01: Return null early when (context.Source is missing and context.Roadmap is missing), context.Request.SelectedItemKey exists and more.
         // Người dùng đã chọn món trên giao diện hoặc chưa có lịch nào để sửa: không áp dụng.
         if (context.Source is null && context.Roadmap is null || context.Request.SelectedItemKey is not null ||
             context.Request.ConfirmedState?.FocusDay is not null || context.State.FocusDay.HasValue) return null;
+        // STEP-02: Prepare text through Normalize and words through Regex.Split().Where(filtered).ToArray.
         var text = Normalize(context.Request.Content);
         var words = Regex.Split(text, @"[^a-z0-9]+").Where(word => word.Length > 0).ToArray();
+        // STEP-03: Return null early when words.Length is 0.
         if (words.Length == 0) return null;
+        // STEP-04: Prepare bareEdit from words.All and bareDislike from words.All.
         var bareEdit = words.Any(Edits.Contains) && words.All(word => Edits.Contains(word) || Fillers.Contains(word));
         var bareDislike = Dislike.IsMatch(text) && words.All(word => DislikeWords.Contains(word) || Fillers.Contains(word));
+        // STEP-05: Return one of two results depending on bareEdit is true or bareDislike is true.
         return bareEdit || bareDislike ? AgentReplyBuilder.Clarify(context, "edit_scope") : null;
     }
 

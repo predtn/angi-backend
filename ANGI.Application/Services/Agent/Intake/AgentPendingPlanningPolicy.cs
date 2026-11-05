@@ -21,27 +21,35 @@ public static class AgentPendingPlanningPolicy
 
     public static AgentPendingPlanningRequest Capture(AgentPendingPlanningRequest? previous, string content)
     {
+        // STEP-01: Prepare messages through previous?.Messages ?? [].Append().ToArray.
         var messages = (previous?.Messages ?? []).Append(content.Trim()).ToArray();
+        // STEP-02: When messages.Length > 6, set messages.
         if (messages.Length > 6) messages = [messages[0], .. messages.TakeLast(5)];
+        // STEP-03: Prepare days, total, daily, text through Normalize and 1 more.
         var days = previous?.NumDays;
         var total = previous?.TotalBudget;
         var daily = previous?.DailyBudget;
         var text = Normalize(content);
         var duration = Regex.Matches(text, @"\b(?<days>\d{1,3})\s+ngay\b", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => TripDuration(text, match));
+        // STEP-04: When duration exists and duration.Groups["days"].Value parses, set days.
         if (duration is not null && short.TryParse(duration.Groups["days"].Value, out var parsedDays)) days = parsedDays;
+        // STEP-05: Prepare budget through Regex.Matches().Cast().LastOrDefault.
         var budget = Regex.Matches(text, @"\bngan sach\s*(?:(?:la|khoang|tam|toi da)\s*|:\s*)?" + Money + Daily, RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => !Negated(text, match.Index));
+        // STEP-06: Set budget.
         // Trả lời câu hỏi ngân sách bằng một mệnh đề chỉ có số tiền ("500k 1 ngày", "khoảng 2 triệu").
         // "món dưới 50k" không khớp vì mệnh đề không bắt đầu bằng số tiền, nên trần giá món không thành ngân sách chuyến.
         budget ??= Regex.Matches(text, @"(?:^|[,;.!?\n])\s*(?:(?:khoang|tam|toi da|la)\s+)?" + MoneyWithUnit + Daily +
             @"\s*(?:nhe|nha|thoi)?\s*(?=[,;.!?\n]|$)", RegexOptions.CultureInvariant)
             .Cast<Match>().LastOrDefault(match => !Negated(text, match.Index));
+        // STEP-07: When budget exists and ParseMoney(budget, ...) holds, set daily and set total.
         if (budget is not null && ParseMoney(budget, out var amount))
         {
             daily = budget.Groups["daily"].Success ? amount : null;
             total = budget.Groups["daily"].Success ? null : amount;
         }
+        // STEP-08: Return the new result.
         return new(messages, days, total, daily);
     }
 
@@ -51,28 +59,37 @@ public static class AgentPendingPlanningPolicy
     /// </summary>
     public static AgentPendingPlanningRequest CaptureAnswer(AgentPendingPlanningRequest? previous, string content, bool budgetAsked)
     {
+        // STEP-01: Prepare request through Capture, text through Normalize().Trim and dailyFirst through Regex.Match.
         var request = Capture(previous, content);
         var text = Normalize(content).Trim();
         var dailyFirst = Regex.Match(text, @"\b(?:moi|1|mot)\s+ngay\s*(?:(?:khoang|tam|toi da|la)\s+)?" + MoneyWithUnit, RegexOptions.CultureInvariant);
+        // STEP-02: When dailyFirst.Success is true, set request.
         // "1 ngày 200k" là ngân sách theo ngày, không phải chuyến đi một ngày như Capture đọc.
         if (dailyFirst.Success) request = request with { NumDays = previous?.NumDays };
+        // STEP-03: When request.NumDays is previous.NumDays, prepare days through Regex.Matches().Cast().LastOrDefault and check whether days exists and new string parses.
         if (request.NumDays == previous?.NumDays)
         {
             var days = Regex.Matches(text, MentionedDays + @"|\b(?:[2-9]|[1-9]\d|100)\s+ngay\b(?!\s+(?:dau|cuoi))", RegexOptions.CultureInvariant).Cast<Match>()
                 .LastOrDefault(match => !Negated(text, match.Index) && !(dailyFirst.Success && match.Index == dailyFirst.Index));
             if (days is not null && short.TryParse(new string(days.Value.Where(char.IsDigit).ToArray()), out var parsed)) request = request with { NumDays = parsed };
         }
+        // STEP-04: Return request early when request.TotalBudget is not previous.TotalBudget or request.DailyBudget is not previous.DailyBudget.
         if (request.TotalBudget != previous?.TotalBudget || request.DailyBudget != previous?.DailyBudget) return request;
+        // STEP-05: Return a copy of request with updated fields early when dailyFirst.Success is true and ParseMoney(dailyFirst, ...) holds.
         if (dailyFirst.Success && ParseMoney(dailyFirst, out var perDay)) return request with { DailyBudget = perDay, TotalBudget = null };
+        // STEP-06: Prepare budget through Regex.Matches().Cast().LastOrDefault.
         // Số tiền nằm trong câu ("3 ngày 1 triệu"); "dưới 50k mỗi món" là trần giá món nên không tính.
         var budget = Regex.Matches(text, MoneyWithUnit + Daily + @"(?!\s*(?:/\s*)?(?:(?:moi|1|mot)\s+)?(?:mon|bua)\b)", RegexOptions.CultureInvariant).Cast<Match>()
             .LastOrDefault(match => !Negated(text, match.Index) && !Regex.IsMatch(text[..match.Index], @"\b(?:mon|bua)\b", RegexOptions.CultureInvariant));
+        // STEP-07: Return one of two results depending on budget.Groups["daily"].Success is true early when budget exists and ParseMoney(budget, ...) holds.
         if (budget is not null && ParseMoney(budget, out var amount))
             return budget.Groups["daily"].Success ? request with { DailyBudget = amount, TotalBudget = null } : request with { TotalBudget = amount, DailyBudget = null };
+        // STEP-08: Return a copy of request with updated fields early when budgetAsked is true, text matches Regex, text.Replace().Replace() parses and 1 more condition(s).
         // Trả lời đúng câu hỏi ngân sách bằng một con số trần ("1500000").
         if (budgetAsked && Regex.IsMatch(text, @"^(?:\d{4,}|\d{1,3}(?:[.,]\d{3})+)$", RegexOptions.CultureInvariant) &&
             decimal.TryParse(text.Replace(".", "").Replace(",", ""), NumberStyles.None, CultureInfo.InvariantCulture, out var plain) && plain <= AgentStateValidator.MaxMoney)
             return request with { TotalBudget = plain, DailyBudget = null };
+        // STEP-09: Return request.
         return request;
     }
 
@@ -87,9 +104,11 @@ public static class AgentPendingPlanningPolicy
     /// <summary>Explicit facts awaiting clarification take precedence over a model's copy of the old confirmed state.</summary>
     public static AgentState Apply(AgentState proposed, AgentPendingPlanningRequest request)
     {
+        // STEP-01: Prepare days and budget.
         var days = request.NumDays ?? proposed.NumDays;
         var budget = request.TotalBudget ?? (request.DailyBudget.HasValue && days.HasValue
             ? request.DailyBudget.Value * days.Value : proposed.BudgetAmount);
+        // STEP-02: Return a copy of proposed with updated fields.
         return proposed with { NumDays = days, BudgetAmount = budget,
             BudgetUnrestricted = request.TotalBudget.HasValue || request.DailyBudget.HasValue ? false : proposed.BudgetUnrestricted };
     }
@@ -100,51 +119,69 @@ public static class AgentPendingPlanningPolicy
     /// </summary>
     public static AgentState? ApplyStated(AgentState? proposed, string content)
     {
+        // STEP-01: Return null early when proposed is missing.
         if (proposed is null) return null;
+        // STEP-02: Prepare stated through Capture.
         var stated = Capture(null, content);
+        // STEP-03: Return one of two results depending on stated.NumDays has a value, stated.TotalBudget has a value or stated.DailyBudget has a value.
         return stated.NumDays.HasValue || stated.TotalBudget.HasValue || stated.DailyBudget.HasValue ? Apply(proposed, stated) : proposed;
     }
 
     /// <summary>Asks the duration/budget still unknown after the retained request; province is left to the planning turn.</summary>
     public static string? MissingTripDetails(AgentState state, AgentPendingPlanningRequest request)
     {
+        // STEP-01: Prepare known through Apply and texts through request.Messages.Select().ToArray.
         var known = Apply(state, request);
         var texts = request.Messages.Select(Normalize).ToArray();
+        // STEP-02: When known.NumDays has no value and texts.Any matches the filter, set known.
         // Bản sao chỉ để quyết định có hỏi không; state thật không đổi. Capture chỉ ghi số ngày ở mẫu câu chặt vì nó ghi đè state,
         // còn ở đây chỉ cần biết người dùng đã nói "4 ngày" ("Hà Nội 4 ngày") để không hỏi lại; "500k 1 ngày" là ngân sách theo ngày.
         if (!known.NumDays.HasValue && texts.Any(text => Regex.IsMatch(text, MentionedDays, RegexOptions.CultureInvariant)))
             known = known with { NumDays = 1 };
+        // STEP-03: When request.DailyBudget has a value or texts.Any matches the filter, set known.
         // Ngân sách theo ngày khi chưa biết số ngày đã đủ; "ngân sách không giới hạn" vẫn cần xác nhận riêng theo chính sách ràng buộc.
         if (request.DailyBudget.HasValue || texts.Any(text => Regex.IsMatch(text, Unrestricted, RegexOptions.CultureInvariant)))
             known = known with { BudgetUnrestricted = true };
+        // STEP-04: Return the result of AgentReplyBuilder.TripDetailsQuestion.
         return AgentReplyBuilder.TripDetailsQuestion(known, askProvince: false);
     }
 
     private static bool ParseMoney(Match match, out decimal amount)
     {
+        // STEP-01: Prepare number, unit and normalized from number.Replace.
         var number = match.Groups["amount"].Value;
         var unit = match.Groups["unit"].Value;
         // VND group separators are integral; k/triệu also accept an explicit decimal multiplier.
         var normalized = unit.Length == 0 ? number.Replace(".", "").Replace(",", "") : number.Replace(',', '.');
+        // STEP-02: Return false early when normalized does not parse.
         if (!decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out amount)) return false;
+        // STEP-03: Prepare factor.
         var factor = unit is "trieu" or "tr" ? 1000000m : unit.Length > 0 ? 1000m : 1m;
+        // STEP-04: Return false early when amount > MaxMoney / factor.
         if (amount > AgentStateValidator.MaxMoney / factor) return false;
+        // STEP-05: Set amount.
         amount *= factor;
+        // STEP-06: Return the computed condition.
         return decimal.Truncate(amount) == amount;
     }
 
     private static bool Negated(string text, int index)
     {
+        // STEP-01: Prepare prefix and clause from prefix.LastIndexOfAny.
         var prefix = text[..index];
         var clause = prefix[(prefix.LastIndexOfAny([',', ';', '.', '!', '?', '\n']) + 1)..];
+        // STEP-02: Return the result of Regex.IsMatch.
         return Regex.IsMatch(clause, @"\b(?:khong|dung|chang)\b", RegexOptions.CultureInvariant);
     }
 
     private static bool TripDuration(string text, Match match)
     {
+        // STEP-01: Return false early when Negated(text, match.Index) holds or the computed value matches Regex.
         if (Negated(text, match.Index) || Regex.IsMatch(text[(match.Index + match.Length)..], @"^\s+(?:dau|cuoi)\b")) return false;
+        // STEP-02: Prepare prefix and clause from prefix.LastIndexOfAny.
         var prefix = text[..match.Index];
         var clause = prefix[(prefix.LastIndexOfAny([',', ';', '.', '!', '?', '\n']) + 1)..];
+        // STEP-03: Return the computed condition.
         return Regex.IsMatch(clause, @"\b(?:lich|chuyen|hanh trinh|thoi gian)\b", RegexOptions.CultureInvariant) ||
             Regex.IsMatch(clause.Trim(), @"^(?:(?:toi|minh)\s+)?(?:(?:muon|doi|sua|thanh|la|trong)\b\s*)*$", RegexOptions.CultureInvariant);
     }

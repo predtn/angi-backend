@@ -31,15 +31,22 @@ public static class AgentDatePolicy
     /// <summary>Returns the date the message states, or null when it states none or an impossible one such as 31/2.</summary>
     public static AgentDateAnswer? Read(string content, DateOnly today)
     {
+        // STEP-01: Prepare text through Normalize.
         var text = Normalize(content);
+        // STEP-02: Return one of two results depending on Date() exists early when FullRange.Match() has the expected shape and Date() exists.
         if (FullRange.Match(text) is { Success: true } full && Date(full, "d", "m", "y", today) is { } fullStart)
             return Date(full, "d2", "m2", "y2", fullStart) is { } fullEnd ? new(fullStart, fullEnd) : null;
+        // STEP-03: Return one of two results depending on Date() exists early when SameMonthRange.Match() has the expected shape and Date() exists.
         if (SameMonthRange.Match(text) is { Success: true } range && Date(range, "d", "m", "y", today) is { } rangeStart)
             return Date(range, "d2", "m", "y", rangeStart) is { } rangeEnd ? new(rangeStart, rangeEnd) : null;
+        // STEP-04: Return one of two results depending on Date() exists early when Iso.Match() has the expected shape.
         if (Iso.Match(text) is { Success: true } iso) return Date(iso, "d", "m", "y", today) is { } isoDate ? new(isoDate, null) : null;
+        // STEP-05: Return one of two results depending on Date() exists early when Single.Match() has the expected shape.
         if (Single.Match(text) is { Success: true } single) return Date(single, "d", "m", "y", today) is { } date ? new(date, null) : null;
+        // STEP-06: Return the new result early when Relative.Match() has the expected shape.
         if (Relative.Match(text) is { Success: true } relative)
             return new(today.AddDays(relative.Groups["w"].Value switch { "mai" => 1, "kia" or "mot" => 2, _ => 0 }), null);
+        // STEP-07: Return one of two results depending on Weekday.Match() has the expected shape.
         return Weekday.Match(text) is { Success: true } weekday ? new(Next(weekday, today), null) : null;
     }
 
@@ -52,28 +59,34 @@ public static class AgentDatePolicy
 
     private static DateOnly? Date(Match match, string day, string month, string year, DateOnly notBefore)
     {
+        // STEP-01: Prepare d through int.Parse, m through int.Parse, stated from int.Parse and y.
         var d = int.Parse(match.Groups[day].Value, CultureInfo.InvariantCulture);
         var m = int.Parse(match.Groups[month].Value, CultureInfo.InvariantCulture);
         var stated = match.Groups[year] is { Success: true } group ? int.Parse(group.Value, CultureInfo.InvariantCulture) : (int?)null;
         var y = stated is { } value ? value < 100 ? 2000 + value : value : notBefore.Year;
+        // STEP-02: Return null early when DateOnly.TryParseExact(CultureInfo.InvariantCulture, DateTimeStyles.None, ...) does not hold.
         if (!DateOnly.TryParseExact($"{y:D4}-{m:D2}-{d:D2}", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) return null;
+        // STEP-03: Return one of two results depending on stated is missing, date < notBefore and DateOnly.TryParseExact(CultureInfo.InvariantCulture, DateTimeStyles.None, ...) holds.
         // Không nêu năm thì là lần gần nhất sắp tới; năm người dùng nêu thì giữ nguyên để báo "đã qua" thay vì tự đổi.
         return stated is null && date < notBefore && DateOnly.TryParseExact($"{y + 1:D4}-{m:D2}-{d:D2}", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var next) ? next : date;
     }
 
     private static DateOnly Next(Match match, DateOnly today)
     {
+        // STEP-01: Prepare wanted.
         var wanted = match.Groups["w"].Value switch
         {
             "2" or "hai" => DayOfWeek.Monday, "3" or "ba" => DayOfWeek.Tuesday, "4" or "tu" => DayOfWeek.Wednesday, "5" or "nam" => DayOfWeek.Thursday,
             "6" or "sau" => DayOfWeek.Friday, "7" or "bay" => DayOfWeek.Saturday, _ => DayOfWeek.Sunday
         };
+        // STEP-02: Return the result of monday.AddDays early when match.Groups["n"].Value is "sau" or "toi".
         if (match.Groups["n"].Value is "sau" or "toi")
         {
             // Tuần tính từ thứ Hai, như cách nói "thứ 7 tuần sau".
             var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7) + 7);
             return monday.AddDays(((int)wanted + 6) % 7);
         }
+        // STEP-03: Return the result of today.AddDays.
         return today.AddDays(((int)wanted - (int)today.DayOfWeek + 7) % 7);
     }
 

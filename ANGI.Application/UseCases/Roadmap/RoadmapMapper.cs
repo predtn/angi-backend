@@ -14,7 +14,9 @@ internal static class RoadmapMapper
         Domain.Entities.Roadmap roadmap,
         IReadOnlyDictionary<long, FeedbackValue>? feedbackByItemId = null)
     {
+        // STEP-01: Set feedbackByItemId.
         feedbackByItemId ??= new Dictionary<long, FeedbackValue>();
+        // STEP-02: Prepare orderedDays through roadmap.Days.OrderBy(filtered).ToArray, allItems through ThenBy(filtered).ThenBy(filtered).ToArray and total through allItems.Sum.
         var orderedDays = roadmap.Days.OrderBy(day => day.DayNumber).ToArray();
         var allItems = orderedDays
             .SelectMany(day => day.Items)
@@ -25,6 +27,7 @@ internal static class RoadmapMapper
             .ToArray();
         var total = allItems.Sum(item => item.Dish.Price);
 
+        // STEP-03: Return a new RoadmapDetailDto.
         return new RoadmapDetailDto
         {
             Overview = new RoadmapSummaryDto
@@ -99,8 +102,10 @@ internal static class RoadmapMapper
         RoadmapItem item,
         IReadOnlyDictionary<long, FeedbackValue>? feedbackByItemId = null)
     {
+        // STEP-01: Prepare dish and restaurant.
         var dish = item.Dish;
         var restaurant = dish.Restaurant;
+        // STEP-02: Return a new RoadmapItemDto.
         return new RoadmapItemDto
         {
             Id = item.Id,

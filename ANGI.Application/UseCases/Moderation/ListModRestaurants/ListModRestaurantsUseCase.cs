@@ -13,9 +13,13 @@ public sealed class ListModRestaurantsUseCase(IValidator<ListModRestaurantsReque
     /// <summary>Validates filters, authorizes the caller, and maps the requested restaurant page.</summary>
     public async Task<Paged<ModRestaurantCardDto>> ExecuteAsync(ListModRestaurantsRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await validator.ValidateAndThrowAsync(request, ct);
+        // STEP-02: Check the caller's permission through access.RequireAsync.
         await access.RequireAsync(ct, "RESTAURANT_MODERATE", "RESTAURANT_VERIFY");
+        // STEP-03: Load page through repository.ListAsync.
         var page = await repository.ListAsync(request, ct);
+        // STEP-04: Return a new Paged<ModRestaurantCardDto>.
         return new Paged<ModRestaurantCardDto>
         {
             Items = page.Items.Select(item => ModerationMapper.Card(item, clock)).ToArray(),

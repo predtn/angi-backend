@@ -38,11 +38,13 @@ public static class AgentTasteClarificationPolicy
     /// <summary>Uses explicit user wording only; persisted model-chosen targets are not proof of human confirmation.</summary>
     public static string? Question(AgentContext context)
     {
+        // STEP-01: Prepare current through Normalize, declarations through Declarations, evidence, followingAnswer and 1 more.
         var current = Normalize(context.Request.Content);
         var declarations = Declarations(context.Request.Content);
         var evidence = current;
         var followingAnswer = false;
         var answerIntensity = false;
+        // STEP-02: When IsQuestion(State.PendingQuestion) holds or context.ReplanAfterConfirmation is true, prepare start through context.History.FindLastIndex and check whether start >= 0.
         if (IsQuestion(context.State.PendingQuestion) || context.ReplanAfterConfirmation)
         {
             // Keep partial answers across turns: e.g. "vừa" followed by "toàn chuyến".
@@ -62,27 +64,37 @@ public static class AgentTasteClarificationPolicy
                 }
             }
         }
+        // STEP-03: Return null early when declarations.Length is 0.
         if (declarations.Length == 0) return null;
 
+        // STEP-04: Prepare unresolvedIntensity as List<string> and unresolvedScope as List<string>.
         var unresolvedIntensity = new List<string>();
         var unresolvedScope = new List<string>();
+        // STEP-05: Go through each declaration in declarations.DistinctBy(filtered).
         foreach (var declaration in declarations.DistinctBy(match => match.Groups["taste"].Value))
         {
+            // STEP-06: Prepare taste, label and historical from context.History.Where.
             var taste = declaration.Groups["taste"].Value;
             var label = Labels[taste];
             var historical = context.State.TasteTargets.Any(target => target.Dimension == Dimension(taste)) &&
                 context.History.Where(turn => turn.Role == "user")
                     .Any(turn => Declarations(turn.Content).Any(match => match.Groups["taste"].Value == taste && HasIntensity(match.Value)) && HasScope(Normalize(turn.Content)));
+            // STEP-07: When HasIntensity(declaration.Value) does not hold, the computed value is false and historical is false, call unresolvedIntensity.Add.
             if (!HasIntensity(declaration.Value) && !(followingAnswer && (HasIntensity(evidence) || answerIntensity)) && !historical)
                 unresolvedIntensity.Add(label);
+            // STEP-08: When HasScope(current) does not hold, followingAnswer && HasScope(evidence) is false and historical is false, call unresolvedScope.Add.
             if (!HasScope(current) && !(followingAnswer && HasScope(evidence)) && !historical)
                 unresolvedScope.Add(label);
         }
+        // STEP-09: Prepare questions as List<string>.
         var questions = new List<string>();
+        // STEP-10: When unresolvedIntensity.Count > 0, call questions.Add.
         if (unresolvedIntensity.Count > 0)
             questions.Add($"Bạn muốn mức {string.Join(", ", unresolvedIntensity)} như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?");
+        // STEP-11: When unresolvedScope.Count > 0, call questions.Add.
         if (unresolvedScope.Count > 0)
             questions.Add($"Bạn muốn áp dụng khẩu vị {string.Join(", ", unresolvedScope)} cho toàn chuyến hay ngày/bữa cụ thể nào?");
+        // STEP-12: Return one of two results depending on questions.Count is 0.
         return questions.Count == 0 ? null : string.Join(' ', questions);
     }
 
@@ -92,15 +104,24 @@ public static class AgentTasteClarificationPolicy
     /// </summary>
     public static string? Resolution(AgentContext context)
     {
+        // STEP-01: Return null early when IsQuestion(State.PendingQuestion) does not hold, context.ReplanAfterConfirmation is true, IsIgnored(context) holds or 1 more condition(s).
         if (!IsQuestion(context.State.PendingQuestion) || context.ReplanAfterConfirmation || IsIgnored(context) || Question(context) is not null) return null;
+        // STEP-02: Prepare start through context.History.FindLastIndex.
         var start = context.History.FindLastIndex(turn => turn.Role == "user" && Declarations(turn.Content).Length > 0);
+        // STEP-03: Return null early when start < 0.
         if (start < 0) return null;
+        // STEP-04: Prepare tastes through Select(filtered).Distinct().ToArray.
         var tastes = Declarations(context.History[start].Content).Select(match => match.Groups["taste"].Value).Distinct().ToArray();
+        // STEP-05: Return null early when tastes.Length is not 1.
         if (tastes.Length != 1) return null;
+        // STEP-06: Prepare messages through Select(filtered).Append().ToArray and level through messages.Select(filtered).LastOrDefault.
         var messages = context.History.Skip(start).Where(turn => turn.Role == "user").Select(turn => turn.Content).Append(context.Request.Content).ToArray();
         var level = messages.Select(message => Level(Normalize(message), tastes[0])).LastOrDefault(value => value.HasValue);
+        // STEP-07: Return null early when level is not { } target or AnswerScope() is not { } scope.
         if (level is not { } target || AnswerScope(messages, context.State) is not { } scope) return null;
+        // STEP-08: Prepare name.
         var name = target switch { 0d => "không", .25 => "nhẹ", .5 => "vừa", .75 => "nhiều", _ => "rất nhiều" };
+        // STEP-09: Return the computed condition.
         return $"Người dùng đã trả lời câu hỏi khẩu vị: {Labels[tastes[0]]} mức {name} ({Dimension(tastes[0])}={target.ToString(CultureInfo.InvariantCulture)}) " +
             $"cho {scope.Text}. Ghi đúng giá trị này vào {scope.Field} rồi lập lịch ngay; không hỏi lại mức hay phạm vi.";
     }
@@ -122,12 +143,17 @@ public static class AgentTasteClarificationPolicy
     // Phạm vi rõ ràng duy nhất: bữa của ngày, ngày, hoặc toàn chuyến. Bữa không kèm ngày cần số ngày nên để model xử lý.
     private static (string Text, string Field)? AnswerScope(IEnumerable<string> messages, AgentState state)
     {
+        // STEP-01: Prepare references through messages.Select(filtered).ToArray and meals through SelectMany(filtered).Distinct().ToArray.
         var references = messages.Select(message => AgentMealScopePolicy.Read(message, state)).ToArray();
         var meals = references.SelectMany(x => x.Meals).Distinct().ToArray();
+        // STEP-02: Return the collected values early when meals.Length > 0.
         if (meals.Length > 0)
             return (string.Join(", ", meals.Select(x => $"{AgentReplyBuilder.Meal(x.MealSlot!)} ngày {x.DayNumber}")), "tasteOverrides với dayNumber và mealSlot đó");
+        // STEP-03: Prepare days through Distinct().Order().ToArray.
         var days = references.SelectMany(x => x.Days).Distinct().Order().ToArray();
+        // STEP-04: Return the collected values early when days.Length > 0.
         if (days.Length > 0) return (string.Join(", ", days.Select(day => $"ngày {day}")), "tasteOverrides với dayNumber đó và mealSlot=null");
+        // STEP-05: Return one of two results depending on messages.Any matches the filter.
         return messages.Any(message => Regex.IsMatch(Normalize(message), @"\b(?:(?:ca|toan)\s+(?:bo\s+)?(?:chuyen|lich|\d+\s+ngay)|tat ca(?: cac)?\s+(?:ngay|bua)|moi bua)\b",
             RegexOptions.CultureInvariant)) ? ("toàn chuyến", "tasteTargets") : null;
     }
@@ -150,9 +176,12 @@ public static class AgentTasteClarificationPolicy
     /// </summary>
     public static bool IsIgnored(AgentContext context)
     {
+        // STEP-01: Return false early when IsQuestion(State.PendingQuestion) does not hold, context.ReplanAfterConfirmation is true, Declarations().Length > 0 or 1 more condition(s).
         if (!IsQuestion(context.State.PendingQuestion) || context.ReplanAfterConfirmation || Declarations(context.Request.Content).Length > 0 ||
             !context.History.Any(turn => turn.Role == "user" && Declarations(turn.Content).Length > 0)) return false;
+        // STEP-02: Prepare current through Normalize.
         var current = Normalize(context.Request.Content);
+        // STEP-03: Return the computed condition.
         return !IsIntensityAnswer(current) && !HasIntensity(current) && !HasScope(current) && !StatesTripFacts(context.Request.Content);
     }
 
@@ -163,27 +192,35 @@ public static class AgentTasteClarificationPolicy
     /// <summary>Returns the fixed novelty question, the no-history answer to that question, or null when the model should read the message.</summary>
     public static string? NoveltyQuestion(AgentContext context)
     {
+        // STEP-01: Prepare text through Normalize.
         var text = Normalize(context.Request.Content);
+        // STEP-02: Return one of two results depending on text matches Regex and text does not match Regex early when the computed value is true.
         // Trả lời câu hỏi novelty: chọn "chưa từng ăn" thì nói thẳng là không có dữ liệu thay vì để model lọc bừa;
         // chọn "khác lịch hiện tại" hoặc câu khác thì model xử lý như cũ.
         if (context.State.PendingQuestion?.StartsWith(AgentReplyBuilder.NoveltyQuestion, StringComparison.Ordinal) == true)
             return Regex.IsMatch(text, NeverEaten, RegexOptions.CultureInvariant) && !Regex.IsMatch(text, DifferentFromPlan, RegexOptions.CultureInvariant)
                 ? context.Source is null && context.Roadmap is null ? AgentReplyBuilder.NoveltyWithoutHistoryOrPlan : AgentReplyBuilder.NoveltyWithoutHistory
                 : null;
+        // STEP-03: Prepare accented through Accented and wording from Regex.Match.
         var accented = Accented(context.Request.Content);
         var wording = accented != text
             ? Regex.Match(accented, AccentedWording, RegexOptions.CultureInvariant)
             : Regex.Match(text, UnaccentedWording, RegexOptions.CultureInvariant);
+        // STEP-04: Return null early when wording.Success is false, text matches Regex or Negated(text, accented, ...) holds.
         if (!wording.Success || Regex.IsMatch(text, DifferentFromPlan, RegexOptions.CultureInvariant) || Negated(text, accented, wording.Index)) return null;
+        // STEP-05: Return AgentReplyBuilder.NoveltyQuestion.
         return AgentReplyBuilder.NoveltyQuestion;
     }
 
     // "Không cần món lạ", "đừng chọn món mới": người dùng đang từ chối món lạ, không cần hỏi nghĩa của nó.
     private static bool Negated(string text, string accented, int index)
     {
+        // STEP-01: Return false early when accented.Length is not text.Length.
         if (accented.Length != text.Length) return false;
+        // STEP-02: Prepare prefix and clause from prefix.LastIndexOfAny.
         var prefix = text[..index];
         var clause = prefix[(prefix.LastIndexOfAny([',', ';', '.', '!', '?', '\n']) + 1)..];
+        // STEP-03: Return the result of Regex.IsMatch.
         return Regex.IsMatch(clause, @"\b(?:khong|dung|chang|khoi)\b", RegexOptions.CultureInvariant);
     }
 
@@ -199,8 +236,11 @@ public static class AgentTasteClarificationPolicy
     // "chưa" (not yet) không phải "chua", "mận" không phải "mặn", "đang" không phải "đắng". Câu không dấu giữ cách đọc cũ.
     private static bool SpelledAsTaste(string text, string accented, string taste, int index)
     {
+        // STEP-01: Return true early when accented.Length is not text.Length.
         if (accented.Length != text.Length) return true;
+        // STEP-02: Prepare word through accented.Substring.
         var word = accented.Substring(index, taste.Length);
+        // STEP-03: Return the computed condition.
         return word == Labels[taste] || word == taste && accented == text;
     }
 

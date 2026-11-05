@@ -56,8 +56,10 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
     /// <summary>Validates media ownership, updates changed fields, and writes one atomic audit row.</summary>
     public async Task<OwnerRestaurantDto> ExecuteAsync(UpdateRestaurantRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare ownerId and restaurant, then load requestedMedia through GetValidOwnedMediaAsync.
         var ownerId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để cập nhật nhà hàng.");
         var restaurant = await _restaurantRepository.GetTrackedOwnerProfileAsync(ownerId, ct)
@@ -65,11 +67,13 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
 
         var requestedMedia = await GetValidOwnedMediaAsync(request, ownerId, ct);
 
+        // STEP-03: Prepare oldValues and newValues, then call ApplyScalarChanges and ApplyImageChanges.
         var oldValues = new Dictionary<string, object?>();
         var newValues = new Dictionary<string, object?>();
         ApplyScalarChanges(restaurant, request, oldValues, newValues);
         ApplyImageChanges(restaurant, request, oldValues, newValues);
 
+        // STEP-04: When oldValues.Count > 0, call auditLogService.Add and call unitOfWork.SaveChangesAsync.
         if (oldValues.Count > 0)
         {
             _auditLogService.Add(new AuditLogEntry
@@ -84,7 +88,9 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
             await _unitOfWork.SaveChangesAsync(ct);
         }
 
+        // STEP-05: Prepare requestedMediaUrls through requestedMedia.ToDictionary.
         var requestedMediaUrls = requestedMedia.ToDictionary(media => media.Id, media => media.Url);
+        // STEP-06: Return the result of OwnerRestaurantMapper.Map.
         return OwnerRestaurantMapper.Map(restaurant, _cloudinaryService, _timeProvider, requestedMediaUrls);
     }
 
@@ -94,28 +100,35 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
         int ownerId,
         CancellationToken ct)
     {
+        // STEP-01: Prepare requestedIds as HashSet<long>.
         var requestedIds = new HashSet<long>();
+        // STEP-02: When request.CoverMediaIdSpecified is true and request.CoverMediaId has a value, call requestedIds.Add.
         if (request.CoverMediaIdSpecified && request.CoverMediaId.HasValue)
         {
             requestedIds.Add(request.CoverMediaId.Value);
         }
 
+        // STEP-03: When request.ImageMediaIdsSpecified is true and request.ImageMediaIds exists, call requestedIds.UnionWith.
         if (request.ImageMediaIdsSpecified && request.ImageMediaIds is not null)
         {
             requestedIds.UnionWith(request.ImageMediaIds);
         }
 
+        // STEP-04: Return the result of Array.Empty early when requestedIds.Count is 0.
         if (requestedIds.Count == 0)
         {
             return Array.Empty<MediaFile>();
         }
 
+        // STEP-05: Load owned through mediaRepository.GetOwnedByIdsAsync.
         var owned = await _mediaRepository.GetOwnedByIdsAsync(ownerId, requestedIds, ct);
+        // STEP-06: Prepare failures as List<ValidationFailure> and imageIds through Where(filtered).Select(filtered).ToHashSet.
         var failures = new List<ValidationFailure>();
         var imageIds = owned
             .Where(media => IsAllowedImage(media.MimeType))
             .Select(media => media.Id)
             .ToHashSet();
+        // STEP-07: When request.CoverMediaId exists and imageIds does not contain coverId, call failures.Add.
         if (request.CoverMediaId is { } coverId && !imageIds.Contains(coverId))
         {
             failures.Add(new ValidationFailure(
@@ -123,9 +136,11 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
                 "Ảnh bìa không tồn tại, không thuộc tài khoản của bạn hoặc không phải ảnh hợp lệ."));
         }
 
+        // STEP-08: Prepare missingGallery through Empty<long>().Where(filtered).ToArray.
         var missingGallery = (request.ImageMediaIds ?? Array.Empty<long>())
             .Where(id => !imageIds.Contains(id))
             .ToArray();
+        // STEP-09: When missingGallery.Length > 0, call failures.Add.
         if (missingGallery.Length > 0)
         {
             failures.Add(new ValidationFailure(
@@ -133,11 +148,13 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
                 "Một hoặc nhiều tệp không tồn tại, không thuộc tài khoản của bạn hoặc không phải ảnh hợp lệ."));
         }
 
+        // STEP-10: Throw ValidationException when failures.Count > 0.
         if (failures.Count > 0)
         {
             throw new ValidationException(failures);
         }
 
+        // STEP-11: Return owned.
         return owned;
     }
 
@@ -173,27 +190,35 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
         IDictionary<string, object?> oldValues,
         IDictionary<string, object?> newValues)
     {
+        // STEP-01: Stop here when request.ImageMediaIdsSpecified is false or request.ImageMediaIds is missing.
         if (!request.ImageMediaIdsSpecified || request.ImageMediaIds is null)
         {
             return;
         }
 
+        // STEP-02: Prepare oldIds through OrderBy(filtered).Select(filtered).ToArray and newIds through request.ImageMediaIds.ToArray.
         var oldIds = restaurant.Images.OrderBy(image => image.SortOrder).Select(image => image.MediaId).ToArray();
         var newIds = request.ImageMediaIds.ToArray();
+        // STEP-03: Stop here when oldIds.SequenceEqual(newIds) holds.
         if (oldIds.SequenceEqual(newIds))
         {
             return;
         }
 
+        // STEP-04: Set oldValues["image_media_ids"] and newValues["image_media_ids"].
         oldValues["image_media_ids"] = oldIds;
         newValues["image_media_ids"] = newIds;
+        // STEP-05: Prepare newIdSet through newIds.ToHashSet.
         var newIdSet = newIds.ToHashSet();
+        // STEP-06: For each removedImage in restaurant.Images.Where(filtered).ToArray(), call restaurant.Images.Remove.
         foreach (var removedImage in restaurant.Images.Where(image => !newIdSet.Contains(image.MediaId)).ToArray())
         {
             restaurant.Images.Remove(removedImage);
         }
 
+        // STEP-07: Prepare existingImages through restaurant.Images.ToDictionary.
         var existingImages = restaurant.Images.ToDictionary(image => image.MediaId);
+        // STEP-08: While index < newIds.Length, check whether existingImages has an entry for newIds[index].
         for (short index = 0; index < newIds.Length; index++)
         {
             if (existingImages.TryGetValue(newIds[index], out var existingImage))
@@ -217,13 +242,16 @@ public sealed class UpdateOwnerRestaurantUseCase : IUpdateOwnerRestaurantUseCase
         IDictionary<string, object?> oldValues,
         IDictionary<string, object?> newValues)
     {
+        // STEP-01: Stop here when specified is false or currentValue equals newValue.
         if (!specified || EqualityComparer<T>.Default.Equals(currentValue, newValue))
         {
             return;
         }
 
+        // STEP-02: Set oldValues[column] and newValues[column].
         oldValues[column] = currentValue;
         newValues[column] = newValue;
+        // STEP-03: Call setter.
         setter(newValue);
     }
 

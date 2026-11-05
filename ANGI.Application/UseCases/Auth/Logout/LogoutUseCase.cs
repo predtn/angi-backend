@@ -39,11 +39,14 @@ namespace ANGI.Application.UseCases.Auth.Logout
         /// </summary>
         public async Task ExecuteAsync(LogoutRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare refreshTokenHash, then load session through authenticationRepository.GetSessionByRefreshTokenHashAsync.
             var refreshTokenHash = _tokenService.HashRefreshToken(request.RefreshToken);
             var session = await _authenticationRepository.GetSessionByRefreshTokenHashAsync(refreshTokenHash, ct);
 
+            // STEP-03: Stop here when session is missing, session.RevokedAt has a value or session.UserId is not _currentUserService.UserId.
             if (session is null ||
                 session.RevokedAt.HasValue ||
                 session.UserId != _currentUserService.UserId)
@@ -51,7 +54,9 @@ namespace ANGI.Application.UseCases.Auth.Logout
                 return;
             }
 
+            // STEP-04: Update session: RevokedAt.
             session.RevokedAt = _timeProvider.GetUtcNow().UtcDateTime;
+            // STEP-05: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
         }
     }

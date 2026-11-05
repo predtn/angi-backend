@@ -42,32 +42,41 @@ namespace ANGI.Application.UseCases.Auth.ForgotPassword
         /// <summary>Handles AUTH-08 by atomically replacing reset tokens and sending a 30-minute link.</summary>
         public async Task ExecuteAsync(ForgotPasswordRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare normalizedEmail through request.Email.Trim().ToLowerInvariant, recipientEmail, recipientDisplayName and rawToken.
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
             string recipientEmail;
             string recipientDisplayName;
             string rawToken;
 
+            // STEP-03: Hold the scoped resource for the block below.
             await using (var transaction = await _unitOfWork.BeginTransactionAsync(ct))
             {
+                // STEP-04: Load user through authenticationRepository.GetUserByEmailForUpdateAsync.
                 var user = await _authenticationRepository.GetUserByEmailForUpdateAsync(normalizedEmail, ct);
+                // STEP-05: Stop here when user is missing.
                 if (user is null)
                 {
                     return;
                 }
 
+                // STEP-06: Prepare now, then load oldTokens through authenticationRepository.GetUnusedUserTokensAsync.
                 var now = _timeProvider.GetUtcNow().UtcDateTime;
                 var oldTokens = await _authenticationRepository.GetUnusedUserTokensAsync(
                     user.Id,
                     UserTokenPurpose.PasswordReset,
                     ct);
+                // STEP-07: For each oldToken in oldTokens, set oldToken.UsedAt.
                 foreach (var oldToken in oldTokens)
                 {
                     oldToken.UsedAt = now;
                 }
 
+                // STEP-08: Prepare generatedToken through tokenService.CreateUserToken.
                 var generatedToken = _tokenService.CreateUserToken();
+                // STEP-09: Queue a new UserToken through authenticationRepository.AddUserToken.
                 _authenticationRepository.AddUserToken(new UserToken
                 {
                     UserId = user.Id,
@@ -76,13 +85,17 @@ namespace ANGI.Application.UseCases.Auth.ForgotPassword
                     ExpiresAt = now.Add(_tokenLifetime)
                 });
 
+                // STEP-10: Save the pending changes.
                 await _unitOfWork.SaveChangesAsync(ct);
+                // STEP-11: Commit the transaction.
                 await transaction.CommitAsync(ct);
+                // STEP-12: Set recipientEmail, recipientDisplayName and rawToken.
                 recipientEmail = user.Email;
                 recipientDisplayName = user.DisplayName;
                 rawToken = generatedToken.Token;
             }
 
+            // STEP-13: Call emailService.SendPasswordResetAsync.
             await _emailService.SendPasswordResetAsync(
                 recipientEmail,
                 recipientDisplayName,

@@ -30,12 +30,15 @@ public static class AgentNamedRequestPolicy
     /// <summary>First day/meal in scope no other named request occupies; a whole-trip request starts from day 1.</summary>
     public static (short Day, string Meal)? Slot(AgentState state, AgentMealRequest request, IEnumerable<string> fitting)
     {
+        // STEP-01: Prepare meals through fitting.ToArray and days from Enumerable.Range.
         var meals = fitting.ToArray();
         var days = request.DayNumber is { } only ? [only] : Enumerable.Range(1, state.NumDays ?? 0).Select(day => (short)day).ToArray();
+        // STEP-02: For each day in days, go through each meal in meals.
         foreach (var day in days)
             foreach (var meal in meals)
                 if (!state.MealRequests.Any(other => other.DayNumber == day && other.MealSlot == meal && (other.DishName ?? other.RestaurantName) is not null))
                     return (day, meal);
+        // STEP-03: Return null.
         return null;
     }
 
@@ -53,10 +56,14 @@ public static class AgentNamedRequestPolicy
     /// <summary>Replaces a wide request with its placed meal; tags and differentFromPlan keep their wide scope without the name.</summary>
     public static AgentState Place(AgentState state, AgentMealRequest request, short day, string meal)
     {
+        // STEP-01: Prepare requests through state.MealRequests.Where(filtered).ToList and remainder.
         var requests = state.MealRequests.Where(other => !(other.DayNumber == request.DayNumber && other.MealSlot == request.MealSlot && SameNames(other, request))).ToList();
         var remainder = request with { DishName = null, RestaurantName = null, RestaurantId = null };
+        // STEP-02: When remainder.TagIds.Length > 0 or remainder.DifferentFromPlan is true, call requests.Add.
         if (remainder.TagIds.Length > 0 || remainder.DifferentFromPlan) requests.Add(remainder);
+        // STEP-03: Add a copy of request to requests.
         requests.Add(request with { DayNumber = day, MealSlot = meal, TagIds = [], DifferentFromPlan = false });
+        // STEP-04: Return a copy of state with updated fields.
         return state with { MealRequests = [.. requests] };
     }
 
@@ -68,10 +75,14 @@ public static class AgentNamedRequestPolicy
     /// <summary>Keeps this turn's placements when the model resends the wide request, or a state without the placed one.</summary>
     public static AgentState? Retain(AgentState? proposed, IReadOnlyCollection<AgentMealRequest> placed)
     {
+        // STEP-01: Return proposed early when proposed is missing or placed.Count is 0.
         if (proposed is null || placed.Count == 0) return proposed;
+        // STEP-02: Prepare requests through MealRequests.Where(filtered).ToList.
         var requests = proposed.MealRequests.Where(request => !placed.Any(item => SameNames(item, request) &&
             (request.DayNumber != item.DayNumber || request.MealSlot != item.MealSlot))).ToList();
+        // STEP-03: Add the built entries to requests.
         requests.AddRange(placed.Where(item => !requests.Any(request => request.DayNumber == item.DayNumber && request.MealSlot == item.MealSlot)));
+        // STEP-04: Return a copy of proposed with updated fields.
         return proposed with { MealRequests = [.. requests] };
     }
 

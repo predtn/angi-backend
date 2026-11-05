@@ -40,14 +40,17 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
     /// <summary>Validates file policy, uploads the content, and persists its metadata.</summary>
     public async Task<MediaFileDto> ExecuteAsync(UploadMediaRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare uploaderId, normalizedMimeType through request.MimeType.Trim().ToLowerInvariant, isPdf and isImage.
         var uploaderId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để tải tệp lên.");
 
         var normalizedMimeType = request.MimeType.Trim().ToLowerInvariant();
         var isPdf = normalizedMimeType == "application/pdf";
         var isImage = normalizedMimeType is "image/jpeg" or "image/png" or "image/webp";
+        // STEP-03: Reject with UNSUPPORTED_MEDIA_TYPE when isImage is false and isPdf && request.Purpose == "verification_doc" is false.
         if (!isImage && !(isPdf && request.Purpose == "verification_doc"))
         {
             throw new BadRequestException(
@@ -55,7 +58,9 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                 "Định dạng tệp không được hỗ trợ cho mục đích này.");
         }
 
+        // STEP-04: Prepare sizeLimit.
         var sizeLimit = isPdf ? PdfLimitBytes : ImageLimitBytes;
+        // STEP-05: Reject with FILE_TOO_LARGE when request.SizeBytes > sizeLimit.
         if (request.SizeBytes > sizeLimit)
         {
             throw new BadRequestException(
@@ -63,6 +68,7 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                 "Tệp vượt quá dung lượng cho phép.");
         }
 
+        // STEP-06: Prepare isPrivate, then call cloudinaryService.UploadAsync and keep upload.
         var isPrivate = request.Purpose is "verification_doc" or "report_evidence";
         var upload = await _cloudinaryService.UploadAsync(
             request.Content!,
@@ -72,6 +78,7 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
             isPrivate,
             ct);
 
+        // STEP-07: Prepare mediaFile as MediaFile.
         var mediaFile = new MediaFile
         {
             UploaderId = uploaderId,
@@ -81,9 +88,12 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
             SizeBytes = request.SizeBytes
         };
 
+        // STEP-08: Queue mediaFile through mediaRepository.Add.
         _mediaRepository.Add(mediaFile);
+        // STEP-09: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // STEP-10: Return a new MediaFileDto.
         return new MediaFileDto
         {
             Id = mediaFile.Id,

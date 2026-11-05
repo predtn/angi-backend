@@ -20,17 +20,22 @@ namespace ANGI.WebApi.Configs
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            // STEP-01: Prepare section through configuration.GetSection and settings from section.Get.
             var section = configuration.GetSection(RateLimitSettings.SectionName);
             var settings = section.Get<RateLimitSettings>() ?? new RateLimitSettings();
 
+            // STEP-02: Run AddOptions().Bind().Validate().ValidateOnStart.
             services.AddOptions<RateLimitSettings>()
                 .Bind(section)
                 .Validate(AreValid, "All rate-limit values must be greater than zero.")
                 .ValidateOnStart();
 
+            // STEP-03: Register AddMemoryCache.
             // Login counts failed attempts only, which the rate limiter cannot see before the request runs
             services.AddMemoryCache();
+            // STEP-04: Call services.TryAddSingleton.
             services.TryAddSingleton(TimeProvider.System);
+            // STEP-05: Register AddScoped and register AddRateLimiter.
             services.AddScoped<LoginFailureLimitMiddleware>();
 
             services.AddRateLimiter(options =>
@@ -48,14 +53,17 @@ namespace ANGI.WebApi.Configs
                 };
             });
 
+            // STEP-06: Return services.
             return services;
         }
 
         /// <summary>Writes the canonical 429 API response and Retry-After header.</summary>
         public static async Task WriteTooManyRequestsAsync(HttpContext context, int retryAfterSeconds, CancellationToken cancellationToken)
         {
+            // STEP-01: Set context.Response.StatusCode and Response.Headers.RetryAfter.
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            // STEP-02: Call context.Response.WriteAsJsonAsync.
             await context.Response.WriteAsJsonAsync(new ApiResponse<object>
             {
                 Success = false,
@@ -70,12 +78,15 @@ namespace ANGI.WebApi.Configs
             HttpContext context,
             RateLimitSettings settings)
         {
+            // STEP-01: Return the result of RateLimitPartition.GetNoLimiter early when context.Request.Path.StartsWithSegments(...) does not hold.
             if (!context.Request.Path.StartsWithSegments("/api"))
             {
                 return RateLimitPartition.GetNoLimiter("non-api");
             }
 
+            // STEP-02: Prepare path.
             var path = context.Request.Path;
+            // STEP-03: Return the result of CreateFixedWindowPartition early when path equals ResendVerificationPath or path equals ForgotPasswordPath.
             if (path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
                 path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -85,11 +96,13 @@ namespace ANGI.WebApi.Configs
                     TimeSpan.FromSeconds(settings.SensitiveAuthWindowSeconds));
             }
 
+            // STEP-04: Prepare userId from context.User.FindFirst and clientKey from GetIpAddress.
             var userId = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
             var clientKey = string.IsNullOrWhiteSpace(userId)
                 ? $"ip:{GetIpAddress(context)}"
                 : $"user:{userId}";
 
+            // STEP-05: Return the result of CreateFixedWindowPartition.
             return CreateFixedWindowPartition(
                 $"general:{clientKey}",
                 settings.GeneralPermitLimit,
