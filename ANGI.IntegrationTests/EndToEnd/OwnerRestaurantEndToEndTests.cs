@@ -39,7 +39,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         // STEP-04: Authenticate the HTTP client through Authorize and get response from UploadAsync.
         Authorize(client, auth.AccessToken);
 
-        using var response = await UploadAsync(client, "avatar", "avatar.png", "image/png", [1, 2, 3, 4]);
+        using var response = await UploadAsync(client, "avatar", "avatar.png", "image/png", PngBytes);
 
         // STEP-05: Obtain media through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.Created.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -521,7 +521,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         // STEP-06: Assert in the database context.Restaurants.CountAsync() is 0.
         await _factory.ExecuteDbAsync(async context => (await context.Restaurants.CountAsync()).Should().Be(0));
         // STEP-07: Get imageUpload from UploadAsync.
-        using var imageUpload = await UploadAsync(client, "restaurant", "restaurant.png", "image/png", [1, 2, 3, 4]);
+        using var imageUpload = await UploadAsync(client, "restaurant", "restaurant.png", "image/png", PngBytes);
         // STEP-08: Obtain image through SuccessDataAsync.
         var image = await SuccessDataAsync<MediaFileDto>(imageUpload);
         // STEP-09: Get request from RegistrationRequest, set request.CoverMediaId to image.Id, set request.ImageMediaIds to a test items and 1 more.
@@ -608,7 +608,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         // STEP-05: Assert for each name, SuccessDataAsync succeeds.
         foreach (var name in new[] { "first.png", "second.png", "third.png" })
         {
-            using var upload = await UploadAsync(client, "restaurant", name, "image/png", [1, 2, 3, 4]);
+            using var upload = await UploadAsync(client, "restaurant", name, "image/png", PngBytes);
             photos.Add(await SuccessDataAsync<MediaFileDto>(upload));
         }
 
@@ -720,6 +720,9 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             Longitude = 106.700m,
             PriceLevel = 2
         };
+
+    /// <summary>The start of a PNG file: MEDIA-01 checks the signature against the declared type.</summary>
+    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     /// <summary>Uploads one multipart file through MEDIA-01 and returns the live HTTP response.</summary>
     private static Task<HttpResponseMessage> UploadAsync(

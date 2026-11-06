@@ -78,6 +78,18 @@ public static class DiscoverySeed
     /// <summary>Registers, verifies and logs in an account of the given role through the public auth endpoints.</summary>
     public static async Task<AuthResultDto> RegisterAndLoginAsync(PostgresApiFactory factory, HttpClient client, string role)
     {
+        var email = await RegisterVerifiedAsync(factory, client, role);
+        using var login = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequestDto { Email = email, Password = Password });
+        login.EnsureSuccessStatusCode();
+        return (await login.Content.ReadFromJsonAsync<ApiResponse<AuthResultDto>>())!.Data!;
+    }
+
+    /// <summary>
+    /// Registers and verifies an account without logging in, returning its email. Migration tests on an older schema use
+    /// it: login writes user_sessions, whose current columns may not exist yet.
+    /// </summary>
+    public static async Task<string> RegisterVerifiedAsync(PostgresApiFactory factory, HttpClient client, string role)
+    {
         var email = $"{role.ToLowerInvariant()}-{Guid.NewGuid():N}@integration.test";
         (await client.PostAsJsonAsync("/api/v1/auth/register", new RegisterAccountRequestDto
         {
@@ -90,9 +102,7 @@ public static class DiscoverySeed
         {
             Token = factory.Email.VerificationToken(email)
         })).EnsureSuccessStatusCode();
-        using var login = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequestDto { Email = email, Password = Password });
-        login.EnsureSuccessStatusCode();
-        return (await login.Content.ReadFromJsonAsync<ApiResponse<AuthResultDto>>())!.Data!;
+        return email;
     }
 
     /// <summary>Changes the seeded restaurant directly, deleted rows included.</summary>

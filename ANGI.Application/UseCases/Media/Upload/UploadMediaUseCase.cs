@@ -68,17 +68,27 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                 "Tệp vượt quá dung lượng cho phép.");
         }
 
-        // STEP-06: Prepare isPrivate, then call cloudinaryService.UploadAsync and keep upload.
+        // STEP-06: Read the file header and reject with UNSUPPORTED_MEDIA_TYPE when it does not match normalizedMimeType.
+        // The declared type comes from the client: the content must start like that type too.
+        var (header, content) = await MediaSignature.ReadHeaderAsync(request.Content!, ct);
+        if (!MediaSignature.Matches(normalizedMimeType, header))
+        {
+            throw new BadRequestException(
+                "UNSUPPORTED_MEDIA_TYPE",
+                "Nội dung tệp không khớp với định dạng đã chọn.");
+        }
+
+        // STEP-07: Prepare isPrivate, then call cloudinaryService.UploadAsync and keep upload.
         var isPrivate = request.Purpose is "verification_doc" or "report_evidence";
         var upload = await _cloudinaryService.UploadAsync(
-            request.Content!,
+            content,
             request.FileName,
             normalizedMimeType,
             request.Purpose,
             isPrivate,
             ct);
 
-        // STEP-07: Prepare mediaFile as MediaFile.
+        // STEP-08: Prepare mediaFile as MediaFile.
         var mediaFile = new MediaFile
         {
             UploaderId = uploaderId,
@@ -88,12 +98,12 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
             SizeBytes = request.SizeBytes
         };
 
-        // STEP-08: Queue mediaFile through mediaRepository.Add.
+        // STEP-09: Queue mediaFile through mediaRepository.Add.
         _mediaRepository.Add(mediaFile);
-        // STEP-09: Save the pending changes.
+        // STEP-10: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
 
-        // STEP-10: Return a new MediaFileDto.
+        // STEP-11: Return a new MediaFileDto.
         return new MediaFileDto
         {
             Id = mediaFile.Id,

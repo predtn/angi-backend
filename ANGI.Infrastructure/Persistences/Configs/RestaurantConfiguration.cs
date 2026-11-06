@@ -15,6 +15,8 @@ namespace ANGI.Infrastructure.Persistences.Configs
                 table.HasCheckConstraint("ck_restaurants_price_level", "price_level BETWEEN 1 AND 4"));
 
             builder.Property(x => x.Name).HasMaxLength(200);
+            // DISH-01 q also matches the restaurant name with ILIKE '%term%'.
+            builder.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops").HasDatabaseName("ix_restaurants_name_trgm");
             builder.Property(x => x.Slug).HasMaxLength(220);
             builder.Property(x => x.Phone).HasMaxLength(20);
             builder.Property(x => x.Email).HasColumnType("citext");

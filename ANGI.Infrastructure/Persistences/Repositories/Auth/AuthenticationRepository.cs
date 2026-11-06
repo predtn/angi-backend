@@ -132,6 +132,7 @@ namespace ANGI.Infrastructure.Persistences.Repositories.Auth
                     .ThenInclude(user => user.Role)
                 .Include(session => session.User)
                     .ThenInclude(user => user.AvatarMedia)
+                .Include(session => session.ReplacedBySession)
                 .SingleOrDefaultAsync(ct);
         }
 

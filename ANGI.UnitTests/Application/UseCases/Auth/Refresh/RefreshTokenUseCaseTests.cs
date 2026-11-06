@@ -55,6 +55,8 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             session.RevokedAt.Should().Be(Now);
             addedSession.Should().NotBeNull();
             addedSession!.RefreshTokenHash.Should().Be("new-hash");
+            // The link tells a late duplicate of this token (concurrent refresh) from a logout.
+            session.ReplacedBySession.Should().BeSameAs(addedSession);
             // STEP-06: Assert result.RefreshToken is a test value, result.AccessToken is a test value and result.User.NeedsPreferenceSurvey is false.
             result.RefreshToken.Should().Be("new-token");
             // sid names the new session, not the revoked one.
@@ -270,24 +272,20 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        // TEST-09: Allow only one success when concurrent requests reuse the same refresh token.
-        /// <summary>Proves the locking design lets only one of two concurrent refreshes succeed.</summary>
+        // TEST-09: Two concurrent refreshes with the same token (two frontend instances) both succeed.
+        /// <summary>The locked first request rotates; the second, inside the grace period, gets a parallel session.</summary>
         [Fact]
-        public async Task ExecuteAsync_WithConcurrentReuse_ShouldAllowOnlyOneSuccessfulRotation()
+        public async Task ExecuteAsync_WithConcurrentReuse_ShouldGiveBothRequestsAValidSession()
         {
             // STEP-01: Create originalSession through CreateSession.
             var originalSession = CreateSession();
-            // STEP-02: Declare replacementSession to capture a call argument; mock IAuthenticationRepository and 1 more; stub repository.GetSessionByRefreshTokenHashForUpdateAsync and 3 more.
-            UserSession? replacementSession = null;
+            // STEP-02: Collect added sessions in addedSessions; mock IAuthenticationRepository and IUnitOfWork; stub GetSessionByRefreshTokenHashForUpdateAsync, AddSession and SaveChangesAsync.
+            var addedSessions = new List<UserSession>();
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(originalSession);
             repository.Setup(x => x.AddSession(It.IsAny<UserSession>()))
-                .Callback<UserSession>(session => replacementSession = session);
-            repository.Setup(x => x.GetActiveSessionsAsync(12, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => replacementSession is null
-                    ? new List<UserSession>()
-                    : new List<UserSession> { replacementSession });
+                .Callback<UserSession>(addedSessions.Add);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
             // STEP-03: Build useCase under test through CreateUseCase.
@@ -305,12 +303,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
             // STEP-06: Run Task.WhenAll and keep attempts.
             var attempts = await Task.WhenAll(ExecuteAsync(), ExecuteAsync());
 
-            // STEP-07: Assert attempts.Count(filtered) is 1, replacementSession is not null and replacementSession.RevokedAt is Now.
-            attempts.Count(attempt => attempt.Result is not null).Should().Be(1);
-            attempts.Count(attempt => attempt.Error is UnauthorizedException unauthorized &&
-                                      unauthorized.ErrorCode == "REFRESH_TOKEN_INVALID").Should().Be(1);
-            replacementSession.Should().NotBeNull();
-            replacementSession!.RevokedAt.Should().Be(Now);
+            // STEP-07: Assert both attempts succeed, two sessions were added, originalSession links to the first and none was revoked as theft.
+            attempts.Should().OnlyContain(attempt => attempt.Result != null);
+            addedSessions.Should().HaveCount(2);
+            // The first successor stays valid; nothing was revoked as theft.
+            originalSession.ReplacedBySession.Should().BeSameAs(addedSessions[0]);
+            addedSessions.Should().OnlyContain(session => session.RevokedAt == null);
+            repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
 
             // STEP-08: Define helper ExecuteAsync.
             async Task<(AuthResultDto? Result, Exception? Error)> ExecuteAsync()
@@ -324,6 +323,113 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Refresh
                     return (null, exception);
                 }
             }
+        }
+
+        // TEST-10: A token rotated less than 30 seconds ago gets a parallel session, not a theft response.
+        /// <summary>Issues a new pair and leaves the first successor active when the duplicate arrives inside the grace period.</summary>
+        [Fact]
+        public async Task ExecuteAsync_WithTokenRotatedWithinGracePeriod_ShouldIssueParallelSession()
+        {
+            // STEP-01: Create successor and session, revoked 10 seconds ago and linked to successor.
+            var successor = CreateSession();
+            successor.Id = 2;
+            successor.RefreshTokenHash = "successor-hash";
+            var session = CreateSession();
+            session.RevokedAt = Now.AddSeconds(-10);
+            session.ReplacedBySession = successor;
+            session.ReplacedBySessionId = successor.Id;
+            // STEP-02: Declare addedSession to capture a call argument; mock IAuthenticationRepository and IUnitOfWork; stub the session lookup, AddSession and SaveChangesAsync.
+            UserSession? addedSession = null;
+            var repository = new Mock<IAuthenticationRepository>();
+            repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(session);
+            repository.Setup(x => x.AddSession(It.IsAny<UserSession>()))
+                .Callback<UserSession>(value => addedSession = value);
+            var unitOfWork = new Mock<IUnitOfWork>();
+            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                .Callback(() => addedSession!.Id = 79)
+                .ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
+            var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
+
+            // STEP-04: Run useCase.ExecuteAsync and keep result.
+            var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
+
+            // STEP-05: Assert result carries the new tokens with the new session id, successor stays active and session is unchanged.
+            result.RefreshToken.Should().Be("new-token");
+            result.AccessToken.Should().Be("new-access-token-sid-79");
+            successor.RevokedAt.Should().BeNull();
+            session.ReplacedBySession.Should().BeSameAs(successor);
+            session.RevokedAt.Should().Be(Now.AddSeconds(-10));
+            // STEP-06: Verify GetActiveSessionsAsync is never called.
+            repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        // TEST-11: Past the grace period, a rotated token is reuse again and ends every session.
+        /// <summary>Treats a duplicate that arrives after 30 seconds as theft.</summary>
+        [Fact]
+        public async Task ExecuteAsync_WithTokenRotatedBeforeGracePeriod_ShouldRevokeActiveSessions()
+        {
+            // STEP-01: Create successor and session, revoked exactly ReuseGracePeriod ago and linked to successor.
+            var successor = CreateSession();
+            successor.Id = 2;
+            var session = CreateSession();
+            session.RevokedAt = Now - RefreshTokenUseCase.ReuseGracePeriod;
+            session.ReplacedBySession = successor;
+            session.ReplacedBySessionId = successor.Id;
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub the session lookup, GetActiveSessionsAsync and SaveChangesAsync.
+            var repository = new Mock<IAuthenticationRepository>();
+            repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(session);
+            repository.Setup(x => x.GetActiveSessionsAsync(12, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<UserSession> { successor });
+            var unitOfWork = new Mock<IUnitOfWork>();
+            unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
+            var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
+
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
+            var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
+
+            // STEP-05: Assert act throws UnauthorizedException with "REFRESH_TOKEN_INVALID" and successor.RevokedAt is Now.
+            var exception = await act.Should().ThrowAsync<UnauthorizedException>();
+            exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
+            successor.RevokedAt.Should().Be(Now);
+            // STEP-06: Verify AddSession is never called.
+            repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
+        }
+
+        // TEST-12: Rotated and then logged out within the grace period: refused, but not treated as theft.
+        /// <summary>A logout of the successor cannot be undone by replaying the previous token.</summary>
+        [Fact]
+        public async Task ExecuteAsync_WithSuccessorLoggedOutWithinGracePeriod_ShouldRejectWithoutRevokingAll()
+        {
+            // STEP-01: Create successor logged out 2 seconds ago and session rotated 5 seconds ago, linked to successor.
+            var successor = CreateSession();
+            successor.Id = 2;
+            successor.RevokedAt = Now.AddSeconds(-2);
+            var session = CreateSession();
+            session.RevokedAt = Now.AddSeconds(-5);
+            session.ReplacedBySession = successor;
+            session.ReplacedBySessionId = successor.Id;
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashForUpdateAsync.
+            var repository = new Mock<IAuthenticationRepository>();
+            repository.Setup(x => x.GetSessionByRefreshTokenHashForUpdateAsync("old-hash", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(session);
+            var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-03: Build useCase under test through CreateUseCase.
+            var useCase = CreateUseCase(repository, new Mock<IRecommendationService>(), unitOfWork);
+
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
+            var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
+
+            // STEP-05: Assert act throws UnauthorizedException and exception.ErrorCode is "REFRESH_TOKEN_INVALID".
+            var exception = await act.Should().ThrowAsync<UnauthorizedException>();
+            exception.Which.ErrorCode.Should().Be("REFRESH_TOKEN_INVALID");
+            // STEP-06: Verify AddSession, GetActiveSessionsAsync and SaveChangesAsync are never called.
+            repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
+            repository.Verify(x => x.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+            unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
         /// <summary>Creates the use case from the given mocks, a fixed clock and an optional transaction double.</summary>

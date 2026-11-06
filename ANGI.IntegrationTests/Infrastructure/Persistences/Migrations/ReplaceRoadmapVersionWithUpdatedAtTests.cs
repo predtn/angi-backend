@@ -24,14 +24,16 @@ public sealed class ReplaceRoadmapVersionWithUpdatedAtTests(PostgresApiFactory f
             await db.GetService<IMigrator>().MigrateAsync("20261027042013_DropRestaurantDistrict");
         });
         using var client = factory.CreateClient();
-        var auth = await DiscoverySeed.RegisterAndLoginAsync(factory, client, "TRAVELER");
+        // No login: on this older schema user_sessions lacks columns the current model writes.
+        var email = await DiscoverySeed.RegisterVerifiedAsync(factory, client, "TRAVELER");
+        var userId = await factory.ExecuteDbAsync(db => db.Users.Where(user => user.Email == email).Select(user => user.Id).SingleAsync());
         await factory.ExecuteDbAsync(async db =>
         {
             await db.Database.ExecuteSqlInterpolatedAsync($$$"""
-                INSERT INTO core.roadmaps (id, user_id, title, num_days) VALUES (701, {{{auth.User.Id}}}, 'Legacy roadmap', 1);
+                INSERT INTO core.roadmaps (id, user_id, title, num_days) VALUES (701, {{{userId}}}, 'Legacy roadmap', 1);
                 INSERT INTO core.agent_conversations (id, user_id, roadmap_id, status, state, expires_at,
                     processing_turn_id, processing_attempt_id, processing_until, version)
-                    VALUES (801, {{{auth.User.Id}}}, 701, 'active',
+                    VALUES (801, {{{userId}}}, 701, 'active',
                         '{"sourceRoadmapVersion":1,"pendingStateChange":{"sourceRoadmapVersion":1}}',
                         now() + interval '7 days', 2, 3, now() + interval '1 minute', 3);
                 INSERT INTO core.agent_proposals (id, conversation_id, proposal_version, operation, payload,

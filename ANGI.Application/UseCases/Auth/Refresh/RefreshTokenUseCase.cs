@@ -19,6 +19,13 @@ namespace ANGI.Application.UseCases.Auth.Refresh
         private const string InvalidTokenCode = "REFRESH_TOKEN_INVALID";
         private const string InvalidTokenMessage = "Refresh token không hợp lệ hoặc đã hết hạn.";
 
+        /// <summary>
+        /// How long a token that was just rotated may be sent again. The frontend runs on several instances, so two
+        /// requests whose access token expired together can both refresh with the same token; the second one gets its
+        /// own valid pair instead of being treated as theft (API Design AUTH-06).
+        /// </summary>
+        public static readonly TimeSpan ReuseGracePeriod = TimeSpan.FromSeconds(30);
+
         private readonly IValidator<RefreshTokenRequestDto> _validator;
         private readonly IAuthenticationRepository _authenticationRepository;
         private readonly IAuthenticationTokenService _tokenService;
@@ -66,7 +73,20 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 throw InvalidRefreshToken();
             }
 
-            // STEP-07: When session.RevokedAt has a value, call RevokeAllActiveSessionsAsync, call transaction.CommitAsync and 1 more action(s).
+            // STEP-07: When the session was rotated within the grace period, refuse a logged-out or blocked login, otherwise issue a parallel session.
+            if (session.RevokedAt.HasValue && IsRecentRotation(session, now))
+            {
+                if (!IsUsableSuccessor(session.ReplacedBySession!, now) || session.User.Status != UserStatus.Active)
+                {
+                    // Rotated, then logged out or blocked: refuse without treating it as theft.
+                    throw InvalidRefreshToken();
+                }
+
+                // A concurrent refresh already rotated this token: issue a parallel session and keep the first one.
+                return await IssueSessionAsync(session, now, transaction, rotate: false, ct);
+            }
+
+            // STEP-08: When session.RevokedAt has a value, call RevokeAllActiveSessionsAsync, call transaction.CommitAsync and 1 more action(s).
             if (session.RevokedAt.HasValue)
             {
                 await RevokeAllActiveSessionsAsync(session.UserId, now, ct);
@@ -74,22 +94,35 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 throw InvalidRefreshToken();
             }
 
-            // STEP-08: When session.ExpiresAt <= now or session.User.Status is not UserStatus.Active, run the branch below.
+            // STEP-09: When session.ExpiresAt <= now or session.User.Status is not UserStatus.Active, run the branch below.
             if (session.ExpiresAt <= now || session.User.Status != UserStatus.Active)
             {
-                // STEP-09: Update session: RevokedAt.
+                // STEP-10: Update session: RevokedAt.
                 session.RevokedAt = now;
-                // STEP-10: Save the pending changes.
+                // STEP-11: Save the pending changes.
                 await _unitOfWork.SaveChangesAsync(ct);
-                // STEP-11: Commit the transaction.
+                // STEP-12: Commit the transaction.
                 await transaction.CommitAsync(ct);
-                // STEP-12: Throw the error from InvalidRefreshToken.
+                // STEP-13: Throw the error from InvalidRefreshToken.
                 throw InvalidRefreshToken();
             }
 
-            // STEP-13: Update session: RevokedAt.
-            session.RevokedAt = now;
-            // STEP-14: Prepare refreshToken through tokenService.CreateRefreshToken and newSession as UserSession.
+            // STEP-14: Rotate the session and return the new token pair through IssueSessionAsync.
+            return await IssueSessionAsync(session, now, transaction, rotate: true, ct);
+        }
+
+        /// <summary>
+        /// Adds a new session for the same user and device and returns its token pair; when rotating, the current session
+        /// is revoked and linked to the new one so a late duplicate of its token can be recognised.
+        /// </summary>
+        private async Task<AuthResultDto> IssueSessionAsync(
+            UserSession session,
+            DateTime now,
+            IUnitOfWorkTransaction transaction,
+            bool rotate,
+            CancellationToken ct)
+        {
+            // STEP-01: Prepare refreshToken through tokenService.CreateRefreshToken and newSession as UserSession.
             var refreshToken = _tokenService.CreateRefreshToken();
             var newSession = new UserSession
             {
@@ -99,15 +132,20 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 IpAddress = session.IpAddress,
                 ExpiresAt = refreshToken.ExpiresAt
             };
-            // STEP-15: Queue newSession through authenticationRepository.AddSession.
+            // STEP-02: Queue newSession through authenticationRepository.AddSession; when rotating, revoke session and link it to newSession.
             _authenticationRepository.AddSession(newSession);
+            if (rotate)
+            {
+                session.RevokedAt = now;
+                session.ReplacedBySession = newSession;
+            }
 
-            // STEP-16: Save the pending changes.
+            // STEP-03: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
-            // STEP-17: Commit the transaction.
+            // STEP-04: Commit the transaction.
             await transaction.CommitAsync(ct);
 
-            // STEP-18: Prepare accessToken and tokens, then load needsPreferenceSurvey through GetNeedsPreferenceSurveyAsync.
+            // STEP-05: Prepare accessToken and tokens, then load needsPreferenceSurvey through GetNeedsPreferenceSurveyAsync.
             // Rotation creates a new session row, so the new access token carries its id as claim sid.
             var accessToken = _tokenService.CreateAccessToken(session.User, newSession.Id);
             var tokens = new AuthenticationTokens(
@@ -118,8 +156,24 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 refreshToken.ExpiresAt);
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(session.User, ct);
-            // STEP-19: Return the result of AuthenticationResponseMapper.Map.
+            // STEP-06: Return the result of AuthenticationResponseMapper.Map.
             return AuthenticationResponseMapper.Map(session.User, tokens, needsPreferenceSurvey);
+        }
+
+        /// <summary>True when the session was revoked by a refresh (not a logout) within the grace period.</summary>
+        private static bool IsRecentRotation(UserSession session, DateTime now)
+        {
+            return session.ReplacedBySession is not null &&
+                   session.RevokedAt!.Value > now - ReuseGracePeriod;
+        }
+
+        /// <summary>
+        /// The successor still stands for this login: active, or itself rotated (a newer refresh, not a logout), and not expired.
+        /// </summary>
+        private static bool IsUsableSuccessor(UserSession successor, DateTime now)
+        {
+            return successor.ExpiresAt > now &&
+                   (!successor.RevokedAt.HasValue || successor.ReplacedBySessionId.HasValue);
         }
 
         /// <summary>Revokes every active session when reuse of an old refresh token is detected.</summary>

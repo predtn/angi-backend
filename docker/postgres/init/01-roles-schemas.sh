@@ -21,6 +21,8 @@ CREATE SCHEMA recommendation AUTHORIZATION :"reco_user";
 -- Migrations keep CREATE EXTENSION IF NOT EXISTS, which becomes a no-op here.
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+-- pg_trgm is trusted but needs CREATE on the database, which the service roles do not have.
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 ALTER ROLE :"backend_user" SET search_path = core, public;
 ALTER ROLE :"reco_user" SET search_path = recommendation, public;

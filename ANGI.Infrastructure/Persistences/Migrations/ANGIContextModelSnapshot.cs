@@ -23,6 +23,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "citext");
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pg_trgm");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("ANGI.Domain.Entities.AgentConversation", b =>
@@ -700,6 +701,12 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                     b.HasIndex("CoverMediaId")
                         .HasDatabaseName("ix_dishes_cover_media_id");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("ix_dishes_name_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Name"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
 
                     b.HasIndex("RestaurantId")
                         .HasDatabaseName("ix_dishes_restaurant_id");
@@ -1545,6 +1552,12 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                     b.HasIndex("CoverMediaId")
                         .HasDatabaseName("ix_restaurants_cover_media_id");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("ix_restaurants_name_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Name"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
 
                     b.HasIndex("OwnerId")
                         .IsUnique()
@@ -2675,6 +2688,10 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("text")
                         .HasColumnName("refresh_token_hash");
 
+                    b.Property<long?>("ReplacedBySessionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("replaced_by_session_id");
+
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("revoked_at");
@@ -2694,6 +2711,9 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.HasIndex("RefreshTokenHash")
                         .IsUnique()
                         .HasDatabaseName("ix_user_sessions_refresh_token_hash");
+
+                    b.HasIndex("ReplacedBySessionId")
+                        .HasDatabaseName("ix_user_sessions_replaced_by_session_id");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_user_sessions_user_id");
@@ -3483,12 +3503,20 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
             modelBuilder.Entity("ANGI.Domain.Entities.UserSession", b =>
                 {
+                    b.HasOne("ANGI.Domain.Entities.UserSession", "ReplacedBySession")
+                        .WithMany()
+                        .HasForeignKey("ReplacedBySessionId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_user_sessions_user_sessions_replaced_by_session_id");
+
                     b.HasOne("ANGI.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_user_sessions_users_user_id");
+
+                    b.Navigation("ReplacedBySession");
 
                     b.Navigation("User");
                 });
