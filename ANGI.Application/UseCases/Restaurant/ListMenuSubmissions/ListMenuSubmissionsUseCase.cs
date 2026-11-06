@@ -32,8 +32,10 @@ public sealed class ListMenuSubmissionsUseCase : IListMenuSubmissionsUseCase
         ListMenuSubmissionsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare ownerId and status, then load result through repository.GetSubmissionsAsync.
         var ownerId = _currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem lịch sử menu.");
         MenuSubmissionStatus? status = request.Status is null
@@ -46,6 +48,7 @@ public sealed class ListMenuSubmissionsUseCase : IListMenuSubmissionsUseCase
             request.PageSize,
             ct);
 
+        // STEP-03: Return a new Paged<MenuSubmissionDto>.
         return new Paged<MenuSubmissionDto>
         {
             Items = result.Items.Select(RestaurantMenuMapper.MapSubmission).ToArray(),

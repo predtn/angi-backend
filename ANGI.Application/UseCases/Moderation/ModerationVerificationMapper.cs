@@ -15,6 +15,7 @@ internal static class ModerationVerificationMapper
         ICloudinaryService cloudinaryService,
         TimeProvider timeProvider)
     {
+        // STEP-01: Prepare source, restaurant and result, then call Copy.
         var source = RestaurantVerificationMapper.Map(verification, cloudinaryService);
         var restaurant = verification.Restaurant;
         var result = new ModVerificationCardDto
@@ -40,6 +41,7 @@ internal static class ModerationVerificationMapper
             }
         };
         Copy(source, result);
+        // STEP-02: Return result.
         return result;
     }
 
@@ -49,6 +51,7 @@ internal static class ModerationVerificationMapper
         ICloudinaryService cloudinaryService,
         TimeProvider timeProvider)
     {
+        // STEP-01: Prepare source and result, then call Copy.
         var source = RestaurantVerificationMapper.Map(verification, cloudinaryService);
         var result = new VerificationReviewDetailDto
         {
@@ -58,6 +61,7 @@ internal static class ModerationVerificationMapper
                 : RestaurantVerificationMapper.Map(verification.Previous, cloudinaryService)
         };
         Copy(source, result);
+        // STEP-02: Return result.
         return result;
     }
 

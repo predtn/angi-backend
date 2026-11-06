@@ -20,6 +20,7 @@ public sealed class ListModMenuSubmissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_ShouldMapCountsAndPagination()
     {
+        // STEP-01: Create restaurant as ANGI.Domain.Entities.Restaurant, create same as Dish, create edited as Dish, set restaurant.Dishes to a test items and 3 more.
         var restaurant = new ANGI.Domain.Entities.Restaurant { Id = 7, Name = "Restaurant" };
         var same = new Dish { Id = 1, Name = "Same", Restaurant = restaurant,
             DishTags = [new DishTag { TagId = 2 }, new DishTag { TagId = 1 }] };
@@ -34,11 +35,14 @@ public sealed class ListModMenuSubmissionsUseCaseTests
             ] };
         var request = new ListModMenuSubmissionsRequestDto { Page = 2, PageSize = 20, RestaurantId = 7 };
         using var cancellation = new CancellationTokenSource();
+        // STEP-02: Mock IMenuReviewRepository; stub repository.HasPermissionAsync and repository.ListAsync.
         var repository = new Mock<IMenuReviewRepository>();
         repository.Setup(x => x.HasPermissionAsync(10, cancellation.Token)).ReturnsAsync(true);
         repository.Setup(x => x.ListAsync(request, cancellation.Token)).ReturnsAsync((new[] { submission }, 21L));
+        // STEP-03: Run Create().ExecuteAsync with request and keep result.
         var result = await Create(repository).ExecuteAsync(request, cancellation.Token);
 
+        // STEP-04: Assert result.Page is 2, result.PageSize is 20, result.TotalItems is 21, result.TotalPages is 2 and 2 more.
         result.Page.Should().Be(2);
         result.PageSize.Should().Be(20);
         result.TotalItems.Should().Be(21);
@@ -57,11 +61,14 @@ public sealed class ListModMenuSubmissionsUseCaseTests
     [InlineData(21, 2)]
     public async Task ExecuteAsync_EmptyPage_ShouldKeepMetadata(long total, int pages)
     {
+        // STEP-01: Mock IMenuReviewRepository; stub repository.HasPermissionAsync and repository.ListAsync.
         var repository = new Mock<IMenuReviewRepository>();
         repository.Setup(x => x.HasPermissionAsync(10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         repository.Setup(x => x.ListAsync(It.IsAny<ListModMenuSubmissionsRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<MenuSubmission>(), total));
+        // STEP-02: Run Create().ExecuteAsync with ListModMenuSubmissionsRequestDto { Page = 99 } and keep result.
         var result = await Create(repository).ExecuteAsync(new ListModMenuSubmissionsRequestDto { Page = 99 }, CancellationToken.None);
+        // STEP-03: Assert result.Items is empty, result.TotalPages is pages and result.TotalItems is total.
         result.Items.Should().BeEmpty();
         result.TotalPages.Should().Be(pages);
         result.TotalItems.Should().Be(total);
@@ -72,9 +79,13 @@ public sealed class ListModMenuSubmissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_Invalid_ShouldValidateFirst()
     {
+        // STEP-01: Mock IMenuReviewRepository.
         var repository = new Mock<IMenuReviewRepository>();
+        // STEP-02: Wrap Create().ExecuteAsync with ListModMenuSubmissionsRequestDto { Status = "draft" } in act so its outcome can be asserted.
         var act = () => Create(repository).ExecuteAsync(new ListModMenuSubmissionsRequestDto { Status = "draft" }, CancellationToken.None);
+        // STEP-03: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-04: Verify repository receives no other calls.
         repository.VerifyNoOtherCalls();
     }
 
@@ -83,9 +94,13 @@ public sealed class ListModMenuSubmissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_Denied_ShouldNotQuery()
     {
+        // STEP-01: Mock IMenuReviewRepository.
         var repository = new Mock<IMenuReviewRepository>();
+        // STEP-02: Wrap Create().ExecuteAsync with an empty ListModMenuSubmissionsRequestDto in act so its outcome can be asserted.
         var act = () => Create(repository).ExecuteAsync(new ListModMenuSubmissionsRequestDto(), CancellationToken.None);
+        // STEP-03: Assert act throws ForbiddenException.
         await act.Should().ThrowAsync<ForbiddenException>();
+        // STEP-04: Verify ListAsync is never called.
         repository.Verify(x => x.ListAsync(It.IsAny<ListModMenuSubmissionsRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -102,6 +117,7 @@ public sealed class ListModMenuSubmissionsUseCaseTests
     [InlineData("unchanged")]
     public async Task ExecuteAsync_ShouldCompareEveryProposedField(string field)
     {
+        // STEP-01: Create restaurant as ANGI.Domain.Entities.Restaurant, create dish as Dish, set restaurant.Dishes to a test items and 3 more.
         var restaurant = new ANGI.Domain.Entities.Restaurant { Id = 7, Name = "Restaurant" };
         var dish = new Dish { Id = 1, Name = "Dish", Restaurant = restaurant,
             Description = null, Price = 0, DishForm = DishForm.Other, CoverMediaId = null, SortOrder = 0 };
@@ -118,11 +134,14 @@ public sealed class ListModMenuSubmissionsUseCaseTests
             case "tags": item.TagIds = [1]; break;
         }
         var submission = new MenuSubmission { Id = 14, Restaurant = restaurant, Items = [item] };
+        // STEP-02: Mock IMenuReviewRepository; stub repository.HasPermissionAsync and repository.ListAsync.
         var repository = new Mock<IMenuReviewRepository>();
         repository.Setup(x => x.HasPermissionAsync(10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         repository.Setup(x => x.ListAsync(It.IsAny<ListModMenuSubmissionsRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { submission }, 1L));
+        // STEP-03: Run Create().ExecuteAsync with an empty ListModMenuSubmissionsRequestDto and keep result.
         var result = await Create(repository).ExecuteAsync(new ListModMenuSubmissionsRequestDto(), CancellationToken.None);
+        // STEP-04: Assert result.Items.Single().EditedCount is field == "unchanged" ? 0 : 1, result.Items.Single().NewCount is 0 and 1 more.
         result.Items.Single().EditedCount.Should().Be(field == "unchanged" ? 0 : 1);
         result.Items.Single().NewCount.Should().Be(0);
         result.Items.Single().RemovedCount.Should().Be(0);

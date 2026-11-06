@@ -23,24 +23,32 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithValidToken_ShouldVerifyAndActivateUser()
         {
+            // STEP-01: Create userToken through CreateToken.
             var userToken = CreateToken();
+            // STEP-02: Create unitOfWork through CreateUnitOfWork; mock IAuthenticationRepository and IAccountStatusCache; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(userToken);
             var unitOfWork = CreateUnitOfWork(out var transaction);
             var accountStatusCache = new Mock<IAccountStatusCache>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, accountStatusCache);
 
+            // STEP-04: Run useCase.ExecuteAsync and keep result.
             var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert userToken.UsedAt is Now, userToken.User.EmailVerifiedAt is Now and userToken.User.Status is UserStatus.Active.
             userToken.UsedAt.Should().Be(Now);
             userToken.User.EmailVerifiedAt.Should().Be(Now);
             userToken.User.Status.Should().Be(UserStatus.Active);
+            // STEP-06: Assert result.UserId is 12, result.EmailVerifiedAt is Now and result.Status is "active".
             result.UserId.Should().Be(12);
             result.EmailVerifiedAt.Should().Be(Now);
             result.Status.Should().Be("active");
+            // STEP-07: Verify SaveChangesAsync is called once and CommitAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
             transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+            // STEP-08: Verify Invalidate is called once.
             accountStatusCache.Verify(x => x.Invalidate(userToken.UserId), Times.Once);
         }
 
@@ -49,16 +57,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Mock IAuthenticationRepository; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((UserToken?)null);
+            // STEP-02: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws BadRequestException and exception.ErrorCode is "TOKEN_INVALID".
             var exception = await act.Should().ThrowAsync<BadRequestException>();
             exception.Which.ErrorCode.Should().Be("TOKEN_INVALID");
+            // STEP-06: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -67,16 +81,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithExpiredToken_ShouldThrowTokenExpired()
         {
+            // STEP-01: Create userToken through CreateToken and set userToken.ExpiresAt to Now.
             var userToken = CreateToken();
             userToken.ExpiresAt = Now;
+            // STEP-02: Mock IAuthenticationRepository; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(userToken);
+            // STEP-03: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-04: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-05: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-06: Assert act throws BadRequestException and exception.ErrorCode is "TOKEN_EXPIRED".
             var exception = await act.Should().ThrowAsync<BadRequestException>();
             exception.Which.ErrorCode.Should().Be("TOKEN_EXPIRED");
         }
@@ -86,16 +106,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithUsedToken_ShouldThrowTokenAlreadyUsed()
         {
+            // STEP-01: Create userToken through CreateToken and set userToken.UsedAt to Now.AddHours().
             var userToken = CreateToken();
             userToken.UsedAt = Now.AddHours(-1);
+            // STEP-02: Mock IAuthenticationRepository; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(userToken);
+            // STEP-03: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-04: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-05: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-06: Assert act throws ConflictException and exception.ErrorCode is "TOKEN_ALREADY_USED".
             var exception = await act.Should().ThrowAsync<ConflictException>();
             exception.Which.ErrorCode.Should().Be("TOKEN_ALREADY_USED");
         }
@@ -105,13 +131,18 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithEmptyToken_ShouldValidateBeforeDatabaseAccess()
         {
+            // STEP-01: Mock IAuthenticationRepository and IUnitOfWork.
             var repository = new Mock<IAuthenticationRepository>();
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync with an empty VerifyEmailRequestDto in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new VerifyEmailRequestDto(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify BeginTransactionAsync is never called.
             unitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -124,19 +155,26 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [InlineData(UserStatus.Deactivated)]
         public async Task ExecuteAsync_WithNonPendingUser_ShouldThrowTokenInvalid(UserStatus status)
         {
+            // STEP-01: Create userToken through CreateToken and set userToken.User.Status to status.
             var userToken = CreateToken();
             userToken.User.Status = status;
+            // STEP-02: Mock IAuthenticationRepository; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(userToken);
+            // STEP-03: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-04: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-05: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-06: Assert act throws BadRequestException, exception.ErrorCode is "TOKEN_INVALID" and userToken.User.Status is status.
             var exception = await act.Should().ThrowAsync<BadRequestException>();
             exception.Which.ErrorCode.Should().Be("TOKEN_INVALID");
             userToken.User.Status.Should().Be(status);
+            // STEP-07: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -145,15 +183,20 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithPasswordResetToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.Purpose to UserTokenPurpose.PasswordReset, get repository from RepositoryReturning and 1 more.
             var userToken = CreateToken();
             userToken.Purpose = UserTokenPurpose.PasswordReset;
             var repository = RepositoryReturning(userToken);
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws BadRequestException and the thrown exception.ErrorCode is "TOKEN_INVALID".
             (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("TOKEN_INVALID");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -162,14 +205,18 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithUsedAndExpiredToken_ShouldThrowTokenAlreadyUsed()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.UsedAt to Now.AddHours(), set userToken.ExpiresAt to Now.AddHours() and 1 more.
             var userToken = CreateToken();
             userToken.UsedAt = Now.AddHours(-2);
             userToken.ExpiresAt = Now.AddHours(-1);
             var repository = RepositoryReturning(userToken);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, CreateUnitOfWork(out _));
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ConflictException and the thrown exception.ErrorCode is "TOKEN_ALREADY_USED".
             (await act.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("TOKEN_ALREADY_USED");
         }
 
@@ -178,13 +225,17 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithOneTickRemaining_ShouldVerifyUser()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.ExpiresAt to Now.AddTicks() and get repository from RepositoryReturning.
             var userToken = CreateToken();
             userToken.ExpiresAt = Now.AddTicks(1);
             var repository = RepositoryReturning(userToken);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, CreateUnitOfWork(out _));
 
+            // STEP-03: Run useCase.ExecuteAsync and keep result.
             var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert result.Status is "active" and userToken.UsedAt is Now.
             result.Status.Should().Be("active");
             userToken.UsedAt.Should().Be(Now);
         }
@@ -194,17 +245,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.VerifyEmail
         [Fact]
         public async Task ExecuteAsync_WithPersistedPostVerificationState_ShouldThrowTokenAlreadyUsed()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.UsedAt to Now.AddMinutes(), set userToken.User.Status to UserStatus.Active and 3 more.
             var userToken = CreateToken();
             userToken.UsedAt = Now.AddMinutes(-1);
             userToken.User.Status = UserStatus.Active;
             userToken.User.EmailVerifiedAt = Now.AddMinutes(-1);
             var repository = RepositoryReturning(userToken);
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ConflictException and the thrown exception.ErrorCode is "TOKEN_ALREADY_USED".
             (await act.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("TOKEN_ALREADY_USED");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 

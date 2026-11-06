@@ -25,9 +25,11 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
         [Fact]
         public async Task ExecuteAsync_WithExistingUser_ShouldReplaceTokensAndSendEmail()
         {
+            // STEP-01: Create user through CreateUser, create firstOldToken as UserToken and create secondOldToken as UserToken.
             var user = CreateUser();
             var firstOldToken = new UserToken { UserId = user.Id, Purpose = UserTokenPurpose.PasswordReset };
             var secondOldToken = new UserToken { UserId = user.Id, Purpose = UserTokenPurpose.PasswordReset };
+            // STEP-02: Declare addedToken to capture a call argument; mock IAuthenticationRepository and 1 more; stub repository.GetUserByEmailForUpdateAsync and 2 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -40,20 +42,27 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
             repository.Setup(x => x.AddUserToken(It.IsAny<UserToken>()))
                 .Callback<UserToken>(token => addedToken = token);
             var emailService = new Mock<IEmailService>();
+            // STEP-03: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork();
+            // STEP-04: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-05: Run useCase.ExecuteAsync with ForgotPasswordRequestDto { Email = " USER@ANGI.TEST " }.
             await useCase.ExecuteAsync(
                 new ForgotPasswordRequestDto { Email = " USER@ANGI.TEST " },
                 CancellationToken.None);
 
+            // STEP-06: Assert firstOldToken.UsedAt is _now and secondOldToken.UsedAt is _now.
             firstOldToken.UsedAt.Should().Be(_now);
             secondOldToken.UsedAt.Should().Be(_now);
+            // STEP-07: Assert addedToken is not null, addedToken.UserId is user.Id, addedToken.Purpose is UserTokenPurpose.PasswordReset and 1 more.
             addedToken.Should().NotBeNull();
             addedToken!.UserId.Should().Be(user.Id);
             addedToken.Purpose.Should().Be(UserTokenPurpose.PasswordReset);
             addedToken.TokenHash.Should().Be("new-hash");
+            // STEP-08: Assert addedToken.ExpiresAt is _now.AddMinutes().
             addedToken.ExpiresAt.Should().Be(_now.AddMinutes(30));
+            // STEP-09: Verify SaveChangesAsync is called once and SendPasswordResetAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
             emailService.Verify(x => x.SendPasswordResetAsync(
                 user.Email,
@@ -68,17 +77,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
         [Fact]
         public async Task ExecuteAsync_WithUnknownEmail_ShouldReturnWithoutSideEffects()
         {
+            // STEP-01: Mock IAuthenticationRepository and IEmailService; stub repository.GetUserByEmailForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync("missing@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((User?)null);
             var emailService = new Mock<IEmailService>();
+            // STEP-02: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync with ForgotPasswordRequestDto { Email = "missing@angi.test" }.
             await useCase.ExecuteAsync(
                 new ForgotPasswordRequestDto { Email = "missing@angi.test" },
                 CancellationToken.None);
 
+            // STEP-05: Verify AddUserToken is never called, SaveChangesAsync is never called and SendPasswordResetAsync is never called.
             repository.Verify(x => x.AddUserToken(It.IsAny<UserToken>()), Times.Never);
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
             emailService.Verify(x => x.SendPasswordResetAsync(
@@ -99,9 +113,11 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
         [InlineData(UserStatus.Deactivated)]
         public async Task ExecuteAsync_WithAnyExistingAccountStatus_ShouldSendResetEmail(UserStatus status)
         {
+            // STEP-01: Create user through CreateUser, set user.Status to status and set user.PasswordHash to null.
             var user = CreateUser();
             user.Status = status;
             user.PasswordHash = null;
+            // STEP-02: Mock IAuthenticationRepository and IEmailService; stub repository.GetUserByEmailForUpdateAsync and repository.GetUnusedUserTokensAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync(user.Email, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -111,12 +127,15 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
             var emailService = new Mock<IEmailService>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, CreateUnitOfWork());
 
+            // STEP-04: Run useCase.ExecuteAsync with ForgotPasswordRequestDto { Email = user.Email }.
             await useCase.ExecuteAsync(
                 new ForgotPasswordRequestDto { Email = user.Email },
                 CancellationToken.None);
 
+            // STEP-05: Verify SendPasswordResetAsync is called once.
             emailService.Verify(x => x.SendPasswordResetAsync(
                 user.Email,
                 user.DisplayName,
@@ -130,17 +149,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
         [Fact]
         public async Task ExecuteAsync_WithMalformedEmail_ShouldValidateBeforeRepositoryAccess()
         {
+            // STEP-01: Mock IAuthenticationRepository.
             var repository = new Mock<IAuthenticationRepository>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 new Mock<IEmailService>(),
                 CreateUnitOfWork());
 
+            // STEP-03: Wrap useCase.ExecuteAsync with ForgotPasswordRequestDto { Email = "not-an-email" } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new ForgotPasswordRequestDto { Email = "not-an-email" },
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify GetUserByEmailForUpdateAsync is never called.
             repository.Verify(x => x.GetUserByEmailForUpdateAsync(
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()), Times.Never);
@@ -151,7 +175,9 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
         [Fact]
         public async Task ExecuteAsync_WhenEmailDeliveryFails_ShouldPreserveCommittedToken()
         {
+            // STEP-01: Create user through CreateUser.
             var user = CreateUser();
+            // STEP-02: Mock IAuthenticationRepository, IEmailService and 2 more; stub repository.GetUserByEmailForUpdateAsync, repository.GetUnusedUserTokensAsync and 3 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync(user.Email, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -173,13 +199,17 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ForgotPassword
             unitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(transaction.Object);
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync with ForgotPasswordRequestDto { Email = user.Email } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new ForgotPasswordRequestDto { Email = user.Email },
                 CancellationToken.None);
 
+            // STEP-05: Assert act throws ServiceUnavailableException.
             await act.Should().ThrowAsync<ServiceUnavailableException>();
+            // STEP-06: Verify SaveChangesAsync is called once and CommitAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
             transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         }

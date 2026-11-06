@@ -40,13 +40,18 @@ public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermission
         ReplaceModRolePermissionsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Require _currentUserService.UserId.
         _ = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Yêu cầu đăng nhập.");
 
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Load catalog through repository.GetCatalogAsync.
         var catalog = await _repository.GetCatalogAsync(ct);
+        // STEP-05: Prepare permissionByCode, replacements and replacementCodes, then call repository.ReplaceModRoleDefaultsAsync.
         var permissionByCode = AdministrationPermissionRules.ResolveGrantable(request.PermissionCodes, catalog);
 
         var replacements = request.PermissionCodes
@@ -59,6 +64,7 @@ public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermission
             catalog.ModRoleId,
             replacements.Select(permission => permission.Id).ToArray(),
             ct);
+        // STEP-06: Record audit action AuditActions.RolePermissionsChanged.
         _auditLogService.Add(new AuditLogEntry
         {
             Action = AuditActions.RolePermissionsChanged,
@@ -67,9 +73,12 @@ public sealed class ReplaceModRolePermissionsUseCase : IReplaceModRolePermission
             OldValues = new { PermissionCodes = catalog.ModDefaults },
             NewValues = new { PermissionCodes = replacementCodes }
         });
+        // STEP-07: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-08: Commit the transaction.
         await transaction.CommitAsync(ct);
 
+        // STEP-09: Return a new ReplaceModRolePermissionsResponseDto.
         return new ReplaceModRolePermissionsResponseDto
         {
             Role = "MOD",

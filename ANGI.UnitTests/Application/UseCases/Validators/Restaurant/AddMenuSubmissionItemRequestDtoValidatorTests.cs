@@ -12,6 +12,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithValidRequest_ShouldBeValid()
     {
+        // STEP-01: Validate AddMenuSubmissionItemRequestDto { Name, Description, DishForm, ... } and keep result.
         var result = await new AddMenuSubmissionItemRequestDtoValidator().ValidateAsync(new AddMenuSubmissionItemRequestDto
         {
             Name = "Mì Quảng",
@@ -21,6 +22,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
             TagIds = [1, 2]
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -29,6 +31,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithShortDescription_ShouldRejectDescription()
     {
+        // STEP-01: Validate AddMenuSubmissionItemRequestDto { Name, Description, DishForm, ... } and keep result.
         var result = await new AddMenuSubmissionItemRequestDtoValidator().ValidateAsync(new AddMenuSubmissionItemRequestDto
         {
             Name = "Mì Quảng",
@@ -37,6 +40,7 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
             Price = 40000
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "Description");
     }
 
@@ -52,11 +56,14 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
         string value,
         bool expectedValid)
     {
+        // STEP-01: Create request through ValidRequest and set request.Price to decimal.Parse().
         var request = ValidRequest();
         request.Price = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
 
+        // STEP-02: Validate request and keep result.
         var result = await new AddMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -69,11 +76,14 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     [InlineData(2001, false)]
     public async Task ValidateAsync_ShouldMeasureDescriptionAfterTrim(int contentLength, bool expectedValid)
     {
+        // STEP-01: Create request through ValidRequest and set request.Description to " {new string()} ".
         var request = ValidRequest();
         request.Description = $"  {new string('a', contentLength)}  ";
 
+        // STEP-02: Validate request and keep result.
         var result = await new AddMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -85,13 +95,16 @@ public sealed class AddMenuSubmissionItemRequestDtoValidatorTests
     [InlineData("1", "-1")]
     public async Task ValidateAsync_WithInvalidTags_ShouldRejectTagIds(string? first, string? second)
     {
+        // STEP-01: Create request through ValidRequest and set request.TagIds to a test value.
         var request = ValidRequest();
         request.TagIds = first is null
             ? null
             : second == "1,1" ? [(short)1, (short)1] : [(short)1, (short)-1];
 
+        // STEP-02: Validate request and keep result.
         var result = await new AddMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is first is null.
         result.IsValid.Should().Be(first is null);
     }
 

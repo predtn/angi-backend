@@ -16,7 +16,9 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public void CreateAccessToken_ShouldIssueRequiredJwtClaimsSessionIdAndExpiry()
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService();
+            // STEP-02: Create user as User.
             var user = new User
             {
                 Id = 12,
@@ -25,7 +27,9 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
                 Role = new Role { Code = "TRAVELER", Name = "Traveler" }
             };
 
+            // STEP-03: Run service.CreateAccessToken with user and keep accessToken.
             var accessToken = service.CreateAccessToken(user, 77);
+            // STEP-04: Read jwt from the response; assert jwt.Issuer is "ANGI.Tests", jwt.Audiences has exactly one matching item and 3 more.
             var jwt = new JwtSecurityTokenHandler().ReadJwtToken(accessToken.Token);
 
             jwt.Issuer.Should().Be("ANGI.Tests");
@@ -36,6 +40,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
             jwt.Claims.Should().Contain(claim => claim.Type == "email_verified" && claim.Value == "true");
             jwt.Claims.Should().ContainSingle(claim => claim.Type == JwtRegisteredClaimNames.Sid)
                 .Which.Value.Should().Be("77");
+            // STEP-05: Assert accessToken.ExpiresAt is Now.AddMinutes().
             accessToken.ExpiresAt.Should().Be(Now.AddMinutes(15));
         }
 
@@ -44,11 +49,15 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public void CreateRefreshToken_ShouldReturnHashedRefreshTokenAndExpiry()
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService();
 
+            // STEP-02: Run service.CreateRefreshToken and keep first.
             var first = service.CreateRefreshToken();
+            // STEP-03: Run service.CreateRefreshToken and keep second.
             var second = service.CreateRefreshToken();
 
+            // STEP-04: Assert first.Token is not first.TokenHash, first.TokenHash is service.HashRefreshToken(), first.TokenHash has length 64 and 2 more.
             first.Token.Should().NotBe(first.TokenHash);
             first.TokenHash.Should().Be(service.HashRefreshToken(first.Token));
             first.TokenHash.Should().HaveLength(64);
@@ -61,11 +70,15 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public void CreateUserToken_ShouldReturnRandomTokenAndHash()
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService();
 
+            // STEP-02: Run service.CreateUserToken and keep first.
             var first = service.CreateUserToken();
+            // STEP-03: Run service.CreateUserToken and keep second.
             var second = service.CreateUserToken();
 
+            // STEP-04: Assert first.Token is not first.TokenHash, first.Token matches the expected pattern, first.TokenHash is service.HashUserToken() and 2 more.
             first.Token.Should().NotBe(first.TokenHash);
             first.Token.Should().MatchRegex("^[A-Za-z0-9_-]+$");
             first.TokenHash.Should().Be(service.HashUserToken(first.Token));

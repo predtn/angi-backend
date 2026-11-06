@@ -30,15 +30,21 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task UploadMedia_ShouldReturnCreatedAndPersistMetadata()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "media-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize and get response from UploadAsync.
         Authorize(client, auth.AccessToken);
 
         using var response = await UploadAsync(client, "avatar", "avatar.png", "image/png", PngBytes);
 
+        // STEP-05: Obtain media through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.Created.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var media = await SuccessDataAsync<MediaFileDto>(response);
+        // STEP-06: Assert in the database persisted.UploaderId is auth.User.Id, persisted.MimeType is "image/png" and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persisted = await context.MediaFiles.SingleAsync(value => value.Id == media.Id);
@@ -53,25 +59,35 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterGetAndUpdateRestaurant_ShouldPersistCompleteProfileLifecycle()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "profile-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
 
+        // STEP-05: Obtain restaurant through RegisterRestaurantAsync.
         var restaurant = await RegisterRestaurantAsync(client, "Initial Integration Restaurant");
+        // STEP-06: Send GET /api/v1/owner/restaurant and keep getResponse.
         using var getResponse = await client.GetAsync("/api/v1/owner/restaurant");
+        // STEP-07: Assert getResponse.StatusCode is HttpStatusCode.OK, SuccessDataAsync succeeds and SuccessDataAsync().Id is restaurant.Id.
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         (await SuccessDataAsync<OwnerRestaurantDto>(getResponse)).Id.Should().Be(restaurant.Id);
 
+        // STEP-08: Send PATCH /api/v1/owner/restaurant with a body of Name and Description and keep patchResponse.
         using var patchResponse = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new
         {
             Name = "Updated Integration Restaurant",
             Description = "Updated through the full HTTP and PostgreSQL integration pipeline."
         });
 
+        // STEP-09: Obtain updated through SuccessDataAsync; assert patchResponse.StatusCode is HttpStatusCode.OK and updated.Name is "Updated Integration Restaurant".
         patchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var updated = await SuccessDataAsync<OwnerRestaurantDto>(patchResponse);
         updated.Name.Should().Be("Updated Integration Restaurant");
+        // STEP-10: Assert in the database persisted.Name is "Updated Integration Restaurant", persisted.Description contains "full HTTP" and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persisted = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
@@ -86,19 +102,27 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task SubmitVerification_ShouldPersistPendingVerificationAndOwnedDocument()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "verification-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
+        // STEP-05: Obtain restaurant through RegisterRestaurantAsync.
         var restaurant = await RegisterRestaurantAsync(client, "Verification Integration Restaurant");
+        // STEP-06: Get uploadResponse from UploadAsync.
         using var uploadResponse = await UploadAsync(
             client,
             "verification_doc",
             "license.pdf",
             "application/pdf",
             "%PDF integration"u8.ToArray());
+        // STEP-07: Obtain media through SuccessDataAsync.
         var media = await SuccessDataAsync<MediaFileDto>(uploadResponse);
 
+        // STEP-08: Send POST /api/v1/owner/restaurant/verifications with a SubmitVerificationRequestDto body and keep response.
         using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant/verifications", new SubmitVerificationRequestDto
         {
             LegalName = "Integration Restaurant Company",
@@ -114,9 +138,11 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             ]
         });
 
+        // STEP-09: Obtain verification through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.Created and verification.Status is "pending".
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var verification = await SuccessDataAsync<VerificationDto>(response);
         verification.Status.Should().Be("pending");
+        // STEP-10: Assert in the database persistedRestaurant.VerificationStatus is RestaurantVerificationStatus.Pending and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var persistedRestaurant = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
@@ -134,11 +160,17 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task ManageAndSubmitMenu_ShouldPersistDraftItemsAndPendingTransition()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "menu-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
+        // STEP-05: Obtain restaurant through RegisterRestaurantAsync.
         var restaurant = await RegisterRestaurantAsync(client, "Menu Integration Restaurant");
+        // STEP-06: Get dishId from _factory.ExecuteDbAsync.
         var dishId = await _factory.ExecuteDbAsync(async context =>
         {
             var persistedRestaurant = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
@@ -157,16 +189,21 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             return dish.Id;
         });
 
+        // STEP-07: Send PUT /api/v1/owner/restaurant/menu/dishes/{dishId}/availability with a UpdateDishAvailabilityRequestDto body and keep availabilityResponse.
         using var availabilityResponse = await client.PutAsJsonAsync(
             $"/api/v1/owner/restaurant/menu/dishes/{dishId}/availability",
             new UpdateDishAvailabilityRequestDto { IsAvailable = false });
+        // STEP-08: Assert availabilityResponse.StatusCode is HttpStatusCode.OK.
         availabilityResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // STEP-09: Send POST /api/v1/owner/restaurant/menu-submissions with no body and keep createResponse.
         using var createResponse = await client.PostAsync("/api/v1/owner/restaurant/menu-submissions", null);
+        // STEP-10: Obtain submission through SuccessDataAsync; assert createResponse.StatusCode is HttpStatusCode.Created and 1 more.
         createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         var submission = await SuccessDataAsync<MenuSubmissionWithItemsDto>(createResponse);
         var copiedItem = submission.Items.Should().ContainSingle(value => value.SourceDishId == dishId).Subject;
 
+        // STEP-11: Send POST /api/v1/owner/restaurant/menu-submissions/{submission.Id}/items with a AddMenuSubmissionItemRequestDto body and keep addResponse.
         using var addResponse = await client.PostAsJsonAsync(
             $"/api/v1/owner/restaurant/menu-submissions/{submission.Id}/items",
             new AddMenuSubmissionItemRequestDto
@@ -177,9 +214,11 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
                 Price = 35000,
                 TagIds = []
             });
+        // STEP-12: Obtain addedItem through SuccessDataAsync; assert addResponse.StatusCode is HttpStatusCode.Created.
         addResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         var addedItem = await SuccessDataAsync<MenuSubmissionItemDto>(addResponse);
 
+        // STEP-13: Send PATCH /api/v1/owner/restaurant/menu-submissions/{submission.Id}/items/{copiedItem.Id} with a body of Name and Price and keep updateResponse.
         using var updateResponse = await client.PatchAsJsonAsync(
             $"/api/v1/owner/restaurant/menu-submissions/{submission.Id}/items/{copiedItem.Id}",
             new
@@ -187,24 +226,34 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
                 Name = "Updated Original Dish",
                 Price = 65000
             });
+        // STEP-14: Assert updateResponse.StatusCode is HttpStatusCode.OK.
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // STEP-15: Send DELETE /api/v1/owner/restaurant/menu-submissions/{submission.Id}/items/{addedItem.Id} and keep deleteResponse.
         using var deleteResponse = await client.DeleteAsync(
             $"/api/v1/owner/restaurant/menu-submissions/{submission.Id}/items/{addedItem.Id}");
+        // STEP-16: Assert deleteResponse.StatusCode is HttpStatusCode.OK.
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // STEP-17: Send GET /api/v1/owner/restaurant/menu-submissions?page=1&pageSize=20 and keep listResponse.
         using var listResponse = await client.GetAsync("/api/v1/owner/restaurant/menu-submissions?page=1&pageSize=20");
+        // STEP-18: Assert listResponse.StatusCode is HttpStatusCode.OK.
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        // STEP-19: Send GET /api/v1/owner/restaurant/menu-submissions/{submission.Id} and keep detailResponse.
         using var detailResponse = await client.GetAsync($"/api/v1/owner/restaurant/menu-submissions/{submission.Id}");
+        // STEP-20: Assert detailResponse.StatusCode is HttpStatusCode.OK.
         detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // STEP-21: Send POST /api/v1/owner/restaurant/menu-submissions/{submission.Id}/submit with a SubmitMenuSubmissionRequestDto body and keep submitResponse.
         using var submitResponse = await client.PostAsJsonAsync(
             $"/api/v1/owner/restaurant/menu-submissions/{submission.Id}/submit",
             new SubmitMenuSubmissionRequestDto { OwnerNote = "Ready for integration approval" });
 
+        // STEP-22: Obtain submitted through SuccessDataAsync; assert submitResponse.StatusCode is HttpStatusCode.OK and submitted.Status is "pending".
         submitResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var submitted = await SuccessDataAsync<MenuSubmissionDto>(submitResponse);
         submitted.Status.Should().Be("pending");
+        // STEP-23: Assert in the database context.Dishes.SingleAsync(filtered).IsAvailable is false, persisted.Status is MenuSubmissionStatus.Pending and 4 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Dishes.SingleAsync(value => value.Id == dishId)).IsAvailable.Should().BeFalse();
@@ -224,11 +273,16 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterRestaurant_WithInvalidPhones_ShouldReturnValidationWithoutCreatingRows()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "invalid-phone-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
 
+        // STEP-05: Assert for each phone, AssertPhoneValidationAsync succeeds.
         foreach (var phone in InvalidPhones())
         {
             using var response = await client.PostAsJsonAsync(
@@ -237,14 +291,17 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             await AssertPhoneValidationAsync(response, phone, isRegistration: true);
         }
 
+        // STEP-06: Send POST /api/v1/owner/restaurant with a body of Name, AddressLine, ProvinceName, Latitude and 1 more and keep omittedResponse.
         // Omitting the property must behave like the empty DTO default.
         using var omittedResponse = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new
         {
             Name = "Missing Phone Restaurant", AddressLine = "1 Integration Street",
             ProvinceName = "Ho Chi Minh City", Latitude = 10m, Longitude = 106m
         });
+        // STEP-07: Assert AssertPhoneValidationAsync confirms.
         await AssertPhoneValidationAsync(omittedResponse, "", isRegistration: true);
 
+        // STEP-08: Assert in the database context.Restaurants.CountAsync() is 0, context.RestaurantImages.CountAsync() is 0 and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Restaurants.CountAsync()).Should().Be(0);
@@ -252,6 +309,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             (await context.RestaurantBusinessHours.CountAsync()).Should().Be(0);
         });
 
+        // STEP-09: Obtain restaurant through RegisterRestaurantAsync; assert restaurant.Phone is "0900000000".
         // An earlier invalid attempt must not consume the owner's right to register.
         var restaurant = await RegisterRestaurantAsync(client, "Recovered Phone Restaurant");
         restaurant.Phone.Should().Be("0900000000");
@@ -262,14 +320,18 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterRestaurant_WithValidPhones_ShouldPersistAndReturnFormattedNumbers()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Build the phones collection.
         string[] phones =
         [
             "0901234567", " 0901234567 ", "0236 3812 345", "024 3812 3456",
             "028 3812 3456", "+84 90 123 4567", "+84 236 3812 345", "090.123.4567",
             "090-123-4567", "0901234567".PadRight(20)
         ];
+        // STEP-04: Assert in the database on every iteration, RegisterOwnerAndLoginAsync succeeds, RegisterRestaurantAsync succeeds and 8 more.
         for (var index = 0; index < phones.Length; index++)
         {
             client.DefaultRequestHeaders.Authorization = null;
@@ -297,15 +359,22 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task UpdateRestaurant_WithInvalidPhones_ShouldLeaveProfileAndAuditUnchanged()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "patch-phone-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
+        // STEP-05: Obtain restaurant through RegisterRestaurantAsync.
         var restaurant = await RegisterRestaurantAsync(client, "Unchanged Phone Restaurant");
+        // STEP-06: Get auditCount from _factory.ExecuteDbAsync and get updatedAt from _factory.ExecuteDbAsync.
         var auditCount = await _factory.ExecuteDbAsync(context => context.AuditLogs.CountAsync());
         var updatedAt = await _factory.ExecuteDbAsync(context => context.Restaurants
             .Where(value => value.Id == restaurant.Id).Select(value => value.UpdatedAt).SingleAsync());
 
+        // STEP-07: Assert for each phone, AssertPhoneValidationAsync succeeds.
         foreach (var phone in InvalidPhones())
         {
             using var response = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new
@@ -315,6 +384,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             await AssertPhoneValidationAsync(response, phone, isRegistration: false);
         }
 
+        // STEP-08: Assert in the database stored.Phone is restaurant.Phone, stored.Name is restaurant.Name, stored.UpdatedAt is updatedAt and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var stored = await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id);
@@ -324,14 +394,19 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             (await context.AuditLogs.CountAsync()).Should().Be(auditCount);
         });
 
+        // STEP-09: Send PATCH /api/v1/owner/restaurant with a body of Description and keep omitted.
         // Omitting phone still permits a legitimate partial update.
         using var omitted = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { Description = "Phone omitted" });
+        // STEP-10: Assert omitted.StatusCode is HttpStatusCode.OK, SuccessDataAsync succeeds and SuccessDataAsync().Phone is restaurant.Phone.
         omitted.StatusCode.Should().Be(HttpStatusCode.OK);
         (await SuccessDataAsync<OwnerRestaurantDto>(omitted)).Phone.Should().Be(restaurant.Phone);
 
+        // STEP-11: Send PATCH /api/v1/owner/restaurant with a body of Phone and keep valid.
         using var valid = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { Phone = "+84 236 3812 345" });
+        // STEP-12: Assert valid.StatusCode is HttpStatusCode.OK, SuccessDataAsync succeeds and SuccessDataAsync().Phone is "+84 236 3812 345".
         valid.StatusCode.Should().Be(HttpStatusCode.OK);
         (await SuccessDataAsync<OwnerRestaurantDto>(valid)).Phone.Should().Be("+84 236 3812 345");
+        // STEP-13: Assert in the database context.Restaurants.SingleAsync(filtered).Phone is "+84 236 3812 345" and context.AuditLogs.CountAsync() is auditCount + 2.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Restaurants.SingleAsync(value => value.Id == restaurant.Id))
@@ -345,27 +420,37 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterRestaurant_WithConcurrentValidPhones_ShouldCreateOnlyOneRestaurant()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "concurrent-phone-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
 
+        // STEP-05: Send POST /api/v1/owner/restaurant with a request body from 2 concurrent calls and keep responses.
         var responses = await Task.WhenAll(
             client.PostAsJsonAsync("/api/v1/owner/restaurant", RegistrationRequest("First Contact", "0901234567")),
             client.PostAsJsonAsync("/api/v1/owner/restaurant", RegistrationRequest("Second Contact", "0236 3812 345")));
         try
         {
+            // STEP-06: Assert responses.Select(filtered) is equivalent to the expected items.
             responses.Select(response => response.StatusCode)
                 .Should().BeEquivalentTo(new[] { HttpStatusCode.Created, HttpStatusCode.Conflict });
+            // STEP-07: Get conflict from responses.Single.
             var conflict = responses.Single(response => response.StatusCode == HttpStatusCode.Conflict);
+            // STEP-08: Read error from the response; assert error.Success is false and error.ErrorCode is "OWNER_ALREADY_HAS_RESTAURANT".
             var error = await conflict.Content.ReadFromJsonAsync<ApiResponse<object>>();
             error!.Success.Should().BeFalse();
             error.ErrorCode.Should().Be("OWNER_ALREADY_HAS_RESTAURANT");
+            // STEP-09: Assert in the database context.Restaurants.CountAsync(filtered) is 1.
             await _factory.ExecuteDbAsync(async context =>
                 (await context.Restaurants.CountAsync(value => value.OwnerId == auth.User.Id)).Should().Be(1));
         }
         finally
         {
+            // STEP-10: Clean up: for each response in responses, call response.Dispose.
             foreach (var response in responses) response.Dispose();
         }
     }
@@ -375,15 +460,21 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterRestaurant_WithNullBusinessHour_ShouldRejectBeforePersistence()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "null-hours-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize, get request from RegistrationRequest and set request.BusinessHours to a test items.
         Authorize(client, auth.AccessToken);
         var request = RegistrationRequest("Null Hours Restaurant", "0901234567");
         request.BusinessHours = [null!];
 
+        // STEP-05: Send POST /api/v1/owner/restaurant with request and keep response.
         using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
 
+        // STEP-06: Read envelope from the response; assert response.StatusCode is HttpStatusCode.BadRequest, envelope.Success is false and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
         envelope!.Success.Should().BeFalse();
@@ -392,6 +483,7 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
         {
             ["businessHours[0]"] = ["Khung giờ mở cửa không hợp lệ."]
         });
+        // STEP-07: Assert in the database context.Restaurants.CountAsync() is 0.
         await _factory.ExecuteDbAsync(async context => (await context.Restaurants.CountAsync()).Should().Be(0));
     }
 
@@ -400,11 +492,16 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterRestaurant_WithOwnedMedia_ShouldRequireImagesAndPersistValidAggregate()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "image-contact-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize and get pdfUpload from UploadAsync.
         Authorize(client, auth.AccessToken);
         using var pdfUpload = await UploadAsync(client, "verification_doc", "license.pdf", "application/pdf", "%PDF test"u8.ToArray());
+        // STEP-05: Obtain document through SuccessDataAsync; assert for each isCover, rejected.StatusCode is HttpStatusCode.BadRequest, error.Success is false and 3 more.
         var document = await SuccessDataAsync<MediaFileDto>(pdfUpload);
 
         foreach (var isCover in new[] { true, false })
@@ -421,21 +518,28 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
             error.Errors.Should().ContainSingle().Which.Key.Should().Be(isCover ? "coverMediaId" : "imageMediaIds");
         }
 
+        // STEP-06: Assert in the database context.Restaurants.CountAsync() is 0.
         await _factory.ExecuteDbAsync(async context => (await context.Restaurants.CountAsync()).Should().Be(0));
+        // STEP-07: Get imageUpload from UploadAsync.
         using var imageUpload = await UploadAsync(client, "restaurant", "restaurant.png", "image/png", PngBytes);
+        // STEP-08: Obtain image through SuccessDataAsync.
         var image = await SuccessDataAsync<MediaFileDto>(imageUpload);
+        // STEP-09: Get request from RegistrationRequest, set request.CoverMediaId to image.Id, set request.ImageMediaIds to a test items and 1 more.
         var request = RegistrationRequest("Complete Image Restaurant", "0236 3812 345");
         request.CoverMediaId = image.Id;
         request.ImageMediaIds = [image.Id];
         request.BusinessHours = [new BusinessHourDto { DayOfWeek = 6, OpenTime = "22:00", CloseTime = "02:00" }];
 
+        // STEP-10: Send POST /api/v1/owner/restaurant with request and keep response.
         using var response = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
 
+        // STEP-11: Obtain restaurant through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.Created, restaurant.CoverUrl is image.Url and 2 more.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var restaurant = await SuccessDataAsync<OwnerRestaurantDto>(response);
         restaurant.CoverUrl.Should().Be(image.Url);
         restaurant.Images.Should().Equal(image.Url);
         restaurant.BusinessHours.Should().BeEquivalentTo(request.BusinessHours);
+        // STEP-12: Assert in the database stored.Phone is request.Phone, stored.CoverMediaId is image.Id, stored.Images has exactly one matching item and 3 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var stored = await context.Restaurants.Include(value => value.Images).Include(value => value.BusinessHours)
@@ -452,24 +556,33 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task RegisterAndUpdateRestaurant_WithLegacyDistrict_ShouldIgnoreIt()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "legacy-district-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize.
         Authorize(client, auth.AccessToken);
 
+        // STEP-05: Send POST /api/v1/owner/restaurant with a body of Name, Phone, AddressLine, Ward and 5 more and keep register.
         using var register = await client.PostAsJsonAsync("/api/v1/owner/restaurant", new
         {
             Name = "Legacy District Restaurant", Phone = "0900000000", AddressLine = "12 Lê Duẩn",
             Ward = "Phường Hải Châu", District = "Quận Hải Châu", ProvinceName = "Thành phố Đà Nẵng",
             Latitude = 16.07m, Longitude = 108.22m, PriceLevel = 2
         });
+        // STEP-06: Assert register.StatusCode is HttpStatusCode.Created and the response body does not contain ""district"".
         register.StatusCode.Should().Be(HttpStatusCode.Created);
         (await register.Content.ReadAsStringAsync()).Should().NotContain("\"district\"");
 
+        // STEP-07: Send PATCH /api/v1/owner/restaurant with a body of District and keep patch.
         using var patch = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { District = "Quận Thanh Khê" });
+        // STEP-08: Assert patch.StatusCode is HttpStatusCode.OK and the response body does not contain ""district"".
         patch.StatusCode.Should().Be(HttpStatusCode.OK);
         (await patch.Content.ReadAsStringAsync()).Should().NotContain("\"district\"");
 
+        // STEP-09: Assert in the database stored.Ward is the expected text and stored.ProvinceName is the expected text.
         await _factory.ExecuteDbAsync(async context =>
         {
             var stored = await context.Restaurants.SingleAsync();
@@ -483,34 +596,48 @@ public sealed class OwnerRestaurantEndToEndTests : IClassFixture<PostgresApiFact
     [PostgresEndToEndFact]
     public async Task UpdateRestaurant_WithGalleryIdsFromProfile_ShouldDropReorderAndAddPhotos()
     {
+        // STEP-01: Reset the test database.
         await _factory.ResetDatabaseAsync();
+        // STEP-02: Create the HTTP client.
         using var client = _factory.CreateClient();
+        // STEP-03: Obtain auth through RegisterOwnerAndLoginAsync.
         var auth = await RegisterOwnerAndLoginAsync(client, "gallery-owner@integration.test");
+        // STEP-04: Authenticate the HTTP client through Authorize and create photos as List<MediaFileDto>.
         Authorize(client, auth.AccessToken);
         var photos = new List<MediaFileDto>();
+        // STEP-05: Assert for each name, SuccessDataAsync succeeds.
         foreach (var name in new[] { "first.png", "second.png", "third.png" })
         {
             using var upload = await UploadAsync(client, "restaurant", name, "image/png", PngBytes);
             photos.Add(await SuccessDataAsync<MediaFileDto>(upload));
         }
 
+        // STEP-06: Get request from RegistrationRequest and set request.ImageMediaIds to a test items.
         var request = RegistrationRequest("Gallery Restaurant", "0901234567");
         request.ImageMediaIds = [photos[0].Id, photos[1].Id];
+        // STEP-07: Send POST /api/v1/owner/restaurant with request and keep register.
         using var register = await client.PostAsJsonAsync("/api/v1/owner/restaurant", request);
+        // STEP-08: Assert register.StatusCode is HttpStatusCode.Created, SuccessDataAsync succeeds and SuccessDataAsync().ImageMediaIds equals photos[0].Id.
         register.StatusCode.Should().Be(HttpStatusCode.Created);
         (await SuccessDataAsync<OwnerRestaurantDto>(register)).ImageMediaIds.Should().Equal(photos[0].Id, photos[1].Id);
+        // STEP-09: Send GET /api/v1/owner/restaurant and keep get.
         using var get = await client.GetAsync("/api/v1/owner/restaurant");
+        // STEP-10: Obtain profile through SuccessDataAsync; assert profile.ImageMediaIds equals photos[0].Id and profile.Images equals photos[0].Url.
         var profile = await SuccessDataAsync<OwnerRestaurantDto>(get);
         profile.ImageMediaIds.Should().Equal(photos[0].Id, photos[1].Id);
         profile.Images.Should().Equal(photos[0].Url, photos[1].Url);
 
+        // STEP-11: Get edited from Where(filtered).Prepend().ToArray.
         var edited = profile.ImageMediaIds.Where(id => id != photos[0].Id).Prepend(photos[2].Id).ToArray();
+        // STEP-12: Send PATCH /api/v1/owner/restaurant with a body of ImageMediaIds and keep patch.
         using var patch = await client.PatchAsJsonAsync("/api/v1/owner/restaurant", new { ImageMediaIds = edited });
 
+        // STEP-13: Obtain updated through SuccessDataAsync; assert patch.StatusCode is HttpStatusCode.OK, updated.ImageMediaIds equals photos[2].Id and 1 more.
         patch.StatusCode.Should().Be(HttpStatusCode.OK);
         var updated = await SuccessDataAsync<OwnerRestaurantDto>(patch);
         updated.ImageMediaIds.Should().Equal(photos[2].Id, photos[1].Id);
         updated.Images.Should().Equal(photos[2].Url, photos[1].Url);
+        // STEP-14: Assert in the database stored.Images.OrderBy(filtered).Select(filtered) equals photos[2].Id.
         await _factory.ExecuteDbAsync(async context =>
         {
             var stored = await context.Restaurants.Include(value => value.Images)

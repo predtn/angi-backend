@@ -20,16 +20,20 @@ public sealed class GetOwnerRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantExists_ShouldReturnCompleteOwnerProfile()
     {
+        // STEP-01: Mock IRestaurantRepository and ICloudinaryService; stub repository.GetOwnerProfileAsync and cloudinary.GetUrl.
         var repository = new Mock<IRestaurantRepository>();
         repository.Setup(item => item.GetOwnerProfileAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateRestaurant());
         var cloudinary = new Mock<ICloudinaryService>();
         cloudinary.Setup(item => item.GetUrl("private/license.pdf"))
             .Returns("https://signed.test/license.pdf");
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, cloudinary);
 
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(CancellationToken.None);
 
+        // STEP-04: Assert result.Id is 7, result.Images equals "https://cdn.test/gallery.jpg", result.ImageMediaIds equals 101 and 6 more.
         result.Id.Should().Be(7);
         result.Images.Should().Equal("https://cdn.test/gallery.jpg");
         result.ImageMediaIds.Should().Equal(101);
@@ -46,13 +50,17 @@ public sealed class GetOwnerRestaurantUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRestaurantDoesNotExist_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantRepository; stub repository.GetOwnerProfileAsync.
         var repository = new Mock<IRestaurantRepository>();
         repository.Setup(item => item.GetOwnerProfileAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Domain.Entities.Restaurant?)null);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, new Mock<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(CancellationToken.None);
 
+        // STEP-04: Assert act throws NotFoundException and exception.ErrorCode is "RESTAURANT_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("RESTAURANT_NOT_FOUND");
     }

@@ -18,7 +18,9 @@ public sealed class CancelMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithPendingSubmission_ShouldCancel()
     {
+        // STEP-01: Create submission as MenuSubmission.
         var submission = new MenuSubmission { Id = 14, Status = MenuSubmissionStatus.Pending };
+        // STEP-02: Mock IRestaurantMenuRepository, ICurrentUserService and 1 more; stub repository.LockOwnedSubmissionAsync, currentUser.UserId and 2 more.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
@@ -28,13 +30,16 @@ public sealed class CancelMenuSubmissionUseCaseTests
         unitOfWork.Setup(value => value.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
         unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        // STEP-03: Create the CancelMenuSubmissionUseCase under test as useCase.
         var useCase = new CancelMenuSubmissionUseCase(
             repository.Object,
             currentUser.Object,
             unitOfWork.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-05: Assert submission.Status is MenuSubmissionStatus.Cancelled and result.Status is "cancelled".
         submission.Status.Should().Be(MenuSubmissionStatus.Cancelled);
         result.Status.Should().Be("cancelled");
     }
@@ -44,6 +49,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithApprovedSubmission_ShouldThrowConflict()
     {
+        // STEP-01: Mock IRestaurantMenuRepository, ICurrentUserService and 1 more; stub repository.LockOwnedSubmissionAsync, currentUser.UserId and 1 more.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MenuSubmission { Id = 14, Status = MenuSubmissionStatus.Approved });
@@ -52,13 +58,16 @@ public sealed class CancelMenuSubmissionUseCaseTests
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(value => value.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
+        // STEP-02: Create the CancelMenuSubmissionUseCase under test as useCase.
         var useCase = new CancelMenuSubmissionUseCase(
             repository.Object,
             currentUser.Object,
             unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "SUBMISSION_NOT_CANCELLABLE".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_CANCELLABLE");
     }
@@ -70,7 +79,9 @@ public sealed class CancelMenuSubmissionUseCaseTests
     [InlineData(MenuSubmissionStatus.Pending)]
     public async Task ExecuteAsync_WithCancellableStatus_ShouldCancel(MenuSubmissionStatus status)
     {
+        // STEP-01: Create submission as MenuSubmission.
         var submission = new MenuSubmission { Id = 14, Status = status };
+        // STEP-02: Mock IRestaurantMenuRepository and IUnitOfWork; stub repository.LockOwnedSubmissionAsync and unitOfWork.BeginTransactionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
@@ -78,9 +89,11 @@ public sealed class CancelMenuSubmissionUseCaseTests
         unitOfWork.Setup(value => value.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository, unitOfWork)
             .ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-04: Assert result.Status is "cancelled".
         result.Status.Should().Be("cancelled");
     }
 
@@ -92,6 +105,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     [InlineData(MenuSubmissionStatus.Cancelled)]
     public async Task ExecuteAsync_WithFinalStatus_ShouldReject(MenuSubmissionStatus status)
     {
+        // STEP-01: Mock IRestaurantMenuRepository and IUnitOfWork; stub repository.LockOwnedSubmissionAsync and unitOfWork.BeginTransactionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MenuSubmission { Id = 14, Status = status });
@@ -99,9 +113,11 @@ public sealed class CancelMenuSubmissionUseCaseTests
         unitOfWork.Setup(value => value.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository, unitOfWork)
             .ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-03: Assert act throws ConflictException.
         await act.Should().ThrowAsync<ConflictException>();
     }
 
@@ -110,6 +126,7 @@ public sealed class CancelMenuSubmissionUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownOrOtherOwnerSubmission_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantMenuRepository and IUnitOfWork; stub repository.LockOwnedSubmissionAsync and unitOfWork.BeginTransactionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(value => value.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync((MenuSubmission?)null);
@@ -117,9 +134,11 @@ public sealed class CancelMenuSubmissionUseCaseTests
         unitOfWork.Setup(value => value.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository, unitOfWork)
             .ExecuteAsync(14, CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException.
         await act.Should().ThrowAsync<NotFoundException>();
     }
 

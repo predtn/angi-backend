@@ -17,6 +17,7 @@ public sealed class GetOwnerMenuUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithRestaurant_ShouldMapMenuAndOpenSubmission()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant, create dish as Dish, add dish to restaurant.Dishes and 1 more.
         var restaurant = new Domain.Entities.Restaurant { Id = 7, Name = "Quán", Latitude = 1, Longitude = 2 };
         var dish = new Dish { Id = 105, Name = "Món", Restaurant = restaurant, SortOrder = 2 };
         restaurant.Dishes.Add(dish);
@@ -26,12 +27,15 @@ public sealed class GetOwnerMenuUseCaseTests
             Status = MenuSubmissionStatus.Pending,
             CreatedAt = DateTime.UtcNow
         });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.GetOwnerMenuAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetOwnerMenuAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(restaurant);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(CancellationToken.None);
 
+        // STEP-04: Assert result.Dishes has exactly one matching item, result.Dishes.Id is 105, result.Dishes[0].SortOrder is 2 and 1 more.
         result.Dishes.Should().ContainSingle().Which.Id.Should().Be(105);
         result.Dishes[0].SortOrder.Should().Be(2);
         result.OpenSubmission.Should().BeEquivalentTo(new { Id = 14L, Status = "pending" });
@@ -42,12 +46,15 @@ public sealed class GetOwnerMenuUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutRestaurant_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantMenuRepository; stub repository.GetOwnerMenuAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetOwnerMenuAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Domain.Entities.Restaurant?)null);
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository).ExecuteAsync(CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and exception.ErrorCode is "RESTAURANT_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("RESTAURANT_NOT_FOUND");
     }
@@ -57,12 +64,15 @@ public sealed class GetOwnerMenuUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyMenuAndNoOpenSubmission_ShouldReturnEmptyResponse()
     {
+        // STEP-01: Mock IRestaurantMenuRepository; stub repository.GetOwnerMenuAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetOwnerMenuAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Domain.Entities.Restaurant { Id = 7 });
 
+        // STEP-02: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(CancellationToken.None);
 
+        // STEP-03: Assert result.Dishes is empty and result.OpenSubmission is null.
         result.Dishes.Should().BeEmpty();
         result.OpenSubmission.Should().BeNull();
     }
@@ -76,14 +86,18 @@ public sealed class GetOwnerMenuUseCaseTests
         MenuSubmissionStatus status,
         string expected)
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant and add a MenuSubmission to restaurant.MenuSubmissions.
         var restaurant = new Domain.Entities.Restaurant { Id = 7 };
         restaurant.MenuSubmissions.Add(new MenuSubmission { Id = 14, Status = status });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.GetOwnerMenuAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetOwnerMenuAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(restaurant);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(CancellationToken.None);
 
+        // STEP-04: Assert result.OpenSubmission.Status is expected.
         result.OpenSubmission!.Status.Should().Be(expected);
     }
 
@@ -92,6 +106,7 @@ public sealed class GetOwnerMenuUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEqualSortOrder_ShouldThenOrderByDishIdAndIncludeHidden()
     {
+        // STEP-01: Create restaurant as Domain.Entities.Restaurant and add a Dish to restaurant.Dishes.
         var restaurant = new Domain.Entities.Restaurant { Id = 7 };
         restaurant.Dishes.Add(new Dish { Id = 12, Restaurant = restaurant, SortOrder = 2 });
         restaurant.Dishes.Add(new Dish
@@ -102,12 +117,15 @@ public sealed class GetOwnerMenuUseCaseTests
             Status = DishStatus.Hidden
         });
         restaurant.Dishes.Add(new Dish { Id = 10, Restaurant = restaurant, SortOrder = 1 });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.GetOwnerMenuAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.GetOwnerMenuAsync(12, It.IsAny<CancellationToken>()))
             .ReturnsAsync(restaurant);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository).ExecuteAsync(CancellationToken.None);
 
+        // STEP-04: Assert result.Dishes.Select(filtered) equals 10 and result.Dishes[1].Status is "hidden".
         result.Dishes.Select(item => item.Id).Should().Equal(10, 11, 12);
         result.Dishes[1].Status.Should().Be("hidden");
     }

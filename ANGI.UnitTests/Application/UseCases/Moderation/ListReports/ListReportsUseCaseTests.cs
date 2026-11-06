@@ -25,6 +25,7 @@ public sealed class ListReportsUseCaseTests
     [InlineData(ReportTargetType.Restaurant, "restaurant")] [InlineData(ReportTargetType.Blog, "blog")]
     public async Task MapsReportPage(ReportTargetType type, string value)
     {
+        // STEP-01: Create world as ModerationTestContext, create cancellation as CancellationTokenSource, create request as ListReportsRequestDto and 3 more.
         var world = new ModerationTestContext();
         using var cancellation = new CancellationTokenSource();
         var request = new ListReportsRequestDto { TargetType = value, Page = 2, PageSize = 1 };
@@ -39,15 +40,19 @@ public sealed class ListReportsUseCaseTests
             { [4] = new() { Id = 4, DisplayName = "Reporter" }, [3] = new() { Id = 3, DisplayName = "Mod" } },
                 new Dictionary<long, MediaFile> { [10] = new() { StorageKey = "private/key" } }, 8)
         };
+        // STEP-02: Stub world.ListReportsAsync, world.GetReportDisplaysAsync and world.GetUrl.
         world.Repository.Setup(x => x.ListReportsAsync(request, cancellation.Token)).ReturnsAsync(page);
         world.Repository.Setup(x => x.GetReportDisplaysAsync(page.Items, cancellation.Token)).ReturnsAsync(displays);
         world.Cloudinary.Setup(x => x.GetUrl("private/key")).Returns("https://signed.test/evidence");
+        // STEP-03: Run Create().ExecuteAsync with request and keep result.
         var result = await Create(world).ExecuteAsync(request, cancellation.Token);
+        // STEP-04: Assert result.Page is 2, result.PageSize is 1, result.TotalItems is 5, result.TotalPages is 5 and 1 more.
         result.Page.Should().Be(2);
         result.PageSize.Should().Be(1);
         result.TotalItems.Should().Be(5);
         result.TotalPages.Should().Be(5);
         var item = result.Items.Should().ContainSingle().Subject;
+        // STEP-05: Assert item.TargetType is value, item.TargetName is "Target", item.ReasonCode is "wrong_info", item.Status is "resolved" and 7 more.
         item.TargetType.Should().Be(value);
         item.TargetName.Should().Be("Target");
         item.ReasonCode.Should().Be("wrong_info");
@@ -59,6 +64,7 @@ public sealed class ListReportsUseCaseTests
         item.ResolutionAction.Should().Be("none");
         item.Description.Should().Be("Details");
         item.ResolutionNote.Should().Be("Conclusion");
+        // STEP-06: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 
@@ -67,13 +73,17 @@ public sealed class ListReportsUseCaseTests
     [Fact]
     public async Task ReturnsEmptyPage()
     {
+        // STEP-01: Create world as ModerationTestContext and create request as ListReportsRequestDto.
         var world = new ModerationTestContext();
         var request = new ListReportsRequestDto { TargetType = "restaurant" };
+        // STEP-02: Stub world.ListReportsAsync and world.GetReportDisplaysAsync.
         world.Repository.Setup(x => x.ListReportsAsync(request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Paged<Report> { Page = 1, PageSize = 20 });
         world.Repository.Setup(x => x.GetReportDisplaysAsync(It.IsAny<IReadOnlyList<Report>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<ReportTarget, ReportDisplayData>());
+        // STEP-03: Run Create().ExecuteAsync with request and keep result.
         var result = await Create(world).ExecuteAsync(request, default);
+        // STEP-04: Assert result.Items is empty, result.TotalItems is 0 and result.TotalPages is 0.
         result.Items.Should().BeEmpty();
         result.TotalItems.Should().Be(0);
         result.TotalPages.Should().Be(0);
@@ -84,9 +94,13 @@ public sealed class ListReportsUseCaseTests
     [Fact]
     public async Task ValidatesBeforeReads()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(new() { TargetType = "0" }, default);
+        // STEP-03: Assert action throws ValidationException.
         await action.Should().ThrowAsync<ValidationException>();
+        // STEP-04: Verify world receives no other calls.
         world.Accounts.VerifyNoOtherCalls();
         world.Repository.VerifyNoOtherCalls();
     }
@@ -97,10 +111,15 @@ public sealed class ListReportsUseCaseTests
     [InlineData("restaurant", "REPORT_SOCIAL_HANDLE")] [InlineData("blog", "REPORT_RESTAURANT_HANDLE")]
     public async Task RejectsWrongTargetPermission(string type, string permission)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub world.GetEffectivePermissionsAsync.
         world.Accounts.Setup(x => x.GetEffectivePermissionsAsync(3, "MOD", It.IsAny<CancellationToken>())).ReturnsAsync([permission]);
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(new() { TargetType = type }, default);
+        // STEP-04: Assert action throws ForbiddenException.
         await action.Should().ThrowAsync<ForbiddenException>();
+        // STEP-05: Verify world receives no other calls.
         world.Repository.VerifyNoOtherCalls();
     }
 }

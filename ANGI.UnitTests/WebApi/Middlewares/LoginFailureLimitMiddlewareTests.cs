@@ -39,15 +39,19 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldRejectWithTooManyRequests_AfterConfiguredFailures()
         {
+            // STEP-01: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-02: Define nextCalled as false and create context through CreateLoginContext.
             var nextCalled = false;
             var context = CreateLoginContext();
+            // STEP-03: Run _middleware.InvokeAsync with context.
             await _middleware.InvokeAsync(context, _ => { nextCalled = true; return Task.CompletedTask; });
 
+            // STEP-04: Assert nextCalled is false, context.Response.StatusCode is StatusCodes.Status429TooManyRequests and 2 more.
             nextCalled.Should().BeFalse();
             context.Response.StatusCode.Should().Be(StatusCodes.Status429TooManyRequests);
             context.Response.Headers.RetryAfter.ToString().Should().Be((WindowMinutes * 60).ToString());
@@ -59,8 +63,10 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldRethrowInvalidCredentials()
         {
+            // STEP-01: Wrap _middleware.InvokeAsync in act so its outcome can be asserted.
             var act = () => _middleware.InvokeAsync(CreateLoginContext(), _ => throw InvalidCredentials());
 
+            // STEP-02: Assert act throws UnauthorizedException.
             await act.Should().ThrowAsync<UnauthorizedException>();
         }
 
@@ -69,19 +75,25 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldClearFailures_AfterSuccessfulLogin()
         {
+            // STEP-01: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit - 1; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-02: Run _middleware.InvokeAsync with SucceedAsync.
             await _middleware.InvokeAsync(CreateLoginContext(), SucceedAsync);
+            // STEP-03: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit - 1; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-04: Create context through CreateLoginContext.
             var context = CreateLoginContext();
+            // STEP-05: Run _middleware.InvokeAsync with context and SucceedAsync.
             await _middleware.InvokeAsync(context, SucceedAsync);
+            // STEP-06: Assert context.Response.StatusCode is StatusCodes.Status200OK.
             context.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
@@ -90,6 +102,7 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldNotCount_OtherErrors()
         {
+            // STEP-01: Assert on every iteration, forbidden throws ForbiddenException and otherUnauthorized throws UnauthorizedException.
             for (var attempt = 0; attempt < PermitLimit; attempt++)
             {
                 var forbidden = () => _middleware.InvokeAsync(CreateLoginContext(),
@@ -107,8 +120,11 @@ namespace ANGI.UnitTests.WebApi.Middlewares
                 });
             }
 
+            // STEP-02: Define nextCalled as false.
             var nextCalled = false;
+            // STEP-03: Run _middleware.InvokeAsync.
             await _middleware.InvokeAsync(CreateLoginContext(), _ => { nextCalled = true; return Task.CompletedTask; });
+            // STEP-04: Assert nextCalled is true.
             nextCalled.Should().BeTrue();
         }
 
@@ -117,20 +133,27 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldAllowLoginAgain_WhenWindowEnds()
         {
+            // STEP-01: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-02: Advance _time and create blocked through CreateLoginContext.
             _time.Advance(TimeSpan.FromMinutes(10));
             var blocked = CreateLoginContext();
+            // STEP-03: Run _middleware.InvokeAsync with blocked and SucceedAsync.
             await _middleware.InvokeAsync(blocked, SucceedAsync);
+            // STEP-04: Assert blocked.Response.StatusCode is StatusCodes.Status429TooManyRequests and blocked.Response.Headers.RetryAfter.ToString() is 5 * 60.ToString().
             blocked.Response.StatusCode.Should().Be(StatusCodes.Status429TooManyRequests);
             blocked.Response.Headers.RetryAfter.ToString().Should().Be((5 * 60).ToString());
 
+            // STEP-05: Advance _time and create allowed through CreateLoginContext.
             _time.Advance(TimeSpan.FromMinutes(5));
             var allowed = CreateLoginContext();
+            // STEP-06: Run _middleware.InvokeAsync with allowed and SucceedAsync.
             await _middleware.InvokeAsync(allowed, SucceedAsync);
+            // STEP-07: Assert allowed.Response.StatusCode is StatusCodes.Status200OK.
             allowed.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
@@ -139,17 +162,24 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldCountPerEmailAndIp()
         {
+            // STEP-01: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-02: Create otherEmail through CreateLoginContext.
             var otherEmail = CreateLoginContext(email: "other@angi.test");
+            // STEP-03: Run _middleware.InvokeAsync with otherEmail and SucceedAsync.
             await _middleware.InvokeAsync(otherEmail, SucceedAsync);
+            // STEP-04: Assert otherEmail.Response.StatusCode is StatusCodes.Status200OK.
             otherEmail.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
 
+            // STEP-05: Create otherIp through CreateLoginContext.
             var otherIp = CreateLoginContext(ip: IPAddress.Parse("10.0.0.2"));
+            // STEP-06: Run _middleware.InvokeAsync with otherIp and SucceedAsync.
             await _middleware.InvokeAsync(otherIp, SucceedAsync);
+            // STEP-07: Assert otherIp.Response.StatusCode is StatusCodes.Status200OK.
             otherIp.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 
@@ -158,19 +188,26 @@ namespace ANGI.UnitTests.WebApi.Middlewares
         [Fact]
         public async Task InvokeAsync_ShouldIgnoreOtherRequests()
         {
+            // STEP-01: Assert on every iteration, FailLoginAsync succeeds.
             for (var attempt = 0; attempt < PermitLimit; attempt++)
             {
                 await FailLoginAsync();
             }
 
+            // STEP-02: Create otherPath through CreateLoginContext and set otherPath.Request.Path to "/api/v1/auth/refresh".
             var otherPath = CreateLoginContext();
             otherPath.Request.Path = "/api/v1/auth/refresh";
+            // STEP-03: Run _middleware.InvokeAsync with otherPath and SucceedAsync.
             await _middleware.InvokeAsync(otherPath, SucceedAsync);
+            // STEP-04: Assert otherPath.Response.StatusCode is StatusCodes.Status200OK.
             otherPath.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
 
+            // STEP-05: Create getLogin through CreateLoginContext and set getLogin.Request.Method to HttpMethods.Get.
             var getLogin = CreateLoginContext();
             getLogin.Request.Method = HttpMethods.Get;
+            // STEP-06: Run _middleware.InvokeAsync with getLogin and SucceedAsync.
             await _middleware.InvokeAsync(getLogin, SucceedAsync);
+            // STEP-07: Assert getLogin.Response.StatusCode is StatusCodes.Status200OK.
             getLogin.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
         }
 

@@ -16,6 +16,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [InlineData(30, 999999999, 90, 180)]
     public async Task Validate_WithBoundaryValues_ShouldBeValid(short numDays, decimal budget, decimal latitude, decimal longitude)
     {
+        // STEP-01: Validate CreateRoadmapRequestDto { Title, NumDays, BudgetAmount, ... } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = new string('a', 200),
@@ -27,6 +28,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
             OriginLabel = new string('b', 200)
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -35,10 +37,11 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithOutOfRangeValues_ShouldReturnEveryRelevantFailure()
     {
+        // STEP-01: Validate CreateRoadmapRequestDto { Title = a new string, NumDays = 101, BudgetAmount = -1, ... } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = new string('a', 201),
-            NumDays = 31,
+            NumDays = 101,
             BudgetAmount = -1,
             OriginMode = "pinned",
             OriginLatitude = 90.000001m,
@@ -46,6 +49,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
             OriginLabel = new string('b', 201)
         });
 
+        // STEP-02: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName).Should().Contain([
             "Title", "NumDays", "BudgetAmount", "OriginLatitude", "OriginLongitude", "OriginLabel"
         ]);
@@ -56,6 +60,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithPinnedOriginWithoutCoordinates_ShouldRejectBothCoordinates()
     {
+        // STEP-01: Validate CreateRoadmapRequestDto { Title = "Trip", NumDays = 3, OriginMode = "pinned" } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = "Trip",
@@ -63,6 +68,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
             OriginMode = "pinned"
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "OriginLatitude");
         result.Errors.Should().Contain(error => error.PropertyName == "OriginLongitude");
     }
@@ -74,6 +80,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [InlineData("gps")]
     public async Task Validate_WithNonPinnedStoredOrigin_ShouldRejectOriginFields(string mode)
     {
+        // STEP-01: Validate CreateRoadmapRequestDto { Title = "Trip", NumDays = 3, OriginMode = mode, ... } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = "Trip",
@@ -84,6 +91,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
             OriginLabel = "Hotel"
         });
 
+        // STEP-02: Assert result.Errors.Select(filtered) contains the expected items.
         result.Errors.Select(error => error.PropertyName).Should().Contain([
             "OriginLatitude", "OriginLongitude", "OriginLabel"
         ]);
@@ -94,12 +102,14 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithOmittedOrigin_ShouldBeValid()
     {
+        // STEP-01: Validate CreateRoadmapRequestDto { Title = "Trip", NumDays = 1 } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = "Trip",
             NumDays = 1
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -108,8 +118,10 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithMissingRequiredFields_ShouldRejectTitleAndNumDays()
     {
+        // STEP-01: Validate an empty CreateRoadmapRequestDto and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto());
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "Title");
         result.Errors.Should().Contain(error => error.PropertyName == "NumDays");
     }

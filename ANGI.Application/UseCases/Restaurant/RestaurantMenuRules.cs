@@ -45,13 +45,16 @@ internal static class RestaurantMenuRules
         long? mediaId,
         CancellationToken ct)
     {
+        // STEP-01: Return null early when mediaId has no value.
         if (!mediaId.HasValue)
         {
             return null;
         }
 
+        // STEP-02: Prepare media through GetOwnedByIdsAsync().SingleOrDefault.
         var media = (await mediaRepository.GetOwnedByIdsAsync(ownerId, [mediaId.Value], ct))
             .SingleOrDefault();
+        // STEP-03: Throw ValidationException when media is missing, media.MimeType is blank, AllowedDishImageMimeTypes does not contain media.MimeType.Trim() or 2 more condition(s).
         if (media is null ||
             string.IsNullOrWhiteSpace(media.MimeType) ||
             !AllowedDishImageMimeTypes.Contains(media.MimeType.Trim()) ||
@@ -65,6 +68,7 @@ internal static class RestaurantMenuRules
             ]);
         }
 
+        // STEP-04: Return media.
         return media;
     }
 
@@ -74,13 +78,17 @@ internal static class RestaurantMenuRules
         IReadOnlyCollection<short> tagIds,
         CancellationToken ct)
     {
+        // STEP-01: Stop here when tagIds.Count is 0.
         if (tagIds.Count == 0)
         {
             return;
         }
 
+        // STEP-02: Load existingIds through repository.GetExistingTagIdsAsync.
         var existingIds = await repository.GetExistingTagIdsAsync(tagIds, ct);
+        // STEP-03: Prepare missingIds through tagIds.Except().ToArray.
         var missingIds = tagIds.Except(existingIds).ToArray();
+        // STEP-04: Throw ValidationException when missingIds.Length > 0.
         if (missingIds.Length > 0)
         {
             throw new ValidationException([

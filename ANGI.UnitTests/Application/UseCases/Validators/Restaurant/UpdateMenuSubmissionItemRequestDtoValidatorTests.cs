@@ -12,10 +12,13 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithExplicitNullCover_ShouldBeValid()
     {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
         var request = new UpdateMenuSubmissionItemRequestDto { CoverMediaId = null };
 
+        // STEP-02: Validate request and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is true and request.CoverMediaIdSpecified is true.
         result.IsValid.Should().BeTrue();
         request.CoverMediaIdSpecified.Should().BeTrue();
     }
@@ -25,9 +28,11 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithExplicitNullPrice_ShouldRejectPrice()
     {
+        // STEP-01: Validate UpdateMenuSubmissionItemRequestDto { Price = null } and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(
             new UpdateMenuSubmissionItemRequestDto { Price = null });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == "Price");
     }
 
@@ -36,9 +41,11 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithEmptyPatch_ShouldBeValid()
     {
+        // STEP-01: Validate an empty UpdateMenuSubmissionItemRequestDto and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(
             new UpdateMenuSubmissionItemRequestDto());
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -53,6 +60,7 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     [InlineData("sort_order")]
     public async Task ValidateAsync_WithExplicitNullNonNullableField_ShouldRejectField(string field)
     {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto and apply the case selected by field.
         var request = new UpdateMenuSubmissionItemRequestDto();
         switch (field)
         {
@@ -64,8 +72,10 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
             case "sort_order": request.SortOrder = null; break;
         }
 
+        // STEP-02: Validate request and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 
@@ -80,13 +90,16 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
         string value,
         bool expectedValid)
     {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
         var request = new UpdateMenuSubmissionItemRequestDto
         {
             Price = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture)
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -99,13 +112,16 @@ public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
     [InlineData(2001, false)]
     public async Task ValidateAsync_ShouldMeasureDescriptionAfterTrim(int length, bool expectedValid)
     {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
         var request = new UpdateMenuSubmissionItemRequestDto
         {
             Description = $"  {new string('a', length)}  "
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 }

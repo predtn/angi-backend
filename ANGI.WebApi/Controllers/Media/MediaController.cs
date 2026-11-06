@@ -36,6 +36,7 @@ public sealed class MediaController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Upload([FromForm] UploadMediaForm form, CancellationToken ct)
     {
+        // STEP-01: Prepare content, then call uploadMediaUseCase.ExecuteAsync and keep result.
         await using var content = form.File?.OpenReadStream();
         var result = await _uploadMediaUseCase.ExecuteAsync(new UploadMediaRequestDto
         {
@@ -46,6 +47,7 @@ public sealed class MediaController : ControllerBase
             Purpose = form.Purpose
         }, ct);
 
+        // STEP-02: Return the result of StatusCode.
         return StatusCode(StatusCodes.Status201Created, new ApiResponse<MediaFileDto>
         {
             Success = true,

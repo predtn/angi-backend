@@ -18,17 +18,22 @@ public sealed class GetVerificationReviewUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenVerificationExists_ShouldReturnCompleteDetail()
     {
+        // STEP-01: Get repository from AuthorizedRepository and get verification from VerificationWithPrevious.
         var repository = AuthorizedRepository();
         var verification = VerificationWithPrevious();
+        // STEP-02: Mock ICloudinaryService; stub repository.GetDetailAsync and cloudinary.GetUrl.
         repository.Setup(item => item.GetDetailAsync(21, It.IsAny<CancellationToken>()))
             .ReturnsAsync(verification);
         var cloudinary = new Mock<ICloudinaryService>();
         cloudinary.Setup(item => item.GetUrl(It.IsAny<string>()))
             .Returns<string>(key => $"https://signed.test/{key}");
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, cloudinary.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(21, CancellationToken.None);
 
+        // STEP-05: Assert result.Id is 21, result.Status is "pending", result.Documents[0].Url is "https://signed.test/current.pdf", result.Restaurant.Id is 7 and 4 more.
         result.Id.Should().Be(21);
         result.Status.Should().Be("pending");
         result.Documents[0].Url.Should().Be("https://signed.test/current.pdf");
@@ -44,13 +49,18 @@ public sealed class GetVerificationReviewUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenVerificationMissing_ShouldThrowNotFound()
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Stub repository.GetDetailAsync.
         repository.Setup(item => item.GetDetailAsync(404, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RestaurantVerification?)null);
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>());
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(404, CancellationToken.None);
 
+        // STEP-05: Assert act throws NotFoundException and exception.ErrorCode is "VERIFICATION_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("VERIFICATION_NOT_FOUND");
     }
@@ -60,14 +70,19 @@ public sealed class GetVerificationReviewUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutEffectivePermission_ShouldThrowForbiddenBeforeLookup()
     {
+        // STEP-01: Mock IVerificationReviewRepository; stub repository.HasEffectivePermissionAsync.
         var repository = new Mock<IVerificationReviewRepository>();
         repository.Setup(item => item.HasEffectivePermissionAsync(9, "RESTAURANT_VERIFY", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, CancellationToken.None);
 
+        // STEP-04: Assert act throws ForbiddenException.
         await act.Should().ThrowAsync<ForbiddenException>();
+        // STEP-05: Verify GetDetailAsync is never called.
         repository.Verify(item => item.GetDetailAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -79,13 +94,18 @@ public sealed class GetVerificationReviewUseCaseTests
     [InlineData("RESTAURANT_OWNER")]
     public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>(), role);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, CancellationToken.None);
 
+        // STEP-04: Assert act throws ForbiddenException and exception.ErrorCode is "FORBIDDEN".
         var exception = await act.Should().ThrowAsync<ForbiddenException>();
         exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        // STEP-05: Verify GetDetailAsync is never called.
         repository.Verify(item => item.GetDetailAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

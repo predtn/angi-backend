@@ -13,5 +13,6 @@ public sealed class ConfirmAgentProposalRequestDtoValidatorTests
     [InlineData(1L, 1, true)][InlineData(long.MaxValue, int.MaxValue, true)][InlineData(0L, 1, false)]
     [InlineData(-1L, 1, false)][InlineData(1L, 0, false)][InlineData(1L, -1, false)]
     public void Validate_ProposalReference_RequiresPositiveValues(long id, int version, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new ConfirmAgentProposalRequestDtoValidator().Validate(new ConfirmAgentProposalRequestDto { ProposalId = id, ProposalVersion = version }).IsValid.Should().Be(valid);
 }

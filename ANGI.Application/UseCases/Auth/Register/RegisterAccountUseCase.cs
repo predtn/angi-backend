@@ -56,16 +56,21 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
         RegisterAccountRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare normalizedEmail through request.Email.Trim().ToLowerInvariant.
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
 
+        // STEP-04: Throw the error from EmailAlreadyExists when _authenticationRepository.EmailExistsAsync() is true.
         if (await _authenticationRepository.EmailExistsAsync(normalizedEmail, ct))
         {
             throw EmailAlreadyExists();
         }
 
+        // STEP-05: Prepare role from authenticationRepository.GetRoleByCodeAsync, generatedVerificationToken through tokenService.CreateUserToken, user as User and userToken as UserToken.
         var role = await _authenticationRepository.GetRoleByCodeAsync(request.Role, ct)
             ?? throw new InvalidOperationException($"Configured role '{request.Role}' was not found.");
         var generatedVerificationToken = _tokenService.CreateUserToken();
@@ -85,8 +90,10 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
             ExpiresAt = _timeProvider.GetUtcNow().UtcDateTime.Add(_emailVerificationLifetime)
         };
 
+        // STEP-06: Queue user through authenticationRepository.AddUser and queue userToken through authenticationRepository.AddUserToken.
         _authenticationRepository.AddUser(user);
         _authenticationRepository.AddUserToken(userToken);
+        // STEP-07: Record audit action AuditActions.UserRegistered.
         _auditLogService.Add(new AuditLogEntry
         {
             Action = AuditActions.UserRegistered,
@@ -98,17 +105,21 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
 
         try
         {
+            // STEP-08: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
+            // STEP-09: Commit the transaction.
             await transaction.CommitAsync(ct);
         }
         catch (UniqueConstraintViolationException exception) when (
             string.Equals(exception.ConstraintName, UsersEmailUniqueConstraint, StringComparison.Ordinal))
         {
+            // STEP-10: On UniqueConstraintViolationException when exception.ConstraintName equals UsersEmailUniqueConstraint, throw the error from EmailAlreadyExists.
             // The initial read is only an early check. The unique index remains authoritative
             // when two registrations for the same normalized email race each other.
             throw EmailAlreadyExists();
         }
 
+        // STEP-11: Call emailService.SendEmailVerificationAsync.
         // Do not send a verification link until its user and token are durably committed.
         // If delivery fails, AUTH-03 can issue a fresh token for the committed account.
         await _emailService.SendEmailVerificationAsync(
@@ -118,6 +129,7 @@ public sealed class RegisterAccountUseCase : IRegisterAccountUseCase
             _emailVerificationLifetime,
             ct);
 
+        // STEP-12: Return a new RegisterAccountResponseDto.
         return new RegisterAccountResponseDto
         {
             UserId = user.Id,

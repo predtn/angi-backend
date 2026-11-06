@@ -17,6 +17,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
         [Fact]
         public async Task AddMapboxInfrastructure_WithConfiguration_ShouldConfigureTypedClientAndSettings()
         {
+            // STEP-01: Create values as Dictionary<string, string?>, create configuration through AddInMemoryCollection().Build and 2 more.
             var values = new Dictionary<string, string?>
             {
                 ["Mapbox:BaseUrl"] = "https://mapbox.example/",
@@ -27,14 +28,17 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
             var services = new ServiceCollection();
             services.AddLogging();
+            // STEP-02: Create the WaitingHttpMessageHandler under test as handler.
             var handler = new WaitingHttpMessageHandler();
 
+            // STEP-03: Call services.AddMapboxInfrastructure, call services.AddHttpClient().ConfigurePrimaryHttpMessageHandler and 2 more.
             services.AddMapboxInfrastructure(configuration);
             services.AddHttpClient<IRouteService, MapboxRouteService>()
                 .ConfigurePrimaryHttpMessageHandler(() => handler);
             using var provider = services.BuildServiceProvider();
 
             var service = provider.GetRequiredService<IRouteService>();
+            // STEP-04: Assert provider.GetRequiredService().Value is equivalent to a new MapboxSettings.
             provider.GetRequiredService<IOptions<MapboxSettings>>().Value.Should().BeEquivalentTo(new MapboxSettings
             {
                 BaseUrl = "https://mapbox.example/",
@@ -43,6 +47,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 CacheHours = 12
             });
 
+            // STEP-05: Create guard as CancellationTokenSource and get result from service.CalculateRouteAsync.
             // The guard only stops a hung test; a slow CI runner must not fail it, so it is not a timing assertion.
             using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var result = await service.CalculateRouteAsync(
@@ -51,6 +56,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Mapbox
                 RouteProfile.Driving,
                 guard.Token);
 
+            // STEP-06: Assert service is MapboxRouteService, result.IsEstimated is true, handler.RequestUri is a new Uri, handler.WasCanceled is true and 1 more.
             service.Should().BeOfType<MapboxRouteService>();
             result.IsEstimated.Should().BeTrue();
             handler.RequestUri.Should().Be(new Uri(

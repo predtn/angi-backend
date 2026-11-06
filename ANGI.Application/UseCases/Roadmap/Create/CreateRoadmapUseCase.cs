@@ -34,8 +34,10 @@ public sealed class CreateRoadmapUseCase : ICreateRoadmapUseCase
     /// <summary>Validates RM-01, creates consecutive empty days, and returns the full detail.</summary>
     public async Task<RoadmapDetailDto> ExecuteAsync(CreateRoadmapRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId, originMode through ParseOriginMode and roadmap as Domain.Entities.Roadmap.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để tạo roadmap.");
         var originMode = ParseOriginMode(request.OriginMode);
@@ -51,13 +53,17 @@ public sealed class CreateRoadmapUseCase : ICreateRoadmapUseCase
             OriginLongitude = originMode == RoadmapOriginMode.Pinned ? request.OriginLongitude : null,
             OriginLabel = originMode == RoadmapOriginMode.Pinned ? NormalizeOptional(request.OriginLabel) : null
         };
+        // STEP-03: While dayNumber <= request.NumDays, call roadmap.Days.Add.
         for (short dayNumber = 1; dayNumber <= request.NumDays; dayNumber++)
         {
             roadmap.Days.Add(new RoadmapDay { DayNumber = dayNumber, Roadmap = roadmap });
         }
 
+        // STEP-04: Queue roadmap through roadmapRepository.Add.
         _roadmapRepository.Add(roadmap);
+        // STEP-05: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-06: Return the result of RoadmapMapper.Map.
         return RoadmapMapper.Map(roadmap);
     }
 

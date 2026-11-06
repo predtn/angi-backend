@@ -34,8 +34,10 @@ public sealed class ReviewVerificationUseCaseTests
         string expectedNotificationType,
         string expectedAuditAction)
     {
+        // STEP-01: Get verification from PendingVerification and get repository from AuthorizedRepository.
         var verification = PendingVerification();
         var repository = AuthorizedRepository();
+        // STEP-02: Declare notification to capture a call argument and 1 more; mock IAuditLogService; stub repository.LockForDecisionAsync and 3 more.
         repository.Setup(item => item.LockForDecisionAsync(verification.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(verification);
         repository.Setup(item => item.LoadReviewerAsync(verification, It.IsAny<CancellationToken>()))
@@ -48,30 +50,38 @@ public sealed class ReviewVerificationUseCaseTests
         var auditService = new Mock<IAuditLogService>();
         auditService.Setup(item => item.Add(It.IsAny<AuditLogEntry>()))
             .Callback<AuditLogEntry>(value => audit = value);
+        // STEP-03: Get unitOfWork from UnitOfWork.
         var unitOfWork = UnitOfWork(out var transaction);
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, auditService.Object, unitOfWork.Object);
 
+        // STEP-05: Run useCase.ExecuteAsync with ReviewVerificationRequestDto { Decision = decision, ReviewNote = note } and keep result.
         var result = await useCase.ExecuteAsync(verification.Id, new ReviewVerificationRequestDto
         {
             Decision = decision,
             ReviewNote = note
         }, CancellationToken.None);
 
+        // STEP-06: Assert verification.Status is expectedVerificationStatus, verification.Restaurant.VerificationStatus is expectedRestaurantStatus and 2 more.
         verification.Status.Should().Be(expectedVerificationStatus);
         verification.Restaurant.VerificationStatus.Should().Be(expectedRestaurantStatus);
         verification.ReviewedBy.Should().Be(9);
         verification.ReviewedAt.Should().Be(ReviewedAt);
+        // STEP-07: Assert result.Status is ToApiValue() and result.ReviewedBy.DisplayName is "Mod Reviewer".
         result.Status.Should().Be(ToApiValue(expectedVerificationStatus));
         result.ReviewedBy!.DisplayName.Should().Be("Mod Reviewer");
+        // STEP-08: Assert notification is not null, notification.RecipientId is 12, notification.Type is expectedNotificationType and 1 more.
         notification.Should().NotBeNull();
         notification!.RecipientId.Should().Be(12);
         notification.Type.Should().Be(expectedNotificationType);
         notification.Data.Should().Contain("\"verification_id\":21");
+        // STEP-09: Assert audit is not null, audit.Action is expectedAuditAction, audit.EntityType is "restaurant", audit.EntityId is 7 and 1 more.
         audit.Should().NotBeNull();
         audit!.Action.Should().Be(expectedAuditAction);
         audit.EntityType.Should().Be("restaurant");
         audit.EntityId.Should().Be(7);
         audit.SubjectUserId.Should().Be(12);
+        // STEP-10: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -81,16 +91,21 @@ public sealed class ReviewVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldFailBeforeAuthorization()
     {
+        // STEP-01: Mock IVerificationReviewRepository and IUnitOfWork.
         var repository = new Mock<IVerificationReviewRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReviewVerificationRequestDto { Decision = "reject" } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, new ReviewVerificationRequestDto
         {
             Decision = "reject"
         }, CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-05: Verify HasEffectivePermissionAsync is never called and BeginTransactionAsync is never called.
         repository.Verify(item => item.HasEffectivePermissionAsync(
             It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -101,16 +116,23 @@ public sealed class ReviewVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenVerificationMissing_ShouldThrowNotFound()
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Stub repository.LockForDecisionAsync.
         repository.Setup(item => item.LockForDecisionAsync(404, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RestaurantVerification?)null);
+        // STEP-03: Get unitOfWork from UnitOfWork.
         var unitOfWork = UnitOfWork(out var transaction);
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-05: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(404, ApproveRequest(), CancellationToken.None);
 
+        // STEP-06: Assert act throws NotFoundException and exception.ErrorCode is "VERIFICATION_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("VERIFICATION_NOT_FOUND");
+        // STEP-07: Verify SaveChangesAsync is never called and CommitAsync is never called.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -124,18 +146,25 @@ public sealed class ReviewVerificationUseCaseTests
     [InlineData(VerificationStatus.Cancelled)]
     public async Task ExecuteAsync_WithNonPendingVerification_ShouldThrowConflict(VerificationStatus status)
     {
+        // STEP-01: Get verification from PendingVerification, set verification.Status to status and get repository from AuthorizedRepository.
         var verification = PendingVerification();
         verification.Status = status;
         var repository = AuthorizedRepository();
+        // STEP-02: Stub repository.LockForDecisionAsync.
         repository.Setup(item => item.LockForDecisionAsync(21, It.IsAny<CancellationToken>()))
             .ReturnsAsync(verification);
+        // STEP-03: Get unitOfWork from UnitOfWork.
         var unitOfWork = UnitOfWork(out var transaction);
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-05: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, ApproveRequest(), CancellationToken.None);
 
+        // STEP-06: Assert act throws ConflictException and exception.ErrorCode is "VERIFICATION_ALREADY_REVIEWED".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("VERIFICATION_ALREADY_REVIEWED");
+        // STEP-07: Verify AddNotification is never called, SaveChangesAsync is never called and CommitAsync is never called.
         repository.Verify(item => item.AddNotification(It.IsAny<Domain.Entities.Notification>()), Times.Never);
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -146,15 +175,20 @@ public sealed class ReviewVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutEffectivePermission_ShouldThrowForbidden()
     {
+        // STEP-01: Mock IVerificationReviewRepository and IUnitOfWork; stub repository.HasEffectivePermissionAsync.
         var repository = new Mock<IVerificationReviewRepository>();
         repository.Setup(item => item.HasEffectivePermissionAsync(9, "RESTAURANT_VERIFY", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, ApproveRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ForbiddenException.
         await act.Should().ThrowAsync<ForbiddenException>();
+        // STEP-05: Verify BeginTransactionAsync is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -163,8 +197,10 @@ public sealed class ReviewVerificationUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenSaveFails_ShouldNotCommit()
     {
+        // STEP-01: Get verification from PendingVerification and get repository from AuthorizedRepository.
         var verification = PendingVerification();
         var repository = AuthorizedRepository();
+        // STEP-02: Get unitOfWork from UnitOfWork; stub repository.LockForDecisionAsync, repository.LoadReviewerAsync and unitOfWork.SaveChangesAsync.
         repository.Setup(item => item.LockForDecisionAsync(21, It.IsAny<CancellationToken>()))
             .ReturnsAsync(verification);
         repository.Setup(item => item.LoadReviewerAsync(verification, It.IsAny<CancellationToken>()))
@@ -172,11 +208,15 @@ public sealed class ReviewVerificationUseCaseTests
         var unitOfWork = UnitOfWork(out var transaction);
         unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database failure"));
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, ApproveRequest(), CancellationToken.None);
 
+        // STEP-05: Assert act throws InvalidOperationException.
         await act.Should().ThrowAsync<InvalidOperationException>();
+        // STEP-06: Verify CommitAsync is never called.
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -188,14 +228,20 @@ public sealed class ReviewVerificationUseCaseTests
     [InlineData("RESTAURANT_OWNER")]
     public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Mock IUnitOfWork.
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<IAuditLogService>(), unitOfWork.Object, role);
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(21, ApproveRequest(), CancellationToken.None);
 
+        // STEP-05: Assert act throws ForbiddenException and exception.ErrorCode is "FORBIDDEN".
         var exception = await act.Should().ThrowAsync<ForbiddenException>();
         exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        // STEP-06: Verify BeginTransactionAsync is never called and AddNotification is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         repository.Verify(item => item.AddNotification(It.IsAny<Domain.Entities.Notification>()), Times.Never);
     }

@@ -13,6 +13,7 @@ public sealed class AgentLlmSchemaTests
     [Fact]
     public void FindMismatch_ValidOutput_ReturnsNull()
     {
+        // STEP-01: Read document from the response; assert AgentLlmSchema.IsValid() is true and AgentLlmSchema.FindMismatch() is null.
         using var document = JsonDocument.Parse(Output().ToJsonString());
 
         AgentLlmSchema.IsValid(document.RootElement, AgentLlmSchema.Output).Should().BeTrue();
@@ -35,6 +36,7 @@ public sealed class AgentLlmSchemaTests
     [InlineData("root-array", "$")]
     public void FindMismatch_InvalidOutput_ReportsFirstFailingPath(string area, string expected)
     {
+        // STEP-01: Get output from Output, derive root from output and apply the case selected by area.
         var output = Output();
         JsonNode root = output;
         switch (area)
@@ -50,6 +52,7 @@ public sealed class AgentLlmSchemaTests
             case "not-integer": output["baseProposalVersion"] = 1.5; break;
             case "root-array": root = new JsonArray(); break;
         }
+        // STEP-02: Read document from the response; assert AgentLlmSchema.IsValid() is false and AgentLlmSchema.FindMismatch() is expected.
         using var document = JsonDocument.Parse(root.ToJsonString());
 
         AgentLlmSchema.IsValid(document.RootElement, AgentLlmSchema.Output).Should().BeFalse();
@@ -66,7 +69,9 @@ public sealed class AgentLlmSchemaTests
     [InlineData("snake_case_1", "$.snake_case_1(unexpected)")]
     public void FindMismatch_UnexpectedName_MasksUnsafeNames(string name, string expected)
     {
+        // STEP-01: Get output from Output and set output[name] to 1.
         var output = Output(); output[name] = 1;
+        // STEP-02: Read document from the response; assert AgentLlmSchema.FindMismatch() is expected.
         using var document = JsonDocument.Parse(output.ToJsonString());
 
         AgentLlmSchema.FindMismatch(document.RootElement, AgentLlmSchema.Output).Should().Be(expected);
@@ -77,7 +82,9 @@ public sealed class AgentLlmSchemaTests
     [Fact]
     public void FindMismatch_DuplicateProperty_ReportsDuplicate()
     {
+        // STEP-01: Derive json from the expected value.
         var json = Output().ToJsonString().TrimEnd('}') + ",\"action\":\"answer\"}";
+        // STEP-02: Read document from the response; assert AgentLlmSchema.IsValid() is false and AgentLlmSchema.FindMismatch() is "$(duplicate)".
         using var document = JsonDocument.Parse(json);
 
         AgentLlmSchema.IsValid(document.RootElement, AgentLlmSchema.Output).Should().BeFalse();
@@ -92,6 +99,7 @@ public sealed class AgentLlmSchemaTests
     [InlineData("{\"roadmapId\":\"88\"}", "$.roadmapId")]
     public void FindMismatch_ToolArguments_UsesSamePathFormat(string arguments, string? expected)
     {
+        // STEP-01: Read document from the response; assert AgentLlmSchema.FindMismatch() is expected.
         using var document = JsonDocument.Parse(arguments);
 
         AgentLlmSchema.FindMismatch(document.RootElement, AgentLlmSchema.Tools["get_roadmap"]).Should().Be(expected);
@@ -106,9 +114,11 @@ public sealed class AgentLlmSchemaTests
     [InlineData("out_of_scope", "missing", "$.suggestedDish(missing)")]
     public void FindMismatch_SmallTalkActions_AreAllowed(string action, string dish, string? expected)
     {
+        // STEP-01: Get output from Output, set output["action"] to action and when dish == "missing", call output.Remove.
         var output = Output(); output["action"] = action;
         if (dish == "missing") output.Remove("suggestedDish");
         else output["suggestedDish"] = JsonNode.Parse(dish);
+        // STEP-02: Read document from the response; assert AgentLlmSchema.FindMismatch() is expected.
         using var document = JsonDocument.Parse(output.ToJsonString());
 
         AgentLlmSchema.FindMismatch(document.RootElement, AgentLlmSchema.Output).Should().Be(expected);
@@ -117,7 +127,7 @@ public sealed class AgentLlmSchemaTests
     /// <summary>Builds a complete strict output with explicit nulls and empty arrays, matching the provider contract.</summary>
     private static JsonObject Output() => new()
     {
-        ["action"] = "answer", ["reply"] = "Explanation", ["suggestedDish"] = null, ["clarification"] = null, ["state"] = null,
+        ["action"] = "answer", ["reply"] = "Explanation", ["tool"] = null, ["pendingAnswer"] = null, ["answerStartDate"] = null, ["answerEndDate"] = null, ["suggestedDish"] = null, ["clarification"] = null, ["state"] = null,
         ["constraintsChangeConfirmed"] = false, ["baseProposalVersion"] = null,
         ["scope"] = new JsonObject { ["dayNumber"] = null, ["mealSlot"] = null },
         ["items"] = new JsonArray(), ["changes"] = new JsonArray(), ["dishNotes"] = new JsonArray(), ["daySummaries"] = new JsonArray()

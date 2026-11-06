@@ -104,7 +104,7 @@ Không dựng lại lịch chính thức chỉ từ nội dung chat. State và s
 | Yêu cầu | Xử lý |
 | --- | --- |
 | Thiếu tỉnh/số ngày để tạo lịch | Hỏi đúng thông tin còn thiếu. |
-| Chưa có ngân sách | Hỏi nếu cần; chỉ tiếp tục không giới hạn khi người dùng chấp nhận. |
+| Chưa có ngân sách | Hỏi một lần; người dùng nói chưa chốt thì tiếp tục không áp ngân sách và nói rõ điều đó (xem “Agent reads, backend guards”). |
 | “Đổi món đó” có nhiều đối tượng | Hỏi lại, hoặc dùng lựa chọn rõ ràng từ giao diện. |
 | Đổi ngày/bữa/thứ tự | Patch proposal và kiểm tra lại; không ranking nếu không cần đổi món. |
 | Thay món/giảm ngân sách/đổi tỉnh | Lấy và ranking ứng viên cho phần cần điều chỉnh. |
@@ -115,7 +115,7 @@ Không dựng lại lịch chính thức chỉ từ nội dung chat. State và s
 | Chốt lịch khi chưa có ngày đi | Hỏi ngày bắt đầu và nêu số ngày của lịch; “để sau” thì lưu không có ngày. Khoảng ngày lệch số ngày thì hỏi lại, không tự đổi lịch. |
 | “Ok” ngay sau “Mình lưu lịch hiện tại … nhé?” | Lưu đúng phiên bản proposal vừa hỏi; “ok” ở lúc khác không lưu gì. |
 | Chào hỏi, cảm ơn, hỏi “bạn là ai” | Trả lời tự nhiên và giới thiệu là ANGI; không đổi lịch, state hay câu hỏi đang mở. |
-| Việc ngoài món ăn, quán và lịch ăn uống | Từ chối bằng đúng câu cố định; câu hỏi ẩm thực chung có nêu tên món thì đề nghị tìm quán món đó. |
+| Việc ngoài món ăn, quán và lịch ăn uống | Từ chối bằng một trong các câu cố định và nhắc lại câu hỏi đang mở; câu hỏi ẩm thực chung có nêu tên món thì đề nghị tìm quán món đó. |
 
 RECO-05 hiện chưa có tham số taste vector theo câu chat. Không mô tả việc hiểu văn nói là một thuật toán ranking mới đã được triển khai.
 
@@ -628,14 +628,14 @@ Application, Infrastructure và WebApi tổ chức Layer → technical folder �
 
 Mỗi method/constructor viết XML `<summary>` bằng tiếng Anh, nêu mục đích và ý nghĩa. Test ghi `// TEST-xx: English description of the behavior being tested.` trước Fact/Theory; đánh số trong từng file, không dùng cùng số cho các hành vi khác nhau trong file đó.
 
-Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folders>/<Class>.cs` → `ANGI.UnitTests/<Project>/<Folders>/<Class>Tests.cs`. Ví dụ `ANGI.Application/Services/Agent/AgentProposalBuilder.cs` → `ANGI.UnitTests/Application/Services/Agent/AgentProposalBuilderTests.cs`. Test HTTP/PostgreSQL đặt trong ANGI.IntegrationTests, ưu tiên cùng cấu trúc source cho controller/repository/configuration. Helper chỉ phục vụ nhóm test đặt cùng folder của nhóm đó; không tạo Services/Agent chung ở gốc test.
+Test unit mirror đúng project và folder chứa source: `ANGI.<Project>/<Folders>/<Class>.cs` → `ANGI.UnitTests/<Project>/<Folders>/<Class>Tests.cs`. Ví dụ `ANGI.Application/Services/Agent/Proposals/AgentProposalBuilder.cs` → `ANGI.UnitTests/Application/Services/Agent/Proposals/AgentProposalBuilderTests.cs`. Test HTTP/PostgreSQL đặt trong ANGI.IntegrationTests, ưu tiên cùng cấu trúc source cho controller/repository/configuration. Helper chỉ phục vụ nhóm test đặt cùng folder của nhóm đó; không tạo Services/Agent chung ở gốc test.
 
 ### 2. Các vùng và biên phải được kiểm chứng
 
 | Vùng | Biên và hành vi bắt buộc |
 | --- | --- |
 | Request/identity | Thiếu/null/sai kiểu JSON; ID 0/âm/tràn long/số thập phân/UUID cũ; ID dương trong hai conversation độc lập; JWT/role/ownership. |
-| State | NumDays 1..30, độ dài chuỗi, VND nguyên không âm đúng numeric(14,0), tag dương/không trùng/tồn tại, tọa độ đủ cặp/đúng miền, radius 1..50 và cần origin, ngày cuối không tràn, focus thuộc ngày/bữa hợp lệ. |
+| State | NumDays 1..100, độ dài chuỗi, VND nguyên không âm đúng numeric(14,0), tag dương/không trùng/tồn tại, tọa độ đủ cặp/đúng miền, radius 1..50 và cần origin, ngày cuối không tràn, focus thuộc ngày/bữa hợp lệ. |
 | Claim/retry | Completed replay trước version/expiry/quota; 202 retry đang chạy; 409 đổi nội dung cùng ID; hai message khác nhau; lease hết hạn/takeover; worker cũ không ghi; failed retry không nhân đôi logical message; quota/phút và ngày dùng chung giữa conversations. |
 | Context/policy | Chỉ history completed; giữ proposal hiện hành, latest roadmap/version và metadata sửa tay; không đoán tỉnh mơ hồ; state do model không được nới hard constraints; confirmedState từ người dùng mới cấp quyền. |
 | Tools/provider | Allowlist, strict schema/unknown/null/duplicate fields, ID ngoài candidates, score không hữu hạn/sai số lượng, topK/candidates/call/round/context/token caps, một lần repair, timeout/cancellation, no candidates, rating fallback và map estimate. |
@@ -728,3 +728,14 @@ trip, day and meal inheritance is backend-owned; reco continues ranking with its
 Tools additionally allow read-only search_catalog. Named selectors cannot silently substitute;
 affected retained dishes require new scoped recommendation provenance. User-visible facts and
 clarification questions are backend-rendered from validated data and allowlisted question intents.
+
+## Agent reads, backend guards — user decision on 2026-11-04
+
+This section supersedes section XX's rule that budget is required to plan, and the older rule that every clarification is backend-rendered.
+
+- Target: the model reads every chat message and words the replies; the backend stays behind it as guardrails on state, tool arguments, catalog facts, proposal versions and limits. No new regex reads user wording. Rules are removed group by group, only while the evaluation in `OpenAiAgentLlmServiceLiveTests` still refuses every out-of-scope sentence and the flow tests give the same outcome.
+- The business flow does not change: place, then duration and budget, then preferences, preview, review, start date, save. Changing a settled constraint still needs confirmation, and only the backend writes a roadmap.
+- One approved exception: budget is optional in chat, matching RM-06 and RM-10 and reco, which has no budget concept. The backend asks once; a user who has not decided continues under `budgetUnrestricted=true`, is told no budget applies, and the plan says so. No second confirmation is asked when the reply answers that question with no plan yet. Elsewhere the model still cannot drop a limit by itself.
+- A request outside ANGI is never carried out. The refusal stays backend-owned: fixed wording with variants chosen by turn, plus the open question. No model text is shown on that turn.
+- The model also words dish suggestions around slots the backend fills from `suggest_dish`, so it cannot misstate a dish's facts, and answers a question about the user's own favourites by saying ANGI does not know yet and offering a suggestion (user decision on 2026-11-05). The backend keeps the facts and the check; the fixed sentence only replaces wording that fails it or a call that fails, with no retry.
+- Second approved exception to the unchanged flow (2026-11-05): a stated taste with no trip in sight (`tôi thích ngọt`) leads to a dish suggestion instead of the planning questions. A suggestion over a plan invites adding the dish, which then follows the ordinary edit path.

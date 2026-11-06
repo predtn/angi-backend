@@ -13,10 +13,12 @@ namespace ANGI.UnitTests.WebApi.Configs
         [Fact]
         public async Task WriteErrorAsync_With404_ShouldWriteRouteNotFound()
         {
+            // STEP-01: Create context through CreateContext and call StatusCodePagesConfig.WriteErrorAsync.
             var context = CreateContext(StatusCodes.Status404NotFound);
 
             await StatusCodePagesConfig.WriteErrorAsync(context);
 
+            // STEP-02: Read root through ReadBodyAsync; assert root.success is false, root.errorCode is "ROUTE_NOT_FOUND" and root.data.ValueKind is JsonValueKind.Null.
             var root = await ReadBodyAsync(context);
             root.GetProperty("success").GetBoolean().Should().BeFalse();
             root.GetProperty("errorCode").GetString().Should().Be("ROUTE_NOT_FOUND");
@@ -28,10 +30,12 @@ namespace ANGI.UnitTests.WebApi.Configs
         [Fact]
         public async Task WriteErrorAsync_With405_ShouldWriteMethodNotAllowed()
         {
+            // STEP-01: Create context through CreateContext and call StatusCodePagesConfig.WriteErrorAsync.
             var context = CreateContext(StatusCodes.Status405MethodNotAllowed);
 
             await StatusCodePagesConfig.WriteErrorAsync(context);
 
+            // STEP-02: Read root through ReadBodyAsync; assert root.errorCode is "METHOD_NOT_ALLOWED".
             var root = await ReadBodyAsync(context);
             root.GetProperty("errorCode").GetString().Should().Be("METHOD_NOT_ALLOWED");
         }
@@ -41,10 +45,12 @@ namespace ANGI.UnitTests.WebApi.Configs
         [Fact]
         public async Task WriteErrorAsync_WithOtherStatus_ShouldWriteNothing()
         {
+            // STEP-01: Create context through CreateContext and call StatusCodePagesConfig.WriteErrorAsync.
             var context = CreateContext(StatusCodes.Status400BadRequest);
 
             await StatusCodePagesConfig.WriteErrorAsync(context);
 
+            // STEP-02: Assert context.Response.Body.Length is 0.
             context.Response.Body.Length.Should().Be(0);
         }
 

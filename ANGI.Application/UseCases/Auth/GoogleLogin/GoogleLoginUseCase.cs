@@ -60,13 +60,18 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
             GoogleLoginRequestDto request,
             CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Call googleIdentityService.VerifyIdTokenAsync and keep identity.
             var identity = await _googleIdentityService.VerifyIdTokenAsync(request.IdToken, ct);
+            // STEP-03: Prepare normalizedEmail through identity.Email.Trim().ToLowerInvariant and now from timeProvider.GetUtcNow.
             var normalizedEmail = identity.Email.Trim().ToLowerInvariant();
             var now = _timeProvider.GetUtcNow().UtcDateTime;
 
+            // STEP-04: Open the database transaction.
             await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+            // STEP-05: Load authenticationRepository.LockExternalLoginAsync and user through authenticationRepository.GetUserByExternalLoginAsync.
             await _authenticationRepository.LockExternalLoginAsync(
                 ExternalLoginProvider.Google,
                 identity.ProviderUserId,
@@ -76,9 +81,11 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 ExternalLoginProvider.Google,
                 identity.ProviderUserId,
                 ct);
+            // STEP-06: Prepare isNewUser and statusChanged.
             var isNewUser = false;
             var statusChanged = false;
 
+            // STEP-07: When user is missing, set user, check whether user is missing and 1 more action(s); otherwise call EnsureGoogleLoginAllowed.
             if (user is null)
             {
                 user = await _authenticationRepository.GetUserByEmailAsync(normalizedEmail, ct);
@@ -142,8 +149,11 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 EnsureGoogleLoginAllowed(user);
             }
 
+            // STEP-08: Prepare refreshToken through tokenService.CreateRefreshToken.
             var refreshToken = _tokenService.CreateRefreshToken();
+            // STEP-09: Update user: LastLoginAt.
             user.LastLoginAt = now;
+            // STEP-10: Prepare session as UserSession.
             var session = new UserSession
             {
                 User = user,
@@ -152,7 +162,9 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 IpAddress = _currentUserService.IpAddress,
                 ExpiresAt = refreshToken.ExpiresAt
             };
+            // STEP-11: Queue session through authenticationRepository.AddSession.
             _authenticationRepository.AddSession(session);
+            // STEP-12: When isNewUser is true, call auditLogService.Add.
             if (isNewUser)
             {
                 _auditLogService.Add(new AuditLogEntry
@@ -166,6 +178,7 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 });
             }
 
+            // STEP-13: Record audit action AuditActions.UserLogin.
             _auditLogService.Add(new AuditLogEntry
             {
                 Action = AuditActions.UserLogin,
@@ -176,8 +189,10 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 ActorRole = user.Role.Code
             });
 
+            // STEP-14: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
 
+            // STEP-15: Prepare accessToken through tokenService.CreateAccessToken and tokens as AuthenticationTokens.
             // The session id exists only once saved; the access token carries it as claim sid.
             var accessToken = _tokenService.CreateAccessToken(user, session.Id);
             var tokens = new AuthenticationTokens(
@@ -186,14 +201,18 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
                 refreshToken.Token,
                 refreshToken.TokenHash,
                 refreshToken.ExpiresAt);
+            // STEP-16: Commit the transaction.
             await transaction.CommitAsync(ct);
 
+            // STEP-17: When statusChanged is true, call accountStatusCache.Invalidate.
             if (statusChanged)
             {
                 _accountStatusCache.Invalidate(user.Id);
             }
 
+            // STEP-18: Load needsPreferenceSurvey through GetNeedsPreferenceSurveyAsync.
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(user, ct);
+            // STEP-19: Return the result of AuthenticationResponseMapper.MapGoogle.
             return AuthenticationResponseMapper.MapGoogle(user, tokens, needsPreferenceSurvey, isNewUser);
         }
 
@@ -220,12 +239,15 @@ namespace ANGI.Application.UseCases.Auth.GoogleLogin
         /// <summary>Queries survey state only for Travelers and preserves login when Reco is unavailable.</summary>
         private async Task<bool?> GetNeedsPreferenceSurveyAsync(User user, CancellationToken ct)
         {
+            // STEP-01: Return null early when user.Role.Code differs from TravelerRole.
             if (!string.Equals(user.Role.Code, TravelerRole, StringComparison.Ordinal))
             {
                 return null;
             }
 
+            // STEP-02: Load status through recommendationService.GetSurveyStatusAsync.
             var status = await _recommendationService.GetSurveyStatusAsync(user.Id, ct);
+            // STEP-03: Return one of two results depending on status is missing.
             return status is null ? null : !status.Completed;
         }
     }

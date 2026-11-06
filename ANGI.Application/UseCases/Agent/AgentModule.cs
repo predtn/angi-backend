@@ -1,6 +1,10 @@
 using ANGI.Application.Common.Interfaces.UseCases.Agent;
 using ANGI.Application.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Places;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Agent.CleanupConversations;
 using ANGI.Application.UseCases.Agent.ConfirmProposal;
 using ANGI.Application.UseCases.Agent.CreateConversation;
@@ -18,7 +22,7 @@ public static class AgentModule
     public static IServiceCollection AddAgentUseCases(this IServiceCollection services)
     {
         services.TryAddSingleton<AgentLimits>();
-        services.AddScoped<AgentStatePolicy>();
+        services.AddScoped<AgentConstraintGuard>();
         services.AddScoped<AgentPreferenceService>();
         services.AddScoped<AgentContextBuilder>();
         services.AddScoped<AgentProposalBuilder>();
@@ -26,6 +30,7 @@ public static class AgentModule
         services.AddScoped<AgentProposalCommitter>();
         services.AddScoped<AgentToolExecutor>();
         services.AddScoped<AgentRouteEstimator>();
+        services.AddScoped<AgentPlaceResolver>();
         services.AddScoped<AgentOrchestrator>();
         services.AddScoped<ICreateAgentConversationUseCase, CreateAgentConversationUseCase>();
         services.AddScoped<IGetAgentConversationUseCase, GetAgentConversationUseCase>();

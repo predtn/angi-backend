@@ -15,7 +15,9 @@ public sealed class ListReportsRequestDtoValidatorTests
     [InlineData("restaurant", true)] [InlineData("blog", true)]
     public void ValidatesTargetType(string? type, bool valid)
     {
+        // STEP-01: Validate ListReportsRequestDto { TargetType = type } and keep result.
         var result = new ListReportsRequestDtoValidator().Validate(new ListReportsRequestDto { TargetType = type! });
+        // STEP-02: Assert result.IsValid is valid and result.Errors has exactly one matching item.
         result.IsValid.Should().Be(valid);
         if (!valid) result.Errors.Should().ContainSingle(error => error.PropertyName == "TargetType");
     }
@@ -27,6 +29,7 @@ public sealed class ListReportsRequestDtoValidatorTests
     [InlineData("resolved", true)] [InlineData("dismissed", true)]
     [InlineData("", false)] [InlineData(" ", false)] [InlineData("PENDING", false)] [InlineData("0", false)] [InlineData("invalid", false)]
     public void ValidatesStatus(string? status, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new ListReportsRequestDtoValidator().Validate(new ListReportsRequestDto { TargetType = "restaurant", Status = status }).IsValid.Should().Be(valid);
 
     // TEST-03: Accept all seven reasons and reject unsupported, numeric and non-exact values.
@@ -36,6 +39,7 @@ public sealed class ListReportsRequestDtoValidatorTests
     [InlineData("offensive", true)] [InlineData("hygiene", true)] [InlineData("scam", true)] [InlineData("other", true)]
     [InlineData("", false)] [InlineData(" ", false)] [InlineData("SPAM", false)] [InlineData("0", false)] [InlineData("invalid", false)]
     public void ValidatesReason(string? reason, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new ListReportsRequestDtoValidator().Validate(new ListReportsRequestDto { TargetType = "restaurant", ReasonCode = reason }).IsValid.Should().Be(valid);
 
     // TEST-04: Bound pages and page sizes and allow positive target identifiers up to Int64.MaxValue.
@@ -46,6 +50,7 @@ public sealed class ListReportsRequestDtoValidatorTests
     [InlineData(1, 0, null, false)] [InlineData(1, -1, null, false)] [InlineData(1, 101, null, false)]
     [InlineData(1, 20, 0L, false)] [InlineData(1, 20, -1L, false)]
     public void ValidatesNumericBoundaries(int page, int size, long? id, bool valid) =>
+        // STEP-01: Assert the validator.Validate().IsValid is valid.
         new ListReportsRequestDtoValidator().Validate(new ListReportsRequestDto
         { TargetType = "restaurant", Page = page, PageSize = size, TargetId = id }).IsValid.Should().Be(valid);
 }

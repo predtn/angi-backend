@@ -16,24 +16,31 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
     /// <summary>Applies all MOD-RP1 filters with stable paging and a wide offset calculation.</summary>
     public async Task<Paged<Report>> ListReportsAsync(ListReportsRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Prepare type through Parse and query through context.Reports.AsNoTracking().Where.
         var type = Parse<ReportTargetType>(request.TargetType);
         var query = context.Reports.AsNoTracking().Where(report => report.TargetType == type);
+        // STEP-02: When request.Status exists, prepare status through Parse and set query.
         if (request.Status is not null)
         {
             var status = Parse<ReportStatus>(request.Status);
             query = query.Where(report => report.Status == status);
         }
+        // STEP-03: When request.ReasonCode exists, prepare reason through Parse and set query.
         if (request.ReasonCode is not null)
         {
             var reason = Parse<ReportReasonCode>(request.ReasonCode);
             query = query.Where(report => report.ReasonCode == reason);
         }
+        // STEP-04: When request.TargetId has a value, set query.
         if (request.TargetId.HasValue)
             query = query.Where(report => type == ReportTargetType.Restaurant ? report.RestaurantId == request.TargetId : report.BlogId == request.TargetId);
+        // STEP-05: Call query.LongCountAsync and keep count.
         var count = await query.LongCountAsync(ct);
+        // STEP-06: Prepare offset and items from query.OrderByDescending.
         var offset = ((long)request.Page - 1) * request.PageSize;
         var items = offset > int.MaxValue ? [] : await query.OrderByDescending(report => report.CreatedAt).ThenByDescending(report => report.Id)
             .Skip((int)offset).Take(request.PageSize).ToListAsync(ct);
+        // STEP-07: Return the new result.
         return new() { Items = items, Page = request.Page, PageSize = request.PageSize, TotalItems = count,
             TotalPages = (int)Math.Ceiling((double)count / request.PageSize) };
     }
@@ -76,7 +83,9 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
     /// <summary>Loads a page's display data in a fixed number of queries rather than querying each report separately.</summary>
     public async Task<IReadOnlyDictionary<ReportTarget, ReportDisplayData>> GetReportDisplaysAsync(IReadOnlyList<Report> reports, CancellationToken ct)
     {
+        // STEP-01: Return a new Dictionary<ReportTarget, ReportDisplayData> early when reports.Count is 0.
         if (reports.Count == 0) return new Dictionary<ReportTarget, ReportDisplayData>();
+        // STEP-02: Prepare restaurantIds, blogIds, users and evidence, then call Where(filtered).Select(filtered).ToDictionaryAsync and keep userMap and more.
         var restaurantIds = reports.Where(report => report.TargetType == ReportTargetType.Restaurant).Select(report => report.RestaurantId!.Value).Distinct().ToArray();
         var blogIds = reports.Where(report => report.TargetType == ReportTargetType.Blog).Select(report => report.BlogId!.Value).Distinct().ToArray();
         var users = reports.Select(report => report.ReporterId).Concat(reports.Where(report => report.HandledBy.HasValue).Select(report => report.HandledBy!.Value)).Distinct().ToArray();
@@ -96,7 +105,9 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
             (report.Status == ReportStatus.Pending || report.Status == ReportStatus.InReview))
             .GroupBy(report => new { report.TargetType, report.RestaurantId, report.BlogId })
             .Select(group => new { group.Key.TargetType, Id = (group.Key.RestaurantId ?? group.Key.BlogId)!.Value, Count = group.Count() }).ToListAsync(ct);
+        // STEP-03: Prepare countMap through counts.ToDictionary.
         var countMap = counts.ToDictionary(item => new ReportTarget(item.TargetType, item.Id), item => item.Count);
+        // STEP-04: Return the result of Select(filtered).Distinct().ToDictionary.
         return reports.Select(report => new ReportTarget(report.TargetType, (report.RestaurantId ?? report.BlogId)!.Value)).Distinct()
             .ToDictionary(target => target, target => new ReportDisplayData(
                 (target.Type == ReportTargetType.Restaurant ? restaurants : blogs).GetValueOrDefault(target.Id, string.Empty),
@@ -106,35 +117,44 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
     /// <summary>Projects a bounded page and applies each MOD-R1 filter, including pending and in-review counts.</summary>
     public async Task<Paged<ModRestaurantListItem>> ListAsync(ListModRestaurantsRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Prepare query through context.Restaurants.AsNoTracking.
         var query = context.Restaurants.AsNoTracking();
+        // STEP-02: When request.Q has a value, prepare term through request.Q.Trim().ToLowerInvariant and set query.
         if (!string.IsNullOrWhiteSpace(request.Q))
         {
             var term = request.Q.Trim().ToLowerInvariant();
             query = query.Where(r => r.Name.ToLower().Contains(term));
         }
+        // STEP-03: When request.Province has a value, set query.
         if (!string.IsNullOrWhiteSpace(request.Province)) query = query.Where(r => r.ProvinceName == request.Province.Trim());
+        // STEP-04: When request.VerificationStatus exists, prepare status through Parse and set query.
         if (request.VerificationStatus is not null)
         {
             var status = Parse<RestaurantVerificationStatus>(request.VerificationStatus);
             query = query.Where(r => r.VerificationStatus == status);
         }
+        // STEP-05: When request.OperatingStatus exists, prepare status through Parse and set query.
         if (request.OperatingStatus is not null)
         {
             var status = Parse<RestaurantOperatingStatus>(request.OperatingStatus);
             query = query.Where(r => r.OperatingStatus == status);
         }
+        // STEP-06: When request.ModerationStatus exists, prepare status through Parse and set query.
         if (request.ModerationStatus is not null)
         {
             var status = Parse<RestaurantModerationStatus>(request.ModerationStatus);
             query = query.Where(r => r.ModerationStatus == status);
         }
+        // STEP-07: When request.HasPendingReports has a value, prepare hasReports and set query.
         if (request.HasPendingReports.HasValue)
         {
             var hasReports = request.HasPendingReports.Value;
             query = query.Where(r => context.Reports.Any(report => report.TargetType == ReportTargetType.Restaurant &&
                 report.RestaurantId == r.Id && (report.Status == ReportStatus.Pending || report.Status == ReportStatus.InReview)) == hasReports);
         }
+        // STEP-08: Call query.LongCountAsync and keep count.
         var count = await query.LongCountAsync(ct);
+        // STEP-09: Prepare offset and items from query.OrderByDescending.
         var offset = ((long)request.Page - 1) * request.PageSize;
         var items = offset > int.MaxValue ? [] : await query.OrderByDescending(r => r.CreatedAt).ThenByDescending(r => r.Id)
             .Skip((int)offset).Take(request.PageSize)
@@ -152,6 +172,7 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
             }, context.Reports.Count(report => report.TargetType == ReportTargetType.Restaurant && report.RestaurantId == r.Id &&
                 (report.Status == ReportStatus.Pending || report.Status == ReportStatus.InReview))))
             .ToListAsync(ct);
+        // STEP-10: Return the new result.
         return new() { Items = items, Page = request.Page, PageSize = request.PageSize, TotalItems = count,
             TotalPages = (int)Math.Ceiling((double)count / request.PageSize) };
     }
@@ -218,6 +239,7 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
     /// <summary>Batch-loads public report identities and evidence metadata without tracking or per-report queries.</summary>
     public async Task<ReportDisplayData> GetReportDisplayDataAsync(ReportTarget target, IReadOnlyList<Report> reports, CancellationToken ct)
     {
+        // STEP-01: Prepare users and evidence, then call Where(filtered).Select(filtered).ToDictionaryAsync and keep userMap and more.
         var users = reports.Select(r => r.ReporterId).Concat(reports.Where(r => r.HandledBy.HasValue).Select(r => r.HandledBy!.Value)).Distinct().ToArray();
         var evidence = reports.SelectMany(r => JsonSerializer.Deserialize<long[]>(r.Evidence) ?? []).Distinct().ToArray();
         var userMap = await context.Users.IgnoreQueryFilters().AsNoTracking().Where(u => users.Contains(u.Id))
@@ -225,12 +247,14 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
                 AvatarMedia = u.AvatarMediaId == null ? null : new MediaFile { Url = u.AvatarMedia!.Url } }).ToDictionaryAsync(u => u.Id, ct);
         var mediaMap = await context.MediaFiles.AsNoTracking().Where(m => evidence.Contains(m.Id))
             .Select(m => new MediaFile { Id = m.Id, StorageKey = m.StorageKey }).ToDictionaryAsync(m => m.Id, ct);
+        // STEP-02: Prepare name, then load openCount through context.Reports.AsNoTracking().CountAsync.
         var name = target.Type == ReportTargetType.Restaurant
             ? await context.Restaurants.AsNoTracking().Where(r => r.Id == target.Id).Select(r => r.Name).SingleOrDefaultAsync(ct)
             : await context.Blogs.AsNoTracking().Where(b => b.Id == target.Id).Select(b => b.Title).SingleOrDefaultAsync(ct);
         var openCount = await context.Reports.AsNoTracking().CountAsync(r => r.TargetType == target.Type &&
             (target.Type == ReportTargetType.Restaurant ? r.RestaurantId == target.Id : r.BlogId == target.Id) &&
             (r.Status == ReportStatus.Pending || r.Status == ReportStatus.InReview), ct);
+        // STEP-03: Return the new result.
         return new(name ?? string.Empty, userMap, mediaMap, openCount);
     }
 

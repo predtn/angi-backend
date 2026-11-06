@@ -86,8 +86,10 @@ internal static class RestaurantMenuMapper
         MenuSubmission submission,
         IReadOnlyCollection<Dish> sourceDishes)
     {
+        // STEP-01: Prepare source through MapSubmission and dishesById through sourceDishes.ToDictionary.
         var source = MapSubmission(submission);
         var dishesById = sourceDishes.ToDictionary(dish => dish.Id);
+        // STEP-02: Return a new MenuSubmissionWithItemsDto.
         return new MenuSubmissionWithItemsDto
         {
             Id = source.Id,
@@ -114,12 +116,14 @@ internal static class RestaurantMenuMapper
     /// <summary>Maps a submission and computes dishes omitted from its proposed item set.</summary>
     public static MenuSubmissionDetailDto MapSubmissionDetail(MenuSubmission submission)
     {
+        // STEP-01: Prepare source through MapSubmissionWithItems and retainedDishIds through Where(filtered).Select(filtered).ToHashSet.
         var source = MapSubmissionWithItems(submission);
         var retainedDishIds = submission.Items
             .Where(item => item.SourceDishId.HasValue)
             .Select(item => item.SourceDishId!.Value)
             .ToHashSet();
 
+        // STEP-02: Return a new MenuSubmissionDetailDto.
         return new MenuSubmissionDetailDto
         {
             Id = source.Id,
@@ -234,11 +238,13 @@ internal static class RestaurantMenuMapper
     /// <summary>Compares a proposed item with its current source dish.</summary>
     private static string GetChange(MenuSubmissionItem item)
     {
+        // STEP-01: Return "new" early when item.SourceDish is missing.
         if (item.SourceDish is null)
         {
             return "new";
         }
 
+        // STEP-02: Prepare sourceTagIds through DishTags.Select(filtered).OrderBy, itemTagIds through item.TagIds.OrderBy and unchanged from sourceTagIds.SequenceEqual.
         var sourceTagIds = item.SourceDish.DishTags.Select(tag => tag.TagId).OrderBy(id => id);
         var itemTagIds = item.TagIds.OrderBy(id => id);
         var unchanged = item.Name == item.SourceDish.Name &&
@@ -248,6 +254,7 @@ internal static class RestaurantMenuMapper
                         item.CoverMediaId == item.SourceDish.CoverMediaId &&
                         item.SortOrder == item.SourceDish.SortOrder &&
                         sourceTagIds.SequenceEqual(itemTagIds);
+        // STEP-03: Return one of two results depending on unchanged is true.
         return unchanged ? "unchanged" : "edited";
     }
 

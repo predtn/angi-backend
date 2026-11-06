@@ -13,4 +13,10 @@ public interface IAgentCatalogRepository
 
     /// <summary>Returns the province of the nearest public restaurant within the radius, or null when none is that close.</summary>
     Task<string?> NearestProvinceAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken ct);
+
+    /// <summary>Returns the address and coordinates of every public restaurant that has a province.</summary>
+    Task<AgentCatalogPlace[]> GetPublicPlacesAsync(CancellationToken ct);
+
+    /// <summary>Returns the name of every dish public restaurants still list, so a reply can be checked against what a dish is called.</summary>
+    Task<string[]> GetDishNamesAsync(CancellationToken ct);
 }

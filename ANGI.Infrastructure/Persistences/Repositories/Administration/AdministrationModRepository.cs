@@ -27,10 +27,12 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
         int pageSize,
         CancellationToken ct)
     {
+        // STEP-01: Prepare users through context.Users.AsNoTracking().Where.
         var users = _context.Users
             .AsNoTracking()
             .Where(user => user.Role.Code == ModRoleCode);
 
+        // STEP-02: When query has a value, prepare pattern from LikePattern.Contains and set users.
         if (!string.IsNullOrWhiteSpace(query))
         {
             var pattern = LikePattern.Contains(query);
@@ -39,12 +41,15 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
                 EF.Functions.ILike(user.DisplayName, pattern, "\\"));
         }
 
+        // STEP-03: When status has a value, set users.
         if (status.HasValue)
         {
             users = users.Where(user => user.Status == status.Value);
         }
 
+        // STEP-04: Call users.LongCountAsync and keep totalItems.
         var totalItems = await users.LongCountAsync(ct);
+        // STEP-05: Prepare offset and items from users.OrderByDescending.
         var offset = ((long)page - 1) * pageSize;
         IReadOnlyList<AdminUserSnapshot> items = offset > int.MaxValue
             ? []
@@ -65,6 +70,7 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
                     user.CreatedAt))
                 .ToListAsync(ct);
 
+        // STEP-06: Return a new Paged<AdminUserSnapshot>.
         return new Paged<AdminUserSnapshot>
         {
             Items = items,
@@ -117,6 +123,7 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
     /// <summary>Counts all rows attributed to the MOD reviewer or handler identifiers.</summary>
     public async Task<ModHandledSnapshot> GetHandledAsync(int userId, CancellationToken ct)
     {
+        // STEP-01: Load verifications through AsNoTracking().CountAsync, menus through MenuSubmissions.AsNoTracking().CountAsync and more.
         var verifications = await _context.RestaurantVerifications
             .AsNoTracking()
             .CountAsync(item => item.ReviewedBy == userId, ct);
@@ -126,6 +133,7 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
         var reports = await _context.Reports
             .AsNoTracking()
             .CountAsync(item => item.HandledBy == userId, ct);
+        // STEP-02: Return a new ModHandledSnapshot.
         return new ModHandledSnapshot(verifications, menus, reports);
     }
 

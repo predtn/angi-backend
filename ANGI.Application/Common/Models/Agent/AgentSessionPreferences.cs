@@ -11,8 +11,8 @@ public sealed record AgentSessionPreferences
     public bool Initialized { get; init; }
 }
 
-/// <summary>A user-specified target; an omitted dimension inherits its profile value.</summary>
-public sealed record AgentTasteTarget(string Dimension, double Target);
+/// <summary>A user-specified target; an omitted dimension inherits its profile value. <paramref name="LevelQuote"/> holds the user's own words for the level while the model proposes it, and is never stored.</summary>
+public sealed record AgentTasteTarget(string Dimension, double Target, string? LevelQuote = null);
 
 /// <summary>Fixed ontology and deterministic application of validated taste targets.</summary>
 public static class AgentTasteOntology

@@ -14,8 +14,11 @@ public sealed class AgentCleanupWorker(IServiceScopeFactory scopes, IConfigurati
     /// <summary>Periodically expires or deletes eligible memory while keeping the worker alive after transient failures.</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // STEP-01: Stop here when GetConnectionString() is blank.
         if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("Default"))) return;
+        // STEP-02: Prepare timer as PeriodicTimer.
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(limits.CleanupSeconds));
+        // STEP-03: While stoppingToken.IsCancellationRequested is false, prepare scope through scopes.CreateScope and call GetRequiredService().ExecuteAsync and more.
         while (!stoppingToken.IsCancellationRequested)
         {
             try

@@ -35,15 +35,20 @@ public sealed class UpdateDishAvailabilityUseCase : IUpdateDishAvailabilityUseCa
         UpdateDishAvailabilityRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare ownerId and dish from repository.GetTrackedOwnerDishAsync.
         var ownerId = _currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để cập nhật món.");
         var dish = await _repository.GetTrackedOwnerDishAsync(ownerId, dishId, ct)
             ?? throw new NotFoundException("DISH_NOT_FOUND", "Không tìm thấy món ăn.");
 
+        // STEP-03: Update dish: IsAvailable.
         dish.IsAvailable = request.IsAvailable!.Value;
+        // STEP-04: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-05: Return a new DishAvailabilityDto.
         return new DishAvailabilityDto { DishId = dish.Id, IsAvailable = dish.IsAvailable };
     }
 }

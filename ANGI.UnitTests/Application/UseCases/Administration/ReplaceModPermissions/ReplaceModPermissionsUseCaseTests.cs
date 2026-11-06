@@ -24,16 +24,21 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidReplacement_ShouldPersistAuditAndReturnEffectivePermissions()
     {
+        // STEP-01: Get repository from RepositoryWithState.
         var repository = RepositoryWithState();
+        // STEP-02: Declare auditEntry to capture a call argument; mock ICurrentUserService and IAuditLogService; stub currentUser.UserId and audit.Add.
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(7);
         var audit = new Mock<IAuditLogService>();
         AuditLogEntry? auditEntry = null;
         audit.Setup(item => item.Add(It.IsAny<AuditLogEntry>()))
             .Callback<AuditLogEntry>(entry => auditEntry = entry);
+        // STEP-03: Get transaction from Transaction and get unitOfWork from UnitOfWork.
         var transaction = Transaction();
         var unitOfWork = UnitOfWork(transaction);
+        // STEP-04: Build useCase under test through Create.
         var useCase = Create(repository.Object, currentUser.Object, audit.Object, unitOfWork.Object);
+        // STEP-05: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides =
@@ -43,10 +48,13 @@ public sealed class ReplaceModPermissionsUseCaseTests
             ]
         };
 
+        // STEP-06: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(42, request, CancellationToken.None);
 
+        // STEP-07: Assert result.Overrides.Select(filtered) equals "USER_BAN" and result.Effective equals "USER_SUSPEND".
         result.Overrides.Select(item => item.PermissionCode).Should().Equal("USER_BAN", "DASHBOARD_VIEW");
         result.Effective.Should().Equal("USER_SUSPEND", "DASHBOARD_VIEW");
+        // STEP-08: Verify ReplaceModOverridesAsync is called once.
         repository.Verify(item => item.ReplaceModOverridesAsync(
             42,
             7,
@@ -54,10 +62,12 @@ public sealed class ReplaceModPermissionsUseCaseTests
             It.Is<IReadOnlyList<PermissionOverrideChange>>(changes =>
                 changes.Count == 2 && changes[0].PermissionId == 2 && changes[1].PermissionId == 3),
             It.IsAny<CancellationToken>()), Times.Once);
+        // STEP-09: Assert auditEntry is not null, auditEntry.Action is AuditActions.ModPermissionsChanged, auditEntry.EntityType is AuditEntityTypes.User and 1 more.
         auditEntry.Should().NotBeNull();
         auditEntry!.Action.Should().Be(AuditActions.ModPermissionsChanged);
         auditEntry.EntityType.Should().Be(AuditEntityTypes.User);
         auditEntry.SubjectUserId.Should().Be(42);
+        // STEP-10: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -67,20 +77,27 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyReplacement_ShouldReturnRoleDefaultsOnly()
     {
+        // STEP-01: Get repository from RepositoryWithState.
         var repository = RepositoryWithState();
+        // STEP-02: Mock ICurrentUserService; stub currentUser.UserId.
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(item => item.UserId).Returns(7);
+        // STEP-03: Get transaction from Transaction and get unitOfWork from UnitOfWork.
         var transaction = Transaction();
         var unitOfWork = UnitOfWork(transaction);
+        // STEP-04: Build useCase under test through Create.
         var useCase = Create(repository.Object, currentUser.Object, Mock.Of<IAuditLogService>(), unitOfWork.Object);
 
+        // STEP-05: Run useCase.ExecuteAsync with ReplaceModPermissionsRequestDto { Overrides = the expected items } and keep result.
         var result = await useCase.ExecuteAsync(
             42,
             new ReplaceModPermissionsRequestDto { Overrides = [] },
             CancellationToken.None);
 
+        // STEP-06: Assert result.Overrides is empty and result.Effective equals "USER_SUSPEND".
         result.Overrides.Should().BeEmpty();
         result.Effective.Should().Equal("USER_SUSPEND", "USER_BAN");
+        // STEP-07: Verify ReplaceModOverridesAsync is called once.
         repository.Verify(item => item.ReplaceModOverridesAsync(
             42, 7, Now, It.Is<IReadOnlyList<PermissionOverrideChange>>(changes => changes.Count == 0),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -91,17 +108,23 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownPermission_ShouldThrowDocumentedError()
     {
+        // STEP-01: Get repository from RepositoryWithState.
         var repository = RepositoryWithState();
+        // STEP-02: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(repository.Object);
+        // STEP-03: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides = [new PermissionOverrideDto { PermissionCode = "UNKNOWN", Effect = "allow" }]
         };
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(42, request, CancellationToken.None);
 
+        // STEP-05: Assert act throws BadRequestException and exception.ErrorCode is "UNKNOWN_PERMISSION".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("UNKNOWN_PERMISSION");
+        // STEP-06: Verify ReplaceModOverridesAsync is never called.
         repository.Verify(item => item.ReplaceModOverridesAsync(
             It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime>(),
             It.IsAny<IReadOnlyList<PermissionOverrideChange>>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -114,15 +137,20 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [InlineData("SYSTEM_AUDIT_VIEW")]
     public async Task ExecuteAsync_WithAdminOnlyPermission_ShouldThrowDocumentedError(string code)
     {
+        // STEP-01: Get repository from RepositoryWithState.
         var repository = RepositoryWithState();
+        // STEP-02: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(repository.Object);
+        // STEP-03: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides = [new PermissionOverrideDto { PermissionCode = code, Effect = "allow" }]
         };
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(42, request, CancellationToken.None);
 
+        // STEP-05: Assert act throws BadRequestException and exception.ErrorCode is "PERMISSION_NOT_GRANTABLE".
         var exception = await act.Should().ThrowAsync<BadRequestException>();
         exception.Which.ErrorCode.Should().Be("PERMISSION_NOT_GRANTABLE");
     }
@@ -132,18 +160,23 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutMod_ShouldThrowModNotFound()
     {
+        // STEP-01: Mock IAdministrationPermissionRepository; stub repository.GetModPermissionsAsync.
         var repository = new Mock<IAdministrationPermissionRepository>();
         repository.Setup(item => item.GetModPermissionsAsync(42, It.IsAny<CancellationToken>()))
             .ReturnsAsync((ModPermissionsSnapshot?)null);
+        // STEP-02: Build useCase under test through CreateAuthenticated.
         var useCase = CreateAuthenticated(repository.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReplaceModPermissionsRequestDto { Overrides = the expected items } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             42,
             new ReplaceModPermissionsRequestDto { Overrides = [] },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws NotFoundException and exception.ErrorCode is "MOD_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("MOD_NOT_FOUND");
+        // STEP-05: Verify GetCatalogAsync is never called.
         repository.Verify(item => item.GetCatalogAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -152,20 +185,25 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IUnitOfWork.
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(
             Mock.Of<IAdministrationPermissionRepository>(),
             Mock.Of<ICurrentUserService>(),
             Mock.Of<IAuditLogService>(),
             unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReplaceModPermissionsRequestDto { Overrides = the expected items } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             42,
             new ReplaceModPermissionsRequestDto { Overrides = [] },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify BeginTransactionAsync is never called.
         unitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -174,20 +212,25 @@ public sealed class ReplaceModPermissionsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldStopBeforeDependencies()
     {
+        // STEP-01: Mock IAdministrationPermissionRepository and IUnitOfWork.
         var repository = new Mock<IAdministrationPermissionRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(
             repository.Object,
             Mock.Of<ICurrentUserService>(),
             Mock.Of<IAuditLogService>(),
             unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ReplaceModPermissionsRequestDto { Overrides = null } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             42,
             new ReplaceModPermissionsRequestDto { Overrides = null! },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws FluentValidation.ValidationException.
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+        // STEP-05: Verify repository receives no other calls and unitOfWork receives no other calls.
         repository.VerifyNoOtherCalls();
         unitOfWork.VerifyNoOtherCalls();
     }

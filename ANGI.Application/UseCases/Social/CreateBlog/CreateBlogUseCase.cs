@@ -53,13 +53,17 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
     /// <summary>Validates and sanitizes content, captures an owned roadmap, then publishes and maps the blog.</summary>
     public async Task<BlogDetailDto> ExecuteAsync(CreateBlogRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare authorId and publishedAt from timeProvider.GetUtcNow.
         var authorId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để viết bài.");
         var publishedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare author from blogRepository.GetAuthorAsync, mediaIds through GetMediaIds and media from mediaRepository.GetOwnedByIdsAsync.
         var author = await _blogRepository.GetAuthorAsync(authorId, ct)
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Tài khoản không còn tồn tại.");
 
@@ -67,12 +71,17 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
         var media = mediaIds.Count == 0
             ? Array.Empty<MediaFile>()
             : await _mediaRepository.GetOwnedByIdsAsync(authorId, mediaIds, ct);
+        // STEP-05: Check the all media exist rule through EnsureAllMediaExist.
         EnsureAllMediaExist(request, media);
 
+        // STEP-06: Call CreateSnapshotAsync and keep snapshot.
         var snapshot = await CreateSnapshotAsync(request.RoadmapId, authorId, publishedAt, ct);
+        // STEP-07: Prepare sanitizedContent through contentSanitizer.Sanitize.
         var sanitizedContent = _contentSanitizer.Sanitize(request.Content.Trim());
+        // STEP-08: Check the sanitized content is not empty rule through EnsureSanitizedContentIsNotEmpty.
         EnsureSanitizedContentIsNotEmpty(sanitizedContent);
 
+        // STEP-09: Prepare blog as Blog.
         var blog = new Blog
         {
             AuthorId = authorId,
@@ -87,24 +96,31 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
             Status = BlogStatus.Published,
             PublishedAt = publishedAt
         };
+        // STEP-10: Queue blog through AddImages and queue blog through blogRepository.Add.
         AddImages(blog, request.ImageMediaIds);
 
         _blogRepository.Add(blog);
+        // STEP-11: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-12: Commit the transaction.
         await transaction.CommitAsync(ct);
 
+        // STEP-13: Return the result of MapToDetail.
         return MapToDetail(blog, author, media.ToDictionary(item => item.Id), snapshot);
     }
 
     /// <summary>Collects distinct cover and inline-image identifiers supplied by the caller.</summary>
     private static IReadOnlyCollection<long> GetMediaIds(CreateBlogRequestDto request)
     {
+        // STEP-01: Prepare ids as HashSet<long>.
         var ids = new HashSet<long>(request.ImageMediaIds ?? []);
+        // STEP-02: When request.CoverMediaId has a value, call ids.Add.
         if (request.CoverMediaId.HasValue)
         {
             ids.Add(request.CoverMediaId.Value);
         }
 
+        // STEP-03: Return ids.
         return ids;
     }
 
@@ -113,9 +129,11 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
         CreateBlogRequestDto request,
         IReadOnlyCollection<MediaFile> media)
     {
+        // STEP-01: Prepare foundIds through media.Select(filtered).ToHashSet and failures as List<ValidationFailure>.
         var foundIds = media.Select(item => item.Id).ToHashSet();
         var failures = new List<ValidationFailure>();
 
+        // STEP-02: When request.CoverMediaId exists and foundIds does not contain coverId, call failures.Add.
         if (request.CoverMediaId is { } coverId && !foundIds.Contains(coverId))
         {
             failures.Add(new ValidationFailure(
@@ -123,9 +141,11 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
                 $"Ảnh bìa {coverId} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
         }
 
+        // STEP-03: Prepare missingIds through Where(filtered).ToArray.
         var missingIds = (request.ImageMediaIds ?? [])
             .Where(id => !foundIds.Contains(id))
             .ToArray();
+        // STEP-04: When missingIds.Length > 0, call failures.Add.
         if (missingIds.Length > 0)
         {
             failures.Add(new ValidationFailure(
@@ -133,6 +153,7 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
                 $"Ảnh {string.Join(", ", missingIds)} không tồn tại hoặc không phải ảnh bạn đã tải lên."));
         }
 
+        // STEP-05: Throw ValidationException when failures.Count > 0.
         if (failures.Count > 0)
         {
             throw new ValidationException(failures);
@@ -157,14 +178,17 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
         DateTime capturedAt,
         CancellationToken ct)
     {
+        // STEP-01: Return null early when roadmapId has no value.
         if (!roadmapId.HasValue)
         {
             return null;
         }
 
+        // STEP-02: Prepare roadmap from blogRepository.GetOwnedRoadmapForSnapshotAsync.
         var roadmap = await _blogRepository.GetOwnedRoadmapForSnapshotAsync(roadmapId.Value, authorId, ct)
             ?? throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
 
+        // STEP-03: Return a new RoadmapSnapshotDto.
         return new RoadmapSnapshotDto
         {
             RoadmapId = roadmap.RoadmapId,
@@ -213,9 +237,11 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
     /// <summary>Creates a readable unique slug from a Vietnamese blog title.</summary>
     private async Task<string> CreateUniqueSlugAsync(string title, CancellationToken ct)
     {
+        // STEP-01: Prepare normalized through title.Trim().ToLowerInvariant().Replace, decomposed through normalized.Normalize and builder as StringBuilder.
         var normalized = title.Trim().ToLowerInvariant().Replace('đ', 'd');
         var decomposed = normalized.Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(decomposed.Length);
+        // STEP-02: For each character in decomposed, check whether CharUnicodeInfo.GetUnicodeCategory() is not UnicodeCategory.NonSpacingMark.
         foreach (var character in decomposed)
         {
             if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
@@ -224,21 +250,26 @@ public sealed partial class CreateBlogUseCase : ICreateBlogUseCase
             }
         }
 
+        // STEP-03: Prepare baseSlug through NonSlugCharacterRegex().Replace().Trim.
         var baseSlug = NonSlugCharacterRegex()
             .Replace(builder.ToString().Normalize(NormalizationForm.FormC), "-")
             .Trim('-');
+        // STEP-04: When baseSlug.Length is 0, set baseSlug.
         if (baseSlug.Length == 0)
         {
             baseSlug = "blog";
         }
 
+        // STEP-05: Prepare slug from baseSlug[..280].TrimEnd.
         var slug = baseSlug.Length <= 280 ? baseSlug : baseSlug[..280].TrimEnd('-');
+        // STEP-06: While _blogRepository.SlugExistsAsync() is true, prepare suffixText and set slug.
         for (var suffix = 2; await _blogRepository.SlugExistsAsync(slug, ct); suffix++)
         {
             var suffixText = $"-{suffix}";
             slug = $"{baseSlug[..Math.Min(baseSlug.Length, 280 - suffixText.Length)].TrimEnd('-')}{suffixText}";
         }
 
+        // STEP-07: Return slug.
         return slug;
     }
 

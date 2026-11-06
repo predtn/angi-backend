@@ -55,8 +55,10 @@ public sealed class CreateModUseCase : ICreateModUseCase
     /// <summary>Creates the active verified MOD atomically, then sends its AUTH-09 password setup link.</summary>
     public async Task<AdminUserCardDto> ExecuteAsync(CreateModRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare actorId, normalizedEmail through request.Email.Trim().ToLowerInvariant, permissionOverrides, generatedToken through tokenService.CreateUserToken and 1 more.
         var actorId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Yêu cầu đăng nhập.");
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
@@ -64,13 +66,17 @@ public sealed class CreateModUseCase : ICreateModUseCase
         var generatedToken = _tokenService.CreateUserToken();
         var now = _timeProvider.GetUtcNow().UtcDateTime;
 
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Throw the error from EmailAlreadyExists when _modRepository.EmailExistsAsync() is true.
         if (await _modRepository.EmailExistsAsync(normalizedEmail, ct))
         {
             throw EmailAlreadyExists();
         }
 
+        // STEP-05: Load catalog through permissionRepository.GetCatalogAsync.
         var catalog = await _permissionRepository.GetCatalogAsync(ct);
+        // STEP-06: Prepare permissionByCode through AdministrationPermissionRules.ResolveGrantable, user as User and persistedOverrides through Select(filtered).ToArray.
         var permissionByCode = AdministrationPermissionRules.ResolveGrantable(
             permissionOverrides.Select(item => item.PermissionCode),
             catalog,
@@ -92,6 +98,7 @@ public sealed class CreateModUseCase : ICreateModUseCase
             GrantedAt = now
         }).ToArray();
 
+        // STEP-07: Queue user through modRepository.AddMod, queue a new UserToken through modRepository.AddPasswordResetToken and more.
         _modRepository.AddMod(user);
         _modRepository.AddPasswordResetToken(new UserToken
         {
@@ -101,6 +108,7 @@ public sealed class CreateModUseCase : ICreateModUseCase
             ExpiresAt = now.Add(InvitationLifetime)
         });
         _modRepository.AddPermissionOverrides(persistedOverrides);
+        // STEP-08: Record audit action AuditActions.ModCreated.
         _auditLogService.Add(new AuditLogEntry
         {
             Action = AuditActions.ModCreated,
@@ -117,15 +125,19 @@ public sealed class CreateModUseCase : ICreateModUseCase
 
         try
         {
+            // STEP-09: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
+            // STEP-10: Commit the transaction.
             await transaction.CommitAsync(ct);
         }
         catch (UniqueConstraintViolationException exception) when (
             string.Equals(exception.ConstraintName, UsersEmailUniqueConstraint, StringComparison.Ordinal))
         {
+            // STEP-11: On UniqueConstraintViolationException when exception.ConstraintName equals UsersEmailUniqueConstraint, throw the error from EmailAlreadyExists.
             throw EmailAlreadyExists();
         }
 
+        // STEP-12: Call emailService.SendPasswordResetAsync.
         await _emailService.SendPasswordResetAsync(
             user.Email,
             user.DisplayName,
@@ -133,6 +145,7 @@ public sealed class CreateModUseCase : ICreateModUseCase
             InvitationLifetime,
             ct);
 
+        // STEP-13: Return the result of AdministrationModMapper.ToCardDto.
         return AdministrationModMapper.ToCardDto(user, "MOD");
     }
 

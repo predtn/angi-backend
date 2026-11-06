@@ -15,9 +15,13 @@ public sealed class ListModMenuSubmissionsUseCase(
     /// <summary>Validates queue filters and returns the requested page with change counts.</summary>
     public async Task<Paged<ModMenuSubmissionCardDto>> ExecuteAsync(ListModMenuSubmissionsRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await validator.ValidateAndThrowAsync(request, ct);
+        // STEP-02: Check the caller's permission through MenuPermissionGuard.RequireAsync.
         await MenuPermissionGuard.RequireAsync(currentUser, repository, ct);
+        // STEP-03: Load (items, total) through repository.ListAsync.
         var (items, total) = await repository.ListAsync(request, ct);
+        // STEP-04: Return a new Paged<ModMenuSubmissionCardDto>.
         return new Paged<ModMenuSubmissionCardDto>
         {
             Items = items.Select(MenuReviewMapper.Card).ToArray(),

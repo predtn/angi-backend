@@ -9,7 +9,10 @@ public sealed class AgentLimits
     public int MaxLlmCalls { get; set; } = 8;
     public int MaxMessageLength { get; set; } = 4000;
     public int MaxContextCharacters { get; set; } = 120000;
+    /// <summary>User and assistant messages sent to the model each call; this one costs tokens.</summary>
     public int MaxHistoryMessages { get; set; } = 20;
+    /// <summary>User and assistant messages returned to the chat screen; it only bounds the response size, so a reload restores the conversation.</summary>
+    public int MaxTranscriptMessages { get; set; } = 1000;
     public int MaxCandidates { get; set; } = 2000;
     public int MaxRanked { get; set; } = 200;
     public int LlmTimeoutSeconds { get; set; } = 60;

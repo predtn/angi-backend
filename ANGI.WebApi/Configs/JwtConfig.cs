@@ -17,9 +17,11 @@ namespace ANGI.WebApi.Configs
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            // STEP-01: Prepare jwtSection through configuration.GetSection and jwtSettings from jwtSection.Get.
             var jwtSection = configuration.GetSection(JwtSettings.SectionName);
             var jwtSettings = jwtSection.Get<JwtSettings>() ?? new JwtSettings();
 
+            // STEP-02: Run Validate(filtered).ValidateOnStart.
             services.AddOptions<JwtSettings>()
                 .Bind(jwtSection)
                 .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")
@@ -29,6 +31,7 @@ namespace ANGI.WebApi.Configs
                 .Validate(settings => settings.RefreshTokenDays > 0, "Jwt:RefreshTokenDays must be greater than zero.")
                 .ValidateOnStart();
 
+            // STEP-03: Register AddJwtBearer and register AddAuthorization.
             services
                 .AddAuthentication(options =>
                 {
@@ -89,6 +92,7 @@ namespace ANGI.WebApi.Configs
 
             services.AddAuthorization();
 
+            // STEP-04: Return services.
             return services;
         }
     }

@@ -14,6 +14,7 @@ public class CloudinaryServiceLiveTests
     [CloudinaryLiveFact]
     public async Task UploadsImageAndPrivatePdfToRealCloudinary()
     {
+        // STEP-01: Get appsettingsPath from Path.GetFullPath and create configuration through AddEnvironmentVariables().Build.
         var appsettingsPath = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory, "../../../../ANGI.WebApi/appsettings.json"));
         var configuration = new ConfigurationBuilder()
@@ -22,7 +23,9 @@ public class CloudinaryServiceLiveTests
             .AddEnvironmentVariables()
             .Build();
 
+        // STEP-02: Create the CloudinaryService under test as service.
         var service = new CloudinaryService(configuration);
+        // STEP-03: Create cleanup as CloudinaryDotNet.Cloudinary, create uploaded as List<DeletionParams> and get png from Convert.FromBase64String.
         var cleanup = new CloudinaryDotNet.Cloudinary(new Account(
             configuration["Cloudinary:CloudName"],
             configuration["Cloudinary:ApiKey"],
@@ -33,6 +36,7 @@ public class CloudinaryServiceLiveTests
         {
             var png = Convert.FromBase64String(
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=");
+            // STEP-04: Assert result.StorageKey starts with "image/upload/angi/avatar/" and result.Url starts with "https://".
             using (var image = new MemoryStream(png))
             {
                 var result = await service.UploadAsync(
@@ -43,7 +47,9 @@ public class CloudinaryServiceLiveTests
                 Assert.StartsWith("https://", result.Url);
             }
 
+            // STEP-05: Get pdf from Encoding.ASCII.GetBytes.
             var pdf = Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n");
+            // STEP-06: Assert result.StorageKey starts with the expected text, result.Url starts with "https://" and service.GetUrl() contains "expires_at".
             using (var document = new MemoryStream(pdf))
             {
                 var result = await service.UploadAsync(
@@ -57,6 +63,7 @@ public class CloudinaryServiceLiveTests
         }
         finally
         {
+            // STEP-07: Clean up: for each item in uploaded, get deletion from cleanup.DestroyAsync and call Assert.Equal.
             foreach (var item in uploaded)
             {
                 var deletion = await cleanup.DestroyAsync(item);

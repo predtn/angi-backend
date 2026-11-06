@@ -26,9 +26,11 @@ public sealed class AddRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithExplicitOrder_ShouldAddCommitAndMapItem()
     {
+        // STEP-01: Get dish from PublicDish, create fixture through CreateFixture and create requestId through Guid.NewGuid.
         var dish = PublicDish();
         var fixture = CreateFixture((true, Day()), dish);
         var requestId = Guid.NewGuid();
+        // STEP-02: Declare captured to capture a call argument; stub fixture.AddItem.
         RoadmapItem? captured = null;
         fixture.RoadmapRepository.Setup(item => item.AddItem(It.IsAny<RoadmapItem>()))
             .Callback<RoadmapItem>(item =>
@@ -38,6 +40,7 @@ public sealed class AddRoadmapItemUseCaseTests
                 captured = item;
             });
 
+        // STEP-03: Run fixture.UseCase.ExecuteAsync with RoadmapId, DayId and AddRoadmapItemRequestDto { DishId = dish.Id, MealSlot = "late_night", SortOrder = 7, ... } and keep result.
         var result = await fixture.UseCase.ExecuteAsync(RoadmapId, DayId, new AddRoadmapItemRequestDto
         {
             DishId = dish.Id,
@@ -46,12 +49,14 @@ public sealed class AddRoadmapItemUseCaseTests
             RecoRequestId = requestId
         }, CancellationToken.None);
 
+        // STEP-04: Assert captured is not null, captured.RoadmapDayId is DayId, captured.MealSlot is MealSlot.LateNight, captured.SortOrder is 7 and 2 more.
         captured.Should().NotBeNull();
         captured!.RoadmapDayId.Should().Be(DayId);
         captured.MealSlot.Should().Be(MealSlot.LateNight);
         captured.SortOrder.Should().Be(7);
         captured.Source.Should().Be(RoadmapItemSource.Manual);
         captured.RecoRequestId.Should().Be(requestId);
+        // STEP-05: Assert result.Id is 1502, result.DayId is DayId, result.DayNumber is 1, result.MealSlot is "late_night" and 4 more.
         result.Id.Should().Be(1502);
         result.DayId.Should().Be(DayId);
         result.DayNumber.Should().Be(1);
@@ -60,6 +65,7 @@ public sealed class AddRoadmapItemUseCaseTests
         result.Dish.Status.Should().Be("active");
         result.Dish.Rank.Should().BeNull();
         result.MyFeedback.Should().BeNull();
+        // STEP-06: Verify SaveChangesAsync is called once and CommitAsync is called once.
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -72,6 +78,7 @@ public sealed class AddRoadmapItemUseCaseTests
     [InlineData(short.MaxValue, short.MaxValue)]
     public async Task ExecuteAsync_WithoutSortOrder_ShouldAppendToMeal(short? existingOrder, short expected)
     {
+        // STEP-01: Get day from Day, when existingOrder.HasValue, add a RoadmapItem to day.Items and create fixture through CreateFixture.
         var day = Day();
         if (existingOrder.HasValue)
         {
@@ -80,16 +87,19 @@ public sealed class AddRoadmapItemUseCaseTests
         }
 
         var fixture = CreateFixture((true, day), PublicDish());
+        // STEP-02: Declare captured to capture a call argument; stub fixture.AddItem.
         RoadmapItem? captured = null;
         fixture.RoadmapRepository.Setup(item => item.AddItem(It.IsAny<RoadmapItem>()))
             .Callback<RoadmapItem>(item => captured = item);
 
+        // STEP-03: Run fixture.UseCase.ExecuteAsync with RoadmapId, DayId and AddRoadmapItemRequestDto { DishId = 105, MealSlot = "lunch" }.
         await fixture.UseCase.ExecuteAsync(RoadmapId, DayId, new AddRoadmapItemRequestDto
         {
             DishId = 105,
             MealSlot = "lunch"
         }, CancellationToken.None);
 
+        // STEP-04: Assert captured.SortOrder is expected.
         captured!.SortOrder.Should().Be(expected);
     }
 
@@ -98,11 +108,15 @@ public sealed class AddRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenRoadmapDoesNotExist_ShouldThrowRoadmapNotFound()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture((false, null), PublicDish());
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId and DayId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-04: Verify fixture receives no other calls, SaveChangesAsync is never called and CommitAsync is never called.
         fixture.DishRepository.VerifyNoOtherCalls();
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -113,11 +127,15 @@ public sealed class AddRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenDayDoesNotBelongToRoadmap_ShouldThrowDayNotFound()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture((true, null), PublicDish());
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId and DayId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "DAY_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("DAY_NOT_FOUND");
+        // STEP-04: Verify fixture receives no other calls.
         fixture.DishRepository.VerifyNoOtherCalls();
     }
 
@@ -130,6 +148,7 @@ public sealed class AddRoadmapItemUseCaseTests
         bool dishExists,
         bool isAvailable)
     {
+        // STEP-01: Derive dish from dishExists ? PublicDish() : null, when dish is not null, set dish.IsAvailable to isAvailable and create fixture through CreateFixture.
         var dish = dishExists ? PublicDish() : null;
         if (dish is not null)
         {
@@ -137,9 +156,12 @@ public sealed class AddRoadmapItemUseCaseTests
         }
 
         var fixture = CreateFixture((true, Day()), dish);
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId and DayId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws BadRequestException and the thrown exception.ErrorCode is "DISH_NOT_AVAILABLE".
         (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
+        // STEP-04: Verify AddItem is never called and SaveChangesAsync is never called.
         fixture.RoadmapRepository.Verify(item => item.AddItem(It.IsAny<RoadmapItem>()), Times.Never);
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -152,13 +174,17 @@ public sealed class AddRoadmapItemUseCaseTests
     public async Task ExecuteAsync_WhenRestaurantIsNotOpen_ShouldThrowDishNotAvailable(
         RestaurantOperatingStatus operatingStatus)
     {
+        // STEP-01: Get dish from PublicDish, set dish.Restaurant.OperatingStatus to operatingStatus and create fixture through CreateFixture.
         var dish = PublicDish();
         dish.Restaurant.OperatingStatus = operatingStatus;
         var fixture = CreateFixture((true, Day()), dish);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId and DayId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws BadRequestException and the thrown exception.ErrorCode is "DISH_NOT_AVAILABLE".
         (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("DISH_NOT_AVAILABLE");
+        // STEP-04: Verify AddItem is never called, SaveChangesAsync is never called and CommitAsync is never called.
         fixture.RoadmapRepository.Verify(item => item.AddItem(It.IsAny<RoadmapItem>()), Times.Never);
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -169,10 +195,14 @@ public sealed class AddRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture((true, Day()), PublicDish(), userId: null);
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId and DayId in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify BeginTransactionAsync is never called.
         fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -181,11 +211,15 @@ public sealed class AddRoadmapItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationFirst()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture((true, Day()), PublicDish());
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync with RoadmapId, DayId and AddRoadmapItemRequestDto { DishId = 0, MealSlot = "brunch" } in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(RoadmapId, DayId,
             new AddRoadmapItemRequestDto { DishId = 0, MealSlot = "brunch" }, CancellationToken.None);
 
+        // STEP-03: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-04: Verify BeginTransactionAsync is never called and fixture receives no other calls.
         fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         fixture.RoadmapRepository.VerifyNoOtherCalls();
         fixture.DishRepository.VerifyNoOtherCalls();

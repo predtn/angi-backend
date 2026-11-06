@@ -18,6 +18,7 @@ public sealed class ListVerificationsRequestDtoValidatorTests
     [InlineData("needs_more_info", 3, 50)]
     public void Validate_WithDocumentedValues_ShouldSucceed(string status, int page, int pageSize)
     {
+        // STEP-01: Validate ListVerificationsRequestDto { Status = status, Page = page, PageSize = pageSize } and keep result.
         var result = _validator.Validate(new ListVerificationsRequestDto
         {
             Status = status,
@@ -25,6 +26,7 @@ public sealed class ListVerificationsRequestDtoValidatorTests
             PageSize = pageSize
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -36,8 +38,10 @@ public sealed class ListVerificationsRequestDtoValidatorTests
     [InlineData("unknown")]
     public void Validate_WithUnsupportedStatus_ShouldFail(string status)
     {
+        // STEP-01: Validate ListVerificationsRequestDto { Status = status } and keep result.
         var result = _validator.Validate(new ListVerificationsRequestDto { Status = status });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(ListVerificationsRequestDto.Status));
     }
 
@@ -48,8 +52,10 @@ public sealed class ListVerificationsRequestDtoValidatorTests
     [InlineData(-1)]
     public void Validate_WithInvalidPage_ShouldFail(int page)
     {
+        // STEP-01: Validate ListVerificationsRequestDto { Page = page } and keep result.
         var result = _validator.Validate(new ListVerificationsRequestDto { Page = page });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(ListVerificationsRequestDto.Page));
     }
 
@@ -60,8 +66,10 @@ public sealed class ListVerificationsRequestDtoValidatorTests
     [InlineData(101)]
     public void Validate_WithInvalidPageSize_ShouldFail(int pageSize)
     {
+        // STEP-01: Validate ListVerificationsRequestDto { PageSize = pageSize } and keep result.
         var result = _validator.Validate(new ListVerificationsRequestDto { PageSize = pageSize });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(ListVerificationsRequestDto.PageSize));
     }
 }

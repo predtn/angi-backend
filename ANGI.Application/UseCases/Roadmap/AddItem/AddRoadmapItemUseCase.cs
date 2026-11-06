@@ -42,20 +42,27 @@ public sealed class AddRoadmapItemUseCase : IAddRoadmapItemUseCase
         AddRoadmapItemRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thêm món vào roadmap.");
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Load target through roadmapRepository.LockAndGetOwnedDayAsync.
         var target = await _roadmapRepository.LockAndGetOwnedDayAsync(roadmapId, dayId, userId, ct);
+        // STEP-05: Reject with ROADMAP_NOT_FOUND when target.RoadmapExists is false.
         if (!target.RoadmapExists)
         {
             throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
         }
 
+        // STEP-06: Prepare day, then load dish through dishRepository.GetPublicDetailAsync.
         var day = target.Day
             ?? throw new NotFoundException("DAY_NOT_FOUND", "Không tìm thấy ngày trong roadmap.");
         var dish = await _dishRepository.GetPublicDetailAsync(request.DishId, ct);
+        // STEP-07: Reject with DISH_NOT_AVAILABLE when dish is missing, dish.IsAvailable is false or dish.Restaurant.OperatingStatus is not RestaurantOperatingStatus.Open.
         if (dish is null ||
             !dish.IsAvailable ||
             dish.Restaurant.OperatingStatus != RestaurantOperatingStatus.Open)
@@ -63,6 +70,7 @@ public sealed class AddRoadmapItemUseCase : IAddRoadmapItemUseCase
             throw new BadRequestException("DISH_NOT_AVAILABLE", "Món không còn khả dụng để thêm vào roadmap.");
         }
 
+        // STEP-08: Prepare mealSlot through ParseMealSlot and item as RoadmapItem.
         var mealSlot = ParseMealSlot(request.MealSlot);
         var item = new RoadmapItem
         {
@@ -73,26 +81,36 @@ public sealed class AddRoadmapItemUseCase : IAddRoadmapItemUseCase
             Source = RoadmapItemSource.Manual,
             RecoRequestId = request.RecoRequestId
         };
+        // STEP-09: Queue item through roadmapRepository.AddItem.
         _roadmapRepository.AddItem(item);
+        // STEP-10: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // STEP-11: Update item: Dish and RoadmapDay.
         item.Dish = dish;
         item.RoadmapDay = day;
+        // STEP-12: Prepare result through RoadmapMapper.MapItem.
         var result = RoadmapMapper.MapItem(day, item);
+        // STEP-13: Commit the transaction.
         await transaction.CommitAsync(ct);
+        // STEP-14: Return result.
         return result;
     }
 
     /// <summary>Returns one greater than the largest order in the meal, or zero for an empty meal.</summary>
     private static short NextSortOrder(RoadmapDay day, MealSlot mealSlot)
     {
+        // STEP-01: Prepare orders through Where(filtered).Select(filtered).ToArray.
         var orders = day.Items.Where(item => item.MealSlot == mealSlot).Select(item => item.SortOrder).ToArray();
+        // STEP-02: Return 0 early when orders.Length is 0.
         if (orders.Length == 0)
         {
             return 0;
         }
 
+        // STEP-03: Prepare maximum through orders.Max.
         var maximum = orders.Max();
+        // STEP-04: Return one of two results depending on maximum is short.MaxValue.
         // A tie at the smallint ceiling still appends deterministically because item ids are the final ordering key.
         return maximum == short.MaxValue ? short.MaxValue : (short)(maximum + 1);
     }

@@ -24,8 +24,10 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenDeactivating_ShouldUpdateRevokeAuditCommitAndInvalidate()
     {
+        // STEP-01: Get mod from ExistingMod and build the sessions collection.
         var mod = ExistingMod();
         var sessions = new[] { new UserSession(), new UserSession() };
+        // STEP-02: Declare auditEntry to capture a call argument; mock IAdministrationModRepository and 2 more; stub repository.GetModForUpdateAsync and 2 more.
         var repository = new Mock<IAdministrationModRepository>();
         repository.Setup(item => item.GetModForUpdateAsync(42, It.IsAny<CancellationToken>())).ReturnsAsync(mod);
         repository.Setup(item => item.GetActiveSessionsAsync(42, It.IsAny<CancellationToken>())).ReturnsAsync(sessions);
@@ -33,21 +35,28 @@ public sealed class UpdateModUseCaseTests
         AuditLogEntry? auditEntry = null;
         audit.Setup(item => item.Add(It.IsAny<AuditLogEntry>())).Callback<AuditLogEntry>(entry => auditEntry = entry);
         var cache = new Mock<IAccountStatusCache>();
+        // STEP-03: Get transaction from Transaction and get unitOfWork from UnitOfWork.
         var transaction = Transaction();
         var unitOfWork = UnitOfWork(transaction);
+        // STEP-04: Build useCase under test through Create.
         var useCase = Create(repository.Object, cache.Object, audit.Object, unitOfWork.Object);
 
+        // STEP-05: Run useCase.ExecuteAsync with UpdateModRequestDto { DisplayName = " New Name ", Status = "deactivated" } and keep result.
         var result = await useCase.ExecuteAsync(
             42,
             new UpdateModRequestDto { DisplayName = " New Name ", Status = "deactivated" },
             CancellationToken.None);
 
+        // STEP-06: Assert result.DisplayName is "New Name" and result.Status is "deactivated".
         result.DisplayName.Should().Be("New Name");
         result.Status.Should().Be("deactivated");
+        // STEP-07: Assert sessions only holds items matching the condition and auditEntry.Action is AuditActions.ModUpdated.
         sessions.Should().OnlyContain(session => session.RevokedAt == Now);
         auditEntry!.Action.Should().Be(AuditActions.ModUpdated);
+        // STEP-08: Verify SaveChangesAsync is called once and CommitAsync is called once.
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        // STEP-09: Verify Invalidate is called once.
         cache.Verify(item => item.Invalidate(42), Times.Once);
     }
 
@@ -56,20 +65,26 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenReactivating_ShouldNotLoadSessions()
     {
+        // STEP-01: Get mod from ExistingMod, set mod.Status to UserStatus.Deactivated and set mod.SuspendedUntil to Now.AddDays().
         var mod = ExistingMod();
         mod.Status = UserStatus.Deactivated;
         mod.SuspendedUntil = Now.AddDays(1);
+        // STEP-02: Mock IAdministrationModRepository; stub repository.GetModForUpdateAsync.
         var repository = new Mock<IAdministrationModRepository>();
         repository.Setup(item => item.GetModForUpdateAsync(42, It.IsAny<CancellationToken>())).ReturnsAsync(mod);
+        // STEP-03: Build useCase under test through Create.
         var useCase = Create(repository.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync with UpdateModRequestDto { Status = "active" } and keep result.
         var result = await useCase.ExecuteAsync(
             42,
             new UpdateModRequestDto { Status = "active" },
             CancellationToken.None);
 
+        // STEP-05: Assert result.Status is "active" and result.SuspendedUntil is null.
         result.Status.Should().Be("active");
         result.SuspendedUntil.Should().BeNull();
+        // STEP-06: Verify GetActiveSessionsAsync is never called.
         repository.Verify(item => item.GetActiveSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -78,21 +93,26 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithIdenticalValues_ShouldReturnWithoutWriting()
     {
+        // STEP-01: Mock IAdministrationModRepository, IAuditLogService and 1 more; stub repository.GetModForUpdateAsync and repository.GetActiveSessionsAsync.
         var repository = new Mock<IAdministrationModRepository>();
         repository.Setup(item => item.GetModForUpdateAsync(42, It.IsAny<CancellationToken>())).ReturnsAsync(ExistingMod());
         repository.Setup(item => item.GetActiveSessionsAsync(42, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<UserSession>());
         var audit = new Mock<IAuditLogService>();
         var cache = new Mock<IAccountStatusCache>();
+        // STEP-02: Get transaction from Transaction and get unitOfWork from UnitOfWork.
         var transaction = Transaction();
         var unitOfWork = UnitOfWork(transaction);
+        // STEP-03: Build useCase under test through Create.
         var useCase = Create(repository.Object, cache.Object, audit.Object, unitOfWork.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync with UpdateModRequestDto { DisplayName = "Old Name", Status = "active" }.
         await useCase.ExecuteAsync(
             42,
             new UpdateModRequestDto { DisplayName = "Old Name", Status = "active" },
             CancellationToken.None);
 
+        // STEP-05: Verify audit receives no other calls, SaveChangesAsync is never called, CommitAsync is never called and cache receives no other calls.
         audit.VerifyNoOtherCalls();
         unitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -104,16 +124,20 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutMod_ShouldThrowDocumentedError()
     {
+        // STEP-01: Mock IAdministrationModRepository; stub repository.GetModForUpdateAsync.
         var repository = new Mock<IAdministrationModRepository>();
         repository.Setup(item => item.GetModForUpdateAsync(42, It.IsAny<CancellationToken>()))
             .ReturnsAsync((User?)null);
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(repository.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with UpdateModRequestDto { Status = "deactivated" } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             42,
             new UpdateModRequestDto { Status = "deactivated" },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws NotFoundException and exception.ErrorCode is "MOD_NOT_FOUND".
         var exception = await act.Should().ThrowAsync<NotFoundException>();
         exception.Which.ErrorCode.Should().Be("MOD_NOT_FOUND");
     }
@@ -123,19 +147,24 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IUnitOfWork.
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(
             Mock.Of<IAdministrationModRepository>(),
             unitOfWork: unitOfWork.Object,
             currentUser: Mock.Of<ICurrentUserService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with UpdateModRequestDto { Status = "active" } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             42,
             new UpdateModRequestDto { Status = "active" },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify unitOfWork receives no other calls.
         unitOfWork.VerifyNoOtherCalls();
     }
 
@@ -144,13 +173,18 @@ public sealed class UpdateModUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyPatch_ShouldStopBeforeDependencies()
     {
+        // STEP-01: Mock IAdministrationModRepository and IUnitOfWork.
         var repository = new Mock<IAdministrationModRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through Create.
         var useCase = Create(repository.Object, unitOfWork: unitOfWork.Object);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty UpdateModRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(42, new UpdateModRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws FluentValidation.ValidationException.
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+        // STEP-05: Verify repository receives no other calls and unitOfWork receives no other calls.
         repository.VerifyNoOtherCalls();
         unitOfWork.VerifyNoOtherCalls();
     }

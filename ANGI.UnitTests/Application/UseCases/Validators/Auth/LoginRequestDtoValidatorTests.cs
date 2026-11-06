@@ -14,8 +14,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithValidRequest_ShouldHaveNoErrors()
         {
+            // STEP-01: Validate LoginRequestDto { Email = "an.nguyen@gmail.com", Password = a test value } and keep result.
             var result = _validator.TestValidate(new LoginRequestDto { Email = "an.nguyen@gmail.com", Password = "MatKhau123" });
 
+            // STEP-02: Assert no validation errors are reported.
             result.ShouldNotHaveAnyValidationErrors();
         }
 
@@ -24,8 +26,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithEmptyEmail_ShouldFailOnEmail()
         {
+            // STEP-01: Validate LoginRequestDto { Email = an empty string, Password = a test value } and keep result.
             var result = _validator.TestValidate(new LoginRequestDto { Email = "", Password = "MatKhau123" });
 
+            // STEP-02: Assert a validation error on Email with the expected message.
             result.ShouldHaveValidationErrorFor(x => x.Email).WithErrorMessage("Email là bắt buộc.");
         }
 
@@ -34,8 +38,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithMalformedEmail_ShouldFailOnEmail()
         {
+            // STEP-01: Validate LoginRequestDto { Email = "an.nguyen", Password = a test value } and keep result.
             var result = _validator.TestValidate(new LoginRequestDto { Email = "an.nguyen", Password = "MatKhau123" });
 
+            // STEP-02: Assert a validation error on Email with the expected message.
             result.ShouldHaveValidationErrorFor(x => x.Email).WithErrorMessage("Email không đúng định dạng.");
         }
 
@@ -44,10 +50,13 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithEmailOver255Characters_ShouldFailOnEmail()
         {
+            // STEP-01: Derive email from new string('a', 250) + "@gmail.com".
             var email = new string('a', 250) + "@gmail.com";
 
+            // STEP-02: Validate LoginRequestDto { Email = email, Password = a test value } and keep result.
             var result = _validator.TestValidate(new LoginRequestDto { Email = email, Password = "MatKhau123" });
 
+            // STEP-03: Assert a validation error on Email with the expected message.
             result.ShouldHaveValidationErrorFor(x => x.Email).WithErrorMessage("Email không được vượt quá 255 ký tự.");
         }
 
@@ -56,8 +65,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public void Validate_WithEmptyPassword_ShouldFailOnPassword()
         {
+            // STEP-01: Validate LoginRequestDto { Email = "an.nguyen@gmail.com", Password = an empty string } and keep result.
             var result = _validator.TestValidate(new LoginRequestDto { Email = "an.nguyen@gmail.com", Password = "" });
 
+            // STEP-02: Assert a validation error on Password with the expected message.
             result.ShouldHaveValidationErrorFor(x => x.Password).WithErrorMessage("Mật khẩu là bắt buộc.");
         }
     }

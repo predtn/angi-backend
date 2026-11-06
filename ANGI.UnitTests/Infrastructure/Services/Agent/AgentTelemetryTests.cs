@@ -14,6 +14,7 @@ public sealed class AgentTelemetryTests
     [Fact]
     public void Record_WithoutActivity_UsesStableCorrelation()
     {
+        // STEP-01: Derive previous from Activity.Current, set Activity.Current to null, create logger as CapturingLogger, create telemetry as AgentTelemetry and 2 more.
         var previous = Activity.Current; Activity.Current = null;
         try
         {
@@ -21,9 +22,11 @@ public sealed class AgentTelemetryTests
             telemetry.Record("claimed", 7, 1, 2);
             telemetry.Record("failed", 7, null, null, new { errorCode = "AGENT_UNAVAILABLE" });
             var correlations = logger.Messages.Select(line => Regex.Match(line, "correlationId=([a-f0-9]{32})").Groups[1].Value).ToArray();
+            // STEP-02: Assert correlations only holds items matching the condition, correlations.Distinct() has exactly one matching item and 1 more.
             correlations.Should().OnlyContain(value => value.Length == 32); correlations.Distinct().Should().ContainSingle();
             logger.Messages.Last().Should().Contain("AGENT_UNAVAILABLE");
         }
+        // STEP-03: Clean up: set Activity.Current to previous.
         finally { Activity.Current = previous; }
     }
 

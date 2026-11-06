@@ -29,13 +29,16 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ListsAndFiltersModeratorRestaurants()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain all through PageAsync; assert all.TotalItems is 2, all.Items.Select(filtered) is equivalent to the expected items and 2 more.
         var all = await PageAsync(client, "");
         all.TotalItems.Should().Be(2);
         all.Items.Select(x => x.Id).Should().BeEquivalentTo([world.RestaurantId, world.HiddenRestaurantId]);
         all.Items.Single(x => x.Id == world.RestaurantId).PendingReportCount.Should().Be(2);
         all.Items.Single(x => x.Id == world.RestaurantId).IsOpenNow.Should().BeTrue();
+        // STEP-03: Assert for each query, PageAsync succeeds, PageAsync().Items has exactly one matching item, PageAsync confirms ?q=no-such-name and 7 more.
         foreach (var query in new[]
         {
             "?q=BÚN", "?province=Hue", "?verificationStatus=verified", "?operatingStatus=open",
@@ -50,6 +53,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
         (await PageAsync(client, "?page=2&pageSize=1")).Items.Should().HaveCount(1);
         (await PageAsync(client, "?page=3&pageSize=1")).Items.Should().BeEmpty();
         (await PageAsync(client, "?page=2147483647&pageSize=100")).Items.Should().BeEmpty();
+        // STEP-04: Assert for each query, ErrorAsync confirms VALIDATION_FAILED.
         foreach (var query in new[] { "?page=0", "?pageSize=0", "?pageSize=101", "?verificationStatus=0", "?moderationStatus=VISIBLE",
             "?operatingStatus=invalid", "?hasPendingReports=invalid" })
             await ErrorAsync(await client.GetAsync("/api/v1/mod/restaurants" + query), HttpStatusCode.BadRequest, "VALIDATION_FAILED");
@@ -60,6 +64,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ReturnsCompleteBoundedDetail()
     {
+        // STEP-01: Create world through SeedAsync, seed or update rows directly in the test database and get client from ClientAsync.
         var world = await SeedAsync();
         await factory.ExecuteDbAsync(async context =>
         {
@@ -73,6 +78,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
             await context.SaveChangesAsync();
         });
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain detail through DataAsync; assert detail.Owner.Id is world.OwnerId, detail.Owner.Role is "RESTAURANT_OWNER" and 8 more.
         var detail = await DataAsync<ModRestaurantDetailDto>(await client.GetAsync($"/api/v1/mod/restaurants/{world.RestaurantId}"));
         detail.Owner.Id.Should().Be(world.OwnerId);
         detail.Owner.Role.Should().Be("RESTAURANT_OWNER");
@@ -84,15 +90,19 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
         detail.RecentAudit.Should().HaveCount(20);
         detail.RecentAudit.Select(x => x.Id).Should().BeInDescendingOrder();
         detail.RecentAudit.Should().OnlyContain(x => x.Actor!.Role == "MOD" && x.SubjectUser!.Id == world.OwnerId);
+        // STEP-03: Read json from the response; assert json does not contain a test value.
         var json = await (await client.GetAsync($"/api/v1/mod/restaurants/{world.RestaurantId}")).Content.ReadAsStringAsync();
         json.Should().NotContain("passwordHash").And.NotContain("refreshTokenHash").And.NotContain("storageKey");
+        // STEP-04: Obtain report through DataAsync; assert report.EvidenceUrls has exactly one matching item.
         // Read the older evidence report through the resolution response to also validate signed evidence delivery.
         var report = await DataAsync<ReportDto>(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new ResolveReportRequestDto { Outcome = "resolved", ResolutionAction = "none", ApplyToRelatedReports = false }));
         report.EvidenceUrls.Should().ContainSingle(x => x.StartsWith("https://media.integration/signed/"));
+        // STEP-05: Assert report.Reporter.Id is world.TravelerId, report.HandledBy.Id is world.ModId and report.ReportCountOnTarget is 1.
         report.Reporter.Id.Should().Be(world.TravelerId);
         report.HandledBy!.Id.Should().Be(world.ModId);
         report.ReportCountOnTarget.Should().Be(1);
+        // STEP-06: Assert for each id, ErrorAsync confirms RESTAURANT_NOT_FOUND.
         foreach (var id in new[] { world.DeletedRestaurantId, long.MaxValue })
             await ErrorAsync(await client.GetAsync($"/api/v1/mod/restaurants/{id}"), HttpStatusCode.NotFound, "RESTAURANT_NOT_FOUND");
     }
@@ -102,9 +112,11 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ChangesRestaurantStateAtomically()
     {
+        // STEP-01: Create world through SeedAsync, get client from ClientAsync and get initialOutbox from factory.ExecuteDbAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
         var initialOutbox = await factory.ExecuteDbAsync(context => context.OutboxMessages.CountAsync());
+        // STEP-02: Assert for each status, DataAsync succeeds, result.ModerationStatus is status and DataAsync succeeds.
         foreach (var status in new[] { "hidden", "suspended", "visible" })
         {
             var result = await DataAsync<UpdateRestaurantModerationStatusResponseDto>(await client.PutAsJsonAsync(
@@ -114,6 +126,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
         }
         await DataAsync<UpdateRestaurantModerationStatusResponseDto>(await client.PutAsJsonAsync(
             $"/api/v1/mod/restaurants/{world.RestaurantId}/moderation-status", new { moderationStatus = "visible", reason = "repeat" }));
+        // STEP-03: Assert in the database SingleAsync(filtered).ModerationStatus is RestaurantModerationStatus.Visible and 5 more.
         await factory.ExecuteDbAsync(async context =>
         {
             (await context.Restaurants.SingleAsync(r => r.Id == world.RestaurantId)).ModerationStatus.Should().Be(RestaurantModerationStatus.Visible);
@@ -124,6 +137,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
             (await context.Notifications.CountAsync(n => n.RecipientId == world.OwnerId)).Should().Be(3);
             (await context.OutboxMessages.CountAsync()).Should().Be(initialOutbox);
         });
+        // STEP-04: Assert ErrorAsync confirms VALIDATION_FAILED and ErrorAsync confirms RESTAURANT_NOT_FOUND.
         await ErrorAsync(await client.PutAsJsonAsync($"/api/v1/mod/restaurants/{world.RestaurantId}/moderation-status",
             new { moderationStatus = "hidden", reason = "reason", reportId = world.BlogReportId }), HttpStatusCode.BadRequest, "VALIDATION_FAILED");
         await ErrorAsync(await client.PutAsJsonAsync($"/api/v1/mod/restaurants/{long.MaxValue}/moderation-status",
@@ -135,17 +149,21 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ChangesDishStateAndCreatesCorrectOutboxEvents()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Assert for each status, DataAsync succeeds and DataAsync().Status is status.
         foreach (var status in new[] { "hidden", "hidden", "active" })
             (await DataAsync<UpdateDishModerationStatusResponseDto>(await client.PutAsJsonAsync(
                 $"/api/v1/mod/dishes/{world.DishId}/moderation-status", new { status, reason = "reason" }))).Status.Should().Be(status);
+        // STEP-03: Assert in the database events.Select(filtered) equals OutboxEventType.DishUpserted and 1 more.
         await factory.ExecuteDbAsync(async context =>
         {
             var events = await context.OutboxMessages.Where(m => m.AggregateKey == $"dish:{world.DishId}").OrderBy(m => m.Id).ToListAsync();
             events.Select(x => x.EventType).Should().Equal(OutboxEventType.DishUpserted, OutboxEventType.DishDeactivated, OutboxEventType.DishUpserted);
             (await context.Dishes.SingleAsync(d => d.Id == world.DishId)).Status.Should().Be(DishStatus.Active);
         });
+        // STEP-04: Assert for each status, ErrorAsync confirms DISH_REMOVED and ErrorAsync confirms DISH_NOT_FOUND.
         foreach (var status in new[] { "hidden", "active" })
             await ErrorAsync(await client.PutAsJsonAsync($"/api/v1/mod/dishes/{world.RemovedDishId}/moderation-status",
                 new { status, reason = "reason" }), HttpStatusCode.Conflict, "DISH_REMOVED");
@@ -158,12 +176,15 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ResolvesRelatedReportsAndAppliesRestaurantAction()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain response through DataAsync; assert response.Status is "resolved" and response.ReportCountOnTarget is 0.
         var response = await DataAsync<ReportDto>(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "hide_restaurant", resolutionNote = "Confirmed" }));
         response.Status.Should().Be("resolved");
         response.ReportCountOnTarget.Should().Be(0);
+        // STEP-03: Assert in the database context.Reports.Where(filtered).ToListAsync() only holds items matching the condition and 4 more.
         await factory.ExecuteDbAsync(async context =>
         {
             (await context.Reports.Where(r => r.RestaurantId == world.RestaurantId).ToListAsync()).Should()
@@ -174,6 +195,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
             (await context.Notifications.Where(n => n.Type == "REPORT_RESOLVED").Select(n => n.RecipientId).ToListAsync())
                 .Should().BeEquivalentTo([world.TravelerId, world.AdminId, world.OwnerId]);
         });
+        // STEP-04: Assert ErrorAsync confirms REPORT_CLOSED.
         await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.RelatedReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "suspend_restaurant" }), HttpStatusCode.Conflict, "REPORT_CLOSED");
     }
@@ -183,8 +205,10 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task DismissesOnlySelectedReportAndRejectsWrongTargetActions()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain result through DataAsync; assert for each action, ErrorAsync confirms ACTION_NOT_ALLOWED_FOR_TARGET.
         foreach (var action in new[] { "hide_blog", "remove_blog" })
             await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
                 new { outcome = "resolved", resolutionAction = action }), HttpStatusCode.BadRequest, "ACTION_NOT_ALLOWED_FOR_TARGET");
@@ -193,10 +217,13 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
                 new { outcome = "resolved", resolutionAction = action }), HttpStatusCode.BadRequest, "ACTION_NOT_ALLOWED_FOR_TARGET");
         var result = await DataAsync<ReportDto>(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new { outcome = "dismissed", resolutionAction = "none", applyToRelatedReports = false }));
+        // STEP-03: Assert result.Status is "dismissed" and result.ReportCountOnTarget is 1.
         result.Status.Should().Be("dismissed");
         result.ReportCountOnTarget.Should().Be(1);
+        // STEP-04: Assert in the database context.Reports.SingleAsync(filtered).Status is ReportStatus.InReview.
         await factory.ExecuteDbAsync(async context =>
             (await context.Reports.SingleAsync(r => r.Id == world.RelatedReportId)).Status.Should().Be(ReportStatus.InReview));
+        // STEP-05: Assert ErrorAsync confirms REPORT_NOT_FOUND.
         await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{long.MaxValue}/resolve",
             new { outcome = "resolved", resolutionAction = "none" }), HttpStatusCode.NotFound, "REPORT_NOT_FOUND");
     }
@@ -206,6 +233,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task AppliesAllAccountSanctions()
     {
+        // STEP-01: Assert in the database for each action, DataAsync succeeds, user.Status is Banned : UserStatus.Suspended and 6 more.
         foreach (var action in new[] { "warn_user", "suspend_user", "ban_user" })
         {
             var world = await SeedAsync();
@@ -237,29 +265,44 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task EnforcesRolesAndEffectivePermissions()
     {
+        // STEP-01: Create world through SeedAsync, create guest through factory.CreateClient and get traveler from ClientAsync.
         var world = await SeedAsync();
         using var guest = factory.CreateClient();
         using var traveler = await ClientAsync(world.TravelerId);
+        // STEP-02: Assert ErrorAsync confirms UNAUTHORIZED and ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await guest.GetAsync("/api/v1/mod/restaurants"), HttpStatusCode.Unauthorized, "UNAUTHORIZED");
         await ErrorAsync(await traveler.GetAsync("/api/v1/mod/restaurants"), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-03: Get mod from ClientAsync and change the moderator's permissions through DenyAsync.
         using var mod = await ClientAsync(world.ModId);
         await DenyAsync(world.ModId, "RESTAURANT_MODERATE");
+        // STEP-04: Send GET /api/v1/mod/restaurants.
         (await mod.GetAsync("/api/v1/mod/restaurants")).EnsureSuccessStatusCode();
+        // STEP-05: Send GET /api/v1/mod/restaurants/{world.RestaurantId}.
         (await mod.GetAsync($"/api/v1/mod/restaurants/{world.RestaurantId}")).EnsureSuccessStatusCode();
+        // STEP-06: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.PutAsJsonAsync($"/api/v1/mod/restaurants/{world.RestaurantId}/moderation-status",
             new { moderationStatus = "hidden", reason = "reason" }), HttpStatusCode.Forbidden, "FORBIDDEN");
         await ErrorAsync(await mod.PutAsJsonAsync($"/api/v1/mod/dishes/{world.DishId}/moderation-status",
             new { status = "hidden", reason = "reason" }), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-07: Change the moderator's permissions through DenyAsync.
         await DenyAsync(world.ModId, "RESTAURANT_VERIFY");
+        // STEP-08: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.GetAsync("/api/v1/mod/restaurants"), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-09: Change the moderator's permissions through DenyAsync.
         await DenyAsync(world.ModId, "REPORT_RESTAURANT_HANDLE");
+        // STEP-10: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "none" }), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-11: Change the moderator's permissions through DenyAsync.
         await DenyAsync(world.ModId, "USER_BAN");
+        // STEP-12: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.PostAsJsonAsync($"/api/v1/mod/reports/{world.BlogReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "ban_user" }), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-13: Get admin from ClientAsync.
         using var admin = await ClientAsync(world.AdminId);
+        // STEP-14: Send GET /api/v1/mod/restaurants.
         (await admin.GetAsync("/api/v1/mod/restaurants")).EnsureSuccessStatusCode();
+        // STEP-15: Assert DataAsync succeeds.
         await DataAsync<UpdateRestaurantModerationStatusResponseDto>(await admin.PutAsJsonAsync(
             $"/api/v1/mod/restaurants/{world.RestaurantId}/moderation-status", new { moderationStatus = "hidden", reason = "Admin" }));
     }
@@ -269,8 +312,10 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task RejectsInvalidBodiesAndSuspensionDeadlines()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Assert for each payload, ErrorAsync confirms VALIDATION_FAILED.
         foreach (var payload in new object[]
         {
             new { moderationStatus = "hidden", reason = (string?)null }, new { moderationStatus = (string?)null, reason = "reason" },
@@ -285,8 +330,11 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
             new { outcome = "resolved", resolutionAction = "suspend_user", suspendUntil = DateTimeOffset.UtcNow.AddMinutes(-1) },
             new { outcome = "resolved", resolutionAction = "none", resolutionNote = new string('a', 1001) }
         }) await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve", payload), HttpStatusCode.BadRequest, "VALIDATION_FAILED");
+        // STEP-03: Create malformed as StringContent.
         using var malformed = new StringContent("{", System.Text.Encoding.UTF8, "application/json");
+        // STEP-04: Assert ErrorAsync confirms VALIDATION_FAILED.
         await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/resolve", malformed), HttpStatusCode.BadRequest, "VALIDATION_FAILED");
+        // STEP-05: Assert in the database context.Reports.SingleAsync(filtered).Status is ReportStatus.Pending and context.AuditLogs.CountAsync() is 0.
         await factory.ExecuteDbAsync(async context =>
         {
             (await context.Reports.SingleAsync(r => r.Id == world.ReportId)).Status.Should().Be(ReportStatus.Pending);
@@ -299,12 +347,15 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task RollsBackAllEffectsWhenPersistenceFails()
     {
+        // STEP-01: Create world through SeedAsync, seed or update rows directly in the test database and get client from ClientAsync.
         var world = await SeedAsync();
         await factory.ExecuteDbAsync(context => context.Database.ExecuteSqlRawAsync(
             "ALTER TABLE core.notifications ADD CONSTRAINT qa_reject_report_notification CHECK (type <> 'REPORT_RESOLVED')"));
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Assert ErrorAsync confirms INTERNAL_ERROR.
         await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "hide_restaurant" }), HttpStatusCode.InternalServerError, "INTERNAL_ERROR");
+        // STEP-03: Assert in the database SingleAsync(filtered).ModerationStatus is RestaurantModerationStatus.Visible and 4 more.
         await factory.ExecuteDbAsync(async context =>
         {
             (await context.Restaurants.SingleAsync(r => r.Id == world.RestaurantId)).ModerationStatus.Should().Be(RestaurantModerationStatus.Visible);
@@ -320,20 +371,25 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task SerializesConcurrentResolutions()
     {
+        // STEP-01: Create world through SeedAsync, get first from ClientAsync, get second from ClientAsync and derive payload from the expected value.
         var world = await SeedAsync();
         using var first = await ClientAsync(world.ModId);
         using var second = await ClientAsync(world.AdminId);
         var payload = new { outcome = "resolved", resolutionAction = "hide_restaurant" };
+        // STEP-02: Send concurrently POST /api/v1/mod/reports/{world.ReportId}/resolve with payload and POST /api/v1/mod/reports/{world.RelatedReportId}/resolve with payload and keep responses.
         var responses = await Task.WhenAll(first.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve", payload),
             second.PostAsJsonAsync($"/api/v1/mod/reports/{world.RelatedReportId}/resolve", payload));
+        // STEP-03: Assert responses.Select(filtered) is equivalent to the expected items and ErrorAsync confirms REPORT_CLOSED.
         responses.Select(x => x.StatusCode).Should().BeEquivalentTo([HttpStatusCode.OK, HttpStatusCode.Conflict]);
         await ErrorAsync(responses.Single(x => x.StatusCode == HttpStatusCode.Conflict), HttpStatusCode.Conflict, "REPORT_CLOSED");
+        // STEP-04: Assert in the database context.AuditLogs.CountAsync(filtered) is 1, context.AuditLogs.CountAsync(filtered) is 2 and 1 more.
         await factory.ExecuteDbAsync(async context =>
         {
             (await context.AuditLogs.CountAsync(a => a.Action == AuditActions.RestaurantHidden)).Should().Be(1);
             (await context.AuditLogs.CountAsync(a => a.Action == AuditActions.ReportResolved)).Should().Be(2);
             (await context.Notifications.CountAsync(n => n.Type == "REPORT_RESOLVED")).Should().Be(3);
         });
+        // STEP-05: For each response in responses, call response.Dispose.
         foreach (var response in responses) response.Dispose();
     }
 
@@ -342,6 +398,7 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task ResolvesBlogReportsWithContentActions()
     {
+        // STEP-01: Assert in the database for each action, DataAsync succeeds, report.TargetType is "blog" and 2 more.
         foreach (var action in new[] { "hide_blog", "remove_blog" })
         {
             var world = await SeedAsync();
@@ -362,18 +419,27 @@ public sealed class ModRestaurantsHttpTests(PostgresApiFactory factory) : IClass
     [PostgresEndToEndFact]
     public async Task PublishesAllOperationsInOpenApiAndScalar()
     {
+        // STEP-01: Create the HTTP client.
         using var client = factory.CreateClient();
+        // STEP-02: Send GET /openapi/v1.json and keep response.
         using var response = await client.GetAsync("/openapi/v1.json");
+        // STEP-03: Ensure response succeeded.
         response.EnsureSuccessStatusCode();
+        // STEP-04: Read document from the response.
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-05: Get paths from document.RootElement.GetProperty.
         var paths = document.RootElement.GetProperty("paths");
+        // STEP-06: Assert paths./api/v1/mod/restaurants.TryGetProperty() is true and TryGetProperty() is true.
         paths.GetProperty("/api/v1/mod/restaurants").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/restaurants/{restaurantId}").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/restaurants/{restaurantId}/moderation-status").TryGetProperty("put", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/dishes/{dishId}/moderation-status").TryGetProperty("put", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/reports/{reportId}/resolve").TryGetProperty("post", out _).Should().BeTrue();
+        // STEP-07: Send GET /scalar/v1 and keep scalar.
         using var scalar = await client.GetAsync("/scalar/v1");
+        // STEP-08: Ensure scalar succeeded.
         scalar.EnsureSuccessStatusCode();
+        // STEP-09: Assert the response body contains "scalar".
         (await scalar.Content.ReadAsStringAsync()).Should().Contain("scalar");
     }
 

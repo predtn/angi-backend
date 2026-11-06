@@ -31,20 +31,27 @@ public sealed class AdministrationPermissionsEndToEndTests : IClassFixture<Postg
     [PostgresEndToEndFact]
     public async Task ReadPermissions_ShouldReturnCatalogDefaultsOverridesAndEffectiveSet()
     {
+        // STEP-01: Reset the test database, create users through SeedAdminAndModAsync and get client from AuthorizedAdminClient.
         await _factory.ResetDatabaseAsync();
         var users = await SeedAdminAndModAsync(addExistingOverride: true);
         using var client = AuthorizedAdminClient(users.AdminId);
 
+        // STEP-02: Send GET /api/v1/admin/permissions and keep catalogResponse.
         using var catalogResponse = await client.GetAsync("/api/v1/admin/permissions");
+        // STEP-03: Send GET /api/v1/admin/mods/{users.ModId}/permissions and keep modResponse.
         using var modResponse = await client.GetAsync($"/api/v1/admin/mods/{users.ModId}/permissions");
 
+        // STEP-04: Assert catalogResponse.StatusCode is HttpStatusCode.OK and modResponse.StatusCode is HttpStatusCode.OK.
         catalogResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         modResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        // STEP-05: Obtain catalog through SuccessDataAsync and mod through SuccessDataAsync.
         var catalog = await SuccessDataAsync<PermissionCatalogDto>(catalogResponse);
         var mod = await SuccessDataAsync<ModPermissionsDto>(modResponse);
+        // STEP-06: Assert catalog.Permissions has 13 item(s), catalog.RoleDefaults.Mod has 10 item(s) and catalog.RoleDefaults.Admin equals "*".
         catalog.Permissions.Should().HaveCount(13);
         catalog.RoleDefaults.Mod.Should().HaveCount(10);
         catalog.RoleDefaults.Admin.Should().Equal("*");
+        // STEP-07: Assert mod.Overrides has exactly one matching item, mod.Effective does not contain "USER_BAN" and mod.Effective contains "USER_SUSPEND".
         mod.Overrides.Should().ContainSingle(item =>
             item.PermissionCode == "USER_BAN" && item.Effect == "deny");
         mod.Effective.Should().NotContain("USER_BAN");
@@ -56,10 +63,12 @@ public sealed class AdministrationPermissionsEndToEndTests : IClassFixture<Postg
     [PostgresEndToEndFact]
     public async Task ReplaceModPermissions_ShouldPersistCompleteReplacementAndAudit()
     {
+        // STEP-01: Reset the test database, create users through SeedAdminAndModAsync and get client from AuthorizedAdminClient.
         await _factory.ResetDatabaseAsync();
         var users = await SeedAdminAndModAsync(addExistingOverride: true);
         using var client = AuthorizedAdminClient(users.AdminId);
 
+        // STEP-02: Send PUT /api/v1/admin/mods/{users.ModId}/permissions with a ReplaceModPermissionsRequestDto body and keep response.
         using var response = await client.PutAsJsonAsync(
             $"/api/v1/admin/mods/{users.ModId}/permissions",
             new ReplaceModPermissionsRequestDto
@@ -71,10 +80,12 @@ public sealed class AdministrationPermissionsEndToEndTests : IClassFixture<Postg
                 ]
             });
 
+        // STEP-03: Obtain data through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.OK, data.Effective does not contain "USER_BAN" and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var data = await SuccessDataAsync<ModPermissionsDto>(response);
         data.Effective.Should().NotContain("USER_BAN");
         data.Effective.Should().Contain("DASHBOARD_VIEW");
+        // STEP-04: Assert in the database overrides has 2 item(s), overrides only holds items matching the condition and 1 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var overrides = await context.UserPermissions
@@ -92,10 +103,12 @@ public sealed class AdministrationPermissionsEndToEndTests : IClassFixture<Postg
     [PostgresEndToEndFact]
     public async Task ReplaceModRolePermissions_ShouldPersistExactDefaultsAndAudit()
     {
+        // STEP-01: Reset the test database, create users through SeedAdminAndModAsync and get client from AuthorizedAdminClient.
         await _factory.ResetDatabaseAsync();
         var users = await SeedAdminAndModAsync(addExistingOverride: false);
         using var client = AuthorizedAdminClient(users.AdminId);
 
+        // STEP-02: Send PUT /api/v1/admin/roles/MOD/permissions with a ReplaceModRolePermissionsRequestDto body and keep response.
         using var response = await client.PutAsJsonAsync(
             "/api/v1/admin/roles/MOD/permissions",
             new ReplaceModRolePermissionsRequestDto
@@ -103,10 +116,12 @@ public sealed class AdministrationPermissionsEndToEndTests : IClassFixture<Postg
                 PermissionCodes = ["USER_SUSPEND", "DASHBOARD_VIEW"]
             });
 
+        // STEP-03: Obtain data through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.OK, data.Role is "MOD" and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var data = await SuccessDataAsync<ReplaceModRolePermissionsResponseDto>(response);
         data.Role.Should().Be("MOD");
         data.PermissionCodes.Should().Equal("USER_SUSPEND", "DASHBOARD_VIEW");
+        // STEP-04: Assert in the database codes equals "USER_SUSPEND", audit.Action is "ROLE_PERMISSIONS_CHANGED" and audit.EntityId is 3.
         await _factory.ExecuteDbAsync(async context =>
         {
             var codes = await context.RolePermissions

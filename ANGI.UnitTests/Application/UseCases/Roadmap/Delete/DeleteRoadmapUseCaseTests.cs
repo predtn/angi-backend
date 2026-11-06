@@ -16,14 +16,18 @@ public sealed class DeleteRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOwnedRoadmap_ShouldSetDeletedAtAndCommit()
     {
+        // STEP-01: Create now as DateTimeOffset, create roadmap as Domain.Entities.Roadmap, create fixture through CreateFixture and 1 more.
         var now = new DateTimeOffset(2026, 10, 17, 9, 30, 0, TimeSpan.Zero);
         var roadmap = new Domain.Entities.Roadmap { Id = 88, UserId = 12, Title = "Trip", NumDays = 1 };
         var fixture = CreateFixture(roadmap, now, 12);
         using var cancellationSource = new CancellationTokenSource();
 
+        // STEP-02: Run fixture.UseCase.ExecuteAsync.
         await fixture.UseCase.ExecuteAsync(88, cancellationSource.Token);
 
+        // STEP-03: Assert roadmap.DeletedAt is now.UtcDateTime.
         roadmap.DeletedAt.Should().Be(now.UtcDateTime);
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is called once, SaveChangesAsync is called once and CommitAsync is called once.
         fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
             88, 12, cancellationSource.Token), Times.Once);
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(cancellationSource.Token), Times.Once);
@@ -35,11 +39,15 @@ public sealed class DeleteRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorizedWithoutPersistence()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture(new Domain.Entities.Roadmap(), DateTimeOffset.UtcNow, null);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(88, CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is never called, BeginTransactionAsync is never called and SaveChangesAsync is never called.
         fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
             It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -51,11 +59,15 @@ public sealed class DeleteRoadmapUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutOwnedVisibleRoadmap_ShouldThrowNotFoundWithoutSaving()
     {
+        // STEP-01: Create fixture through CreateFixture.
         var fixture = CreateFixture(null, DateTimeOffset.UtcNow, 12);
 
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => fixture.UseCase.ExecuteAsync(404, CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is called once, SaveChangesAsync is never called and CommitAsync is never called.
         fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
             404, 12, It.IsAny<CancellationToken>()), Times.Once);
         fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);

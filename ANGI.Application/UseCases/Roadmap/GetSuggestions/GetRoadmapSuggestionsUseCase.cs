@@ -56,17 +56,21 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
         GetRoadmapSuggestionsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId, context from roadmapRepository.GetSuggestionContextAsync and limit.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem gợi ý roadmap.");
         var context = await _roadmapRepository.GetSuggestionContextAsync(roadmapId, userId, ct)
             ?? throw new NotFoundException("ROADMAP_NOT_FOUND", "Không tìm thấy roadmap.");
         var limit = request.Limit ?? DefaultLimit;
+        // STEP-03: Set (list, offset).
         var (list, offset) = request.Cursor is null
             ? (await RankAsync(roadmapId, userId, request, context, ct), 0)
             : ResumeFromCursor(request.Cursor, roadmapId, userId);
 
+        // STEP-04: Prepare pageIds through list.DishIds.Skip().Take().ToArray, dishes through GetCardDishesAsync().ToDictionary and more.
         var pageIds = list.DishIds.Skip(offset).Take(limit).ToArray();
         var dishes = (await _dishRepository.GetCardDishesAsync(pageIds, ct)).ToDictionary(dish => dish.Id);
         var items = pageIds
@@ -82,6 +86,7 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
             .ToArray();
 
         var nextOffset = offset + limit;
+        // STEP-05: Return a new GetRoadmapSuggestionsResponseDto.
         return new GetRoadmapSuggestionsResponseDto
         {
             RequestId = list.RequestId,
@@ -98,6 +103,7 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
         RoadmapSuggestionContext context,
         CancellationToken ct)
     {
+        // STEP-01: Prepare area, then load candidates through dishRepository.GetCandidateIdsAsync.
         var area = ResolveArea(request, context);
         var candidates = await _dishRepository.GetCandidateIdsAsync(new DishCandidateFilter
         {
@@ -110,12 +116,14 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
             ExcludeDishIds = context.ExistingDishIds,
             Area = area
         }, MaxCandidates, ct);
+        // STEP-02: Call recommendationService.RecommendAsync and keep ranked.
         var ranked = await _recommendationService.RecommendAsync(
             userId,
             candidates,
             MaxRanked,
             RecommendationContext.RoadmapManual,
             ct);
+        // STEP-03: Prepare candidateSet, eligibleRankedDishIds and list, then call cache.Store.
         var candidateSet = candidates.ToHashSet();
         var eligibleRankedDishIds = ranked.DishIds
             .Where(candidateSet.Contains)
@@ -129,6 +137,7 @@ public sealed class GetRoadmapSuggestionsUseCase : IGetRoadmapSuggestionsUseCase
             eligibleRankedDishIds,
             roadmapId);
         _cache.Store(list);
+        // STEP-04: Return list.
         return list;
     }
 

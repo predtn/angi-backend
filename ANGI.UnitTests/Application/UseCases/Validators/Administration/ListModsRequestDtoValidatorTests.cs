@@ -15,6 +15,7 @@ public sealed class ListModsRequestDtoValidatorTests
     [InlineData("deactivated", 2, 20)]
     public async Task Validate_WithValidBoundaries_ShouldPass(string? status, int page, int pageSize)
     {
+        // STEP-01: Validate ListModsRequestDto { Status = status, Page = page, PageSize = pageSize } and keep result.
         var result = await new ListModsRequestDtoValidator().ValidateAsync(new ListModsRequestDto
         {
             Status = status,
@@ -22,6 +23,7 @@ public sealed class ListModsRequestDtoValidatorTests
             PageSize = pageSize
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -33,8 +35,10 @@ public sealed class ListModsRequestDtoValidatorTests
     [InlineData("suspended")]
     public async Task Validate_WithInvalidStatus_ShouldFail(string status)
     {
+        // STEP-01: Validate ListModsRequestDto { Status = status } and keep result.
         var result = await new ListModsRequestDtoValidator().ValidateAsync(new ListModsRequestDto { Status = status });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(ListModsRequestDto.Status));
     }
 
@@ -46,12 +50,14 @@ public sealed class ListModsRequestDtoValidatorTests
     [InlineData(1, 101)]
     public async Task Validate_WithInvalidPaging_ShouldFail(int page, int pageSize)
     {
+        // STEP-01: Validate ListModsRequestDto { Page = page, PageSize = pageSize } and keep result.
         var result = await new ListModsRequestDtoValidator().ValidateAsync(new ListModsRequestDto
         {
             Page = page,
             PageSize = pageSize
         });
 
+        // STEP-02: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 }

@@ -4,7 +4,7 @@ using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.DTOs.Agent;
-using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using Moq;
@@ -37,7 +37,7 @@ internal static class AgentTestData
     /// <summary>Creates a test snapshot with trusted grants and a complete trip state.</summary>
     public static AgentSnapshot Snapshot(params AgentItem[] items) => new(State(), items, [Grant()]);
     /// <summary>Creates a complete structured answer without implying a roadmap write.</summary>
-    public static AgentOutput Answer(string reply = "Please clarify") => new() { Action = "answer", Reply = reply };
+    public static AgentOutput Answer(string reply = "Bạn nói rõ hơn giúp mình nhé.") => new() { Action = "answer", Reply = reply };
     /// <summary>Configures public catalog and exact route metrics while keeping provider calls observable.</summary>
     public static (AgentProposalValidator Validator, Mock<IDishRepository> Dishes, Mock<ITagRepository> Tags, Mock<IRouteService> Routes) Validator(params Dish[] catalog)
     {

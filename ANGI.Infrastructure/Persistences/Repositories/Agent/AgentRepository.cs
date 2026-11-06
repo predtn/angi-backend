@@ -14,9 +14,13 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
     /// <summary>Locks and reloads tracked state so late attempts cannot observe a stale lease.</summary>
     public async Task<AgentConversation?> LockOwnedAsync(long id, int userId, CancellationToken ct)
     {
+        // STEP-01: Call context.Database.ExecuteSqlInterpolatedAsync.
         await context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM core.agent_conversations WHERE id = {id} AND user_id = {userId} FOR UPDATE", ct);
+        // STEP-02: Prepare tracked through context.AgentConversations.Local.FirstOrDefault.
         var tracked = context.AgentConversations.Local.FirstOrDefault(x => x.Id == id);
+        // STEP-03: When tracked exists, call context.Entry().ReloadAsync.
         if (tracked is not null) await context.Entry(tracked).ReloadAsync(ct);
+        // STEP-04: Return the result of context.AgentConversations.FirstOrDefaultAsync.
         return await context.AgentConversations.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
     }
 
@@ -60,14 +64,17 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
     /// <summary>Allocates sequence numbers while the conversation lock is held.</summary>
     public async Task<int> NextSequenceAsync(long conversationId, CancellationToken ct)
     {
+        // STEP-01: Call context.AgentConversations.SingleAsync and keep conversation.
         var conversation = await context.AgentConversations.SingleAsync(x => x.Id == conversationId, ct);
+        // STEP-02: Prepare stored from context.AgentMessages.Where.
         var stored = await context.AgentMessages.Where(x => x.ConversationId == conversationId).MaxAsync(x => (int?)x.SequenceNo, ct) ?? 0;
+        // STEP-03: Return the computed value.
         return conversation.LastMessageSequence = checked(Math.Max(conversation.LastMessageSequence, stored) + 1);
     }
 
-    /// <summary>Reads only completed turns, maintaining transcript order inside the bounded window.</summary>
+    /// <summary>Reads only what the user and the assistant said in completed turns, in transcript order; tool rows never count against the window.</summary>
     public async Task<AgentMessage[]> GetCompletedHistoryAsync(long conversationId, int limit, CancellationToken ct) =>
-        (await context.AgentMessages.AsNoTracking().Where(x => x.ConversationId == conversationId &&
+        (await context.AgentMessages.AsNoTracking().Where(x => x.ConversationId == conversationId && x.Role != AgentMessageRole.Tool &&
             context.AgentMessages.Any(user => user.ConversationId == conversationId && user.TurnId == x.TurnId &&
                 user.Role == AgentMessageRole.User && user.ProcessingStatus == AgentProcessingStatus.Completed))
             .OrderByDescending(x => x.SequenceNo).Take(limit).ToArrayAsync(ct)).OrderBy(x => x.SequenceNo).ToArray();
@@ -75,16 +82,22 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
     /// <summary>Tracks a new ordered transcript entry.</summary>
     public void AddMessage(AgentMessage message)
     {
+        // STEP-01: Prepare conversation through context.AgentConversations.Local.SingleOrDefault.
         var conversation = context.AgentConversations.Local.SingleOrDefault(x => x.Id == message.ConversationId);
+        // STEP-02: When conversation exists, set conversation.LastMessageSequence.
         if (conversation is not null) conversation.LastMessageSequence = Math.Max(conversation.LastMessageSequence, message.SequenceNo);
+        // STEP-03: Queue message through context.AgentMessages.Add.
         context.AgentMessages.Add(message);
     }
 
     /// <summary>Restricts proposal access to the already checked conversation.</summary>
     public async Task<AgentProposal?> GetProposalAsync(long conversationId, long proposalId, CancellationToken ct)
     {
+        // STEP-01: Prepare tracked through context.AgentProposals.Local.FirstOrDefault.
         var tracked = context.AgentProposals.Local.FirstOrDefault(x => x.Id == proposalId);
+        // STEP-02: When tracked exists, call context.Entry().ReloadAsync.
         if (tracked is not null) await context.Entry(tracked).ReloadAsync(ct);
+        // STEP-03: Return the result of context.AgentProposals.FirstOrDefaultAsync.
         return await context.AgentProposals.FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.Id == proposalId, ct);
     }
 
@@ -95,8 +108,11 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
     /// <summary>Allocates a conversation-local proposal version while holding the conversation lock.</summary>
     public async Task<int> NextProposalVersionAsync(long conversationId, CancellationToken ct)
     {
+        // STEP-01: Call context.AgentConversations.SingleAsync and keep conversation.
         var conversation = await context.AgentConversations.SingleAsync(x => x.Id == conversationId, ct);
+        // STEP-02: Prepare stored from context.AgentProposals.Where.
         var stored = await context.AgentProposals.Where(x => x.ConversationId == conversationId).MaxAsync(x => (int?)x.ProposalVersion, ct) ?? 0;
+        // STEP-03: Return the computed value.
         return conversation.LastProposalVersion = checked(Math.Max(conversation.LastProposalVersion, stored) + 1);
     }
 
@@ -131,6 +147,7 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
 
     public async Task PruneAsync(AgentConversation conversation, DateTime cutoff, CancellationToken ct)
     {
+        // STEP-01: Call FromSqlInterpolated().ToArrayAsync and keep messages.
         // A recent retry extends replay retention for the whole logical turn, even when its original row is old.
         var messages = await context.AgentMessages.FromSqlInterpolated($"""
             SELECT m.* FROM core.agent_messages m
@@ -139,19 +156,23 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
                   CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(NULLIF(u.payload->'attempts', 'null'::jsonb), '[]'::jsonb)) a(value)
                   WHERE u.conversation_id = m.conversation_id AND u.turn_id = m.turn_id AND a.value::timestamptz >= {cutoff})
             """).ToArrayAsync(ct);
+        // STEP-02: Prepare removableIds, then call Where(filtered).Select(filtered).ToArrayAsync and keep retainedResponses.
         var removableIds = messages.Select(x => x.Id).ToArray();
         var retainedResponses = await context.AgentMessages.AsNoTracking().Where(x => x.ConversationId == conversation.Id &&
             !removableIds.Contains(x.Id) && x.ResponsePayload != null).Select(x => x.ResponsePayload!).ToArrayAsync(ct);
+        // STEP-03: Prepare replayProposals, then call AgentProposals.Where(filtered).ToArrayAsync and keep proposals.
         var replayProposals = retainedResponses.Select(x => AgentJson.Read<ANGI.Application.DTOs.Agent.AgentTurnDto>(x).Proposal?.ProposalId)
             .Where(x => x.HasValue).Select(x => x!.Value).ToArray();
         var proposals = await context.AgentProposals.Where(x => x.ConversationId == conversation.Id &&
             x.CreatedAt < cutoff && x.Id != conversation.CurrentProposalId && !replayProposals.Contains(x.Id)).ToArrayAsync(ct);
+        // STEP-04: Update conversation: LastMessageSequence, LastProposalVersion and PurgedClientMessageId.
         conversation.LastMessageSequence = Math.Max(conversation.LastMessageSequence,
             messages.Select(x => x.SequenceNo).DefaultIfEmpty().Max());
         conversation.LastProposalVersion = Math.Max(conversation.LastProposalVersion,
             proposals.Select(x => x.ProposalVersion).DefaultIfEmpty().Max());
         conversation.PurgedClientMessageId = Math.Max(conversation.PurgedClientMessageId,
             messages.Select(x => x.ClientMessageId ?? 0).DefaultIfEmpty().Max());
+        // STEP-05: Mark messages for removal through context.AgentMessages.RemoveRange and mark proposals for removal through context.AgentProposals.RemoveRange.
         context.AgentMessages.RemoveRange(messages);
         context.AgentProposals.RemoveRange(proposals);
     }

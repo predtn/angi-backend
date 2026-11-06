@@ -21,19 +21,25 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         [Fact]
         public async Task ExecuteAsync_WithOwnedSession_ShouldRevokeSession()
         {
+            // STEP-01: Create session as UserSession.
             var session = new UserSession { UserId = 12, RefreshTokenHash = "token-hash" };
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashAsync and unitOfWork.SaveChangesAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, 12);
 
+            // STEP-04: Run useCase.ExecuteAsync with LogoutRequestDto { RefreshToken = a test value }.
             await useCase.ExecuteAsync(
                 new LogoutRequestDto { RefreshToken = "refresh-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert session.RevokedAt is Now.
             session.RevokedAt.Should().Be(Now);
+            // STEP-06: Verify SaveChangesAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -42,18 +48,24 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         [Fact]
         public async Task ExecuteAsync_WithAnotherUsersSession_ShouldNotModifySession()
         {
+            // STEP-01: Create session as UserSession.
             var session = new UserSession { UserId = 99, RefreshTokenHash = "token-hash" };
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, 12);
 
+            // STEP-04: Run useCase.ExecuteAsync with LogoutRequestDto { RefreshToken = a test value }.
             await useCase.ExecuteAsync(
                 new LogoutRequestDto { RefreshToken = "refresh-token" },
                 CancellationToken.None);
 
+            // STEP-05: Assert session.RevokedAt is null.
             session.RevokedAt.Should().BeNull();
+            // STEP-06: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -62,14 +74,18 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldReturnWithoutSaving()
         {
+            // STEP-01: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((UserSession?)null);
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, 12);
 
+            // STEP-03: Run useCase.ExecuteAsync.
             await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -78,21 +94,27 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         [Fact]
         public async Task ExecuteAsync_WithRevokedSession_ShouldReturnWithoutSaving()
         {
+            // STEP-01: Create session as UserSession.
             var session = new UserSession
             {
                 UserId = 12,
                 RefreshTokenHash = "token-hash",
                 RevokedAt = Now.AddMinutes(-1)
             };
+            // STEP-02: Mock IAuthenticationRepository and IUnitOfWork; stub repository.GetSessionByRefreshTokenHashAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetSessionByRefreshTokenHashAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(session);
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, 12);
 
+            // STEP-04: Run useCase.ExecuteAsync.
             await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert session.RevokedAt is Now.AddMinutes().
             session.RevokedAt.Should().Be(Now.AddMinutes(-1));
+            // STEP-06: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -101,10 +123,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
         [Fact]
         public async Task ExecuteAsync_WithEmptyToken_ShouldThrowValidationExceptionFirst()
         {
+            // STEP-01: Mock IAuthenticationRepository, IUnitOfWork, IAuthenticationTokenService and ICurrentUserService.
             var repository = new Mock<IAuthenticationRepository>();
             var unitOfWork = new Mock<IUnitOfWork>();
             var tokenService = new Mock<IAuthenticationTokenService>();
             var currentUserService = new Mock<ICurrentUserService>();
+            // STEP-02: Create the LogoutUseCase under test as useCase.
             var useCase = new LogoutUseCase(
                 new LogoutRequestDtoValidator(),
                 repository.Object,
@@ -113,9 +137,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Logout
                 unitOfWork.Object,
                 new FixedTimeProvider(Now));
 
+            // STEP-03: Wrap useCase.ExecuteAsync with an empty LogoutRequestDto in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new LogoutRequestDto(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify HashRefreshToken is never called and GetSessionByRefreshTokenHashAsync is never called.
             tokenService.Verify(x => x.HashRefreshToken(It.IsAny<string>()), Times.Never);
             repository.Verify(
                 x => x.GetSessionByRefreshTokenHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),

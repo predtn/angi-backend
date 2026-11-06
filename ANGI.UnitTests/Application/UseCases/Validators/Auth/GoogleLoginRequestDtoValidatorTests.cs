@@ -14,8 +14,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [Fact]
         public async Task ValidateAsync_WithTokenAndNoRole_ShouldBeValid()
         {
+            // STEP-01: Validate GoogleLoginRequestDto { IdToken = a test value } and keep result.
             var result = await _validator.ValidateAsync(new GoogleLoginRequestDto { IdToken = "id-token" });
 
+            // STEP-02: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
 
@@ -26,12 +28,14 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("RESTAURANT_OWNER")]
         public async Task ValidateAsync_WithSupportedRole_ShouldBeValid(string role)
         {
+            // STEP-01: Validate GoogleLoginRequestDto { IdToken = a test value, Role = role } and keep result.
             var result = await _validator.ValidateAsync(new GoogleLoginRequestDto
             {
                 IdToken = "id-token",
                 Role = role
             });
 
+            // STEP-02: Assert result.IsValid is true.
             result.IsValid.Should().BeTrue();
         }
 
@@ -42,8 +46,10 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public async Task ValidateAsync_WithEmptyToken_ShouldBeInvalid(string idToken)
         {
+            // STEP-01: Validate GoogleLoginRequestDto { IdToken = idToken } and keep result.
             var result = await _validator.ValidateAsync(new GoogleLoginRequestDto { IdToken = idToken });
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(GoogleLoginRequestDto.IdToken));
         }
@@ -58,12 +64,14 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Auth
         [InlineData("   ")]
         public async Task ValidateAsync_WithUnsupportedRole_ShouldBeInvalid(string role)
         {
+            // STEP-01: Validate GoogleLoginRequestDto { IdToken = a test value, Role = role } and keep result.
             var result = await _validator.ValidateAsync(new GoogleLoginRequestDto
             {
                 IdToken = "id-token",
                 Role = role
             });
 
+            // STEP-02: Assert result.IsValid is false and result.Errors contains a matching item.
             result.IsValid.Should().BeFalse();
             result.Errors.Should().Contain(error => error.PropertyName == nameof(GoogleLoginRequestDto.Role));
         }

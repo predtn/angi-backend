@@ -22,6 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Fixtures\AgentEvaluationCases.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ANGI.Domain\ANGI.Domain.csproj" />
     <ProjectReference Include="..\ANGI.Application\ANGI.Application.csproj" />
     <ProjectReference Include="..\ANGI.Infrastructure\ANGI.Infrastructure.csproj" />

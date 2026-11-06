@@ -23,18 +23,23 @@ namespace ANGI.Infrastructure.Services.Auth
         /// <summary>Returns the cached status or loads it; a missing user is not cached.</summary>
         public async Task<AccountStatusSnapshot?> GetAsync(int userId, CancellationToken ct)
         {
+            // STEP-01: Prepare key through Key.
             var key = Key(userId);
+            // STEP-02: Return cached early when _cache has an entry for key and cached exists.
             if (_cache.TryGetValue(key, out AccountStatusSnapshot? cached) && cached is not null)
             {
                 return cached;
             }
 
+            // STEP-03: Load account through authenticationRepository.GetAccountStatusAsync.
             var account = await _authenticationRepository.GetAccountStatusAsync(userId, ct);
+            // STEP-04: When account exists, call cache.Set.
             if (account is not null)
             {
                 _cache.Set(key, account, Duration);
             }
 
+            // STEP-05: Return account.
             return account;
         }
 

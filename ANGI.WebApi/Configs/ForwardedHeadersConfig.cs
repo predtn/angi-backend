@@ -12,12 +12,15 @@ namespace ANGI.WebApi.Configs
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            // STEP-01: Prepare section through configuration.GetSection.
             var section = configuration.GetSection(ForwardedHeadersSettings.SectionName);
+            // STEP-02: Run Bind().Validate(filtered).ValidateOnStart.
             services.AddOptions<ForwardedHeadersSettings>()
                 .Bind(section)
                 .Validate(settings => settings.ForwardLimit > 0, "ForwardedHeaders:ForwardLimit must be greater than zero.")
                 .ValidateOnStart();
 
+            // STEP-03: Prepare settings, then call services.Configure.
             var settings = section.Get<ForwardedHeadersSettings>() ?? new ForwardedHeadersSettings();
             services.Configure<ForwardedHeadersOptions>(options =>
             {
@@ -29,6 +32,7 @@ namespace ANGI.WebApi.Configs
                 options.KnownProxies.Clear();
             });
 
+            // STEP-04: Return services.
             return services;
         }
 

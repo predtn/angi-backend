@@ -15,12 +15,14 @@ namespace ANGI.UnitTests.WebApi.Common
         [Fact]
         public void From_WithMissingBody_ShouldReportBodyOnce()
         {
+            // STEP-01: Create modelState as ModelStateDictionary, call modelState.AddModelError and get errors from ModelBindingErrors.From.
             var modelState = new ModelStateDictionary();
             modelState.AddModelError(string.Empty, "A non-empty request body is required.");
             modelState.AddModelError("request", "The request field is required.");
 
             var errors = ModelBindingErrors.From(modelState, BodyParameters);
 
+            // STEP-02: Assert errors is equivalent to a new Dictionary<string, string[]>.
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
             {
                 ["body"] = [ModelBindingErrors.MissingBodyMessage]
@@ -32,11 +34,13 @@ namespace ANGI.UnitTests.WebApi.Common
         [Fact]
         public void From_WithMalformedJson_ShouldReportMalformedBody()
         {
+            // STEP-01: Create modelState as ModelStateDictionary, call modelState.AddModelError and get errors from ModelBindingErrors.From.
             var modelState = new ModelStateDictionary();
             modelState.AddModelError("$", new JsonException("'}' is invalid"), new EmptyModelMetadataProvider().GetMetadataForType(typeof(object)));
 
             var errors = ModelBindingErrors.From(modelState, BodyParameters);
 
+            // STEP-02: Assert errors is equivalent to a new Dictionary<string, string[]>.
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
             {
                 ["body"] = [ModelBindingErrors.MalformedBodyMessage]
@@ -48,6 +52,7 @@ namespace ANGI.UnitTests.WebApi.Common
         [Fact]
         public void From_WithFieldErrors_ShouldUseFieldNamesAndVietnamese()
         {
+            // STEP-01: Create modelState as ModelStateDictionary, call modelState.AddModelError and get errors from ModelBindingErrors.From.
             var modelState = new ModelStateDictionary();
             modelState.AddModelError("$.latitude", "The JSON value could not be converted to System.Decimal.");
             modelState.AddModelError("$.businessHours[0].dayOfWeek", "The JSON value could not be converted.");
@@ -55,6 +60,7 @@ namespace ANGI.UnitTests.WebApi.Common
 
             var errors = ModelBindingErrors.From(modelState, BodyParameters);
 
+            // STEP-02: Assert errors is equivalent to a new Dictionary<string, string[]>.
             errors.Should().BeEquivalentTo(new Dictionary<string, string[]>
             {
                 ["latitude"] = [ModelBindingErrors.InvalidValueMessage],

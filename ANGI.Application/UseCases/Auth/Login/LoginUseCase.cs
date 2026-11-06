@@ -56,22 +56,29 @@ namespace ANGI.Application.UseCases.Auth.Login
         /// </summary>
         public async Task<AuthResultDto> ExecuteAsync(LoginRequestDto request, CancellationToken ct)
         {
+            // STEP-01: Validate the request.
             await _validator.ValidateAndThrowAsync(request, ct);
 
+            // STEP-02: Prepare normalizedEmail, then load user through authenticationRepository.GetUserByEmailAsync.
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
             var user = await _authenticationRepository.GetUserByEmailAsync(normalizedEmail, ct);
 
+            // STEP-03: Reject with INVALID_CREDENTIALS when user.PasswordHash is missing or _passwordService.Verify(request.Password, user.PasswordHash) does not hold.
             if (user?.PasswordHash is null || !_passwordService.Verify(request.Password, user.PasswordHash))
             {
                 throw new UnauthorizedException("INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng.");
             }
 
+            // STEP-04: Check the active rule through AccountStatusRules.EnsureActive.
             AccountStatusRules.EnsureActive(user.Status, user.SuspendedUntil);
 
+            // STEP-05: Prepare now from timeProvider.GetUtcNow and refreshToken through tokenService.CreateRefreshToken.
             var now = _timeProvider.GetUtcNow().UtcDateTime;
             var refreshToken = _tokenService.CreateRefreshToken();
 
+            // STEP-06: Update user: LastLoginAt.
             user.LastLoginAt = now;
+            // STEP-07: Prepare session as UserSession.
             var session = new UserSession
             {
                 UserId = user.Id,
@@ -80,7 +87,9 @@ namespace ANGI.Application.UseCases.Auth.Login
                 IpAddress = _currentUserService.IpAddress,
                 ExpiresAt = refreshToken.ExpiresAt
             };
+            // STEP-08: Queue session through authenticationRepository.AddSession.
             _authenticationRepository.AddSession(session);
+            // STEP-09: Record audit action AuditActions.UserLogin.
             // AUTH-04 has no token yet, so the actor is the user who just logged in.
             _auditLogService.Add(new AuditLogEntry
             {
@@ -92,8 +101,10 @@ namespace ANGI.Application.UseCases.Auth.Login
                 ActorRole = user.Role.Code
             });
 
+            // STEP-10: Save the pending changes.
             await _unitOfWork.SaveChangesAsync(ct);
 
+            // STEP-11: Prepare accessToken and tokens, then load needsPreferenceSurvey through GetNeedsPreferenceSurveyAsync.
             // The session id exists only once saved; the access token carries it as claim sid.
             var accessToken = _tokenService.CreateAccessToken(user, session.Id);
             var tokens = new AuthenticationTokens(
@@ -104,6 +115,7 @@ namespace ANGI.Application.UseCases.Auth.Login
                 refreshToken.ExpiresAt);
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(user, ct);
+            // STEP-12: Return the result of AuthenticationResponseMapper.Map.
             return AuthenticationResponseMapper.Map(user, tokens, needsPreferenceSurvey);
         }
 
@@ -112,12 +124,15 @@ namespace ANGI.Application.UseCases.Auth.Login
         /// </summary>
         private async Task<bool?> GetNeedsPreferenceSurveyAsync(User user, CancellationToken ct)
         {
+            // STEP-01: Return null early when user.Role.Code differs from TravelerRole.
             if (!string.Equals(user.Role.Code, TravelerRole, StringComparison.Ordinal))
             {
                 return null;
             }
 
+            // STEP-02: Load status through recommendationService.GetSurveyStatusAsync.
             var status = await _recommendationService.GetSurveyStatusAsync(user.Id, ct);
+            // STEP-03: Return one of two results depending on status is missing.
             return status is null ? null : !status.Completed;
         }
     }

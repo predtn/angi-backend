@@ -49,6 +49,7 @@ public sealed class VietnamesePhoneNumberRulesTests
     [InlineData("99")]
     public void IsValid_WithMobilePrefix_ShouldAcceptBothNotations(string prefix)
     {
+        // STEP-01: Assert for each subscriber, VietnamesePhoneNumberRules.IsValid() is true and VietnamesePhoneNumberRules.IsValid() is true.
         foreach (var subscriber in new[] { "0000000", "1234567", "9999999" })
         {
             VietnamesePhoneNumberRules.IsValid($"0{prefix}{subscriber}").Should().BeTrue();
@@ -124,8 +125,10 @@ public sealed class VietnamesePhoneNumberRulesTests
     [InlineData("299")]
     public void IsValid_WithGeographicAreaCode_ShouldAcceptBothNotations(string areaCode)
     {
+        // STEP-01: Derive subscriber from Length == 2 ? "38123456" : "3812345".
         var subscriber = areaCode.Length == 2 ? "38123456" : "3812345";
 
+        // STEP-02: Assert VietnamesePhoneNumberRules.IsValid() is true.
         VietnamesePhoneNumberRules.IsValid($"0{areaCode}{subscriber}").Should().BeTrue();
         VietnamesePhoneNumberRules.IsValid($"+84{areaCode}{subscriber}").Should().BeTrue();
     }
@@ -144,6 +147,7 @@ public sealed class VietnamesePhoneNumberRulesTests
     [InlineData(" 0901234567 ")]
     public void IsValid_WithSupportedPresentation_ShouldBeTrue(string phone)
     {
+        // STEP-01: Assert VietnamesePhoneNumberRules.IsValid() is true.
         VietnamesePhoneNumberRules.IsValid(phone).Should().BeTrue();
     }
 
@@ -208,6 +212,7 @@ public sealed class VietnamesePhoneNumberRulesTests
     [InlineData("0 901234567")]
     public void IsValid_WithInvalidNumber_ShouldBeFalse(string? phone)
     {
+        // STEP-01: Assert VietnamesePhoneNumberRules.IsValid() is false.
         VietnamesePhoneNumberRules.IsValid(phone).Should().BeFalse();
     }
 
@@ -220,6 +225,7 @@ public sealed class VietnamesePhoneNumberRulesTests
     [InlineData(10000, false)]
     public void IsValid_WithRawLengthBoundary_ShouldMatchLimit(int length, bool expectedValid)
     {
+        // STEP-01: Assert VietnamesePhoneNumberRules.IsValid() is expectedValid.
         VietnamesePhoneNumberRules.IsValid("0901234567".PadRight(length)).Should().Be(expectedValid);
     }
 }

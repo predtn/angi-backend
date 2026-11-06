@@ -14,7 +14,9 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task VerifyIdTokenAsync_WithValidPayload_ShouldReturnIdentity()
         {
+            // STEP-01: Declare capturedSettings to capture a call argument.
             GoogleJsonWebSignature.ValidationSettings? capturedSettings = null;
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService((_, settings) =>
             {
                 capturedSettings = settings;
@@ -27,8 +29,10 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
                 });
             });
 
+            // STEP-03: Run service.VerifyIdTokenAsync and keep result.
             var result = await service.VerifyIdTokenAsync("signed-token", CancellationToken.None);
 
+            // STEP-04: Assert result.ProviderUserId is "google-subject", result.Email is "User@Gmail.com", result.DisplayName is "Nguyen An" and 1 more.
             result.ProviderUserId.Should().Be("google-subject");
             result.Email.Should().Be("User@Gmail.com");
             result.DisplayName.Should().Be("Nguyen An");
@@ -40,11 +44,14 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task VerifyIdTokenAsync_WhenGoogleRejectsToken_ShouldThrowDocumentedError()
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService((_, _) =>
                 Task.FromException<GoogleJsonWebSignature.Payload>(new InvalidJwtException("invalid")));
 
+            // STEP-02: Wrap service.VerifyIdTokenAsync in act so its outcome can be asserted.
             var act = () => service.VerifyIdTokenAsync("bad-token", CancellationToken.None);
 
+            // STEP-03: Assert act throws UnauthorizedException and exception.ErrorCode is "GOOGLE_TOKEN_INVALID".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("GOOGLE_TOKEN_INVALID");
         }
@@ -62,6 +69,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
             string? email,
             bool emailVerified)
         {
+            // STEP-01: Build service under test through CreateService.
             var service = CreateService((_, _) => Task.FromResult(new GoogleJsonWebSignature.Payload
             {
                 Subject = subject,
@@ -69,8 +77,10 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
                 EmailVerified = emailVerified
             }));
 
+            // STEP-02: Wrap service.VerifyIdTokenAsync in act so its outcome can be asserted.
             var act = () => service.VerifyIdTokenAsync("signed-token", CancellationToken.None);
 
+            // STEP-03: Assert act throws UnauthorizedException and exception.ErrorCode is "GOOGLE_TOKEN_INVALID".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("GOOGLE_TOKEN_INVALID");
         }
@@ -80,15 +90,19 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task VerifyIdTokenAsync_WithoutClientId_ShouldThrowWithoutValidation()
         {
+            // STEP-01: Define invoked as false.
             var invoked = false;
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService((_, _) =>
             {
                 invoked = true;
                 return Task.FromResult(new GoogleJsonWebSignature.Payload());
             }, clientId: string.Empty);
 
+            // STEP-03: Wrap service.VerifyIdTokenAsync in act so its outcome can be asserted.
             var act = () => service.VerifyIdTokenAsync("signed-token", CancellationToken.None);
 
+            // STEP-04: Assert act throws UnauthorizedException, exception.ErrorCode is "GOOGLE_TOKEN_INVALID" and invoked is false.
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("GOOGLE_TOKEN_INVALID");
             invoked.Should().BeFalse();
@@ -99,13 +113,18 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public async Task VerifyIdTokenAsync_WhenCallerCancels_ShouldThrowOperationCanceled()
         {
+            // STEP-01: Create pending as TaskCompletionSource<GoogleJsonWebSignature.Payload>.
             var pending = new TaskCompletionSource<GoogleJsonWebSignature.Payload>();
+            // STEP-02: Build service under test through CreateService.
             var service = CreateService((_, _) => pending.Task);
+            // STEP-03: Create cancellation as CancellationTokenSource and cancel cancellation.
             using var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
 
+            // STEP-04: Wrap service.VerifyIdTokenAsync in act so its outcome can be asserted.
             var act = () => service.VerifyIdTokenAsync("signed-token", cancellation.Token);
 
+            // STEP-05: Assert act throws OperationCanceledException.
             await act.Should().ThrowAsync<OperationCanceledException>();
         }
 

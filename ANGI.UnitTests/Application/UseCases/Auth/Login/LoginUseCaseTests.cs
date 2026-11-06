@@ -29,7 +29,9 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithValidCredentials_ShouldCreateSessionAndReturnAuthResult()
         {
+            // STEP-01: Create user through CreateUser.
             var user = CreateUser();
+            // STEP-02: Declare addedSession to capture a call argument and 1 more; mock IAuthenticationRepository and 4 more; stub repository.GetUserByEmailAsync and 5 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -52,6 +54,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 .Callback(() => addedSession!.Id = 77)
                 .ReturnsAsync(3);
 
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 passwordService,
@@ -59,12 +62,14 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 unitOfWork,
                 auditLogService);
 
+            // STEP-04: Run useCase.ExecuteAsync with LoginRequestDto { Email = " User@ANGI.Test ", Password = a test value } and keep result.
             var result = await useCase.ExecuteAsync(new LoginRequestDto
             {
                 Email = "  User@ANGI.Test ",
                 Password = "correct-password"
             }, CancellationToken.None);
 
+            // STEP-05: Assert result.AccessToken is a test value, result.RefreshToken is a test value, result.User.Id is user.Id and 3 more.
             // Issued after the save, carrying the new session's id as claim sid.
             result.AccessToken.Should().Be("access-token-sid-77");
             result.RefreshToken.Should().Be("refresh-token");
@@ -72,10 +77,12 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             result.User.Role.Should().Be("TRAVELER");
             result.User.Status.Should().Be("active");
             result.User.NeedsPreferenceSurvey.Should().BeTrue();
+            // STEP-06: Assert user.LastLoginAt is Now, addedSession is not null, addedSession.RefreshTokenHash is a test value and 1 more.
             user.LastLoginAt.Should().Be(Now);
             addedSession.Should().NotBeNull();
             addedSession!.RefreshTokenHash.Should().Be("refresh-hash");
             addedSession.IpAddress.Should().Be(IPAddress.Loopback);
+            // STEP-07: Assert addedAuditLog is not null, addedAuditLog.Action is "USER_LOGIN", addedAuditLog.EntityType is "user" and 4 more.
             addedAuditLog.Should().NotBeNull();
             addedAuditLog!.Action.Should().Be("USER_LOGIN");
             addedAuditLog.EntityType.Should().Be("user");
@@ -83,6 +90,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             addedAuditLog.SubjectUserId.Should().Be(user.Id);
             addedAuditLog.ActorId.Should().Be(user.Id);
             addedAuditLog.ActorRole.Should().Be("TRAVELER");
+            // STEP-08: Verify SaveChangesAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -91,26 +99,31 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithIncorrectPassword_ShouldThrowInvalidCredentials()
         {
+            // STEP-01: Mock IAuthenticationRepository, IPasswordService and IUnitOfWork; stub repository.GetUserByEmailAsync and passwordService.Verify.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(CreateUser());
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 passwordService,
                 new Mock<IRecommendationService>(),
                 unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync with LoginRequestDto { Email = "user@angi.test", Password = a test value } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new LoginRequestDto
             {
                 Email = "user@angi.test",
                 Password = "wrong-password"
             }, CancellationToken.None);
 
+            // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "INVALID_CREDENTIALS".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("INVALID_CREDENTIALS");
+            // STEP-05: Verify AddSession is never called and SaveChangesAsync is never called.
             repository.Verify(x => x.AddSession(It.IsAny<UserSession>()), Times.Never);
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -120,26 +133,31 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithSuspendedAccount_ShouldThrowAccountSuspended()
         {
+            // STEP-01: Create user through CreateUser, set user.Status to UserStatus.Suspended and set user.SuspendedUntil to Now.AddDays().
             var user = CreateUser();
             user.Status = UserStatus.Suspended;
             user.SuspendedUntil = Now.AddDays(1);
+            // STEP-02: Mock IAuthenticationRepository and IPasswordService; stub repository.GetUserByEmailAsync and passwordService.Verify.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 passwordService,
                 new Mock<IRecommendationService>(),
                 new Mock<IUnitOfWork>());
 
+            // STEP-04: Wrap useCase.ExecuteAsync with LoginRequestDto { Email = "user@angi.test", Password = a test value } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new LoginRequestDto
             {
                 Email = "user@angi.test",
                 Password = "correct-password"
             }, CancellationToken.None);
 
+            // STEP-05: Assert act throws AccountSuspendedException, exception.ErrorCode is "ACCOUNT_SUSPENDED" and exception.SuspendedUntil is user.SuspendedUntil.
             var exception = await act.Should().ThrowAsync<AccountSuspendedException>();
             exception.Which.ErrorCode.Should().Be("ACCOUNT_SUSPENDED");
             exception.Which.SuspendedUntil.Should().Be(user.SuspendedUntil);
@@ -150,17 +168,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithUnknownEmail_ShouldThrowInvalidCredentials()
         {
+            // STEP-01: Mock IAuthenticationRepository, IPasswordService and IUnitOfWork; stub repository.GetUserByEmailAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((User?)null);
             var passwordService = new Mock<IPasswordService>();
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, passwordService, new Mock<IRecommendationService>(), unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws UnauthorizedException and exception.ErrorCode is "INVALID_CREDENTIALS".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("INVALID_CREDENTIALS");
+            // STEP-05: Verify Verify is never called and SaveChangesAsync is never called.
             passwordService.Verify(x => x.Verify(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -170,22 +193,28 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithoutPasswordHash_ShouldThrowInvalidCredentials()
         {
+            // STEP-01: Create user through CreateUser and set user.PasswordHash to null.
             var user = CreateUser();
             user.PasswordHash = null;
+            // STEP-02: Mock IAuthenticationRepository and IPasswordService; stub repository.GetUserByEmailAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
             var passwordService = new Mock<IPasswordService>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 passwordService,
                 new Mock<IRecommendationService>(),
                 new Mock<IUnitOfWork>());
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws UnauthorizedException and exception.ErrorCode is "INVALID_CREDENTIALS".
             var exception = await act.Should().ThrowAsync<UnauthorizedException>();
             exception.Which.ErrorCode.Should().Be("INVALID_CREDENTIALS");
+            // STEP-06: Verify Verify is never called.
             passwordService.Verify(x => x.Verify(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
@@ -199,21 +228,26 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             UserStatus status,
             string expectedErrorCode)
         {
+            // STEP-01: Create user through CreateUser and set user.Status to status.
             var user = CreateUser();
             user.Status = status;
+            // STEP-02: Mock IAuthenticationRepository and IPasswordService; stub repository.GetUserByEmailAsync and passwordService.Verify.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Verify(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 passwordService,
                 new Mock<IRecommendationService>(),
                 new Mock<IUnitOfWork>());
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws ForbiddenException and exception.ErrorCode is expectedErrorCode.
             var exception = await act.Should().ThrowAsync<ForbiddenException>();
             exception.Which.ErrorCode.Should().Be(expectedErrorCode);
         }
@@ -223,18 +257,23 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithInvalidRequest_ShouldThrowValidationExceptionFirst()
         {
+            // STEP-01: Mock IAuthenticationRepository.
             var repository = new Mock<IAuthenticationRepository>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 new Mock<IPasswordService>(),
                 new Mock<IRecommendationService>(),
                 new Mock<IUnitOfWork>());
 
+            // STEP-03: Wrap useCase.ExecuteAsync with LoginRequestDto { Email = "invalid-email", Password = string.Empty } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new LoginRequestDto { Email = "invalid-email", Password = string.Empty },
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify GetUserByEmailAsync is never called.
             repository.Verify(
                 x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
                 Times.Never);
@@ -245,7 +284,9 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WhenSurveyStatusIsUnavailable_ShouldReturnNullPreferenceRequirement()
         {
+            // STEP-01: Create user through CreateUser.
             var user = CreateUser();
+            // STEP-02: Mock IAuthenticationRepository, IPasswordService and 2 more; stub repository.GetUserByEmailAsync, passwordService.Verify and 2 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -256,10 +297,13 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
                 .ReturnsAsync((SurveyStatus?)null);
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, passwordService, recommendationService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync and keep result.
             var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert result.User.NeedsPreferenceSurvey is null.
             result.User.NeedsPreferenceSurvey.Should().BeNull();
         }
 
@@ -268,8 +312,10 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
         [Fact]
         public async Task ExecuteAsync_WithNonTravelerRole_ShouldNotRequestSurveyStatus()
         {
+            // STEP-01: Create user through CreateUser and set user.Role to a new Role.
             var user = CreateUser();
             user.Role = new Role { Id = 2, Code = "RESTAURANT_OWNER", Name = "Restaurant Owner" };
+            // STEP-02: Mock IAuthenticationRepository, IPasswordService and 2 more; stub repository.GetUserByEmailAsync, passwordService.Verify and 1 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -278,11 +324,15 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.Login
             var recommendationService = new Mock<IRecommendationService>();
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, passwordService, recommendationService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync and keep result.
             var result = await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert result.User.NeedsPreferenceSurvey is null.
             result.User.NeedsPreferenceSurvey.Should().BeNull();
+            // STEP-06: Verify GetSurveyStatusAsync is never called.
             recommendationService.Verify(
                 x => x.GetSurveyStatusAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
                 Times.Never);

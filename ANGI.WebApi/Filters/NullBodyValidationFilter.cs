@@ -11,16 +11,19 @@ public sealed class NullBodyValidationFilter : IAsyncActionFilter
 {
     public Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
+        // STEP-01: Prepare missingRequiredBody through OfType().Where(filtered).Any.
         var missingRequiredBody = context.ActionDescriptor.Parameters
             .OfType<ControllerParameterDescriptor>()
             .Where(parameter => parameter.BindingInfo?.BindingSource?.CanAcceptDataFrom(BindingSource.Body) == true)
             .Any(parameter => !context.ActionArguments.TryGetValue(parameter.Name, out var value) || value is null);
 
+        // STEP-02: Return the result of next early when missingRequiredBody is false.
         if (!missingRequiredBody)
         {
             return next();
         }
 
+        // STEP-03: Update context: Result.
         context.Result = new BadRequestObjectResult(new ApiResponse<object>
         {
             Success = false,
@@ -32,6 +35,7 @@ public sealed class NullBodyValidationFilter : IAsyncActionFilter
                 ["body"] = ["Nội dung JSON là bắt buộc và không được là null."]
             }
         });
+        // STEP-04: Return Task.CompletedTask.
         return Task.CompletedTask;
     }
 }

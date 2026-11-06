@@ -40,22 +40,31 @@ public sealed class AddMenuSubmissionItemUseCase : IAddMenuSubmissionItemUseCase
         AddMenuSubmissionItemRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare ownerId.
         var ownerId = _currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thêm món.");
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare submission from repository.LockOwnedSubmissionAsync.
         var submission = await _repository.LockOwnedSubmissionAsync(ownerId, submissionId, ct)
             ?? throw new NotFoundException("SUBMISSION_NOT_FOUND", "Không tìm thấy bản menu.");
+        // STEP-05: Check the editable rule through RestaurantMenuRules.EnsureEditable.
         RestaurantMenuRules.EnsureEditable(submission);
 
+        // STEP-06: Prepare tagIds from Array.Empty.
         var tagIds = request.TagIds?.ToArray() ?? Array.Empty<short>();
+        // STEP-07: Run RestaurantMenuRules.ValidateTagIdsAsync.
         await RestaurantMenuRules.ValidateTagIdsAsync(_repository, tagIds, ct);
+        // STEP-08: Load coverMedia through RestaurantMenuRules.GetOwnedMediaAsync.
         var coverMedia = await RestaurantMenuRules.GetOwnedMediaAsync(
             _mediaRepository,
             ownerId,
             request.CoverMediaId,
             ct);
+        // STEP-09: Prepare highestSortOrder from submission.Items.Max, nextSortOrder and item as MenuSubmissionItem.
         var highestSortOrder = submission.Items.Count == 0
             ? (short)-1
             : submission.Items.Max(item => item.SortOrder);
@@ -75,9 +84,13 @@ public sealed class AddMenuSubmissionItemUseCase : IAddMenuSubmissionItemUseCase
             SortOrder = nextSortOrder
         };
 
+        // STEP-10: Queue item through repository.AddItem.
         _repository.AddItem(item);
+        // STEP-11: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
+        // STEP-12: Commit the transaction.
         await transaction.CommitAsync(ct);
+        // STEP-13: Return the result of RestaurantMenuMapper.MapItem.
         return RestaurantMenuMapper.MapItem(item, "new", coverMedia?.Url);
     }
 }

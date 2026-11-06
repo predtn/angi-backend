@@ -48,24 +48,32 @@ namespace ANGI.Infrastructure.Services.Mapbox
             RouteProfile profile,
             CancellationToken ct)
         {
+            // STEP-01: Call ArgumentNullException.ThrowIfNull.
             ArgumentNullException.ThrowIfNull(destinations);
+            // STEP-02: Evaluate ProfileName().
             _ = ProfileName(profile);
 
+            // STEP-03: Prepare points, then call ArgumentOutOfRangeException.ThrowIfGreaterThan.
             var points = BuildPoints(origin, destinations);
             ArgumentOutOfRangeException.ThrowIfGreaterThan(points.Count, MaxPoints, nameof(destinations));
 
+            // STEP-04: Return the result of Empty early when points.Count < 2.
             if (points.Count < 2)
             {
                 return Empty();
             }
 
+            // STEP-05: Prepare cacheKey through BuildCacheKey.
             var cacheKey = BuildCacheKey(profile, points, origin is not null);
+            // STEP-06: Return a new RouteCalculationResult early when _cache has an entry for cacheKey and cachedRoute exists.
             if (_cache.TryGetValue(cacheKey, out CachedRoute? cachedRoute) && cachedRoute is not null)
             {
                 return new RouteCalculationResult(cachedRoute.Legs, false);
             }
 
+            // STEP-07: Load metrics through GetMapboxLegsAsync.
             var metrics = await GetMapboxLegsAsync(points, profile, ct);
+            // STEP-08: Return a new RouteCalculationResult early when metrics exists.
             if (metrics is not null)
             {
                 _cache.Set(
@@ -75,6 +83,7 @@ namespace ANGI.Infrastructure.Services.Mapbox
                 return new RouteCalculationResult(metrics, false);
             }
 
+            // STEP-09: Return a new RouteCalculationResult.
             return new RouteCalculationResult(EstimateLegs(points, profile), true);
         }
 
@@ -83,13 +92,17 @@ namespace ANGI.Infrastructure.Services.Mapbox
             RouteCoordinate? origin,
             IReadOnlyList<RouteCoordinate> destinations)
         {
+            // STEP-01: Prepare points as List<RouteCoordinate>.
             var points = new List<RouteCoordinate>(destinations.Count + (origin is null ? 0 : 1));
+            // STEP-02: When origin exists, call points.Add.
             if (origin is not null)
             {
                 points.Add(origin);
             }
 
+            // STEP-03: Add destinations to points.
             points.AddRange(destinations);
+            // STEP-04: Return points.
             return points;
         }
 
@@ -99,16 +112,20 @@ namespace ANGI.Infrastructure.Services.Mapbox
             RouteProfile profile,
             CancellationToken ct)
         {
+            // STEP-01: Return null early when _httpClient.BaseAddress is missing or _settings.AccessToken is blank.
             if (_httpClient.BaseAddress is null || string.IsNullOrWhiteSpace(_settings.AccessToken))
             {
                 _logger.LogWarning("Mapbox is not configured; route metrics will be estimated.");
                 return null;
             }
 
+            // STEP-02: Prepare path through BuildRequestPath.
             var path = BuildRequestPath(points, profile, _settings.AccessToken);
             try
             {
+                // STEP-03: Load response through httpClient.GetAsync.
                 using var response = await _httpClient.GetAsync(path, ct);
+                // STEP-04: Return null early when response.IsSuccessStatusCode is false.
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Mapbox Directions failed with status {StatusCode}; route metrics will be estimated.",
@@ -116,15 +133,20 @@ namespace ANGI.Infrastructure.Services.Mapbox
                     return null;
                 }
 
+                // STEP-05: Load body through response.Content.ReadFromJsonAsync.
                 var body = await response.Content.ReadFromJsonAsync<MapboxResponse>(_jsonOptions, ct);
+                // STEP-06: Prepare legs from FirstOrDefault.
                 var legs = body?.Routes?.FirstOrDefault()?.Legs;
+                // STEP-07: Return null early when legs is missing or legs.Count is not points.Count - 1.
                 if (legs is null || legs.Count != points.Count - 1)
                 {
                     _logger.LogWarning("Mapbox Directions returned an invalid leg count; route metrics will be estimated.");
                     return null;
                 }
 
+                // STEP-08: Prepare metrics as List<RouteMetric>.
                 var metrics = new List<RouteMetric>(legs.Count);
+                // STEP-09: For each leg in legs, return null early when TryRoundMetric(leg.Distance, ...) does not hold or TryRoundMetric(leg.Duration, ...) does not hold and call metrics.Add.
                 foreach (var leg in legs)
                 {
                     if (!TryRoundMetric(leg.Distance, out var distance) ||
@@ -137,22 +159,27 @@ namespace ANGI.Infrastructure.Services.Mapbox
                     metrics.Add(new RouteMetric(distance, duration));
                 }
 
+                // STEP-10: Return metrics.
                 return metrics;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                // STEP-11: On OperationCanceledException when ct.IsCancellationRequested is false, call logger.LogWarning.
                 _logger.LogWarning("Mapbox Directions did not answer within {TimeoutMilliseconds} ms; route metrics will be estimated.",
                     _settings.TimeoutMilliseconds);
             }
             catch (HttpRequestException exception)
             {
+                // STEP-12: On HttpRequestException, call logger.LogWarning.
                 _logger.LogWarning(exception, "Mapbox Directions could not be reached; route metrics will be estimated.");
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
+                // STEP-13: On Exception when exception is one of the listed values, call logger.LogWarning.
                 _logger.LogWarning(exception, "Mapbox Directions returned an unreadable body; route metrics will be estimated.");
             }
 
+            // STEP-14: Return null.
             return null;
         }
 
@@ -193,17 +220,22 @@ namespace ANGI.Infrastructure.Services.Mapbox
             IReadOnlyList<RouteCoordinate> points,
             RouteProfile profile)
         {
+            // STEP-01: Prepare speedMetersPerSecond from SpeedKilometersPerHour and legs as List<RouteMetric>.
             var speedMetersPerSecond = SpeedKilometersPerHour(profile) / 3.6d;
             var legs = new List<RouteMetric>(points.Count - 1);
+            // STEP-02: Repeat while index < points.Count.
             for (var index = 1; index < points.Count; index++)
             {
+                // STEP-03: Prepare from, to and distance from HaversineMeters.
                 var from = points[index - 1];
                 var to = points[index];
                 var distance = HaversineMeters(from.Latitude, from.Longitude, to.Latitude, to.Longitude) *
                                RoadDistanceFactor;
+                // STEP-04: Add a new RouteMetric to legs.
                 legs.Add(new RouteMetric(RoundMetric(distance), RoundMetric(distance / speedMetersPerSecond)));
             }
 
+            // STEP-05: Return legs.
             return legs;
         }
 
@@ -218,6 +250,7 @@ namespace ANGI.Infrastructure.Services.Mapbox
             decimal toLatitude,
             decimal toLongitude)
         {
+            // STEP-01: Prepare latitude1 through DegreesToRadians, latitude2 through DegreesToRadians, latitudeDelta, longitudeDelta through DegreesToRadians and 1 more.
             var latitude1 = DegreesToRadians((double)fromLatitude);
             var latitude2 = DegreesToRadians((double)toLatitude);
             var latitudeDelta = latitude2 - latitude1;
@@ -225,6 +258,7 @@ namespace ANGI.Infrastructure.Services.Mapbox
             var haversine = Math.Pow(Math.Sin(latitudeDelta / 2d), 2d) +
                             Math.Cos(latitude1) * Math.Cos(latitude2) *
                             Math.Pow(Math.Sin(longitudeDelta / 2d), 2d);
+            // STEP-02: Return the computed condition.
             return EarthRadiusMeters * 2d * Math.Atan2(Math.Sqrt(haversine), Math.Sqrt(1d - haversine));
         }
 
@@ -256,13 +290,16 @@ namespace ANGI.Infrastructure.Services.Mapbox
         /// <summary>Rounds a finite, non-negative metric to the nearest API integer.</summary>
         private static bool TryRoundMetric(double value, out int rounded)
         {
+            // STEP-01: Return false early when double.IsFinite(value) does not hold, value < 0d or value > int.MaxValue.
             if (!double.IsFinite(value) || value < 0d || value > int.MaxValue)
             {
                 rounded = 0;
                 return false;
             }
 
+            // STEP-02: Set rounded.
             rounded = RoundMetric(value);
+            // STEP-03: Return true.
             return true;
         }
 

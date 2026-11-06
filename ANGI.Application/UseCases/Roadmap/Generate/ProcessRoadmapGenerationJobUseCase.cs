@@ -4,6 +4,7 @@ using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Interfaces.Services;
 using ANGI.Application.Common.Interfaces.Services.Recommendation;
 using ANGI.Application.Common.Interfaces.UseCases.Roadmap;
+using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Common.Models.Discovery;
 using ANGI.Application.Common.Models.Recommendation;
 using ANGI.Application.Common.Models.Roadmap;
@@ -170,9 +171,17 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
                 .ToArray();
 
             var used = new HashSet<int>();
+            // Each day is one paid model call, so a long trip uses the backend planner, and repeats dishes rather than leaving its last days empty.
+            var longTrip = targets.Length > AgentScopedPlanning.LongTripDays;
             foreach (var (day, dayMeals) in targets)
             {
                 var available = ordered.Where(dish => !used.Contains(dish.Id)).ToArray();
+                if (longTrip && available.Length < dayMeals.Count)
+                {
+                    used.Clear();
+                    available = ordered.ToArray();
+                }
+
                 if (available.Length == 0)
                 {
                     break;
@@ -180,7 +189,7 @@ public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerati
 
                 var cluster = RoadmapDayPlanner.Cluster(available, dayMeals.Count);
                 var anchor = cluster[0];
-                var plan = await _plannerService.PlanDayAsync(new RoadmapPlanRequest(
+                var plan = longTrip ? null : await _plannerService.PlanDayAsync(new RoadmapPlanRequest(
                     day.DayNumber,
                     dayMeals,
                     cluster.Select(dish => new RoadmapPlanCandidate(

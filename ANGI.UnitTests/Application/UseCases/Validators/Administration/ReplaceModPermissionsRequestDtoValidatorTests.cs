@@ -14,8 +14,10 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithEmptyOverrides_ShouldBeValid()
     {
+        // STEP-01: Validate ReplaceModPermissionsRequestDto { Overrides = the expected items } and keep result.
         var result = await _validator.ValidateAsync(new ReplaceModPermissionsRequestDto { Overrides = [] });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -24,6 +26,7 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithAllowAndDeny_ShouldBeValid()
     {
+        // STEP-01: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides =
@@ -33,8 +36,10 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
             ]
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -43,8 +48,10 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullOverrides_ShouldHaveRequiredError()
     {
+        // STEP-01: Validate ReplaceModPermissionsRequestDto { Overrides = null } and keep result.
         var result = await _validator.ValidateAsync(new ReplaceModPermissionsRequestDto { Overrides = null! });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Overrides");
     }
 
@@ -53,10 +60,13 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithMissingNestedFields_ShouldRejectBothFieldsOnce()
     {
+        // STEP-01: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto { Overrides = [new PermissionOverrideDto()] };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Overrides[0].PermissionCode");
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Overrides[0].Effect");
     }
@@ -69,13 +79,16 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [InlineData(" allow ")]
     public async Task Validate_WithUnsupportedEffect_ShouldBeInvalid(string effect)
     {
+        // STEP-01: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides = [new PermissionOverrideDto { PermissionCode = "USER_BAN", Effect = effect }]
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Overrides[0].Effect");
     }
 
@@ -84,6 +97,7 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithDuplicateCodes_ShouldBeInvalid()
     {
+        // STEP-01: Create request as ReplaceModPermissionsRequestDto.
         var request = new ReplaceModPermissionsRequestDto
         {
             Overrides =
@@ -93,8 +107,10 @@ public sealed class ReplaceModPermissionsRequestDtoValidatorTests
             ]
         };
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "Overrides");
     }
 }

@@ -25,6 +25,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithValidToken_ShouldResetPasswordRevokeSessionsAndWriteAudit()
         {
+            // STEP-01: Create userToken through CreateToken, build the sessions collection and get repository from RepositoryReturning.
             var userToken = CreateToken();
             var sessions = new[]
             {
@@ -32,6 +33,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
                 new UserSession { Id = 11, UserId = userToken.UserId, RefreshTokenHash = "two" }
             };
             var repository = RepositoryReturning(userToken);
+            // STEP-02: Declare auditEntry to capture a call argument; mock IPasswordService and 1 more; stub repository.GetActiveSessionsAsync and 2 more.
             repository.Setup(x => x.GetActiveSessionsAsync(userToken.UserId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessions);
             var passwordService = new Mock<IPasswordService>();
@@ -40,13 +42,18 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
             AuditLogEntry? auditEntry = null;
             auditLogService.Setup(x => x.Add(It.IsAny<AuditLogEntry>()))
                 .Callback<AuditLogEntry>(entry => auditEntry = entry);
+            // STEP-03: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out var transaction);
+            // STEP-04: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, passwordService, auditLogService);
 
+            // STEP-05: Run useCase.ExecuteAsync.
             await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-06: Assert userToken.UsedAt is Now and userToken.User.PasswordHash is a test value.
             userToken.UsedAt.Should().Be(Now);
             userToken.User.PasswordHash.Should().Be("new-password-hash");
+            // STEP-07: Assert sessions only holds items matching the condition, auditEntry is not null, auditEntry.Action is AuditActions.PasswordReset and 7 more.
             sessions.Should().OnlyContain(session => session.RevokedAt == Now);
             auditEntry.Should().NotBeNull();
             auditEntry!.Action.Should().Be(AuditActions.PasswordReset);
@@ -57,6 +64,7 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
             auditEntry.ActorRole.Should().Be("TRAVELER");
             auditEntry.OldValues.Should().BeNull("password hashes must never be written to audit values");
             auditEntry.NewValues.Should().BeNull("password hashes must never be written to audit values");
+            // STEP-08: Verify SaveChangesAsync is called once and CommitAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
             transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -66,16 +74,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithUnknownToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Mock IAuthenticationRepository; stub repository.GetUserTokenByHashForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserTokenByHashForUpdateAsync("token-hash", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((UserToken?)null);
+            // STEP-02: Create unitOfWork through CreateUnitOfWork.
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork);
 
+            // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert act throws BadRequestException and exception.ErrorCode is "TOKEN_INVALID".
             var exception = await act.Should().ThrowAsync<BadRequestException>();
             exception.Which.ErrorCode.Should().Be("TOKEN_INVALID");
+            // STEP-06: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -84,15 +98,20 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithEmailVerificationToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.Purpose to UserTokenPurpose.EmailVerify and create unitOfWork through CreateUnitOfWork.
             var userToken = CreateToken();
             userToken.Purpose = UserTokenPurpose.EmailVerify;
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(RepositoryReturning(userToken), unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws BadRequestException, the thrown exception.ErrorCode is "TOKEN_INVALID" and userToken.User.PasswordHash is a test value.
             (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("TOKEN_INVALID");
             userToken.User.PasswordHash.Should().Be("old-password-hash");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -101,14 +120,19 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithUsedToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.UsedAt to Now.AddMinutes() and create unitOfWork through CreateUnitOfWork.
             var userToken = CreateToken();
             userToken.UsedAt = Now.AddMinutes(-1);
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(RepositoryReturning(userToken), unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws BadRequestException and the thrown exception.ErrorCode is "TOKEN_INVALID".
             (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("TOKEN_INVALID");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -117,14 +141,19 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithTokenAtExpiryBoundary_ShouldThrowTokenExpired()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.ExpiresAt to Now and create unitOfWork through CreateUnitOfWork.
             var userToken = CreateToken();
             userToken.ExpiresAt = Now;
             var unitOfWork = CreateUnitOfWork(out _);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(RepositoryReturning(userToken), unitOfWork);
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws BadRequestException and the thrown exception.ErrorCode is "TOKEN_EXPIRED".
             (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("TOKEN_EXPIRED");
+            // STEP-05: Verify SaveChangesAsync is never called.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -133,17 +162,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithOneTickRemainingAndNoSessions_ShouldResetPassword()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.ExpiresAt to Now.AddTicks() and get repository from RepositoryReturning.
             var userToken = CreateToken();
             userToken.ExpiresAt = Now.AddTicks(1);
             var repository = RepositoryReturning(userToken);
+            // STEP-02: Mock IPasswordService; stub repository.GetActiveSessionsAsync and passwordService.Hash.
             repository.Setup(x => x.GetActiveSessionsAsync(userToken.UserId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
             var passwordService = new Mock<IPasswordService>();
             passwordService.Setup(x => x.Hash("Password2")).Returns("new-password-hash");
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, CreateUnitOfWork(out _), passwordService);
 
+            // STEP-04: Run useCase.ExecuteAsync.
             await useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-05: Assert userToken.UsedAt is Now and userToken.User.PasswordHash is a test value.
             userToken.UsedAt.Should().Be(Now);
             userToken.User.PasswordHash.Should().Be("new-password-hash");
         }
@@ -153,14 +187,19 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithInvalidRequest_ShouldValidateBeforeSecurityOrDatabaseAccess()
         {
+            // STEP-01: Mock IAuthenticationRepository, IUnitOfWork and IAuthenticationTokenService.
             var repository = new Mock<IAuthenticationRepository>();
             var unitOfWork = new Mock<IUnitOfWork>();
             var tokenService = new Mock<IAuthenticationTokenService>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, unitOfWork, tokenService: tokenService);
 
+            // STEP-03: Wrap useCase.ExecuteAsync with an empty ResetPasswordRequestDto in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(new ResetPasswordRequestDto(), CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify HashUserToken is never called and BeginTransactionAsync is never called.
             tokenService.Verify(x => x.HashUserToken(It.IsAny<string>()), Times.Never);
             unitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -170,13 +209,17 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResetPassword
         [Fact]
         public async Task ExecuteAsync_WithUsedAndExpiredToken_ShouldThrowTokenInvalid()
         {
+            // STEP-01: Create userToken through CreateToken, set userToken.UsedAt to Now.AddHours() and set userToken.ExpiresAt to Now.AddHours().
             var userToken = CreateToken();
             userToken.UsedAt = Now.AddHours(-2);
             userToken.ExpiresAt = Now.AddHours(-1);
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(RepositoryReturning(userToken), CreateUnitOfWork(out _));
 
+            // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+            // STEP-04: Assert act throws BadRequestException and the thrown exception.ErrorCode is "TOKEN_INVALID".
             (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("TOKEN_INVALID");
         }
 

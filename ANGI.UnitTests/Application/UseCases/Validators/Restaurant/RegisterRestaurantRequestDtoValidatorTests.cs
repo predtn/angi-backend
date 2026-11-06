@@ -13,7 +13,9 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithOverlappingBusinessHours_ShouldBeInvalid()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request as RegisterRestaurantRequestDto.
         var request = new RegisterRestaurantRequestDto
         {
             Name = "Test Restaurant",
@@ -29,8 +31,10 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             ]
         };
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is false and result.Errors contains a matching item.
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.PropertyName == nameof(request.BusinessHours));
     }
@@ -40,13 +44,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithOvernightOverlapOnFollowingDay_ShouldBeInvalid()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest.
         var request = ValidRequest(
             new BusinessHourDto { DayOfWeek = 1, OpenTime = "22:00", CloseTime = "02:00" },
             new BusinessHourDto { DayOfWeek = 2, OpenTime = "01:00", CloseTime = "03:00" });
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is false and result.Errors contains a matching item.
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.PropertyName == nameof(request.BusinessHours));
     }
@@ -56,13 +64,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithNonOverlappingEarlyAndOvernightIntervals_ShouldBeValid()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest.
         var request = ValidRequest(
             new BusinessHourDto { DayOfWeek = 1, OpenTime = "01:00", CloseTime = "03:00" },
             new BusinessHourDto { DayOfWeek = 1, OpenTime = "22:00", CloseTime = "02:00" });
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -71,13 +83,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithOverlapAcrossWeekBoundary_ShouldBeInvalid()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest.
         var request = ValidRequest(
             new BusinessHourDto { DayOfWeek = 6, OpenTime = "22:00", CloseTime = "02:00" },
             new BusinessHourDto { DayOfWeek = 0, OpenTime = "01:00", CloseTime = "03:00" });
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 
@@ -86,15 +102,19 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithInvalidFields_ShouldReturnVietnameseMessages()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, set request.Name to an empty string, set request.Latitude to 95m and set request.ImageMediaIds to a test items.
         var request = ValidRequest(
             new BusinessHourDto { DayOfWeek = 1, OpenTime = "8h", CloseTime = "12:00" });
         request.Name = "";
         request.Latitude = 95m;
         request.ImageMediaIds = [1, 1];
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.TestValidateAsync(request);
 
+        // STEP-04: Assert a validation error on Name with the expected message, a validation error on Latitude with the expected message and 2 more.
         result.ShouldHaveValidationErrorFor(x => x.Name).WithErrorMessage("Tên nhà hàng là bắt buộc.");
         result.ShouldHaveValidationErrorFor(x => x.Latitude)
             .WithErrorMessage("Vĩ độ phải nằm trong khoảng -90 đến 90.");
@@ -113,7 +133,9 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [InlineData("provinceName")]
     public async Task ValidateAsync_WithMissingRequiredText_ShouldBeInvalid(string field)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest and apply the case selected by field.
         var request = ValidRequest();
         switch (field)
         {
@@ -123,8 +145,10 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             case "provinceName": request.ProvinceName = " "; break;
         }
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 
@@ -148,7 +172,9 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         int length,
         bool expectedValid)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, create value as string and apply the case selected by field.
         var request = ValidRequest();
         var value = new string('a', length);
         switch (field)
@@ -161,8 +187,10 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
             case "provinceName": request.ProvinceName = value; break;
         }
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -178,13 +206,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         string website,
         bool expectedValid)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, set request.Email to email and set request.Website to website.
         var request = ValidRequest();
         request.Email = email;
         request.Website = website;
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -202,13 +234,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         double longitude,
         bool expectedValid)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, set request.Latitude to latitude and set request.Longitude to longitude.
         var request = ValidRequest();
         request.Latitude = (decimal)latitude;
         request.Longitude = (decimal)longitude;
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -221,13 +257,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         bool omitLatitude,
         bool omitLongitude)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, when omitLatitude, set request.Latitude to null and when omitLongitude, set request.Longitude to null.
         var request = ValidRequest();
         if (omitLatitude) request.Latitude = null;
         if (omitLongitude) request.Longitude = null;
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 
@@ -243,12 +283,16 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         int? priceLevel,
         bool expectedValid)
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest and set request.PriceLevel to priceLevel.
         var request = ValidRequest();
         request.PriceLevel = (short?)priceLevel;
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is expectedValid.
         result.IsValid.Should().Be(expectedValid);
     }
 
@@ -257,13 +301,17 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithInvalidMediaIdentifiers_ShouldReportEachField()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, set request.CoverMediaId to 0 and set request.ImageMediaIds to a test items.
         var request = ValidRequest();
         request.CoverMediaId = 0;
         request.ImageMediaIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1];
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.TestValidateAsync(request);
 
+        // STEP-04: Assert a validation error on CoverMediaId, a validation error on ImageMediaIds and result.Errors.Count(filtered) is 2.
         result.ShouldHaveValidationErrorFor(item => item.CoverMediaId);
         result.ShouldHaveValidationErrorFor(item => item.ImageMediaIds);
         result.Errors.Count(error => error.PropertyName == nameof(request.ImageMediaIds)).Should().Be(2);
@@ -274,7 +322,9 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithOptionalFieldsOmittedAndTenImages_ShouldBeValid()
     {
+        // STEP-01: Create the RegisterRestaurantRequestDtoValidator under test as validator.
         var validator = new RegisterRestaurantRequestDtoValidator();
+        // STEP-02: Create request through ValidRequest, set request.Description to null, set request.Email to null, set request.Website to null and 5 more.
         var request = ValidRequest();
         request.Description = null;
         request.Email = null;
@@ -285,8 +335,10 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
         request.ImageMediaIds = Enumerable.Range(1, 10).Select(id => (long)id).ToArray();
         request.BusinessHours = null;
 
+        // STEP-03: Validate request and keep result.
         var result = await validator.ValidateAsync(request);
 
+        // STEP-04: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -308,11 +360,14 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [InlineData("+84 90 123 4567", true)]
     public async Task ValidateAsync_WithVietnamesePhone_ShouldReportOnlyThePhoneError(string? phone, bool expectedValid)
     {
+        // STEP-01: Create request through ValidRequest and set request.Phone to phone.
         var request = ValidRequest();
         request.Phone = phone!;
 
+        // STEP-02: Validate request and keep result.
         var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid, result.Errors has exactly one matching item, result.Errors.PropertyName is nameof() and 1 more.
         result.IsValid.Should().Be(expectedValid);
         if (!expectedValid)
         {
@@ -331,11 +386,14 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [InlineData(21, false)]
     public async Task ValidateAsync_WithFormattedPhoneLength_ShouldMatchLimit(int length, bool expectedValid)
     {
+        // STEP-01: Create request through ValidRequest and set request.Phone to "0901234567".PadRight().
         var request = ValidRequest();
         request.Phone = "0901234567".PadRight(length);
 
+        // STEP-02: Validate request and keep result.
         var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is expectedValid, result.Errors has exactly one matching item and result.Errors.ErrorMessage is the expected text.
         result.IsValid.Should().Be(expectedValid);
         if (!expectedValid)
         {
@@ -349,11 +407,14 @@ public sealed class RegisterRestaurantRequestDtoValidatorTests
     [Fact]
     public async Task ValidateAsync_WithNullBusinessHour_ShouldReportIndexedField()
     {
+        // STEP-01: Create request through ValidRequest and set request.BusinessHours to a test items.
         var request = ValidRequest();
         request.BusinessHours = [null!];
 
+        // STEP-02: Validate request and keep result.
         var result = await new RegisterRestaurantRequestDtoValidator().ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item and result.Errors.PropertyName is "BusinessHours[0]".
         result.Errors.Should().ContainSingle().Which.PropertyName.Should().Be("BusinessHours[0]");
     }
 

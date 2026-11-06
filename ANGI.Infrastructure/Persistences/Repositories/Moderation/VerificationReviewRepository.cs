@@ -42,6 +42,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
         ListVerificationsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Prepare status and query through AsNoTracking().Where.
         var status = request.Status switch
         {
             "approved" => VerificationStatus.Approved,
@@ -53,6 +54,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
             .AsNoTracking()
             .Where(verification => verification.Status == status);
 
+        // STEP-02: When request.Province has a value, prepare province and set query.
         if (!string.IsNullOrWhiteSpace(request.Province))
         {
             var province = LikePattern.Contains(request.Province);
@@ -61,6 +63,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
                 EF.Functions.ILike(verification.Restaurant.ProvinceName, province, LikePattern.Escape));
         }
 
+        // STEP-03: Call query.LongCountAsync and keep totalItems and AsSplitQuery().ToListAsync and keep items.
         var totalItems = await query.LongCountAsync(ct);
         var items = await query
             .OrderBy(verification => verification.SubmittedAt)
@@ -78,6 +81,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
             .AsSplitQuery()
             .ToListAsync(ct);
 
+        // STEP-04: Return the collected values.
         return (items, totalItems);
     }
 
@@ -121,6 +125,7 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
     /// <summary>Acquires a row lock and explicitly loads only data needed to decide and map MOD-V3.</summary>
     public async Task<RestaurantVerification?> LockForDecisionAsync(long verificationId, CancellationToken ct)
     {
+        // STEP-01: Call FromSqlInterpolated().SingleOrDefaultAsync and keep verification.
         var verification = await _context.RestaurantVerifications
             .FromSqlInterpolated($$"""
                 SELECT *
@@ -129,24 +134,30 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
                 FOR UPDATE
                 """)
             .SingleOrDefaultAsync(ct);
+        // STEP-02: Return null early when verification is missing.
         if (verification is null)
         {
             return null;
         }
 
+        // STEP-03: Load Entry().Reference(filtered).LoadAsync and Query().Include(filtered).LoadAsync.
         await _context.Entry(verification).Reference(item => item.Restaurant).LoadAsync(ct);
         await _context.Entry(verification).Collection(item => item.Documents)
             .Query()
             .Include(document => document.Media)
             .LoadAsync(ct);
+        // STEP-04: Return verification.
         return verification;
     }
 
     /// <summary>Refreshes the reviewer navigation after MOD-V3 assigns its foreign key.</summary>
     public async Task LoadReviewerAsync(RestaurantVerification verification, CancellationToken ct)
     {
+        // STEP-01: Prepare reference through context.Entry().Reference.
         var reference = _context.Entry(verification).Reference(item => item.Reviewer);
+        // STEP-02: Update reference: IsLoaded.
         reference.IsLoaded = false;
+        // STEP-03: Load Query().Include(filtered).LoadAsync.
         await reference.Query().Include(reviewer => reviewer!.AvatarMedia).LoadAsync(ct);
     }
 

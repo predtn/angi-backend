@@ -23,13 +23,16 @@ public sealed class GetModDetailUseCase : IGetModDetailUseCase
     /// <summary>Returns ADM-M3 data or the documented MOD_NOT_FOUND error.</summary>
     public async Task<ModDetailDto> ExecuteAsync(int userId, CancellationToken ct)
     {
+        // STEP-01: Prepare mod and permissions, then load handled through modRepository.GetHandledAsync.
         var mod = await _modRepository.GetModAsync(userId, ct)
             ?? throw ModNotFound();
         var permissions = await _permissionRepository.GetModPermissionsAsync(userId, ct)
             ?? throw ModNotFound();
         var handled = await _modRepository.GetHandledAsync(userId, ct);
+        // STEP-02: Prepare card through AdministrationModMapper.ToCardDto.
         var card = AdministrationModMapper.ToCardDto(mod);
 
+        // STEP-03: Return a new ModDetailDto.
         return new ModDetailDto
         {
             Id = card.Id,

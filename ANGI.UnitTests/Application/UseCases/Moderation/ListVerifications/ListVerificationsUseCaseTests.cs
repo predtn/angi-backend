@@ -21,12 +21,15 @@ public sealed class ListVerificationsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithAuthorizedRequest_ShouldReturnMappedPage()
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Mock ICloudinaryService; stub repository.ListAsync and cloudinary.GetUrl.
         repository.Setup(item => item.ListAsync(It.IsAny<ListVerificationsRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(([Verification()], 21));
         var cloudinary = new Mock<ICloudinaryService>();
         cloudinary.Setup(item => item.GetUrl("verification/license.pdf"))
             .Returns("https://signed.test/license.pdf");
+        // STEP-03: Create request as ListVerificationsRequestDto.
         var request = new ListVerificationsRequestDto
         {
             Status = "PENDING",
@@ -34,10 +37,13 @@ public sealed class ListVerificationsUseCaseTests
             Page = 2,
             PageSize = 10
         };
+        // STEP-04: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, cloudinary.Object);
 
+        // STEP-05: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-06: Assert result.Page is 2, result.PageSize is 10, result.TotalItems is 21, result.TotalPages is 3 and 4 more.
         result.Page.Should().Be(2);
         result.PageSize.Should().Be(10);
         result.TotalItems.Should().Be(21);
@@ -46,6 +52,7 @@ public sealed class ListVerificationsUseCaseTests
         result.Items[0].Status.Should().Be("pending");
         result.Items[0].Documents[0].Url.Should().Be("https://signed.test/license.pdf");
         result.Items[0].Restaurant.Name.Should().Be("Bún Bò Bà Diệu");
+        // STEP-07: Assert request.Status is "pending" and request.Province is the expected text.
         request.Status.Should().Be("pending");
         request.Province.Should().Be("Đà Nẵng");
     }
@@ -55,14 +62,19 @@ public sealed class ListVerificationsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldFailBeforeAuthorization()
     {
+        // STEP-01: Mock IVerificationReviewRepository.
         var repository = new Mock<IVerificationReviewRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with ListVerificationsRequestDto { Page = 0 } in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(
             new ListVerificationsRequestDto { Page = 0 },
             CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-05: Verify HasEffectivePermissionAsync is never called.
         repository.Verify(item => item.HasEffectivePermissionAsync(
             It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -72,13 +84,16 @@ public sealed class ListVerificationsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             new Mock<IVerificationReviewRepository>(),
             Mock.Of<ICloudinaryService>(),
             userId: null);
 
+        // STEP-02: Wrap useCase.ExecuteAsync with an empty ListVerificationsRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(new ListVerificationsRequestDto(), CancellationToken.None);
 
+        // STEP-03: Assert act throws UnauthorizedException and exception.ErrorCode is "UNAUTHORIZED".
         var exception = await act.Should().ThrowAsync<UnauthorizedException>();
         exception.Which.ErrorCode.Should().Be("UNAUTHORIZED");
     }
@@ -88,15 +103,20 @@ public sealed class ListVerificationsUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutEffectivePermission_ShouldThrowForbidden()
     {
+        // STEP-01: Mock IVerificationReviewRepository; stub repository.HasEffectivePermissionAsync.
         var repository = new Mock<IVerificationReviewRepository>();
         repository.Setup(item => item.HasEffectivePermissionAsync(9, "RESTAURANT_VERIFY", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty ListVerificationsRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(new ListVerificationsRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ForbiddenException and exception.ErrorCode is "FORBIDDEN".
         var exception = await act.Should().ThrowAsync<ForbiddenException>();
         exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        // STEP-05: Verify ListAsync is never called.
         repository.Verify(item => item.ListAsync(
             It.IsAny<ListVerificationsRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -109,13 +129,18 @@ public sealed class ListVerificationsUseCaseTests
     [InlineData("RESTAURANT_OWNER")]
     public async Task ExecuteAsync_WithNonModRole_ShouldThrowForbidden(string role)
     {
+        // STEP-01: Get repository from AuthorizedRepository.
         var repository = AuthorizedRepository();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, Mock.Of<ICloudinaryService>(), role: role);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty ListVerificationsRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(new ListVerificationsRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ForbiddenException and exception.ErrorCode is "FORBIDDEN".
         var exception = await act.Should().ThrowAsync<ForbiddenException>();
         exception.Which.ErrorCode.Should().Be("FORBIDDEN");
+        // STEP-05: Verify HasEffectivePermissionAsync is never called and ListAsync is never called.
         repository.Verify(item => item.HasEffectivePermissionAsync(
             It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.Verify(item => item.ListAsync(

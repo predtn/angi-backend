@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Conversation;
 
 namespace ANGI.Application.Common.Models.Agent;
 
@@ -14,6 +16,8 @@ public sealed record AgentState
     public string Title { get; init; } = "Lịch trình ẩm thực";
     public DateOnly? StartDate { get; init; }
     public decimal? BudgetAmount { get; init; }
+    /// <summary>The user's own words stating a new budget, checked by AgentConstraintGuard and dropped before the state is kept.</summary>
+    public string? BudgetQuote { get; init; }
     public bool BudgetUnrestricted { get; init; }
     public decimal? MaxPricePerMeal { get; init; }
     public short[] TagIds { get; init; } = [];
@@ -46,6 +50,18 @@ public sealed record AgentState
     /// <summary>Backend-owned meals the user removed on purpose; they may stay empty although their meal slot is declared.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentScope[]? SkippedMeals { get; init; }
+    /// <summary>Backend-owned places from the user's itinerary; a day without one uses the area of the whole trip.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentDayArea[]? DayAreas { get; init; }
+    /// <summary>No longer written, since the model asks which days move; it stays so conversations already stored can still be read.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentPlaceMatch? PendingDayArea { get; init; }
+    /// <summary>Backend-owned label of a whole-trip area the user named; it tells that area apart from an origin picked on the map or by GPS.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NamedAreaLabel { get; init; }
+    /// <summary>Backend-owned meals with no dish inside their named place, searched further out; only these meals may use the wider radius.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentWidenedMeal[]? WidenedMeals { get; init; }
     /// <summary>Backend-staged constraints awaiting explicit consent in a subsequent chat turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentState? PendingStateChange { get; init; }
@@ -55,6 +71,9 @@ public sealed record AgentState
     /// <summary>Backend-owned save question awaiting a reply; it never blocks the proposal and clients or the model cannot set it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentPendingSave? PendingSave { get; init; }
+    /// <summary>Backend-owned mark that the last reply suggested a dish; it lives one turn so "ok" is read against that offer, and clients or the model cannot set it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? DishOffered { get; init; }
     /// <summary>Backend-owned stage of the questions asked before a new plan ("details", "preferences"); clients and the model cannot set it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PlanningIntake { get; init; }
@@ -66,7 +85,14 @@ public sealed record AgentState
     public long? HistoryStartSequence { get; init; }
 }
 
-/// <summary>Bounded user messages plus explicit duration/budget values collected across clarification turns.</summary>
+/// <summary>Where the traveler is on one day; that day's dishes are searched within the radius around this point.</summary>
+/// <param name="District">The district around that point, shown to the user so a wrongly located place is noticed before any dish is chosen.</param>
+public sealed record AgentDayArea(short DayNumber, string Label, decimal Latitude, decimal Longitude, decimal RadiusKm, string? District = null);
+
+/// <summary>One meal whose search reached this radius around its named place, because nearer restaurants have nothing for it.</summary>
+public sealed record AgentWidenedMeal(short DayNumber, string MealSlot, decimal RadiusKm);
+
+/// <summary>Bounded user messages collected across clarification turns. The figures are no longer filled; they stay so conversations already stored can still be read.</summary>
 public sealed record AgentPendingPlanningRequest(string[] Messages, short? NumDays = null,
     decimal? TotalBudget = null, decimal? DailyBudget = null);
 
@@ -86,9 +112,9 @@ public sealed record AgentCandidateGrant(short? DayNumber, string? MealSlot, int
 /// <summary>Full immutable itinerary and trusted provenance, independent of any saved roadmap.</summary>
 public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCandidateGrant[] Grants,
     long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
-    AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null);
+    AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null, string[]? Notes = null);
 
-/// <summary>Model-worded text about one dish in a preview; shown only after AgentProposalNotes checked it. Never saved to the roadmap.</summary>
+/// <summary>Model-worded text about one dish in a preview; shown only after AgentReplyGuard checked it. Never saved to the roadmap.</summary>
 public sealed record AgentDishNote(int DishId, string? Intro, string? Reason);
 
 /// <summary>Model-worded conclusion about one day of a preview, checked the same way.</summary>
@@ -132,7 +158,7 @@ public sealed class AgentContext
     /// <summary>The rest of each ranked list, never sent to the model; only the backend uses it to replace an avoidable repeat.</summary>
     public List<AgentCandidateGrant> ReserveGrants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
-    /// <summary>The model's wording for the preview this turn produced, for AgentProposalNotes to check against the final dishes.</summary>
+    /// <summary>The model's wording for the preview this turn produced, for AgentReplyGuard to check against the final dishes.</summary>
     public AgentOutput? PreviewOutput { get; set; }
     /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
     public List<AgentMealCoverage> MealCoverage { get; } = [];
@@ -156,13 +182,45 @@ public sealed class AgentContext
     public bool ToolsClosed { get; set; }
     /// <summary>Set when a recommendation was requested before province, duration and budget were known; the turn asks for them.</summary>
     public bool TripDetailsMissing { get; set; }
-    /// <summary>Set when the user just finished the pre-plan questions; this turn plans, and a short reply such as "không" adds no requirement.</summary>
+    /// <summary>Set when the preferences question was asked before this message; once the model reads an answer in it, this turn plans.</summary>
     public bool IntakeComplete { get; set; }
+    /// <summary>Provinces ANGI has restaurants in, loaded only while no plan exists; a province outside it never enters the trip.</summary>
+    public IReadOnlyCollection<string>? CatalogProvinces { get; set; }
+    /// <summary>A province the model read that ANGI has no data for; the turn says so and asks again.</summary>
+    public string? UnknownPlace { get; set; }
+    /// <summary>Set when the previous reply suggested a dish, so a short answer is read against that offer instead of as a bare acknowledgement.</summary>
+    public bool DishOffered { get; set; }
+    /// <summary>Days this message moved to another place on an existing plan; they need new dishes.</summary>
+    public short[] MovedDays { get; set; } = [];
+    public bool ItineraryChanged => MovedDays.Length > 0;
+    /// <summary>How the backend read the place of this turn (a pinned point, shared coordinates, located names); told to the user once, above the next question.</summary>
+    public string? PlaceNote { get; set; }
+    /// <summary>What suggest_dish found; the turn ends once the model has worded it, because no plan is involved.</summary>
+    public AgentDishSuggestion? DishSuggestion { get; set; }
+    /// <summary>Words that start many catalog dish names; a reply may use one only when something it may quote backs it.</summary>
+    public IReadOnlySet<string>? DishWords { get; set; }
+    /// <summary>A long plan cut to the days this message names, sent to the model instead of Source; null sends Source whole.</summary>
+    public AgentSnapshot? PromptSource { get; set; }
+    /// <summary>The question the backend is waiting on, for the model to read this message against; null when nothing waits.</summary>
+    public string? AwaitedAnswer { get; set; }
+    /// <summary>What this provider call may do; the orchestrator moves it through the turn.</summary>
+    public AgentTurnPhase Phase { get; set; } = AgentTurnPhase.Act;
+    /// <summary>The tool named in the read step, for the forced call.</summary>
+    public string? ForcedTool { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>
 public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int AvailableCount,
     string Fingerprint, string[] RequiredTags);
+
+/// <summary>One dish suggest_dish picked, with the only facts a reply may state about it.</summary>
+/// <param name="Meals">The meals the dish fits, in words; null when it fits any meal or the user already named one.</param>
+public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null);
+
+/// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply shown when the model's wording fails its check.</summary>
+/// <param name="Area">The place the user named that the search stayed around.</param>
+/// <param name="AreaNotFound">The place the user named that could not be located, so the search was not narrowed to it.</param>
+public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);
@@ -181,6 +239,9 @@ public sealed record AgentToolExchange(AgentToolCall[] Calls, JsonElement[] Resu
 /// <summary>Provider-neutral LLM step, containing either tool requests or one structured result.</summary>
 public sealed record AgentLlmStep(AgentToolCall[] Tools, AgentOutput? Output, int? Tokens = null, AgentLlmFailure? Failure = null)
 {
+    /// <summary>Input tokens the provider read from its prompt cache, billed at a fraction of the normal rate; null when the provider did not report it.</summary>
+    public int? CachedTokens { get; init; }
+
     /// <summary>Creates a failed step that cannot be mistaken for malformed model output requiring repair.</summary>
     public static AgentLlmStep Failed(AgentLlmFailureKind kind, int? httpStatus = null, int? retryAfterSeconds = null, int? tokens = null) =>
         new([], null, tokens, new(kind, httpStatus, retryAfterSeconds));
@@ -203,6 +264,25 @@ public sealed record AgentOutput
     public AgentChange[] Changes { get; init; } = [];
     public AgentDishNote[]? DishNotes { get; init; } = [];
     public AgentDaySummary[]? DaySummaries { get; init; } = [];
+    /// <summary>The model's reading of a reply to the question the backend is waiting on; it grants nothing until AgentConfirmationPolicy has checked that question is open.</summary>
+    public string? PendingAnswer { get; init; }
+    /// <summary>The trip start the model read from a reply to the start date question, as yyyy-MM-dd; the backend still checks it.</summary>
+    public string? AnswerStartDate { get; init; }
+    /// <summary>The trip end when the reply named a range, as yyyy-MM-dd.</summary>
+    public string? AnswerEndDate { get; init; }
+    /// <summary>With action use_tool: the one tool the model asks for, because it has no tools while it reads a message.</summary>
+    public string? Tool { get; init; }
+}
+
+/// <summary>What a provider call may do. A model holding tools tends to call one even when none fits, so it first reads the message with none.</summary>
+public enum AgentTurnPhase
+{
+    /// <summary>All tools are offered: following up on data a tool returned, or repairing an output.</summary>
+    Act,
+    /// <summary>No tools: the model reads the message and answers it, or names the tool it needs.</summary>
+    Read,
+    /// <summary>Only the tool named in the read step, which the model must call.</summary>
+    Forced
 }
 
 /// <summary>One bounded delta operation referencing a stable source item key.</summary>

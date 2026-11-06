@@ -27,15 +27,19 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task ListsAndFiltersReportQueue()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain all through PageAsync; assert all.TotalItems is 7, all.Items only holds items matching the condition and 2 more.
         var all = await PageAsync(client, "targetType=restaurant");
         all.TotalItems.Should().Be(7);
         all.Items.Should().OnlyContain(report => report.TargetType == "restaurant");
         all.Items.Where(report => report.TargetId == world.RestaurantId).Should().OnlyContain(report => report.ReportCountOnTarget == 2);
         all.Items.Select(report => report.Id).Should().BeInDescendingOrder();
+        // STEP-03: Obtain blogs through PageAsync; assert blogs.Items has exactly one matching item.
         var blogs = await PageAsync(client, "targetType=blog");
         blogs.Items.Should().ContainSingle(report => report.Id == world.BlogReportId && report.ReportCountOnTarget == 1);
+        // STEP-04: Assert for each status, PageAsync succeeds, page.Items is not empty and for each reason, PageAsync succeeds.
         foreach (var status in new[] { "pending", "in_review", "resolved", "dismissed" })
         {
             var page = await PageAsync(client, $"targetType=restaurant&status={status}");
@@ -46,15 +50,20 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
             var page = await PageAsync(client, $"targetType=restaurant&reasonCode={reason}");
             page.Items.Should().NotBeEmpty().And.OnlyContain(report => report.ReasonCode == reason);
         }
+        // STEP-05: Obtain selected through PageAsync; assert selected.Items has exactly one matching item.
         var selected = await PageAsync(client, $"targetType=restaurant&status=pending&reasonCode=hygiene&targetId={world.RestaurantId}");
         selected.Items.Should().ContainSingle(report => report.Id == world.ReportId && report.ReportCountOnTarget == 2);
+        // STEP-06: Create ids as List<long>.
         var ids = new List<long>();
+        // STEP-07: Assert on every iteration, PageAsync succeeds and ids equals all.Items.Select(filtered).
         for (var page = 1; page <= 7; page++)
             ids.Add((await PageAsync(client, $"targetType=restaurant&page={page}&pageSize=1")).Items.Single().Id);
         ids.Should().Equal(all.Items.Select(report => report.Id));
+        // STEP-08: Obtain empty through PageAsync; assert PageAsync confirms targetType=restaurant&page=8&pageSize=1, PageAsync().Items is empty and 1 more.
         (await PageAsync(client, "targetType=restaurant&page=8&pageSize=1")).Items.Should().BeEmpty();
         (await PageAsync(client, "targetType=restaurant&page=2147483647&pageSize=100")).Items.Should().BeEmpty();
         var empty = await PageAsync(client, "targetType=restaurant&targetId=9223372036854775807");
+        // STEP-09: Assert empty.TotalItems is 0, empty.TotalPages is 0 and empty.Items is empty.
         empty.TotalItems.Should().Be(0);
         empty.TotalPages.Should().Be(0);
         empty.Items.Should().BeEmpty();
@@ -65,33 +74,47 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task ReturnsAuthorizedReportDetail()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Send GET /api/v1/mod/reports/{world.ReportId} and keep response.
         using var response = await client.GetAsync($"/api/v1/mod/reports/{world.ReportId}");
+        // STEP-03: Read body from the response.
         var body = await response.Content.ReadAsStringAsync();
+        // STEP-04: Ensure response succeeded.
         response.EnsureSuccessStatusCode();
+        // STEP-05: Read document from the response.
         using var document = JsonDocument.Parse(body);
+        // STEP-06: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-07: Assert data.id is world.ReportId, data.target.id is world.RestaurantId, data.target.name is "Hidden restaurant" and 1 more.
         data.GetProperty("id").GetInt64().Should().Be(world.ReportId);
         data.GetProperty("target").GetProperty("id").GetInt64().Should().Be(world.RestaurantId);
         data.GetProperty("target").GetProperty("name").GetString().Should().Be("Hidden restaurant");
         data.GetProperty("target").TryGetProperty("owner", out _).Should().BeFalse();
         data.GetProperty("target").TryGetProperty("moderationStatus", out _).Should().BeFalse();
+        // STEP-08: Assert data.evidenceUrls.EnumerateArray() has exactly one matching item and data.reporter.id is world.TravelerId.
         data.GetProperty("evidenceUrls").EnumerateArray().Should().ContainSingle(url => url.GetString()!.StartsWith("https://media.integration/signed/"));
         data.GetProperty("reporter").GetProperty("id").GetInt32().Should().Be(world.TravelerId);
+        // STEP-09: Assert data.relatedReports.EnumerateArray() has exactly one matching item and data.reportCountOnTarget is 2.
         data.GetProperty("relatedReports").EnumerateArray().Should().ContainSingle(report => report.GetProperty("id").GetInt64() == world.RelatedId);
         data.GetProperty("reportCountOnTarget").GetInt32().Should().Be(2);
+        // STEP-10: Obtain closed through DataAsync; assert body does not contain a test value.
         body.Should().NotContain("passwordHash").And.NotContain("refreshTokenHash").And.NotContain("storageKey").And.NotContain("@reports.test");
         var closed = await DataAsync<JsonElement>(await client.GetAsync($"/api/v1/mod/reports/{world.ClosedId}"));
+        // STEP-11: Obtain blog through DataAsync; assert closed.relatedReports.length is 2.
         closed.GetProperty("relatedReports").GetArrayLength().Should().Be(2);
         var blog = await DataAsync<JsonElement>(await client.GetAsync($"/api/v1/mod/reports/{world.BlogReportId}"));
+        // STEP-12: Get target from blog.GetProperty.
         var target = blog.GetProperty("target");
+        // STEP-13: Assert target.title is "Hidden blog", target.content is "<p>Reported content</p>", target.images.length is 1, target.likedByMe is true and 2 more.
         target.GetProperty("title").GetString().Should().Be("Hidden blog");
         target.GetProperty("content").GetString().Should().Be("<p>Reported content</p>");
         target.GetProperty("images").GetArrayLength().Should().Be(1);
         target.GetProperty("likedByMe").GetBoolean().Should().BeTrue();
         target.GetProperty("isMine").GetBoolean().Should().BeFalse();
         target.GetProperty("viewCount").GetInt32().Should().Be(5);
+        // STEP-14: Assert in the database context.Blogs.SingleAsync(filtered).ViewCount is 5.
         await factory.ExecuteDbAsync(async context => (await context.Blogs.SingleAsync(item => item.Id == world.BlogId)).ViewCount.Should().Be(5));
     }
 
@@ -100,17 +123,23 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task ClaimsThenResolvesReport()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Obtain report through DataAsync; assert report.Status is "in_review", report.HandledBy.Id is world.ModId, report.HandledAt is null and 2 more.
         var report = await DataAsync<ReportDto>(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null));
         report.Status.Should().Be("in_review");
         report.HandledBy!.Id.Should().Be(world.ModId);
         report.HandledAt.Should().BeNull();
         report.ResolutionAction.Should().BeNull();
         report.ReportCountOnTarget.Should().Be(2);
+        // STEP-03: Assert ErrorAsync confirms REPORT_ALREADY_CLAIMED.
         await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), HttpStatusCode.Conflict, "REPORT_ALREADY_CLAIMED");
+        // STEP-04: Get other from ClientAsync.
         using var other = await ClientAsync(world.OtherModId);
+        // STEP-05: Assert ErrorAsync confirms REPORT_ALREADY_CLAIMED.
         await ErrorAsync(await other.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), HttpStatusCode.Conflict, "REPORT_ALREADY_CLAIMED");
+        // STEP-06: Assert in the database saved.Status is ReportStatus.InReview, saved.HandledBy is world.ModId, context.AuditLogs.CountAsync() is 0 and 1 more.
         await factory.ExecuteDbAsync(async context =>
         {
             var saved = await context.Reports.SingleAsync(item => item.Id == world.ReportId);
@@ -119,14 +148,19 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
             (await context.AuditLogs.CountAsync()).Should().Be(0);
             (await context.Notifications.CountAsync()).Should().Be(0);
         });
+        // STEP-07: Assert DataAsync succeeds.
         await DataAsync<ReportDto>(await client.PostAsync($"/api/v1/mod/reports/{world.BlogReportId}/claim", null));
         report = await DataAsync<ReportDto>(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve",
             new { outcome = "resolved", resolutionAction = "suspend_restaurant", resolutionNote = "Confirmed" }));
+        // STEP-08: Assert report.Status is "resolved", report.HandledAt is not null and report.ReportCountOnTarget is 0.
         report.Status.Should().Be("resolved");
         report.HandledAt.Should().NotBeNull();
         report.ReportCountOnTarget.Should().Be(0);
+        // STEP-09: Assert ErrorAsync confirms REPORT_CLOSED.
         await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), HttpStatusCode.Conflict, "REPORT_CLOSED");
+        // STEP-10: Get dismissed from factory.ExecuteDbAsync.
         var dismissed = await factory.ExecuteDbAsync(context => context.Reports.Where(item => item.Status == ReportStatus.Dismissed).Select(item => item.Id).FirstAsync());
+        // STEP-11: Assert ErrorAsync confirms REPORT_CLOSED.
         await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{dismissed}/claim", null), HttpStatusCode.Conflict, "REPORT_CLOSED");
     }
 
@@ -135,15 +169,19 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task SerializesConcurrentClaims()
     {
+        // STEP-01: Create world through SeedAsync, get first from ClientAsync and get second from ClientAsync.
         var world = await SeedAsync();
         using var first = await ClientAsync(world.ModId);
         using var second = await ClientAsync(world.OtherModId);
+        // STEP-02: Send POST /api/v1/mod/reports/{world.ReportId}/claim with no body from 2 concurrent calls and keep responses.
         var responses = await Task.WhenAll(first.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null),
             second.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null));
+        // STEP-03: Obtain winner through DataAsync; assert responses.Count(filtered) is 1 and ErrorAsync confirms REPORT_ALREADY_CLAIMED.
         responses.Count(response => response.StatusCode == HttpStatusCode.OK).Should().Be(1);
         responses.Count(response => response.StatusCode == HttpStatusCode.Conflict).Should().Be(1);
         var winner = await DataAsync<ReportDto>(responses.Single(response => response.IsSuccessStatusCode));
         await ErrorAsync(responses.Single(response => !response.IsSuccessStatusCode), HttpStatusCode.Conflict, "REPORT_ALREADY_CLAIMED");
+        // STEP-04: Assert in the database context.Reports.SingleAsync(filtered).HandledBy is winner.HandledBy.Id.
         await factory.ExecuteDbAsync(async context =>
             (await context.Reports.SingleAsync(report => report.Id == world.ReportId)).HandledBy.Should().Be(winner.HandledBy!.Id));
     }
@@ -153,14 +191,18 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task SerializesClaimWithResolution()
     {
+        // STEP-01: Create world through SeedAsync, get first from ClientAsync and get second from ClientAsync.
         var world = await SeedAsync();
         using var first = await ClientAsync(world.ModId);
         using var second = await ClientAsync(world.OtherModId);
+        // STEP-02: Send concurrently POST /api/v1/mod/reports/{world.ReportId}/claim with no body and POST /api/v1/mod/reports/{world.ReportId}/resolve with a body of outcome and resolutionAction and keep responses.
         var responses = await Task.WhenAll(first.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null),
             second.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve", new { outcome = "resolved", resolutionAction = "none" }));
+        // STEP-03: Assert responses[1].StatusCode is HttpStatusCode.OK, responses[0].StatusCode is one of the allowed values and ErrorAsync confirms REPORT_CLOSED.
         responses[1].StatusCode.Should().Be(HttpStatusCode.OK);
         responses[0].StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.Conflict);
         if (responses[0].StatusCode == HttpStatusCode.Conflict) await ErrorAsync(responses[0], HttpStatusCode.Conflict, "REPORT_CLOSED");
+        // STEP-04: Assert in the database report.Status is ReportStatus.Resolved, report.HandledBy is world.OtherModId and context.AuditLogs.CountAsync() is 2.
         await factory.ExecuteDbAsync(async context =>
         {
             var report = await context.Reports.SingleAsync(item => item.Id == world.ReportId);
@@ -175,10 +217,12 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task EnforcesTargetSpecificPermissions()
     {
+        // STEP-01: Create world through SeedAsync, create guest through factory.CreateClient, get traveler from ClientAsync and get owner from ClientAsync.
         var world = await SeedAsync();
         using var guest = factory.CreateClient();
         using var traveler = await ClientAsync(world.TravelerId);
         using var owner = await ClientAsync(world.OwnerId);
+        // STEP-02: Assert for each client, ErrorAsync succeeds and ErrorAsync succeeds.
         foreach (var client in new[] { guest, traveler, owner })
         {
             var status = client == guest ? HttpStatusCode.Unauthorized : HttpStatusCode.Forbidden;
@@ -188,21 +232,31 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
             await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), status, code);
             await ErrorAsync(await client.PostAsJsonAsync($"/api/v1/mod/reports/{world.ReportId}/resolve", new { outcome = "resolved", resolutionAction = "none" }), status, code);
         }
+        // STEP-03: Change the moderator's permissions through DenyAsync and get mod from ClientAsync.
         await DenyAsync(world.ModId, "REPORT_RESTAURANT_HANDLE");
         using var mod = await ClientAsync(world.ModId);
+        // STEP-04: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await mod.GetAsync("/api/v1/mod/reports?targetType=restaurant"), HttpStatusCode.Forbidden, "FORBIDDEN");
         await ErrorAsync(await mod.GetAsync($"/api/v1/mod/reports/{world.ReportId}"), HttpStatusCode.Forbidden, "FORBIDDEN");
         await ErrorAsync(await mod.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-05: Send GET /api/v1/mod/reports?targetType=blog.
         (await mod.GetAsync("/api/v1/mod/reports?targetType=blog")).EnsureSuccessStatusCode();
+        // STEP-06: Send GET /api/v1/mod/reports/{world.BlogReportId}.
         (await mod.GetAsync($"/api/v1/mod/reports/{world.BlogReportId}")).EnsureSuccessStatusCode();
+        // STEP-07: Change the moderator's permissions through DenyAsync and get other from ClientAsync.
         await DenyAsync(world.OtherModId, "REPORT_SOCIAL_HANDLE");
         using var other = await ClientAsync(world.OtherModId);
+        // STEP-08: Assert ErrorAsync confirms FORBIDDEN.
         await ErrorAsync(await other.GetAsync("/api/v1/mod/reports?targetType=blog"), HttpStatusCode.Forbidden, "FORBIDDEN");
         await ErrorAsync(await other.GetAsync($"/api/v1/mod/reports/{world.BlogReportId}"), HttpStatusCode.Forbidden, "FORBIDDEN");
         await ErrorAsync(await other.PostAsync($"/api/v1/mod/reports/{world.BlogReportId}/claim", null), HttpStatusCode.Forbidden, "FORBIDDEN");
+        // STEP-09: Get admin from ClientAsync.
         using var admin = await ClientAsync(world.AdminId);
+        // STEP-10: Send GET /api/v1/mod/reports?targetType=restaurant.
         (await admin.GetAsync("/api/v1/mod/reports?targetType=restaurant")).EnsureSuccessStatusCode();
+        // STEP-11: Send GET /api/v1/mod/reports/{world.ReportId}.
         (await admin.GetAsync($"/api/v1/mod/reports/{world.ReportId}")).EnsureSuccessStatusCode();
+        // STEP-12: Send POST /api/v1/mod/reports/{world.ReportId}/claim with no body.
         (await admin.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null)).EnsureSuccessStatusCode();
     }
 
@@ -211,8 +265,10 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task RejectsInvalidQueriesAndMissingReports()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Assert for each query, ErrorAsync confirms VALIDATION_FAILED, for each id, ErrorAsync confirms REPORT_NOT_FOUND and 1 more.
         foreach (var query in new[] { "", "targetType=0", "targetType=Restaurant", "targetType=review", "targetType=restaurant&page=0",
             "targetType=restaurant&page=-1", "targetType=restaurant&pageSize=0", "targetType=restaurant&pageSize=101",
             "targetType=restaurant&targetId=0", "targetType=restaurant&targetId=-1", "targetType=restaurant&targetId=invalid",
@@ -233,13 +289,16 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task RollsBackFailedClaim()
     {
+        // STEP-01: Create world through SeedAsync, seed or update rows directly in the test database and get client from ClientAsync.
         var world = await SeedAsync();
         await factory.ExecuteDbAsync(context => context.Database.ExecuteSqlRawAsync(
             "ALTER TABLE core.reports ADD CONSTRAINT qa_reject_claim CHECK (status <> 'in_review') NOT VALID"));
         using var client = await ClientAsync(world.ModId);
         try
         {
+            // STEP-02: Assert ErrorAsync confirms INTERNAL_ERROR.
             await ErrorAsync(await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null), HttpStatusCode.InternalServerError, "INTERNAL_ERROR");
+            // STEP-03: Assert in the database report.Status is ReportStatus.Pending and report.HandledBy is null.
             await factory.ExecuteDbAsync(async context =>
             {
                 var report = await context.Reports.SingleAsync(item => item.Id == world.ReportId);
@@ -249,8 +308,10 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
         }
         finally
         {
+            // STEP-04: Clean up: seed or update rows directly in the test database.
             await factory.ExecuteDbAsync(context => context.Database.ExecuteSqlRawAsync("ALTER TABLE core.reports DROP CONSTRAINT qa_reject_claim"));
         }
+        // STEP-05: Send POST /api/v1/mod/reports/{world.ReportId}/claim with no body.
         (await client.PostAsync($"/api/v1/mod/reports/{world.ReportId}/claim", null)).EnsureSuccessStatusCode();
     }
 
@@ -259,11 +320,17 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task PublishesReportOperations()
     {
+        // STEP-01: Create the HTTP client.
         using var client = factory.CreateClient();
+        // STEP-02: Send GET /openapi/v1.json and keep response.
         using var response = await client.GetAsync("/openapi/v1.json");
+        // STEP-03: Ensure response succeeded.
         response.EnsureSuccessStatusCode();
+        // STEP-04: Read document from the response.
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-05: Get paths from document.RootElement.GetProperty.
         var paths = document.RootElement.GetProperty("paths");
+        // STEP-06: Assert paths./api/v1/mod/reports.TryGetProperty() is true, /api/v1/mod/reports/{reportId}.TryGetProperty() is true and TryGetProperty() is true.
         paths.GetProperty("/api/v1/mod/reports").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/reports/{reportId}").TryGetProperty("get", out _).Should().BeTrue();
         paths.GetProperty("/api/v1/mod/reports/{reportId}/claim").TryGetProperty("post", out _).Should().BeTrue();
@@ -275,8 +342,10 @@ public sealed class ModReportsHttpTests(PostgresApiFactory factory) : IClassFixt
     [PostgresEndToEndFact]
     public async Task BlocksInactiveModeratorAccounts()
     {
+        // STEP-01: Create world through SeedAsync and get client from ClientAsync.
         var world = await SeedAsync();
         using var client = await ClientAsync(world.ModId);
+        // STEP-02: Assert in the database ErrorAsync succeeds, ErrorAsync succeeds and 2 more.
         foreach (var (status, code) in new[]
         {
             (UserStatus.PendingVerification, "EMAIL_NOT_VERIFIED"), (UserStatus.Suspended, "ACCOUNT_SUSPENDED"),

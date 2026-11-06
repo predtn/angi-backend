@@ -50,8 +50,10 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMissingBody_ShouldReturnValidationEnvelope(string path)
         {
+            // STEP-01: Send POST path with no body and keep response.
             using var response = await _factory.CreateClient().PostAsync(path, content: null);
 
+            // STEP-02: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorEnvelope confirms VALIDATION_FAILED.
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
@@ -62,10 +64,13 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithMalformedJson_ShouldReturnValidationEnvelope(string path)
         {
+            // STEP-01: Define malformed as the expected text and create content as StringContent.
             var malformed = $"{{\"email\":\"malformed-{Guid.NewGuid():N}@angi.test\"";
             using var content = new StringContent(malformed, Encoding.UTF8, "application/json");
+            // STEP-02: Send POST path with content and keep response.
             using var response = await _factory.CreateClient().PostAsync(path, content);
 
+            // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorEnvelope confirms VALIDATION_FAILED.
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
@@ -76,9 +81,12 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [MemberData(nameof(BodyEndpoints))]
         public async Task Endpoint_WithNullJsonBody_ShouldReturnValidationEnvelope(string path)
         {
+            // STEP-01: Create content as StringContent.
             using var content = new StringContent("null", Encoding.UTF8, "application/json");
+            // STEP-02: Send POST path with content and keep response.
             using var response = await _factory.CreateClient().PostAsync(path, content);
 
+            // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorEnvelope confirms VALIDATION_FAILED.
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             await AssertErrorEnvelope(response, "VALIDATION_FAILED", expectErrors: true);
         }
@@ -94,10 +102,12 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
             HttpStatusCode expectedStatus,
             string expectedCode)
         {
+            // STEP-01: Send POST /api/v1/auth/verify-email with a VerifyEmailRequestDto body and keep response.
             using var response = await _factory.CreateClient().PostAsJsonAsync(
                 "/api/v1/auth/verify-email",
                 new VerifyEmailRequestDto { Token = token });
 
+            // STEP-02: Assert response.StatusCode is expectedStatus and AssertErrorEnvelope succeeds.
             response.StatusCode.Should().Be(expectedStatus);
             await AssertErrorEnvelope(response, expectedCode);
         }
@@ -111,10 +121,12 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
             string token,
             string expectedCode)
         {
+            // STEP-01: Send POST /api/v1/auth/reset-password with a ResetPasswordRequestDto body and keep response.
             using var response = await _factory.CreateClient().PostAsJsonAsync(
                 "/api/v1/auth/reset-password",
                 new ResetPasswordRequestDto { Token = token, NewPassword = "Password2" });
 
+            // STEP-02: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorEnvelope succeeds.
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             await AssertErrorEnvelope(response, expectedCode);
         }
@@ -124,10 +136,12 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [Fact]
         public async Task ResendVerificationEmail_WhenEmailProviderFails_ShouldReturnServiceUnavailableEnvelope()
         {
+            // STEP-01: Send POST /api/v1/auth/verify-email/resend with a ResendVerificationEmailRequestDto body and keep response.
             using var response = await _factory.CreateClient().PostAsJsonAsync(
                 "/api/v1/auth/verify-email/resend",
                 new ResendVerificationEmailRequestDto { Email = "service-unavailable@angi.test" });
 
+            // STEP-02: Assert response.StatusCode is HttpStatusCode.ServiceUnavailable and AssertErrorEnvelope confirms SERVICE_UNAVAILABLE.
             response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
             await AssertErrorEnvelope(response, "SERVICE_UNAVAILABLE");
         }
@@ -139,15 +153,21 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [InlineData("/api/v1/auth/forgot-password")]
         public async Task SensitiveEmailEndpoint_TwiceWithinWindow_ShouldReturnRateLimitEnvelope(string path)
         {
+            // STEP-01: Create the AuthenticationApiFactory under test as factory.
             await using var factory = new AuthenticationApiFactory(
                 sensitiveWindowSeconds: 60,
                 sensitivePermitLimit: 1);
+            // STEP-02: Define email as "rate-{Guid.NewGuid()}@angi.test".
             var email = $"rate-{Guid.NewGuid():N}@angi.test";
+            // STEP-03: Create the HTTP client.
             var client = factory.CreateClient();
 
+            // STEP-04: Send POST path with a body of Email and keep first.
             using var first = await client.PostAsJsonAsync(path, new { Email = email });
+            // STEP-05: Send POST path with a body of Email and keep second.
             using var second = await client.PostAsJsonAsync(path, new { Email = email });
 
+            // STEP-06: Assert first.StatusCode is HttpStatusCode.OK, second.StatusCode is HttpStatusCode.TooManyRequests, second.Headers.RetryAfter is not null and 3 more.
             first.StatusCode.Should().Be(HttpStatusCode.OK);
             second.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
             second.Headers.RetryAfter.Should().NotBeNull();
@@ -163,17 +183,24 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [InlineData("/api/v1/auth/forgot-password")]
         public async Task SensitiveEmailEndpoint_AfterWindow_ShouldBeAllowedAgain(string path)
         {
+            // STEP-01: Create the AuthenticationApiFactory under test as factory; create HTTP client client.
             await using var factory = new AuthenticationApiFactory(
                 sensitiveWindowSeconds: 1,
                 sensitivePermitLimit: 1);
             var client = factory.CreateClient();
+            // STEP-02: Define email as "reset-{Guid.NewGuid()}@angi.test".
             var email = $"reset-{Guid.NewGuid():N}@angi.test";
 
+            // STEP-03: Send POST path with a body of Email and keep first.
             using var first = await client.PostAsJsonAsync(path, new { Email = email });
+            // STEP-04: Send POST path with a body of Email and keep limited.
             using var limited = await client.PostAsJsonAsync(path, new { Email = email });
+            // STEP-05: Call Task.Delay.
             await Task.Delay(TimeSpan.FromMilliseconds(2200));
+            // STEP-06: Send POST path with a body of Email and keep replenished.
             using var replenished = await client.PostAsJsonAsync(path, new { Email = email });
 
+            // STEP-07: Assert first.StatusCode is HttpStatusCode.OK, limited.StatusCode is HttpStatusCode.TooManyRequests and replenished.StatusCode is HttpStatusCode.OK.
             first.StatusCode.Should().Be(HttpStatusCode.OK);
             limited.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
             replenished.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -184,12 +211,14 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
         [Fact]
         public void ApiExplorer_ShouldExposeAuthenticationVerificationSchemas()
         {
+            // STEP-01: Get descriptions from Items.SelectMany(filtered).ToArray.
             var descriptions = _factory.Services
                 .GetRequiredService<IApiDescriptionGroupCollectionProvider>()
                 .ApiDescriptionGroups.Items
                 .SelectMany(group => group.Items)
                 .ToArray();
 
+            // STEP-02: Assert AssertOpenApiContract confirms api/v1/auth/verify-email, AssertOpenApiContract confirms api/v1/auth/verify-email/resend and 3 more.
             AssertOpenApiContract<VerifyEmailRequestDto, VerifyEmailResponseDto>(
                 descriptions,
                 "api/v1/auth/verify-email");
@@ -218,10 +247,12 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
             HttpStatusCode expectedStatus,
             string expectedCode)
         {
+            // STEP-01: Send POST /api/v1/auth/google with a GoogleLoginRequestDto body and keep response.
             using var response = await _factory.CreateClient().PostAsJsonAsync(
                 "/api/v1/auth/google",
                 new GoogleLoginRequestDto { IdToken = idToken, Role = role });
 
+            // STEP-02: Assert response.StatusCode is expectedStatus and AssertErrorEnvelope succeeds.
             response.StatusCode.Should().Be(expectedStatus);
             await AssertErrorEnvelope(response, expectedCode);
         }

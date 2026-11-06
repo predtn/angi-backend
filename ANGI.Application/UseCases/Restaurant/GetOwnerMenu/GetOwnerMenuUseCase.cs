@@ -22,10 +22,12 @@ public sealed class GetOwnerMenuUseCase : IGetOwnerMenuUseCase
     /// <summary>Loads and maps the owner's non-removed dishes in display order.</summary>
     public async Task<OwnerMenuDto> ExecuteAsync(CancellationToken ct)
     {
+        // STEP-01: Prepare ownerId and restaurant from repository.GetOwnerMenuAsync.
         var ownerId = _currentUser.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem menu.");
         var restaurant = await _repository.GetOwnerMenuAsync(ownerId, ct)
             ?? throw new NotFoundException("RESTAURANT_NOT_FOUND", "Không tìm thấy nhà hàng.");
+        // STEP-02: Return the result of RestaurantMenuMapper.MapOwnerMenu.
         return RestaurantMenuMapper.MapOwnerMenu(restaurant);
     }
 }

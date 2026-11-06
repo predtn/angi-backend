@@ -17,15 +17,19 @@ public sealed class GetRoadmapDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOwnedRoadmap_ShouldReturnCompleteCalculatedDetail()
     {
+        // STEP-01: Create roadmap through CreateRoadmapWithItems and get repository from RepositoryReturning.
         var roadmap = CreateRoadmapWithItems();
         var repository = RepositoryReturning(roadmap, new Dictionary<long, FeedbackValue>
         {
             [501] = FeedbackValue.Dislike
         });
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository.Object, userId: 12);
 
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(88, CancellationToken.None);
 
+        // STEP-04: Assert result.Overview.Id is 88, result.Overview.EndDate is a new DateOnly, result.Overview.TotalEstimatedCost is 75_000 and 8 more.
         result.Overview.Id.Should().Be(88);
         result.Overview.EndDate.Should().Be(new DateOnly(2026, 10, 11));
         result.Overview.TotalEstimatedCost.Should().Be(75_000);
@@ -37,6 +41,7 @@ public sealed class GetRoadmapDetailUseCaseTests
         result.Itinerary[0].Items[0].MyFeedback.Should().Be("dislike");
         result.Budget.Remaining.Should().Be(25_000);
         result.Budget.ByDay.Select(item => item.Cost).Should().Equal(75_000, 0);
+        // STEP-05: Verify GetFeedbackByItemIdsAsync is called once.
         repository.Verify(item => item.GetFeedbackByItemIdsAsync(
             12,
             It.Is<IReadOnlyCollection<long>>(ids => ids.Order().SequenceEqual(new long[] { 501, 502 })),
@@ -48,16 +53,21 @@ public sealed class GetRoadmapDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyRoadmap_ShouldReturnZeroCostAndAllDays()
     {
+        // STEP-01: Create roadmap through CreateRoadmap and get repository from RepositoryReturning.
         var roadmap = CreateRoadmap();
         var repository = RepositoryReturning(roadmap, new Dictionary<long, FeedbackValue>());
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository.Object, userId: 12);
 
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
         var result = await useCase.ExecuteAsync(88, CancellationToken.None);
 
+        // STEP-04: Assert result.Itinerary has 2 item(s), result.Itinerary only holds items matching the condition, result.Budget.TotalEstimatedCost is 0 and 1 more.
         result.Itinerary.Should().HaveCount(2);
         result.Itinerary.Should().OnlyContain(day => day.Items.Count == 0 && day.DayCost == 0);
         result.Budget.TotalEstimatedCost.Should().Be(0);
         result.Budget.Remaining.Should().Be(100_000);
+        // STEP-05: Verify GetFeedbackByItemIdsAsync is called once.
         repository.Verify(item => item.GetFeedbackByItemIdsAsync(
             12,
             It.Is<IReadOnlyCollection<long>>(ids => ids.Count == 0),
@@ -69,12 +79,17 @@ public sealed class GetRoadmapDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenOwnedRoadmapDoesNotExist_ShouldThrowRoadmapNotFound()
     {
+        // STEP-01: Get repository from RepositoryReturning.
         var repository = RepositoryReturning(null, new Dictionary<long, FeedbackValue>());
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository.Object, userId: 12);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(404, CancellationToken.None);
 
+        // STEP-04: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
         (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-05: Verify GetFeedbackByItemIdsAsync is never called.
         repository.Verify(item => item.GetFeedbackByItemIdsAsync(
             It.IsAny<int>(), It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -84,12 +99,17 @@ public sealed class GetRoadmapDetailUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorized()
     {
+        // STEP-01: Mock IRoadmapRepository.
         var repository = new Mock<IRoadmapRepository>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository.Object, userId: null);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(88, CancellationToken.None);
 
+        // STEP-04: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
         (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-05: Verify repository receives no other calls.
         repository.VerifyNoOtherCalls();
     }
 

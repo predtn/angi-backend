@@ -31,11 +31,14 @@ public sealed class GetMyRoadmapsUseCase : IGetMyRoadmapsUseCase
         GetMyRoadmapsRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này.");
 
+        // STEP-03: Return the result of roadmapRepository.GetByUserAsync.
         return await _roadmapRepository.GetByUserAsync(userId, request.Page, request.PageSize, ct);
     }
 }

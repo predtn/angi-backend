@@ -32,10 +32,12 @@ public sealed class AdministrationModsEndToEndTests : IClassFixture<PostgresApiF
     [PostgresEndToEndFact]
     public async Task CreateListAndGetMod_ShouldPersistAndReturnCompleteContracts()
     {
+        // STEP-01: Reset the test database, create adminId through SeedAdminAsync and get client from AuthorizedAdminClient.
         await _factory.ResetDatabaseAsync();
         var adminId = await SeedAdminAsync();
         using var client = AuthorizedAdminClient(adminId);
 
+        // STEP-02: Send POST /api/v1/admin/mods with a CreateModRequestDto body and keep createResponse.
         using var createResponse = await client.PostAsJsonAsync(
             "/api/v1/admin/mods",
             new CreateModRequestDto
@@ -48,25 +50,31 @@ public sealed class AdministrationModsEndToEndTests : IClassFixture<PostgresApiF
                 ]
             });
 
+        // STEP-03: Obtain created through SuccessDataAsync; assert createResponse.StatusCode is HttpStatusCode.Created, created.Role is "MOD" and 2 more.
         createResponse.StatusCode.Should().Be(HttpStatusCode.Created, await createResponse.Content.ReadAsStringAsync());
         var created = await SuccessDataAsync<AdminUserCardDto>(createResponse);
         created.Role.Should().Be("MOD");
         created.Status.Should().Be("active");
         _factory.Email.ResetToken("linh.mod@angi.vn").Should().NotBeNullOrWhiteSpace();
 
+        // STEP-04: Send GET /api/v1/admin/mods?q=linh&status=active&page=1&pageSize=1 and keep listResponse.
         using var listResponse = await client.GetAsync("/api/v1/admin/mods?q=linh&status=active&page=1&pageSize=1");
+        // STEP-05: Obtain page through SuccessDataAsync; assert listResponse.StatusCode is HttpStatusCode.OK, page.TotalItems is 1 and 2 more.
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var page = await SuccessDataAsync<Paged<AdminUserCardDto>>(listResponse);
         page.TotalItems.Should().Be(1);
         page.Items.Should().ContainSingle().Which.Id.Should().Be(created.Id);
 
+        // STEP-06: Send GET /api/v1/admin/mods/{created.Id} and keep detailResponse.
         using var detailResponse = await client.GetAsync($"/api/v1/admin/mods/{created.Id}");
+        // STEP-07: Obtain detail through SuccessDataAsync; assert detailResponse.StatusCode is HttpStatusCode.OK and 2 more.
         detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var detail = await SuccessDataAsync<ModDetailDto>(detailResponse);
         detail.Permissions.Overrides.Should().ContainSingle(item =>
             item.PermissionCode == "USER_BAN" && item.Effect == "deny");
         detail.Handled.Should().BeEquivalentTo(new { Verifications = 0, Menus = 0, Reports = 0 });
 
+        // STEP-08: Assert in the database mod.EmailVerifiedAt is not null, mod.PasswordHash is null and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             var mod = await context.Users.SingleAsync(user => user.Id == created.Id);
@@ -83,18 +91,22 @@ public sealed class AdministrationModsEndToEndTests : IClassFixture<PostgresApiF
     [PostgresEndToEndFact]
     public async Task DeactivateMod_ShouldRevokeSessionsAndPersistAudit()
     {
+        // STEP-01: Reset the test database, create users through SeedAdminAndModWithSessionsAsync and get client from AuthorizedAdminClient.
         await _factory.ResetDatabaseAsync();
         var users = await SeedAdminAndModWithSessionsAsync();
         using var client = AuthorizedAdminClient(users.AdminId);
 
+        // STEP-02: Send PATCH /api/v1/admin/mods/{users.ModId} with a UpdateModRequestDto body and keep response.
         using var response = await client.PatchAsJsonAsync(
             $"/api/v1/admin/mods/{users.ModId}",
             new UpdateModRequestDto { DisplayName = "Deactivated Mod", Status = "deactivated" });
 
+        // STEP-03: Obtain updated through SuccessDataAsync; assert response.StatusCode is HttpStatusCode.OK, updated.DisplayName is "Deactivated Mod" and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var updated = await SuccessDataAsync<AdminUserCardDto>(response);
         updated.DisplayName.Should().Be("Deactivated Mod");
         updated.Status.Should().Be("deactivated");
+        // STEP-04: Assert in the database context.Users.SingleAsync(filtered).Status is UserStatus.Deactivated and 2 more.
         await _factory.ExecuteDbAsync(async context =>
         {
             (await context.Users.SingleAsync(user => user.Id == users.ModId)).Status

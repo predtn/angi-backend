@@ -18,11 +18,17 @@ public sealed class AgentConversationsControllerTests
     [InlineData("completed", 200)][InlineData("processing", 202)]
     public async Task Send_UsesDocumentedTurnStatus(string status, int expected)
     {
+        // STEP-01: Mock ISendAgentMessageUseCase.
+        // STEP-02: Create request as SendAgentMessageRequestDto and create dto as AgentTurnDto.
         var useCase = new Mock<ISendAgentMessageUseCase>(); var request = new SendAgentMessageRequestDto();
         var dto = new AgentTurnDto(status, "reply", 2);
+        // STEP-03: Stub useCase.ExecuteAsync.
         useCase.Setup(x => x.ExecuteAsync(7, request, It.IsAny<CancellationToken>())).ReturnsAsync(dto);
+        // STEP-04: Create the AgentConversationsController under test as controller.
         var controller = new AgentConversationsController(Mock.Of<ICreateAgentConversationUseCase>(), Mock.Of<IGetAgentConversationUseCase>(), useCase.Object, Mock.Of<IConfirmAgentProposalUseCase>());
+        // STEP-05: Run controller.Send with request and keep result.
         var result = (ObjectResult)await controller.Send(7, request, CancellationToken.None);
+        // STEP-06: Assert result.StatusCode is expected and result.Value.Data is the same instance as dto.
         result.StatusCode.Should().Be(expected); ((ApiResponse<AgentTurnDto>)result.Value!).Data.Should().BeSameAs(dto);
     }
 
@@ -30,5 +36,6 @@ public sealed class AgentConversationsControllerTests
     /// <summary>Verifies that anonymous and other-role callers are excluded before use-case execution.</summary>
     [Fact]
     public void Controller_RequiresTravelerRole() =>
+        // STEP-01: Assert GetCustomAttributes().Cast().Single().Roles is "TRAVELER".
         typeof(AgentConversationsController).GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>().Single().Roles.Should().Be("TRAVELER");
 }

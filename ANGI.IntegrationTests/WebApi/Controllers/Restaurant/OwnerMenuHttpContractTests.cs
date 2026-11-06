@@ -65,10 +65,13 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
         string path,
         string? body)
     {
+        // STEP-01: Get request from Request.
         using var request = Request(method, path, body);
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Unauthorized and AssertErrorEnvelope confirms UNAUTHORIZED.
         response.StatusCode.Should().Be(
             HttpStatusCode.Unauthorized,
             await response.Content.ReadAsStringAsync());
@@ -84,11 +87,14 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
         string path,
         string? body)
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request(method, path, body);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("USER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertErrorEnvelope confirms FORBIDDEN.
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
             await response.Content.ReadAsStringAsync());
@@ -104,11 +110,14 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [InlineData("/api/v1/owner/restaurant/menu-submissions/1/submit", "POST")]
     public async Task BodyEndpoint_WithMissingBody_ShouldReturnValidationEnvelope(string path, string method)
     {
+        // STEP-01: Build the HTTP request and attach the bearer token to request.
         using var request = new HttpRequestMessage(new HttpMethod(method), path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("RESTAURANT_OWNER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.BadRequest, AssertErrorEnvelope confirms VALIDATION_FAILED and 2 more.
         response.StatusCode.Should().Be(
             HttpStatusCode.BadRequest,
             await response.Content.ReadAsStringAsync());
@@ -129,11 +138,14 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [InlineData("/api/v1/owner/restaurant/menu-submissions/1/submit", "POST")]
     public async Task BodyEndpoint_WithMalformedJson_ShouldReturnValidationEnvelope(string path, string method)
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request(new HttpMethod(method), path, "{");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("RESTAURANT_OWNER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorEnvelope confirms VALIDATION_FAILED.
         response.StatusCode.Should().Be(
             HttpStatusCode.BadRequest,
             await response.Content.ReadAsStringAsync());
@@ -145,12 +157,14 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public void Services_ShouldResolveEveryControllerDependencyUseCaseValidatorAndRepository()
     {
+        // STEP-01: Create scope through _factory.Services.CreateScope, derive provider from scope.ServiceProvider and 1 more.
         using var scope = _factory.Services.CreateScope();
         var provider = scope.ServiceProvider;
         var controllerDependencies = typeof(OwnerMenuController).GetConstructors().Single()
             .GetParameters()
             .Select(parameter => parameter.ParameterType);
 
+        // STEP-02: Assert controllerDependencies.Select(filtered) not contain nulls and provider.GetRequiredService() is not null.
         controllerDependencies.Select(type => provider.GetService(type)).Should().NotContainNulls();
         provider.GetRequiredService<IValidator<AddMenuSubmissionItemRequestDto>>().Should().NotBeNull();
         provider.GetRequiredService<IValidator<UpdateMenuSubmissionItemRequestDto>>().Should().NotBeNull();
@@ -164,11 +178,13 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public void Controller_ShouldDeclareExactlyTenDocumentedRoutesAndResponseSchemas()
     {
+        // STEP-01: Get actions from Where(filtered).Where(filtered).ToArray.
         var actions = typeof(OwnerMenuController).GetMethods()
             .Where(method => method.DeclaringType == typeof(OwnerMenuController))
             .Where(method => method.GetCustomAttributes(typeof(HttpMethodAttribute), true).Length > 0)
             .ToArray();
 
+        // STEP-02: Assert actions has 10 item(s) and actions only holds items matching the condition.
         actions.Should().HaveCount(10);
         actions.Should().OnlyContain(method =>
             method.GetCustomAttributes(typeof(ProducesResponseTypeAttribute), true).Length > 0);
@@ -179,11 +195,13 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public void RuntimeEndpointDataSource_ShouldExposeAllTenOwnerMenuOperations()
     {
+        // STEP-01: Get endpoints from Endpoints.Where(filtered).ToArray.
         var endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?
                 .ControllerTypeInfo.AsType() == typeof(OwnerMenuController))
             .ToArray();
 
+        // STEP-02: Assert endpoints has 10 item(s) and endpoints only holds items matching the condition.
         endpoints.Should().HaveCount(10);
         endpoints.Should().OnlyContain(endpoint =>
             endpoint.Metadata.GetMetadata<ProducesResponseTypeAttribute>() != null);
@@ -194,6 +212,7 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public async Task SubmitEndpoint_WithValidRequest_ShouldSerializePendingSubmission()
     {
+        // STEP-01: Build a POST /api/v1/owner/restaurant/menu-submissions/14/submit request with a JSON body and attach the bearer token to request.
         using var request = Request(
             HttpMethod.Post,
             "/api/v1/owner/restaurant/menu-submissions/14/submit",
@@ -202,13 +221,19 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
             "Bearer",
             Token("RESTAURANT_OWNER"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Derive root from document.RootElement.
         var root = document.RootElement;
+        // STEP-05: Assert root.success is true.
         root.GetProperty("success").GetBoolean().Should().BeTrue();
+        // STEP-06: Get data from root.GetProperty.
         var data = root.GetProperty("data");
+        // STEP-07: Assert data.id is 14, data.status is "pending", data.ownerNote is the expected text and data.submittedAt is "2026-10-18T09:30:00Z".
         data.GetProperty("id").GetInt64().Should().Be(14);
         data.GetProperty("status").GetString().Should().Be("pending");
         data.GetProperty("ownerNote").GetString().Should().Be("Gửi duyệt");
@@ -220,18 +245,23 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public async Task OpenApiDocument_ShouldContainSubmitEndpointAndSchemas()
     {
+        // STEP-01: Send GET /openapi/v1.json and keep response.
         using var response = await _factory.CreateClient().GetAsync("/openapi/v1.json");
 
+        // STEP-02: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-03: Get operation from GetProperty.
         var operation = document.RootElement
             .GetProperty("paths")
             .GetProperty("/api/v1/owner/restaurant/menu-submissions/{submissionId}/submit")
             .GetProperty("post");
+        // STEP-04: Assert operation.requestBody.content.TryGetProperty() is true and operation.responses.TryGetProperty() is true.
         operation.GetProperty("requestBody").GetProperty("content")
             .TryGetProperty("application/json", out _).Should().BeTrue();
         operation.GetProperty("responses").TryGetProperty("200", out _).Should().BeTrue();
 
+        // STEP-05: Get schemas from document.RootElement.components.GetProperty and get requestSchema from EnumerateObject().Select(filtered).Single.
         var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
         var requestSchema = schemas.EnumerateObject()
             .Select(schema => schema.Value)
@@ -239,6 +269,7 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
                 schema.TryGetProperty("properties", out var properties) &&
                 properties.TryGetProperty("ownerNote", out var ownerNote) &&
                 ownerNote.TryGetProperty("maxLength", out _));
+        // STEP-06: Assert requestSchema.properties.ownerNote.maxLength is 1000 and schemas.EnumerateObject().Any(filtered) is true.
         requestSchema.GetProperty("properties").GetProperty("ownerNote")
             .GetProperty("maxLength").GetInt32().Should().Be(1000);
         schemas.EnumerateObject().Any(schema =>
@@ -254,8 +285,10 @@ public sealed class OwnerMenuHttpContractTests : IClassFixture<OwnerMenuApiFacto
     [Fact]
     public async Task ScalarReference_ShouldBePublished()
     {
+        // STEP-01: Send GET /scalar/v1 and keep response.
         using var response = await _factory.CreateClient().GetAsync("/scalar/v1");
 
+        // STEP-02: Assert response.StatusCode is HttpStatusCode.OK and the response body contains "openapi/v1.json".
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         (await response.Content.ReadAsStringAsync()).Should().Contain("openapi/v1.json");
     }

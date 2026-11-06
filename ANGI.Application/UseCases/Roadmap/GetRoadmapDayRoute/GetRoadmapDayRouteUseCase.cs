@@ -41,8 +41,10 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
         GetRoadmapDayRouteRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare userId, roadmap from roadmapRepository.GetOwnedRouteDataAsync, day, items through OrderItems and 3 more.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem lộ trình.");
         var roadmap = await _roadmapRepository.GetOwnedRouteDataAsync(roadmapId, dayId, userId, ct)
@@ -56,19 +58,23 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
         var origin = SelectOrigin(roadmap, request);
         var originSkipped = origin is not null && destinations.Length > 0 &&
                             HaversineMeters(origin.Coordinate, destinations[0]) > MaximumOriginDistanceMeters;
+        // STEP-03: When originSkipped is true, set origin.
         if (originSkipped)
         {
             origin = null;
         }
 
+        // STEP-04: Prepare profile, then call routeService.CalculateRouteAsync and keep route.
         var profile = ParseProfile(request.Profile!);
         var route = await _routeService.CalculateRouteAsync(
             origin?.Coordinate,
             destinations,
             profile,
             ct);
+        // STEP-05: Prepare legs through MapLegs.
         var legs = MapLegs(items, route.Legs, origin is not null);
 
+        // STEP-06: Return a new GetRoadmapDayRouteResponseDto.
         return new GetRoadmapDayRouteResponseDto
         {
             DayId = day.Id,
@@ -102,6 +108,7 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
         RoadmapRouteData roadmap,
         GetRoadmapDayRouteRequestDto request)
     {
+        // STEP-01: Return a new SelectedOrigin early when request.OriginLat has a value and request.OriginLng has a value.
         if (request.OriginLat.HasValue && request.OriginLng.HasValue)
         {
             return new SelectedOrigin(
@@ -110,6 +117,7 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
                 "gps");
         }
 
+        // STEP-02: Return a new SelectedOrigin early when roadmap.OriginMode is RoadmapOriginMode.Pinned, roadmap.OriginLatitude has a value and roadmap.OriginLongitude has a value.
         if (roadmap.OriginMode == RoadmapOriginMode.Pinned &&
             roadmap.OriginLatitude.HasValue &&
             roadmap.OriginLongitude.HasValue)
@@ -120,6 +128,7 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
                 "pinned");
         }
 
+        // STEP-03: Return null.
         return null;
     }
 
@@ -129,12 +138,15 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
         IReadOnlyList<RouteMetric> metrics,
         bool hasOrigin)
     {
+        // STEP-01: Prepare expectedCount through Math.Max.
         var expectedCount = Math.Max(0, items.Count - (hasOrigin ? 0 : 1));
+        // STEP-02: Throw InvalidOperationException when metrics.Count is not expectedCount.
         if (metrics.Count != expectedCount)
         {
             throw new InvalidOperationException("The route provider returned an unexpected number of legs.");
         }
 
+        // STEP-03: Return the result of metrics.Select(filtered).ToArray.
         return metrics.Select((metric, index) => new RoadmapRouteLegDto
         {
             FromItemId = hasOrigin && index == 0 ? null : items[hasOrigin ? index - 1 : index].Id,
@@ -158,6 +170,7 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
     /// <summary>Calculates straight-line distance between two WGS84 coordinates for the 30 km origin rule.</summary>
     private static double HaversineMeters(RouteCoordinate from, RouteCoordinate to)
     {
+        // STEP-01: Prepare latitude1 through DegreesToRadians, latitude2 through DegreesToRadians, latitudeDelta, longitudeDelta through DegreesToRadians and 1 more.
         var latitude1 = DegreesToRadians((double)from.Latitude);
         var latitude2 = DegreesToRadians((double)to.Latitude);
         var latitudeDelta = latitude2 - latitude1;
@@ -165,6 +178,7 @@ public sealed class GetRoadmapDayRouteUseCase : IGetRoadmapDayRouteUseCase
         var haversine = Math.Pow(Math.Sin(latitudeDelta / 2d), 2d) +
                         Math.Cos(latitude1) * Math.Cos(latitude2) *
                         Math.Pow(Math.Sin(longitudeDelta / 2d), 2d);
+        // STEP-02: Return the computed condition.
         return EarthRadiusMeters * 2d * Math.Atan2(Math.Sqrt(haversine), Math.Sqrt(1d - haversine));
     }
 

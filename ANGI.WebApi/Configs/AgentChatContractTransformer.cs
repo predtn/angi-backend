@@ -13,7 +13,9 @@ internal sealed class AgentChatOperationTransformer : IOpenApiOperationTransform
     /// <summary>Publishes a valid minimal example rather than empty commands and an unconfirmed state object.</summary>
     public Task TransformAsync(OpenApiOperation operation, OpenApiOperationTransformerContext context, CancellationToken cancellationToken)
     {
+        // STEP-01: Prepare path.
         var path = context.Description.RelativePath;
+        // STEP-02: When context.Description.HttpMethod is "POST", path exists, path starts with "api/v1/agent/conversations/" and 2 more condition(s) and more.
         if (context.Description.HttpMethod == "POST" && path is not null &&
             path.StartsWith("api/v1/agent/conversations/", StringComparison.Ordinal) && path.EndsWith("/messages", StringComparison.Ordinal) &&
             operation.RequestBody?.Content?.TryGetValue("application/json", out var media) == true)
@@ -23,6 +25,7 @@ internal sealed class AgentChatOperationTransformer : IOpenApiOperationTransform
                 """);
             operation.Description = "Chỉ cần gửi content. Bỏ clientMessageId và expectedConversationVersion để backend tự cấp ID tin mới và dùng version hiện tại. Nếu gửi ID rõ ràng: cùng ID/nội dung là retry; khác nội dung trả 409 MESSAGE_ID_REUSED. Nhắn ‘lưu lịch trình này’ để lưu preview; kết quả nằm trong data.commit.";
         }
+        // STEP-03: Return Task.CompletedTask.
         return Task.CompletedTask;
     }
 }

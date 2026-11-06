@@ -34,6 +34,7 @@ public sealed class GetRoadmapItemDetailUseCase : IGetRoadmapItemDetailUseCase
     /// <summary>Loads an owned item, its feedback and review, then maps the complete RM-12 response.</summary>
     public async Task<RoadmapItemDetailDto> ExecuteAsync(long roadmapId, long itemId, CancellationToken ct)
     {
+        // STEP-01: Prepare userId and item, then load feedback through roadmapRepository.GetFeedbackByItemIdsAsync and more.
         var userId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem chi tiết món trong roadmap.");
         var item = await _roadmapRepository.GetOwnedItemDetailAsync(roadmapId, itemId, userId, ct)
@@ -43,9 +44,11 @@ public sealed class GetRoadmapItemDetailUseCase : IGetRoadmapItemDetailUseCase
             item.Dish.RestaurantId,
             userId,
             ct);
+        // STEP-02: Prepare reviewDto from RestaurantDetailMapper.MapReview and baseItem through RoadmapMapper.MapItem.
         var reviewDto = review is null ? null : RestaurantDetailMapper.MapReview(review);
         var baseItem = RoadmapMapper.MapItem(item.RoadmapDay, item, feedback);
 
+        // STEP-03: Return a new RoadmapItemDetailDto.
         return new RoadmapItemDetailDto
         {
             Id = baseItem.Id,

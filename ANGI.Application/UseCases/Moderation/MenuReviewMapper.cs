@@ -11,10 +11,12 @@ internal static class MenuReviewMapper
     /// <summary>Maps one queue card with new, edited and removed counts.</summary>
     public static ModMenuSubmissionCardDto Card(MenuSubmission submission)
     {
+        // STEP-01: Prepare source through RestaurantMenuMapper.MapSubmission, changes through submission.Items.Select(filtered).ToArray and more.
         var source = RestaurantMenuMapper.MapSubmission(submission);
         var changes = submission.Items.Select(item => RestaurantMenuMapper.MapItem(item).Change).ToArray();
         var retained = submission.Items.Where(item => item.SourceDishId.HasValue)
             .Select(item => item.SourceDishId!.Value).ToHashSet();
+        // STEP-02: Return a new ModMenuSubmissionCardDto.
         return new ModMenuSubmissionCardDto
         {
             Id = source.Id, RestaurantId = source.RestaurantId, Status = source.Status,
@@ -31,8 +33,10 @@ internal static class MenuReviewMapper
     /// <summary>Maps the flattened submission, proposed items, previous values and omitted dishes.</summary>
     public static ModMenuSubmissionDetailDto Detail(MenuSubmission submission)
     {
+        // STEP-01: Prepare source through RestaurantMenuMapper.MapSubmissionDetail and itemsById through submission.Items.ToDictionary.
         var source = RestaurantMenuMapper.MapSubmissionDetail(submission);
         var itemsById = submission.Items.ToDictionary(x => x.Id);
+        // STEP-02: Return a new ModMenuSubmissionDetailDto.
         return new ModMenuSubmissionDetailDto
         {
             Id = source.Id, RestaurantId = source.RestaurantId, Status = source.Status,

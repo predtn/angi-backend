@@ -14,6 +14,7 @@ public sealed class GetRoadmapSuggestionsRequestDtoValidatorTests
     [Fact]
     public void Validate_WithDocumentedBoundaryValues_ShouldPass()
     {
+        // STEP-01: Assert _validator.Validate().IsValid is true.
         _validator.Validate(new GetRoadmapSuggestionsRequestDto { Province = "Đà Nẵng" })
             .IsValid.Should().BeTrue();
         _validator.Validate(new GetRoadmapSuggestionsRequestDto
@@ -39,6 +40,7 @@ public sealed class GetRoadmapSuggestionsRequestDtoValidatorTests
         GetRoadmapSuggestionsRequestDto request,
         string field)
     {
+        // STEP-01: Assert _validator.Validate().Errors contains a matching item.
         _validator.Validate(request).Errors.Should().Contain(error => error.PropertyName == field);
     }
 

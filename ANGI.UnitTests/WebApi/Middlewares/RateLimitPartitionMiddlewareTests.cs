@@ -21,13 +21,16 @@ public sealed class RateLimitPartitionMiddlewareTests
     [Fact]
     public async Task RateLimitPartitionMiddleware_ShouldNormalizeEmailAndRewindBody()
     {
+        // STEP-01: Define requestJson as the expected text, create context as DefaultHttpContext, set context.Request.Method to HttpMethods.Post and 2 more.
         const string requestJson = "{\"email\":\"  User@ANGI.Test  \",\"password\":\"secret\"}";
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/v1/auth/login";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(requestJson));
+        // STEP-02: Create the RateLimitPartitionMiddleware under test as middleware.
         var middleware = new RateLimitPartitionMiddleware();
 
+        // STEP-03: Assert Items[RateLimitPartitionMiddleware.EmailItemKey] is "user@angi.test" and reader.ReadToEndAsync() is requestJson.
         await middleware.InvokeAsync(context, async nextContext =>
         {
             nextContext.Items[RateLimitPartitionMiddleware.EmailItemKey]

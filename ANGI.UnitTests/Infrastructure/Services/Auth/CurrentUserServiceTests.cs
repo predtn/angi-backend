@@ -17,6 +17,7 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [InlineData(null, null)]
         public void SessionId_ShouldComeFromTheSidClaim(string? sid, long? expected)
         {
+            // STEP-01: Create claims as List<Claim>, when sid is not null, add a Claim to claims and create httpContext as DefaultHttpContext.
             var claims = new List<Claim> { new("sub", "3") };
             if (sid is not null)
             {
@@ -24,8 +25,10 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
             }
 
             var httpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+            // STEP-02: Create the CurrentUserService under test as service.
             var service = new CurrentUserService(new HttpContextAccessor { HttpContext = httpContext });
 
+            // STEP-03: Assert service.SessionId is expected.
             service.SessionId.Should().Be(expected);
         }
 
@@ -34,12 +37,15 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public void UserIdAndRole_WithAuthenticatedRequest_ShouldComeFromClaims()
         {
+            // STEP-01: Create httpContext as DefaultHttpContext.
             var httpContext = new DefaultHttpContext
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "3"), new Claim("role", "MOD")], "Bearer"))
             };
+            // STEP-02: Create the CurrentUserService under test as service.
             var service = new CurrentUserService(new HttpContextAccessor { HttpContext = httpContext });
 
+            // STEP-03: Assert service.UserId is 3 and service.Role is "MOD".
             service.UserId.Should().Be(3);
             service.Role.Should().Be("MOD");
         }
@@ -49,9 +55,11 @@ namespace ANGI.UnitTests.Infrastructure.Services.Auth
         [Fact]
         public void UserIdAndRole_WithoutToken_ShouldBeNull()
         {
+            // STEP-01: Create the CurrentUserService under test as anonymous; create the CurrentUserService under test as noRequest.
             var anonymous = new CurrentUserService(new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
             var noRequest = new CurrentUserService(new HttpContextAccessor());
 
+            // STEP-02: Assert anonymous.UserId is null, anonymous.Role is null, noRequest.UserId is null and noRequest.Role is null.
             anonymous.UserId.Should().BeNull();
             anonymous.Role.Should().BeNull();
             noRequest.UserId.Should().BeNull();

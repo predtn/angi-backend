@@ -11,8 +11,10 @@ public sealed class AgentLimitsTests
     [Fact]
     public void Defaults_AllowSixtyMessagesPerMinute()
     {
+        // STEP-01: Create limits as AgentLimits.
         var limits = new AgentLimits();
 
+        // STEP-02: Assert limits.MessagesPerMinute is 60 and limits.MessagesPerDay is 100.
         limits.MessagesPerMinute.Should().Be(60);
         limits.MessagesPerDay.Should().Be(100);
     }

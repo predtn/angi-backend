@@ -12,21 +12,27 @@ public sealed class RestaurantModerationEffects(IRestaurantModerationRepository 
     /// <summary>Changes restaurant visibility and stages the matching audit and owner notification once.</summary>
     public void Apply(Domain.Entities.Restaurant restaurant, RestaurantModerationStatus status, string? reason, long? reportId)
     {
+        // STEP-01: Stop here when restaurant.ModerationStatus is status.
         if (restaurant.ModerationStatus == status) return;
+        // STEP-02: Prepare oldStatus.
         var oldStatus = restaurant.ModerationStatus;
+        // STEP-03: Update restaurant: ModerationStatus.
         restaurant.ModerationStatus = status;
+        // STEP-04: Prepare action.
         var action = status switch
         {
             RestaurantModerationStatus.Visible => AuditActions.RestaurantShown,
             RestaurantModerationStatus.Hidden => AuditActions.RestaurantHidden,
             _ => AuditActions.RestaurantSuspended
         };
+        // STEP-05: Record the audit entry.
         audit.Add(new AuditLogEntry
         {
             Action = action, EntityType = AuditEntityTypes.Restaurant, EntityId = restaurant.Id,
             SubjectUserId = restaurant.OwnerId, OldValues = new { ModerationStatus = oldStatus },
             NewValues = new { ModerationStatus = status, Reason = reason }
         });
+        // STEP-06: Queue a new Domain.Entities.Notification through repository.AddNotification.
         repository.AddNotification(new Domain.Entities.Notification
         {
             RecipientId = restaurant.OwnerId, Type = action, Title = "Trạng thái kiểm duyệt nhà hàng đã thay đổi",

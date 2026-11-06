@@ -31,10 +31,13 @@ public sealed class GetVerificationReviewUseCase : IGetVerificationReviewUseCase
     /// <summary>Enforces RESTAURANT_VERIFY and returns MOD-V2 or VERIFICATION_NOT_FOUND.</summary>
     public async Task<VerificationReviewDetailDto> ExecuteAsync(long verificationId, CancellationToken ct)
     {
+        // STEP-01: Check the caller's permission through ModerationPermissionGuard.RequireAsync.
         await ModerationPermissionGuard.RequireAsync(_currentUserService, _repository, ct);
+        // STEP-02: Prepare verification from repository.GetDetailAsync.
         var verification = await _repository.GetDetailAsync(verificationId, ct)
             ?? throw new NotFoundException("VERIFICATION_NOT_FOUND", "Không tìm thấy hồ sơ xác minh.");
 
+        // STEP-03: Return the result of ModerationVerificationMapper.MapDetail.
         return ModerationVerificationMapper.MapDetail(verification, _cloudinaryService, _timeProvider);
     }
 }

@@ -24,13 +24,18 @@ public sealed class UpdateDishModerationStatusUseCaseTests
     [InlineData(DishStatus.Hidden, "hidden", DishStatus.Hidden)]
     public async Task SavesAllowedState(DishStatus before, string requested, DishStatus expected)
     {
+        // STEP-01: Create world as ModerationTestContext and create dish as Dish.
         var world = new ModerationTestContext();
         var dish = new Dish { Id = 105, RestaurantId = 7, Status = before };
+        // STEP-02: Stub world.GetDishRestaurantIdAsync and world.LockDishAsync.
         world.Repository.Setup(x => x.GetDishRestaurantIdAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(7);
         world.Repository.Setup(x => x.LockDishAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(dish);
+        // STEP-03: Run Create().ExecuteAsync and keep result.
         var result = await Create(world).ExecuteAsync(105, new() { Status = requested, Reason = "reason" }, default);
+        // STEP-04: Assert result.Status is requested and dish.Status is expected.
         result.Status.Should().Be(requested);
         dish.Status.Should().Be(expected);
+        // STEP-05: Verify SaveChangesAsync is called once.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -41,11 +46,16 @@ public sealed class UpdateDishModerationStatusUseCaseTests
     [InlineData("hidden")]
     public async Task RejectsRemovedDish(string status)
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Stub world.GetDishRestaurantIdAsync and world.LockDishAsync.
         world.Repository.Setup(x => x.GetDishRestaurantIdAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(7);
         world.Repository.Setup(x => x.LockDishAsync(105, It.IsAny<CancellationToken>())).ReturnsAsync(new Dish { Status = DishStatus.Removed });
+        // STEP-03: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(105, new() { Status = status, Reason = "reason" }, default);
+        // STEP-04: Assert action throws ConflictException and the thrown exception.ErrorCode is "DISH_REMOVED".
         (await action.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("DISH_REMOVED");
+        // STEP-05: Verify SaveChangesAsync is never called.
         world.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -54,9 +64,13 @@ public sealed class UpdateDishModerationStatusUseCaseTests
     [Fact]
     public async Task RejectsMissingDish()
     {
+        // STEP-01: Create world as ModerationTestContext.
         var world = new ModerationTestContext();
+        // STEP-02: Wrap Create().ExecuteAsync in action so its outcome can be asserted.
         var action = () => Create(world).ExecuteAsync(404, new() { Status = "hidden", Reason = "reason" }, default);
+        // STEP-03: Assert action throws NotFoundException and the thrown exception.ErrorCode is "DISH_NOT_FOUND".
         (await action.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("DISH_NOT_FOUND");
+        // STEP-04: Verify world receives no other calls.
         world.UnitOfWork.VerifyNoOtherCalls();
     }
 }

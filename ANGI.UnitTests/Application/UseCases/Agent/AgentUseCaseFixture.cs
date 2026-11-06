@@ -5,6 +5,8 @@ using ANGI.Application.Common.Interfaces.Services.Agent;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Constraints;
+using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Domain.Entities;
 using ANGI.UnitTests.Application.Services.Agent;
 using Moq;
@@ -48,7 +50,8 @@ internal sealed class AgentUseCaseFixture
     public AgentOrchestrator Orchestrator()
     {
         var catalog = AgentTestData.Validator(AgentTestData.Dish());
-        var policy = new AgentStatePolicy();
+        catalog.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<ANGI.Application.Common.Models.Discovery.DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<int>());
+        var policy = new AgentConstraintGuard();
         var tools = new AgentToolExecutor(catalog.Dishes.Object, catalog.Tags.Object,
             Mock.Of<ANGI.Application.Common.Interfaces.Services.Recommendation.IRecommendationService>(), policy,
             new(catalog.Routes.Object), Limits, Telemetry);

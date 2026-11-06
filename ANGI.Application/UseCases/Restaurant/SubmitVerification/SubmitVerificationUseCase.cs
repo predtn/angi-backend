@@ -44,21 +44,29 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
         SubmitVerificationRequestDto request,
         CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await _validator.ValidateAndThrowAsync(request, ct);
 
+        // STEP-02: Prepare ownerId.
         var ownerId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để nộp hồ sơ xác minh.");
 
+        // STEP-03: Open the database transaction.
         await using var transaction = await _unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare restaurant from restaurantRepository.LockOwnerRestaurantForVerificationAsync.
         var restaurant = await _restaurantRepository.LockOwnerRestaurantForVerificationAsync(ownerId, ct)
             ?? throw new NotFoundException("RESTAURANT_NOT_FOUND", "Không tìm thấy nhà hàng.");
 
+        // STEP-05: Check the submission state rule through EnsureSubmissionState.
         EnsureSubmissionState(restaurant.VerificationStatus);
 
+        // STEP-06: Prepare mediaIds, then load ownedMedia through mediaRepository.GetOwnedByIdsAsync.
         var mediaIds = request.Documents!.Select(document => document.MediaId).Distinct().ToArray();
         var ownedMedia = await _mediaRepository.GetOwnedByIdsAsync(ownerId, mediaIds, ct);
+        // STEP-07: Check the verification media rule through RestaurantVerificationRules.EnsureVerificationMedia.
         var mediaById = RestaurantVerificationRules.EnsureVerificationMedia(request.Documents!, ownedMedia);
 
+        // STEP-08: Prepare verification as RestaurantVerification.
         var verification = new RestaurantVerification
         {
             RestaurantId = restaurant.Id,
@@ -70,15 +78,22 @@ public sealed class SubmitVerificationUseCase : ISubmitVerificationUseCase
             Status = VerificationStatus.Pending
         };
 
+        // STEP-09: Add verification to RestaurantVerificationRules.
         RestaurantVerificationRules.AddDocuments(verification, request.Documents!);
 
+        // STEP-10: Update restaurant: VerificationStatus.
         restaurant.VerificationStatus = RestaurantVerificationStatus.Pending;
+        // STEP-11: Queue verification through restaurantRepository.AddVerification.
         _restaurantRepository.AddVerification(verification);
+        // STEP-12: Save the pending changes.
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // STEP-13: Prepare storageKeys through mediaById.ToDictionary and result through RestaurantVerificationMapper.Map.
         var storageKeys = mediaById.ToDictionary(item => item.Key, item => item.Value.StorageKey);
         var result = RestaurantVerificationMapper.Map(verification, _cloudinaryService, storageKeys);
+        // STEP-14: Commit the transaction.
         await transaction.CommitAsync(ct);
+        // STEP-15: Return result.
         return result;
     }
 

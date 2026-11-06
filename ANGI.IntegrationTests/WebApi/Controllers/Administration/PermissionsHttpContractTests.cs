@@ -42,10 +42,13 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [InlineData("PUT", "/api/v1/admin/roles/MOD/permissions", "{\"permissionCodes\":[]}")]
     public async Task Endpoint_WithoutToken_ShouldReturnUnauthorized(string method, string path, string? body)
     {
+        // STEP-01: Get request from Request.
         using var request = Request(method, path, body);
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Unauthorized and AssertErrorCode confirms UNAUTHORIZED.
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         await AssertErrorCode(response, "UNAUTHORIZED");
     }
@@ -59,11 +62,14 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [InlineData("PUT", "/api/v1/admin/roles/MOD/permissions", "{\"permissionCodes\":[]}")]
     public async Task Endpoint_WithNonAdminRole_ShouldReturnForbidden(string method, string path, string? body)
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request(method, path, body);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("MOD"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.Forbidden and AssertErrorCode confirms FORBIDDEN.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await AssertErrorCode(response, "FORBIDDEN");
     }
@@ -73,14 +79,19 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [Fact]
     public async Task GetPermissionCatalog_AsAdmin_ShouldSerializeDocumentedShape()
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request("GET", "/api/v1/admin/permissions", null);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.permissions[0].code is "USER_BAN", data.roleDefaults.MOD[0] is "USER_BAN" and data.roleDefaults.ADMIN[0] is "*".
         data.GetProperty("permissions")[0].GetProperty("code").GetString().Should().Be("USER_BAN");
         data.GetProperty("roleDefaults").GetProperty("MOD")[0].GetString().Should().Be("USER_BAN");
         data.GetProperty("roleDefaults").GetProperty("ADMIN")[0].GetString().Should().Be("*");
@@ -91,14 +102,19 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [Fact]
     public async Task GetModPermissions_AsAdmin_ShouldSerializeDocumentedShape()
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request("GET", "/api/v1/admin/mods/42/permissions", null);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.roleDefaults[0] is "USER_BAN", data.overrides[0].effect is "deny", data.effective[0] is "DASHBOARD_VIEW" and 1 more.
         data.GetProperty("roleDefaults")[0].GetString().Should().Be("USER_BAN");
         data.GetProperty("overrides")[0].GetProperty("effect").GetString().Should().Be("deny");
         data.GetProperty("effective")[0].GetString().Should().Be("DASHBOARD_VIEW");
@@ -110,13 +126,16 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [Fact]
     public async Task ReplaceModPermissions_WithValidBody_ShouldBindAndSerializeResponse()
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request("PUT", "/api/v1/admin/mods/42/permissions", """
             {"overrides":[{"permissionCode":"USER_BAN","effect":"deny"}]}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.OK, _factory.ReplaceMod.LastCall is not null, _factory.ReplaceMod.LastCall.Value.UserId is 42 and 1 more.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         _factory.ReplaceMod.LastCall.Should().NotBeNull();
         _factory.ReplaceMod.LastCall!.Value.UserId.Should().Be(42);
@@ -128,16 +147,21 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [Fact]
     public async Task ReplaceModRolePermissions_WithValidBody_ShouldBindAndSerializeResponse()
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request("PUT", "/api/v1/admin/roles/MOD/permissions", """
             {"permissionCodes":["USER_BAN","DASHBOARD_VIEW"]}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Read document from the response; assert response.StatusCode is HttpStatusCode.OK.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        // STEP-04: Get data from document.RootElement.GetProperty.
         var data = document.RootElement.GetProperty("data");
+        // STEP-05: Assert data.role is "MOD" and data.permissionCodes.length is 2.
         data.GetProperty("role").GetString().Should().Be("MOD");
         data.GetProperty("permissionCodes").GetArrayLength().Should().Be(2);
     }
@@ -151,11 +175,14 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
     [InlineData("/api/v1/admin/roles/MOD/permissions", "{\"permissionCodes\":null}")]
     public async Task PutEndpoint_WithMissingRequiredPayload_ShouldReturnValidationEnvelope(string path, string? body)
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request("PUT", path, body);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is HttpStatusCode.BadRequest and AssertErrorCode confirms VALIDATION_FAILED.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         await AssertErrorCode(response, "VALIDATION_FAILED");
     }
@@ -173,11 +200,14 @@ public sealed class PermissionsHttpContractTests : IClassFixture<PermissionsApiF
         HttpStatusCode status,
         string errorCode)
     {
+        // STEP-01: Get request from Request and attach the bearer token to request.
         using var request = Request(method, path, body);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("ADMIN"));
 
+        // STEP-02: Send request through the HTTP client and keep response.
         using var response = await _factory.CreateClient().SendAsync(request);
 
+        // STEP-03: Assert response.StatusCode is status and AssertErrorCode succeeds.
         response.StatusCode.Should().Be(status);
         await AssertErrorCode(response, errorCode);
     }

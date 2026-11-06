@@ -24,8 +24,10 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
         [Fact]
         public async Task ExecuteAsync_WithUnverifiedUser_ShouldReplaceTokenAndSendEmail()
         {
+            // STEP-01: Create user through CreateUnverifiedUser and create oldToken as UserToken.
             var user = CreateUnverifiedUser();
             var oldToken = new UserToken { UserId = user.Id, Purpose = UserTokenPurpose.EmailVerify };
+            // STEP-02: Declare addedToken to capture a call argument; mock IAuthenticationRepository and 2 more; stub repository.GetUserByEmailForUpdateAsync and 3 more.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
@@ -40,18 +42,23 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
             var emailService = new Mock<IEmailService>();
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(2);
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync with ResendVerificationEmailRequestDto { Email = " USER@ANGI.TEST " }.
             await useCase.ExecuteAsync(
                 new ResendVerificationEmailRequestDto { Email = " USER@ANGI.TEST " },
                 CancellationToken.None);
 
+            // STEP-05: Assert oldToken.UsedAt is Now, addedToken is not null, addedToken.UserId is user.Id, addedToken.Purpose is UserTokenPurpose.EmailVerify and 1 more.
             oldToken.UsedAt.Should().Be(Now);
             addedToken.Should().NotBeNull();
             addedToken!.UserId.Should().Be(user.Id);
             addedToken.Purpose.Should().Be(UserTokenPurpose.EmailVerify);
             addedToken.TokenHash.Should().Be("new-hash");
+            // STEP-06: Assert addedToken.ExpiresAt is Now.AddHours().
             addedToken.ExpiresAt.Should().Be(Now.AddHours(24));
+            // STEP-07: Verify SaveChangesAsync is called once and SendEmailVerificationAsync is called once.
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
             emailService.Verify(x => x.SendEmailVerificationAsync(
                 user.Email,
@@ -66,17 +73,21 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
         [Fact]
         public async Task ExecuteAsync_WithUnknownEmail_ShouldReturnWithoutSideEffects()
         {
+            // STEP-01: Mock IAuthenticationRepository, IEmailService and IUnitOfWork; stub repository.GetUserByEmailForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync("missing@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((User?)null);
             var emailService = new Mock<IEmailService>();
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-03: Run useCase.ExecuteAsync with ResendVerificationEmailRequestDto { Email = "missing@angi.test" }.
             await useCase.ExecuteAsync(
                 new ResendVerificationEmailRequestDto { Email = "missing@angi.test" },
                 CancellationToken.None);
 
+            // STEP-04: Verify AddUserToken is never called, SaveChangesAsync is never called and SendEmailVerificationAsync is never called.
             repository.Verify(x => x.AddUserToken(It.IsAny<UserToken>()), Times.Never);
             unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
             emailService.Verify(x => x.SendEmailVerificationAsync(
@@ -92,19 +103,24 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
         [Fact]
         public async Task ExecuteAsync_WithVerifiedUser_ShouldReturnWithoutSendingEmail()
         {
+            // STEP-01: Create user through CreateUnverifiedUser and set user.EmailVerifiedAt to Now.AddDays().
             var user = CreateUnverifiedUser();
             user.EmailVerifiedAt = Now.AddDays(-1);
+            // STEP-02: Mock IAuthenticationRepository, IEmailService and IUnitOfWork; stub repository.GetUserByEmailForUpdateAsync.
             var repository = new Mock<IAuthenticationRepository>();
             repository.Setup(x => x.GetUserByEmailForUpdateAsync("user@angi.test", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(user);
             var emailService = new Mock<IEmailService>();
             var unitOfWork = new Mock<IUnitOfWork>();
+            // STEP-03: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(repository, emailService, unitOfWork);
 
+            // STEP-04: Run useCase.ExecuteAsync with ResendVerificationEmailRequestDto { Email = "user@angi.test" }.
             await useCase.ExecuteAsync(
                 new ResendVerificationEmailRequestDto { Email = "user@angi.test" },
                 CancellationToken.None);
 
+            // STEP-05: Verify SendEmailVerificationAsync is never called.
             emailService.Verify(x => x.SendEmailVerificationAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
@@ -118,17 +134,22 @@ namespace ANGI.UnitTests.Application.UseCases.Auth.ResendVerificationEmail
         [Fact]
         public async Task ExecuteAsync_WithMalformedEmail_ShouldValidateBeforeRepositoryAccess()
         {
+            // STEP-01: Mock IAuthenticationRepository.
             var repository = new Mock<IAuthenticationRepository>();
+            // STEP-02: Build useCase under test through CreateUseCase.
             var useCase = CreateUseCase(
                 repository,
                 new Mock<IEmailService>(),
                 new Mock<IUnitOfWork>());
 
+            // STEP-03: Wrap useCase.ExecuteAsync with ResendVerificationEmailRequestDto { Email = "not-an-email" } in act so its outcome can be asserted.
             var act = () => useCase.ExecuteAsync(
                 new ResendVerificationEmailRequestDto { Email = "not-an-email" },
                 CancellationToken.None);
 
+            // STEP-04: Assert act throws ValidationException.
             await act.Should().ThrowAsync<ValidationException>();
+            // STEP-05: Verify GetUserByEmailForUpdateAsync is never called.
             repository.Verify(x => x.GetUserByEmailForUpdateAsync(
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()), Times.Never);

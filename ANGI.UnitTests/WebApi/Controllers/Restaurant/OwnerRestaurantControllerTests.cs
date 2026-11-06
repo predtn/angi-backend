@@ -17,6 +17,7 @@ public sealed class OwnerRestaurantControllerTests
     [Fact]
     public async Task Register_WithValidRequest_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create request as RegisterRestaurantRequestDto and create expected as OwnerRestaurantDto.
         var request = new RegisterRestaurantRequestDto
         {
             Name = "Bún Bò Bà Diệu",
@@ -27,9 +28,11 @@ public sealed class OwnerRestaurantControllerTests
             Longitude = 108.220116m
         };
         var expected = new OwnerRestaurantDto { Id = 7, Name = request.Name };
+        // STEP-02: Mock IRegisterRestaurantUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IRegisterRestaurantUseCase>();
         useCase.Setup(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Create the OwnerRestaurantController under test as controller.
         var controller = new OwnerRestaurantController(
             useCase.Object,
             Mock.Of<IGetOwnerRestaurantUseCase>(),
@@ -38,13 +41,16 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IGetVerificationStatusUseCase>(),
             Mock.Of<IResubmitVerificationUseCase>());
 
+        // STEP-04: Run controller.Register with request and keep action.
         var action = await controller.Register(request, CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<OwnerRestaurantDto> and 2 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         var response = result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
+        // STEP-06: Verify ExecuteAsync is called once.
         useCase.Verify(x => x.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -53,9 +59,12 @@ public sealed class OwnerRestaurantControllerTests
     [Fact]
     public async Task Get_WhenRestaurantExists_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create expected as OwnerRestaurantDto.
         var expected = new OwnerRestaurantDto { Id = 7, Name = "Bún Bò Bà Diệu" };
+        // STEP-02: Mock IGetOwnerRestaurantUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetOwnerRestaurantUseCase>();
         useCase.Setup(item => item.ExecuteAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the OwnerRestaurantController under test as controller.
         var controller = new OwnerRestaurantController(
             Mock.Of<IRegisterRestaurantUseCase>(),
             useCase.Object,
@@ -64,8 +73,10 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IGetVerificationStatusUseCase>(),
             Mock.Of<IResubmitVerificationUseCase>());
 
+        // STEP-04: Run controller.Get and keep action.
         var action = await controller.Get(CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<OwnerRestaurantDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>()
             .Which.Data.Should().BeSameAs(expected);
@@ -76,10 +87,13 @@ public sealed class OwnerRestaurantControllerTests
     [Fact]
     public async Task Update_WithValidRequest_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as UpdateRestaurantRequestDto and create expected as OwnerRestaurantDto.
         var request = new UpdateRestaurantRequestDto { Name = "Tên mới" };
         var expected = new OwnerRestaurantDto { Id = 7, Name = "Tên mới" };
+        // STEP-02: Mock IUpdateOwnerRestaurantUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUpdateOwnerRestaurantUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the OwnerRestaurantController under test as controller.
         var controller = new OwnerRestaurantController(
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
@@ -88,8 +102,10 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IGetVerificationStatusUseCase>(),
             Mock.Of<IResubmitVerificationUseCase>());
 
+        // STEP-04: Run controller.Update with request and keep action.
         var action = await controller.Update(request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<OwnerRestaurantDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<OwnerRestaurantDto>>()
             .Which.Data.Should().BeSameAs(expected);
@@ -100,6 +116,7 @@ public sealed class OwnerRestaurantControllerTests
     [Fact]
     public async Task SubmitVerification_WithValidRequest_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create request as SubmitVerificationRequestDto and create expected as VerificationDto.
         var request = new SubmitVerificationRequestDto
         {
             LegalName = "Hộ kinh doanh Bún Bò Bà Diệu",
@@ -114,9 +131,11 @@ public sealed class OwnerRestaurantControllerTests
             ]
         };
         var expected = new VerificationDto { Id = 21, RestaurantId = 7, Status = "pending" };
+        // STEP-02: Mock ISubmitVerificationUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<ISubmitVerificationUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Create the OwnerRestaurantController under test as controller.
         var controller = new OwnerRestaurantController(
             Mock.Of<IRegisterRestaurantUseCase>(),
             Mock.Of<IGetOwnerRestaurantUseCase>(),
@@ -125,13 +144,16 @@ public sealed class OwnerRestaurantControllerTests
             Mock.Of<IGetVerificationStatusUseCase>(),
             Mock.Of<IResubmitVerificationUseCase>());
 
+        // STEP-04: Run controller.SubmitVerification with request and keep action.
         var action = await controller.SubmitVerification(request, CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<VerificationDto> and 2 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         var response = result.Value.Should().BeOfType<ApiResponse<VerificationDto>>().Subject;
         response.Success.Should().BeTrue();
         response.Data.Should().BeSameAs(expected);
+        // STEP-06: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 

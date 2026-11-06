@@ -18,10 +18,13 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task Create_WithValidRequest_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create request as CreateRoadmapRequestDto and create expected as RoadmapDetailDto.
         var request = new CreateRoadmapRequestDto { Title = "Trip", NumDays = 3 };
         var expected = new RoadmapDetailDto { Overview = new RoadmapSummaryDto { Id = 88 } };
+        // STEP-02: Mock ICreateRoadmapUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<ICreateRoadmapUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             useCase.Object,
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -38,8 +41,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.Create with request and keep action.
         var action = await controller.Create(request, CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<RoadmapDetailDto> and 1 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         result.Value.Should().BeOfType<ApiResponse<RoadmapDetailDto>>().Which.Data.Should().BeSameAs(expected);
@@ -50,10 +55,13 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task Update_WithValidRequest_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as UpdateRoadmapRequestDto and create expected as RoadmapDetailDto.
         var request = new UpdateRoadmapRequestDto { Title = "Updated trip" };
         var expected = new RoadmapDetailDto { Overview = new RoadmapSummaryDto { Id = 88 } };
+        // STEP-02: Mock IUpdateRoadmapUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUpdateRoadmapUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -70,8 +78,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.Update with request and keep action.
         var action = await controller.Update(88, request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<RoadmapDetailDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<RoadmapDetailDto>>().Which.Data.Should().BeSameAs(expected);
     }
@@ -81,6 +91,7 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task GetMyRoadmaps_WithValidQuery_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as GetMyRoadmapsRequestDto and create expected as Paged<RoadmapSummaryDto>.
         var request = new GetMyRoadmapsRequestDto { Page = 2, PageSize = 10 };
         var expected = new Paged<RoadmapSummaryDto>
         {
@@ -89,8 +100,10 @@ public sealed class RoadmapsControllerTests
             TotalItems = 11,
             TotalPages = 2
         };
+        // STEP-02: Mock IGetMyRoadmapsUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetMyRoadmapsUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             useCase.Object,
@@ -107,8 +120,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.GetMyRoadmaps with request and keep action.
         var action = await controller.GetMyRoadmaps(request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<Paged<RoadmapSummaryDto>> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<Paged<RoadmapSummaryDto>>>()
             .Which.Data.Should().BeSameAs(expected);
@@ -119,9 +134,12 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task GetDetail_WithOwnedRoadmap_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create expected as RoadmapDetailDto.
         var expected = new RoadmapDetailDto { Overview = new RoadmapSummaryDto { Id = 88 } };
+        // STEP-02: Mock IGetRoadmapDetailUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetRoadmapDetailUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -138,8 +156,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.GetDetail and keep action.
         var action = await controller.GetDetail(88, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<RoadmapDetailDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<RoadmapDetailDto>>().Which.Data.Should().BeSameAs(expected);
     }
@@ -149,11 +169,14 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task GetDayRoute_WithValidQuery_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as GetRoadmapDayRouteRequestDto and create expected as GetRoadmapDayRouteResponseDto.
         var request = new GetRoadmapDayRouteRequestDto { Profile = "walking" };
         var expected = new GetRoadmapDayRouteResponseDto { DayId = 301, Profile = "walking" };
+        // STEP-02: Mock IGetRoadmapDayRouteUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetRoadmapDayRouteUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, 301, request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -170,8 +193,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.GetDayRoute with request and keep action.
         var action = await controller.GetDayRoute(88, 301, request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<GetRoadmapDayRouteResponseDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<GetRoadmapDayRouteResponseDto>>().Which.Data.Should().BeSameAs(expected);
     }
@@ -181,7 +206,9 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task Delete_WithOwnedRoadmap_ShouldReturnOkApiResponseWithNullData()
     {
+        // STEP-01: Mock IDeleteRoadmapUseCase.
         var useCase = new Mock<IDeleteRoadmapUseCase>();
+        // STEP-02: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -198,12 +225,15 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-03: Run controller.Delete and keep action.
         var action = await controller.Delete(88, CancellationToken.None);
 
+        // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, envelope.Success is true and envelope.Data is null.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         var envelope = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
         envelope.Success.Should().BeTrue();
         envelope.Data.Should().BeNull();
+        // STEP-05: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(88, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -212,10 +242,13 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task GetSuggestions_WithValidQuery_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as GetRoadmapSuggestionsRequestDto and create expected as GetRoadmapSuggestionsResponseDto.
         var request = new GetRoadmapSuggestionsRequestDto { Province = "Đà Nẵng", Limit = 20 };
         var expected = new GetRoadmapSuggestionsResponseDto { RequestId = Guid.NewGuid() };
+        // STEP-02: Mock IGetRoadmapSuggestionsUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetRoadmapSuggestionsUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -232,8 +265,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.GetSuggestions with request and keep action.
         var action = await controller.GetSuggestions(88, request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<GetRoadmapSuggestionsResponseDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<GetRoadmapSuggestionsResponseDto>>()
             .Which.Data.Should().BeSameAs(expected);
@@ -244,10 +279,13 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task AddItem_WithValidBody_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create request as AddRoadmapItemRequestDto and create expected as RoadmapItemDto.
         var request = new AddRoadmapItemRequestDto { DishId = 105, MealSlot = "lunch" };
         var expected = new RoadmapItemDto { Id = 1502, DayId = 301 };
+        // STEP-02: Mock IAddRoadmapItemUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IAddRoadmapItemUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, 301, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -264,8 +302,10 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.AddItem with request and keep action.
         var action = await controller.AddItem(88, 301, request, CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<RoadmapItemDto> and 1 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(StatusCodes.Status201Created);
         result.Value.Should().BeOfType<ApiResponse<RoadmapItemDto>>().Which.Data.Should().BeSameAs(expected);
@@ -276,9 +316,12 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task GetItemDetail_WithOwnedItem_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create expected as RoadmapItemDetailDto.
         var expected = new RoadmapItemDetailDto { Id = 1502, DayId = 301 };
+        // STEP-02: Mock IGetRoadmapItemDetailUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetRoadmapItemDetailUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, 1502, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -295,10 +338,13 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.GetItemDetail and keep action.
         var action = await controller.GetItemDetail(88, 1502, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<RoadmapItemDetailDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<RoadmapItemDetailDto>>().Which.Data.Should().BeSameAs(expected);
+        // STEP-06: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(88, 1502, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -307,11 +353,14 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task UpdateItem_WithValidBody_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as UpdateRoadmapItemRequestDto and create expected as RoadmapItemDto.
         var request = new UpdateRoadmapItemRequestDto { DishId = 120, MealSlot = "lunch", SortOrder = 1 };
         var expected = new RoadmapItemDto { Id = 1600, DayId = 302 };
+        // STEP-02: Mock IUpdateRoadmapItemUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUpdateRoadmapItemUseCase>();
         useCase.Setup(item => item.ExecuteAsync(88, 1502, request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
+        // STEP-03: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -328,10 +377,13 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-04: Run controller.UpdateItem with request and keep action.
         var action = await controller.UpdateItem(88, 1502, request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<RoadmapItemDto> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<RoadmapItemDto>>().Which.Data.Should().BeSameAs(expected);
+        // STEP-06: Verify ExecuteAsync is called once.
         useCase.Verify(item => item.ExecuteAsync(88, 1502, request, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -340,7 +392,9 @@ public sealed class RoadmapsControllerTests
     [Fact]
     public async Task DeleteItem_WithOwnedMatchingItem_ShouldReturnOkApiResponseWithNullData()
     {
+        // STEP-01: Mock IDeleteRoadmapItemUseCase.
         var useCase = new Mock<IDeleteRoadmapItemUseCase>();
+        // STEP-02: Create the RoadmapsController under test as controller.
         var controller = new RoadmapsController(
             Mock.Of<ICreateRoadmapUseCase>(),
             Mock.Of<IGetMyRoadmapsUseCase>(),
@@ -357,12 +411,15 @@ public sealed class RoadmapsControllerTests
             Mock.Of<IGenerateRoadmapUseCase>(),
             Mock.Of<IGetRoadmapGenerationJobUseCase>());
 
+        // STEP-03: Run controller.DeleteItem and keep action.
         var action = await controller.DeleteItem(88, 1502, CancellationToken.None);
 
+        // STEP-04: Assert action is OkObjectResult, result.Value is ApiResponse<object>, envelope.Success is true and envelope.Data is null.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         var envelope = result.Value.Should().BeOfType<ApiResponse<object>>().Subject;
         envelope.Success.Should().BeTrue();
         envelope.Data.Should().BeNull();
+        // STEP-05: Verify ExecuteAsync is called once.
         useCase.Verify(value => value.ExecuteAsync(88, 1502, It.IsAny<CancellationToken>()), Times.Once);
     }
 

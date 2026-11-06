@@ -14,9 +14,11 @@ public sealed class ReplaceModRolePermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithEmptyPermissionCodes_ShouldBeValid()
     {
+        // STEP-01: Validate ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } and keep result.
         var result = await _validator.ValidateAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = [] });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -25,9 +27,11 @@ public sealed class ReplaceModRolePermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNullPermissionCodes_ShouldHaveRequiredError()
     {
+        // STEP-01: Validate ReplaceModRolePermissionsRequestDto { PermissionCodes = null } and keep result.
         var result = await _validator.ValidateAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = null! });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "PermissionCodes");
     }
 
@@ -38,9 +42,11 @@ public sealed class ReplaceModRolePermissionsRequestDtoValidatorTests
     [InlineData(" ")]
     public async Task Validate_WithBlankPermissionCode_ShouldBeInvalid(string code)
     {
+        // STEP-01: Validate ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } and keep result.
         var result = await _validator.ValidateAsync(
             new ReplaceModRolePermissionsRequestDto { PermissionCodes = [code] });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "PermissionCodes[0]");
     }
 
@@ -49,11 +55,13 @@ public sealed class ReplaceModRolePermissionsRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithDuplicateCodes_ShouldBeInvalid()
     {
+        // STEP-01: Validate ReplaceModRolePermissionsRequestDto { PermissionCodes = the expected items } and keep result.
         var result = await _validator.ValidateAsync(new ReplaceModRolePermissionsRequestDto
         {
             PermissionCodes = ["USER_BAN", "USER_BAN"]
         });
 
+        // STEP-02: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "PermissionCodes");
     }
 }

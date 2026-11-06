@@ -26,7 +26,9 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidTraveler_ShouldCreatePendingAccountAndSendVerificationEmail()
     {
+        // STEP-01: Create operations as List<string>.
         var operations = new List<string>();
+        // STEP-02: Declare addedUser to capture a call argument and 3 more; mock IAuthenticationRepository and 5 more; stub repository.EmailExistsAsync and 10 more.
         var repository = new Mock<IAuthenticationRepository>();
         repository.Setup(x => x.EmailExistsAsync("an.nguyen@gmail.com", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -69,6 +71,7 @@ public sealed class RegisterAccountUseCaseTests
                 addedUser!.Id = 12;
             })
             .ReturnsAsync(3);
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -77,6 +80,7 @@ public sealed class RegisterAccountUseCaseTests
             auditService,
             unitOfWork);
 
+        // STEP-04: Run useCase.ExecuteAsync with RegisterAccountRequestDto { Email, Password, DisplayName, ... } and keep result.
         var result = await useCase.ExecuteAsync(new RegisterAccountRequestDto
         {
             Email = "An.Nguyen@GMAIL.com",
@@ -85,26 +89,32 @@ public sealed class RegisterAccountUseCaseTests
             Role = "TRAVELER"
         }, CancellationToken.None);
 
+        // STEP-05: Assert addedUser is not null, addedUser.Email is "an.nguyen@gmail.com", addedUser.PasswordHash is a test value and 2 more.
         addedUser.Should().NotBeNull();
         addedUser!.Email.Should().Be("an.nguyen@gmail.com");
         addedUser.PasswordHash.Should().Be("password-hash");
         addedUser.DisplayName.Should().Be("Nguyễn An");
         addedUser.Status.Should().Be(UserStatus.PendingVerification);
+        // STEP-06: Assert addedToken is not null, addedToken.User is the same instance as addedUser, addedToken.Purpose is UserTokenPurpose.EmailVerify and 1 more.
         addedToken.Should().NotBeNull();
         addedToken!.User.Should().BeSameAs(addedUser);
         addedToken.Purpose.Should().Be(UserTokenPurpose.EmailVerify);
         addedToken.TokenHash.Should().Be("verification-hash");
+        // STEP-07: Assert addedToken.ExpiresAt is Now.AddHours(), auditEntry is not null, auditEntry.Action is AuditActions.UserRegistered and 3 more.
         addedToken.ExpiresAt.Should().Be(Now.AddHours(24));
         auditEntry.Should().NotBeNull();
         auditEntry!.Action.Should().Be(AuditActions.UserRegistered);
         auditEntry.ActorUser.Should().BeSameAs(addedUser);
         auditEntry.SubjectUser.Should().BeSameAs(addedUser);
         auditEntry.ActorRole.Should().Be("TRAVELER");
+        // STEP-08: Assert result.UserId is 12, result.Email is "an.nguyen@gmail.com", result.Role is "TRAVELER" and result.Status is "pending_verification".
         result.UserId.Should().Be(12);
         result.Email.Should().Be("an.nguyen@gmail.com");
         result.Role.Should().Be("TRAVELER");
         result.Status.Should().Be("pending_verification");
+        // STEP-09: Assert operations equals "save".
         operations.Should().Equal("save", "commit", "email");
+        // STEP-10: Verify SendEmailVerificationAsync is called once, SaveChangesAsync is called once and CommitAsync is called once.
         emailService.Verify(x => x.SendEmailVerificationAsync(
             "an.nguyen@gmail.com",
             "Nguyễn An",
@@ -120,6 +130,7 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidRestaurantOwner_ShouldAssignOwnerRole()
     {
+        // STEP-01: Create transaction through CreateTransaction; mock IAuthenticationRepository and 3 more; stub repository.EmailExistsAsync and 5 more.
         var repository = new Mock<IAuthenticationRepository>();
         repository.Setup(x => x.EmailExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -135,6 +146,7 @@ public sealed class RegisterAccountUseCaseTests
         var tokenService = new Mock<IAuthenticationTokenService>();
         tokenService.Setup(x => x.CreateUserToken())
             .Returns(new GeneratedUserToken("raw-token", "token-hash"));
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -142,12 +154,16 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IEmailService>(),
             new Mock<IAuditLogService>(),
             unitOfWork);
+        // STEP-03: Create request through ValidRequest and set request.Role to "RESTAURANT_OWNER".
         var request = ValidRequest();
         request.Role = "RESTAURANT_OWNER";
 
+        // STEP-04: Run useCase.ExecuteAsync with request and keep result.
         var result = await useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert result.Role is "RESTAURANT_OWNER".
         result.Role.Should().Be("RESTAURANT_OWNER");
+        // STEP-06: Verify GetRoleByCodeAsync is called once.
         repository.Verify(x => x.GetRoleByCodeAsync("RESTAURANT_OWNER", It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -156,6 +172,7 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithExistingEmail_ShouldThrowConflictWithoutWrites()
     {
+        // STEP-01: Mock IAuthenticationRepository, IPasswordService, IEmailService and IUnitOfWork; stub repository.EmailExistsAsync and unitOfWork.BeginTransactionAsync.
         var repository = new Mock<IAuthenticationRepository>();
         repository.Setup(x => x.EmailExistsAsync("used@angi.test", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -164,6 +181,7 @@ public sealed class RegisterAccountUseCaseTests
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateTransaction().Object);
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -172,13 +190,17 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IAuditLogService>(),
             unitOfWork);
 
+        // STEP-03: Create request through ValidRequest and set request.Email to "USED@angi.test".
         var request = ValidRequest();
         request.Email = "USED@angi.test";
 
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ConflictException and exception.ErrorCode is "EMAIL_ALREADY_EXISTS".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("EMAIL_ALREADY_EXISTS");
+        // STEP-06: Verify Hash is never called, AddUser is never called, SaveChangesAsync is never called and SendEmailVerificationAsync is never called.
         passwordService.Verify(x => x.Hash(It.IsAny<string>()), Times.Never);
         repository.Verify(x => x.AddUser(It.IsAny<User>()), Times.Never);
         unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -192,6 +214,7 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenConcurrentInsertWins_ShouldThrowEmailAlreadyExistsWithoutEmail()
     {
+        // STEP-01: Create transaction through CreateTransaction; mock IAuthenticationRepository and 4 more; stub repository.EmailExistsAsync and 5 more.
         var repository = new Mock<IAuthenticationRepository>();
         repository.Setup(x => x.EmailExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -209,6 +232,7 @@ public sealed class RegisterAccountUseCaseTests
             .ReturnsAsync(transaction.Object);
         unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UniqueConstraintViolationException("ix_users_email", new Exception("duplicate")));
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -217,10 +241,13 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IAuditLogService>(),
             unitOfWork);
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "EMAIL_ALREADY_EXISTS".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("EMAIL_ALREADY_EXISTS");
+        // STEP-05: Verify CommitAsync is never called and SendEmailVerificationAsync is never called.
         transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
         emailService.Verify(x => x.SendEmailVerificationAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(),
@@ -232,9 +259,11 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenCommitFails_ShouldNotSendVerificationEmail()
     {
+        // STEP-01: Get repository from SuccessfulRepository, get passwordService from SuccessfulPasswordService and get tokenService from SuccessfulTokenService.
         var repository = SuccessfulRepository();
         var passwordService = SuccessfulPasswordService();
         var tokenService = SuccessfulTokenService();
+        // STEP-02: Create transaction through CreateTransaction; mock IEmailService and 1 more; stub transaction.CommitAsync and 2 more.
         var emailService = new Mock<IEmailService>();
         var transaction = CreateTransaction();
         transaction.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>()))
@@ -243,6 +272,7 @@ public sealed class RegisterAccountUseCaseTests
         unitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(transaction.Object);
         unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             passwordService,
@@ -251,9 +281,12 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IAuditLogService>(),
             unitOfWork);
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-05: Assert act throws InvalidOperationException.
         await act.Should().ThrowAsync<InvalidOperationException>();
+        // STEP-06: Verify SendEmailVerificationAsync is never called.
         emailService.Verify(x => x.SendEmailVerificationAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Never);
@@ -264,7 +297,9 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WhenEmailFails_ShouldHaveCommittedBeforePropagatingFailure()
     {
+        // STEP-01: Get repository from SuccessfulRepository.
         var repository = SuccessfulRepository();
+        // STEP-02: Create transaction through CreateTransaction; mock IEmailService and 1 more; stub emailService.SendEmailVerificationAsync and 2 more.
         var emailService = new Mock<IEmailService>();
         emailService.Setup(x => x.SendEmailVerificationAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(),
@@ -275,6 +310,7 @@ public sealed class RegisterAccountUseCaseTests
         unitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(transaction.Object);
         unitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
+        // STEP-03: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             SuccessfulPasswordService(),
@@ -283,9 +319,12 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IAuditLogService>(),
             unitOfWork);
 
+        // STEP-04: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(ValidRequest(), CancellationToken.None);
 
+        // STEP-05: Assert act throws ServiceUnavailableException.
         await act.Should().ThrowAsync<ServiceUnavailableException>();
+        // STEP-06: Verify CommitAsync is called once.
         transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -294,8 +333,10 @@ public sealed class RegisterAccountUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidRequest_ShouldFailValidationFirst()
     {
+        // STEP-01: Mock IAuthenticationRepository and IUnitOfWork.
         var repository = new Mock<IAuthenticationRepository>();
         var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(
             repository,
             new Mock<IPasswordService>(),
@@ -304,9 +345,12 @@ public sealed class RegisterAccountUseCaseTests
             new Mock<IAuditLogService>(),
             unitOfWork);
 
+        // STEP-03: Wrap useCase.ExecuteAsync with an empty RegisterAccountRequestDto in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(new RegisterAccountRequestDto(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-05: Verify BeginTransactionAsync is never called and EmailExistsAsync is never called.
         unitOfWork.Verify(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
         repository.Verify(x => x.EmailExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }

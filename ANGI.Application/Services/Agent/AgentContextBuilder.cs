@@ -4,6 +4,7 @@ using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Interfaces.Repositories.Discovery;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
+using ANGI.Application.Services.Agent.Intake;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 
@@ -16,10 +17,12 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
     /// <summary>Loads completed bounded history and the latest official roadmap after ownership checks.</summary>
     public async Task<AgentContext> BuildAsync(AgentConversation conversation, SendAgentMessageRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Prepare stored through AgentJson.Read, state, roadmap from RoadmapMissing, proposal from repository.GetProposalSnapshotAsync and 1 more.
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
-                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, PlanningIntake = stored.PlanningIntake }
+                Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
+                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
             : stored;
         var roadmap = conversation.RoadmapId is { } id
             ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
@@ -27,6 +30,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var proposal = conversation.CurrentProposalId is { } proposalId
             ? await repository.GetProposalSnapshotAsync(conversation.Id, proposalId, ct) : null;
         AgentSnapshot? source = null;
+        // STEP-02: When proposal.Status is AgentProposalStatus.Ready and proposal.ExpiresAt > clock.GetUtcNow().UtcDateTime, set source and more.
         if (proposal?.Status == AgentProposalStatus.Ready && proposal.ExpiresAt > clock.GetUtcNow().UtcDateTime)
         {
             source = AgentJson.Read<AgentSnapshot>(proposal.Payload);
@@ -38,11 +42,15 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             if (request.ConfirmedState is null && state.SourceRoadmapUpdatedAt != roadmap.UpdatedAt) state = RefreshRoadmapMetadata(state, roadmap);
             source = AgentJson.FromRoadmap(roadmap, state);
         }
+        // STEP-03: Load history through repository.GetCompletedHistoryAsync.
         var history = await repository.GetCompletedHistoryAsync(conversation.Id, limits.MaxHistoryMessages, ct);
+        // STEP-04: When preferences exists and proposal.Status is not AgentProposalStatus.Ready, set state.
         // A legacy ready preview can still be committed unchanged. Other turns initialize lazily.
         if (preferences is not null && proposal?.Status != AgentProposalStatus.Ready)
             state = await preferences.EnsureAsync(state, conversation.UserId, ct);
+        // STEP-05: Load catalogTags through tags.GetTagsAsync.
         var catalogTags = await tags.GetTagsAsync(null, ct);
+        // STEP-06: Return a new AgentContext.
         return new AgentContext
         {
             ConversationId = conversation.Id, UserId = conversation.UserId, State = state, Source = source,
@@ -59,11 +67,13 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
     /// <summary>Preserves manual metadata edits when a new draft starts from an already committed roadmap.</summary>
     private static AgentState RefreshRoadmapMetadata(AgentState state, Domain.Entities.Roadmap roadmap)
     {
+        // STEP-01: Prepare current through StateFromRoadmap, retainGps, latitude, longitude and 1 more.
         var current = StateFromRoadmap(roadmap);
         var retainGps = current.OriginMode == "gps" && state.OriginMode == "gps";
         var latitude = retainGps ? state.OriginLatitude : current.OriginLatitude;
         var longitude = retainGps ? state.OriginLongitude : current.OriginLongitude;
         var focus = state.FocusDay <= current.NumDays ? state.FocusDay : null;
+        // STEP-02: Return a copy of state with updated fields.
         return state with
         {
             Title = current.Title, StartDate = current.StartDate, NumDays = current.NumDays,
@@ -71,6 +81,8 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             Province = state.Province ?? current.Province, OriginMode = current.OriginMode,
             OriginLatitude = latitude, OriginLongitude = longitude, OriginLabel = current.OriginLabel,
             RadiusKm = latitude.HasValue ? state.RadiusKm : null, FocusDay = focus, FocusMeal = focus.HasValue ? state.FocusMeal : null,
+            DayAreas = state.DayAreas?.Where(x => x.DayNumber <= current.NumDays).ToArray() is { Length: > 0 } areas ? areas : null,
+            WidenedMeals = state.WidenedMeals?.Where(x => x.DayNumber <= current.NumDays).ToArray() is { Length: > 0 } widened ? widened : null,
             SourceRoadmapUpdatedAt = roadmap.UpdatedAt
         };
     }

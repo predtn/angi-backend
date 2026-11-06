@@ -13,7 +13,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
         {
             builder.ToTable("roadmaps", table =>
             {
-                table.HasCheckConstraint("ck_roadmaps_num_days", "num_days BETWEEN 1 AND 30");
+                table.HasCheckConstraint("ck_roadmaps_num_days", $"num_days BETWEEN 1 AND {Roadmap.MaxNumDays}");
                 table.HasCheckConstraint("ck_roadmaps_budget_amount", "budget_amount >= 0");
                 table.HasCheckConstraint("ck_roadmaps_updated_at", "isfinite(updated_at)");
                 // Data Dictionary 1.1: the coordinates are stored if and only if origin_mode = 'pinned'

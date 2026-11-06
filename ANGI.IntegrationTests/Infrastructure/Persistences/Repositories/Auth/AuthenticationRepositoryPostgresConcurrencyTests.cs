@@ -29,6 +29,7 @@ public sealed class AuthenticationRepositoryPostgresConcurrencyTests
     [PostgresIntegrationFact]
     public async Task VerifyEmail_WithTwoDatabaseScopes_ShouldAllowExactlyOneConsumer()
     {
+        // STEP-01: Get connectionString from RequiredConnectionString, create seed through SeedPendingUserAsync, create gate as TaskCompletionSource and 4 more.
         var connectionString = RequiredConnectionString();
         var seed = await SeedPendingUserAsync(connectionString, "verify", "shared-token-hash");
 
@@ -41,18 +42,22 @@ public sealed class AuthenticationRepositoryPostgresConcurrencyTests
 
             var outcomes = await Task.WhenAll(first, second);
 
+            // STEP-02: Assert outcomes has exactly one matching item.
             outcomes.Should().ContainSingle(outcome => outcome == "success");
             outcomes.Should().ContainSingle(outcome => outcome == "TOKEN_ALREADY_USED");
 
+            // STEP-03: Create assertionContext through CreateContext, get token from assertionContext.UserTokens.SingleAsync and 1 more.
             await using var assertionContext = CreateContext(connectionString);
             var token = await assertionContext.UserTokens.SingleAsync(item => item.Id == seed.TokenId);
             var user = await assertionContext.Users.SingleAsync(item => item.Id == seed.UserId);
+            // STEP-04: Assert token.UsedAt is Now, user.Status is UserStatus.Active and user.EmailVerifiedAt is Now.
             token.UsedAt.Should().Be(Now);
             user.Status.Should().Be(UserStatus.Active);
             user.EmailVerifiedAt.Should().Be(Now);
         }
         finally
         {
+            // STEP-05: Clean up: call DeleteUserAsync.
             await DeleteUserAsync(connectionString, seed.UserId);
         }
     }
@@ -62,12 +67,14 @@ public sealed class AuthenticationRepositoryPostgresConcurrencyTests
     [PostgresIntegrationFact]
     public async Task ResendVerificationEmail_WithTwoDatabaseScopes_ShouldLeaveOneUnusedToken()
     {
+        // STEP-01: Get connectionString from RequiredConnectionString, create seed through SeedPendingUserAsync and create gate as TaskCompletionSource.
         var connectionString = RequiredConnectionString();
         var seed = await SeedPendingUserAsync(connectionString, "resend", "old-token-hash");
 
         try
         {
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            // STEP-02: Obtain first through RunResendAsync and second through RunResendAsync.
             var first = RunResendAsync(
                 connectionString,
                 seed.Email,
@@ -78,6 +85,7 @@ public sealed class AuthenticationRepositoryPostgresConcurrencyTests
                 seed.Email,
                 new GeneratedUserToken("second-raw-token", $"second-{Guid.NewGuid():N}"),
                 gate.Task);
+            // STEP-03: Call gate.SetResult, call Task.WhenAll, create assertionContext through CreateContext and 1 more.
             gate.SetResult();
 
             await Task.WhenAll(first, second);
@@ -88,12 +96,14 @@ public sealed class AuthenticationRepositoryPostgresConcurrencyTests
                 .OrderBy(item => item.Id)
                 .ToListAsync();
 
+            // STEP-04: Assert tokens has 3 item(s), tokens has exactly one matching item and tokens.Single(filtered).UsedAt is not null.
             tokens.Should().HaveCount(3);
             tokens.Should().ContainSingle(item => item.UsedAt == null);
             tokens.Single(item => item.Id == seed.TokenId).UsedAt.Should().NotBeNull();
         }
         finally
         {
+            // STEP-05: Clean up: call DeleteUserAsync.
             await DeleteUserAsync(connectionString, seed.UserId);
         }
     }

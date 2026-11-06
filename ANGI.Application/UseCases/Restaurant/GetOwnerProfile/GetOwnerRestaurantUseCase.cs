@@ -31,11 +31,13 @@ public sealed class GetOwnerRestaurantUseCase : IGetOwnerRestaurantUseCase
     /// <summary>Loads and maps the owner restaurant or raises the documented not-found error.</summary>
     public async Task<OwnerRestaurantDto> ExecuteAsync(CancellationToken ct)
     {
+        // STEP-01: Prepare ownerId and restaurant from restaurantRepository.GetOwnerProfileAsync.
         var ownerId = _currentUserService.UserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Bạn cần đăng nhập để xem nhà hàng.");
         var restaurant = await _restaurantRepository.GetOwnerProfileAsync(ownerId, ct)
             ?? throw new NotFoundException("RESTAURANT_NOT_FOUND", "Không tìm thấy nhà hàng.");
 
+        // STEP-02: Return the result of OwnerRestaurantMapper.Map.
         return OwnerRestaurantMapper.Map(restaurant, _cloudinaryService, _timeProvider);
     }
 }

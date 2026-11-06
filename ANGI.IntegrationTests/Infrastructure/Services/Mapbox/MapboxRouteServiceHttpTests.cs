@@ -21,8 +21,10 @@ public sealed class MapboxRouteServiceHttpTests
     [Fact]
     public async Task CalculateRouteAsync_ThroughRealHttpTransport_ShouldMapAndCacheMapboxResponse()
     {
+        // STEP-01: Define requestCount as 0 and derive receivedPathAndQuery from string.Empty.
         var requestCount = 0;
         var receivedPathAndQuery = string.Empty;
+        // STEP-02: Obtain mapboxStub through StartMapboxStubAsync; assert first.IsEstimated is false, first.Legs equals a new RouteMetric and 3 more.
         var mapboxStub = await StartMapboxStubAsync(async context =>
         {
             requestCount++;

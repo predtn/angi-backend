@@ -16,8 +16,10 @@ public sealed class UpdateModRequestDtoValidatorTests
     [InlineData("banned")]
     public async Task Validate_WithoutValidField_ShouldFail(string? status)
     {
+        // STEP-01: Validate UpdateModRequestDto { Status = status } and keep result.
         var result = await new UpdateModRequestDtoValidator().ValidateAsync(new UpdateModRequestDto { Status = status });
 
+        // STEP-02: Assert result.IsValid is false.
         result.IsValid.Should().BeFalse();
     }
 
@@ -30,11 +32,13 @@ public sealed class UpdateModRequestDtoValidatorTests
     [InlineData("Bad\u0001Name")]
     public async Task Validate_WithInvalidDisplayName_ShouldFail(string displayName)
     {
+        // STEP-01: Validate UpdateModRequestDto { DisplayName = displayName } and keep result.
         var result = await new UpdateModRequestDtoValidator().ValidateAsync(new UpdateModRequestDto
         {
             DisplayName = displayName
         });
 
+        // STEP-02: Assert result.Errors contains a matching item.
         result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateModRequestDto.DisplayName));
     }
 
@@ -47,12 +51,14 @@ public sealed class UpdateModRequestDtoValidatorTests
     [InlineData("Valid Name", "deactivated")]
     public async Task Validate_WithValidPartialPatch_ShouldPass(string? displayName, string? status)
     {
+        // STEP-01: Validate UpdateModRequestDto { DisplayName = displayName, Status = status } and keep result.
         var result = await new UpdateModRequestDtoValidator().ValidateAsync(new UpdateModRequestDto
         {
             DisplayName = displayName,
             Status = status
         });
 
+        // STEP-02: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 }

@@ -17,14 +17,19 @@ public sealed class ModsControllerTests
     [Fact]
     public async Task List_ShouldReturnOkApiResponse()
     {
+        // STEP-01: Create request as ListModsRequestDto and create expected as Paged<AdminUserCardDto>.
         var request = new ListModsRequestDto();
         var expected = new Paged<AdminUserCardDto>();
+        // STEP-02: Mock IListModsUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IListModsUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Build controller under test through Create.
         var controller = Create(list: useCase.Object);
 
+        // STEP-04: Run controller.List with request and keep action.
         var action = await controller.List(request, CancellationToken.None);
 
+        // STEP-05: Assert action is OkObjectResult, result.Value is ApiResponse<Paged<AdminUserCardDto>> and result.Value.Data is the same instance as expected.
         var result = action.Should().BeOfType<OkObjectResult>().Subject;
         result.Value.Should().BeOfType<ApiResponse<Paged<AdminUserCardDto>>>().Which.Data.Should().BeSameAs(expected);
     }
@@ -34,14 +39,19 @@ public sealed class ModsControllerTests
     [Fact]
     public async Task Create_ShouldReturnCreatedApiResponse()
     {
+        // STEP-01: Create request as CreateModRequestDto and create expected as AdminUserCardDto.
         var request = new CreateModRequestDto();
         var expected = new AdminUserCardDto();
+        // STEP-02: Mock ICreateModUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<ICreateModUseCase>();
         useCase.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Build controller under test through Create.
         var controller = Create(create: useCase.Object);
 
+        // STEP-04: Run controller.Create with request and keep action.
         var action = await controller.Create(request, CancellationToken.None);
 
+        // STEP-05: Assert action is ObjectResult, result.StatusCode is 201, result.Value is ApiResponse<AdminUserCardDto> and 1 more.
         var result = action.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(201);
         result.Value.Should().BeOfType<ApiResponse<AdminUserCardDto>>().Which.Data.Should().BeSameAs(expected);
@@ -52,14 +62,20 @@ public sealed class ModsControllerTests
     [Fact]
     public async Task Get_ShouldDelegateUserIdAndReturnOkApiResponse()
     {
+        // STEP-01: Create expected as ModDetailDto.
         var expected = new ModDetailDto();
+        // STEP-02: Mock IGetModDetailUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IGetModDetailUseCase>();
         useCase.Setup(item => item.ExecuteAsync(42, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Build controller under test through Create.
         var controller = Create(get: useCase.Object);
 
+        // STEP-04: Run controller.Get and keep action.
         var action = await controller.Get(42, CancellationToken.None);
 
+        // STEP-05: Verify every setup on useCase ran.
         useCase.VerifyAll();
+        // STEP-06: Assert action is OkObjectResult, action.Value is ApiResponse<ModDetailDto> and action.Value.Data is the same instance as expected.
         action.Should().BeOfType<OkObjectResult>().Which.Value
             .Should().BeOfType<ApiResponse<ModDetailDto>>().Which.Data.Should().BeSameAs(expected);
     }
@@ -69,15 +85,21 @@ public sealed class ModsControllerTests
     [Fact]
     public async Task Update_ShouldDelegateRequestAndReturnOkApiResponse()
     {
+        // STEP-01: Create request as UpdateModRequestDto and create expected as AdminUserCardDto.
         var request = new UpdateModRequestDto { Status = "deactivated" };
         var expected = new AdminUserCardDto();
+        // STEP-02: Mock IUpdateModUseCase; stub useCase.ExecuteAsync.
         var useCase = new Mock<IUpdateModUseCase>();
         useCase.Setup(item => item.ExecuteAsync(42, request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        // STEP-03: Build controller under test through Create.
         var controller = Create(update: useCase.Object);
 
+        // STEP-04: Run controller.Update with request and keep action.
         var action = await controller.Update(42, request, CancellationToken.None);
 
+        // STEP-05: Verify every setup on useCase ran.
         useCase.VerifyAll();
+        // STEP-06: Assert action is OkObjectResult, action.Value is ApiResponse<AdminUserCardDto> and action.Value.Data is the same instance as expected.
         action.Should().BeOfType<OkObjectResult>().Which.Value
             .Should().BeOfType<ApiResponse<AdminUserCardDto>>().Which.Data.Should().BeSameAs(expected);
     }

@@ -17,8 +17,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task Lookup_EscapesWildcardsAndSeparatesUnavailableFromMissing()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database matches has exactly one matching item, matches[0].Id is seed.DishId, matches[0].Available is false and 3 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var dish = await db.Dishes.SingleAsync(x => x.Id == seed.DishId);
@@ -43,8 +45,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task CandidateLimit_ComesAfterAllAgentTagsAndMealCompatibility()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database candidates equals correct.Id and named equals correct.Id.
         await factory.ExecuteDbAsync(async db =>
         {
             var first = new Tag { Code = "agent_one", Name = "One", TagType = TagType.Category };
@@ -71,8 +75,10 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
     [PostgresEndToEndFact]
     public async Task Provinces_ComeFromPublicRestaurantsAndNearestWins()
     {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
         await factory.ResetDatabaseAsync();
         var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database repository.GetProvincesAsync() equals province, repository.NearestProvinceAsync() is province and 2 more.
         await factory.ExecuteDbAsync(async db =>
         {
             var repository = new AgentCatalogRepository(db);
@@ -87,6 +93,40 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
             await db.SaveChangesAsync();
             (await repository.GetProvincesAsync(default)).Should().BeEmpty();
             (await repository.NearestProvinceAsync(restaurant.Latitude, restaurant.Longitude, 1m, default)).Should().BeNull();
+        });
+    }
+
+    // TEST-04: Dish names come only from public restaurants and leave out hidden and removed dishes; an unavailable dish stays, because its name is still a dish.
+    /// <summary>Verifies the word list a reply is checked against holds only what the catalog publicly calls a dish.</summary>
+    [PostgresEndToEndFact]
+    public async Task DishNames_LeaveOutHiddenRemovedAndNonPublic()
+    {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
+        await factory.ResetDatabaseAsync();
+        var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert in the database the name is returned while available or not, and gone once hidden, removed or its restaurant is hidden.
+        await factory.ExecuteDbAsync(async db =>
+        {
+            var repository = new AgentCatalogRepository(db);
+            var dish = await db.Dishes.SingleAsync(x => x.Id == seed.DishId);
+            var restaurant = await db.Restaurants.SingleAsync(x => x.Id == seed.RestaurantId);
+            (await repository.GetDishNamesAsync(default)).Should().Contain(dish.Name);
+
+            dish.IsAvailable = false;
+            await db.SaveChangesAsync();
+            (await repository.GetDishNamesAsync(default)).Should().Contain(dish.Name);
+
+            foreach (var status in new[] { DishStatus.Hidden, DishStatus.Removed })
+            {
+                dish.Status = status;
+                await db.SaveChangesAsync();
+                (await repository.GetDishNamesAsync(default)).Should().NotContain(dish.Name);
+            }
+
+            dish.Status = DishStatus.Active;
+            restaurant.ModerationStatus = RestaurantModerationStatus.Hidden;
+            await db.SaveChangesAsync();
+            (await repository.GetDishNamesAsync(default)).Should().BeEmpty();
         });
     }
 }

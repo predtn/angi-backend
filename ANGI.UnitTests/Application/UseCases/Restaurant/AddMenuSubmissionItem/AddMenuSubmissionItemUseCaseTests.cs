@@ -22,8 +22,10 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithValidProposal_ShouldAddNewItem()
     {
+        // STEP-01: Create submission as MenuSubmission and add a MenuSubmissionItem to submission.Items.
         var submission = new MenuSubmission { Id = 14 };
         submission.Items.Add(new MenuSubmissionItem { Id = 1, SortOrder = 3 });
+        // STEP-02: Mock IRestaurantMenuRepository, ICurrentUserService and 1 more; stub repository.LockOwnedSubmissionAsync, repository.GetExistingTagIdsAsync and 4 more.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
@@ -38,6 +40,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         unitOfWork.Setup(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mock.Of<IUnitOfWorkTransaction>());
         unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        // STEP-03: Create the AddMenuSubmissionItemUseCase under test as useCase.
         var useCase = new AddMenuSubmissionItemUseCase(
             new AddMenuSubmissionItemRequestDtoValidator(),
             repository.Object,
@@ -45,6 +48,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
             currentUser.Object,
             unitOfWork.Object);
 
+        // STEP-04: Run useCase.ExecuteAsync with AddMenuSubmissionItemRequestDto { Name, Description, DishForm, ... } and keep result.
         var result = await useCase.ExecuteAsync(14, new AddMenuSubmissionItemRequestDto
         {
             Name = " Mì Quảng gà ",
@@ -54,6 +58,7 @@ public sealed class AddMenuSubmissionItemUseCaseTests
             TagIds = [2]
         }, CancellationToken.None);
 
+        // STEP-05: Assert result.Id is 340, result.Change is "new", result.Name is the expected text and result.SortOrder is 4.
         result.Id.Should().Be(340);
         result.Change.Should().Be("new");
         result.Name.Should().Be("Mì Quảng gà");
@@ -69,13 +74,17 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [InlineData(MenuSubmissionStatus.Cancelled)]
     public async Task ExecuteAsync_WithNonDraftSubmission_ShouldThrowConflict(MenuSubmissionStatus status)
     {
+        // STEP-01: Mock IRestaurantMenuRepository; stub repository.LockOwnedSubmissionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MenuSubmission { Id = 14, Status = status });
+        // STEP-02: Build useCase under test through CreateUseCase.
         var useCase = CreateUseCase(repository, new Mock<IMediaRepository>());
 
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
         var act = () => useCase.ExecuteAsync(14, ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert act throws ConflictException and exception.ErrorCode is "SUBMISSION_NOT_EDITABLE".
         var exception = await act.Should().ThrowAsync<ConflictException>();
         exception.Which.ErrorCode.Should().Be("SUBMISSION_NOT_EDITABLE");
     }
@@ -85,13 +94,16 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithUnknownSubmission_ShouldThrowNotFound()
     {
+        // STEP-01: Mock IRestaurantMenuRepository; stub repository.LockOwnedSubmissionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync((MenuSubmission?)null);
 
+        // STEP-02: Wrap CreateUseCase().ExecuteAsync in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository, new Mock<IMediaRepository>())
             .ExecuteAsync(14, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert act throws NotFoundException.
         await act.Should().ThrowAsync<NotFoundException>();
     }
 
@@ -100,17 +112,23 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithNonexistentTag_ShouldRejectBeforeAdding()
     {
+        // STEP-01: Get repository from DraftRepository.
         var repository = DraftRepository();
+        // STEP-02: Stub repository.GetExistingTagIdsAsync.
         repository.Setup(item => item.GetExistingTagIdsAsync(
                 It.IsAny<IReadOnlyCollection<short>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        // STEP-03: Create request through ValidRequest and set request.TagIds to a test items.
         var request = ValidRequest();
         request.TagIds = [2];
 
+        // STEP-04: Wrap CreateUseCase().ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository, new Mock<IMediaRepository>())
             .ExecuteAsync(14, request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
+        // STEP-06: Verify AddItem is never called.
         repository.Verify(item => item.AddItem(It.IsAny<MenuSubmissionItem>()), Times.Never);
     }
 
@@ -123,7 +141,9 @@ public sealed class AddMenuSubmissionItemUseCaseTests
         string mimeType,
         string storageKey)
     {
+        // STEP-01: Get repository from DraftRepository.
         var repository = DraftRepository();
+        // STEP-02: Mock IMediaRepository; stub mediaRepository.GetOwnedByIdsAsync.
         var mediaRepository = new Mock<IMediaRepository>();
         mediaRepository.Setup(item => item.GetOwnedByIdsAsync(
                 12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
@@ -133,12 +153,15 @@ public sealed class AddMenuSubmissionItemUseCaseTests
                 MimeType = mimeType,
                 StorageKey = storageKey
             }]);
+        // STEP-03: Create request through ValidRequest and set request.CoverMediaId to 50.
         var request = ValidRequest();
         request.CoverMediaId = 50;
 
+        // STEP-04: Wrap CreateUseCase().ExecuteAsync with request in act so its outcome can be asserted.
         var act = () => CreateUseCase(repository, mediaRepository)
             .ExecuteAsync(14, request, CancellationToken.None);
 
+        // STEP-05: Assert act throws ValidationException.
         await act.Should().ThrowAsync<ValidationException>();
     }
 
@@ -147,7 +170,9 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithOwnedDishImage_ShouldKeepMediaDetachedFromAddedGraph()
     {
+        // STEP-01: Get repository from DraftRepository.
         var repository = DraftRepository();
+        // STEP-02: Declare added to capture a call argument; mock IMediaRepository; stub repository.AddItem and mediaRepository.GetOwnedByIdsAsync.
         MenuSubmissionItem? added = null;
         repository.Setup(item => item.AddItem(It.IsAny<MenuSubmissionItem>()))
             .Callback<MenuSubmissionItem>(value => added = value);
@@ -161,12 +186,15 @@ public sealed class AddMenuSubmissionItemUseCaseTests
                 StorageKey = "image/upload/dish/file.jpg",
                 Url = "https://cdn.test/file.jpg"
             }]);
+        // STEP-03: Create request through ValidRequest and set request.CoverMediaId to 50.
         var request = ValidRequest();
         request.CoverMediaId = 50;
 
+        // STEP-04: Run CreateUseCase().ExecuteAsync with request and keep result.
         var result = await CreateUseCase(repository, mediaRepository)
             .ExecuteAsync(14, request, CancellationToken.None);
 
+        // STEP-05: Assert added.CoverMedia is null, added.CoverMediaId is 50 and result.CoverUrl is "https://cdn.test/file.jpg".
         added!.CoverMedia.Should().BeNull();
         added.CoverMediaId.Should().Be(50);
         result.CoverUrl.Should().Be("https://cdn.test/file.jpg");
@@ -177,11 +205,14 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithEmptyMenu_ShouldAutoAssignZeroSortOrder()
     {
+        // STEP-01: Get repository from DraftRepository.
         var repository = DraftRepository();
 
+        // STEP-02: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository, new Mock<IMediaRepository>())
             .ExecuteAsync(14, ValidRequest(), CancellationToken.None);
 
+        // STEP-03: Assert result.SortOrder is 0.
         result.SortOrder.Should().Be(0);
     }
 
@@ -190,15 +221,19 @@ public sealed class AddMenuSubmissionItemUseCaseTests
     [Fact]
     public async Task ExecuteAsync_WithMaximumExistingSortOrder_ShouldKeepMaximumSortOrder()
     {
+        // STEP-01: Create submission as MenuSubmission and add a MenuSubmissionItem to submission.Items.
         var submission = new MenuSubmission { Id = 14 };
         submission.Items.Add(new MenuSubmissionItem { Id = 1, SortOrder = short.MaxValue });
+        // STEP-02: Mock IRestaurantMenuRepository; stub repository.LockOwnedSubmissionAsync.
         var repository = new Mock<IRestaurantMenuRepository>();
         repository.Setup(item => item.LockOwnedSubmissionAsync(12, 14, It.IsAny<CancellationToken>()))
             .ReturnsAsync(submission);
 
+        // STEP-03: Run CreateUseCase().ExecuteAsync and keep result.
         var result = await CreateUseCase(repository, new Mock<IMediaRepository>())
             .ExecuteAsync(14, ValidRequest(), CancellationToken.None);
 
+        // STEP-04: Assert result.SortOrder is short.MaxValue.
         result.SortOrder.Should().Be(short.MaxValue);
     }
 

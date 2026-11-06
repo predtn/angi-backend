@@ -19,6 +19,7 @@ namespace ANGI.WebApi.Configs
         /// <summary>Writes ROUTE_NOT_FOUND for 404 and METHOD_NOT_ALLOWED for 405; other statuses are untouched.</summary>
         public static Task WriteErrorAsync(HttpContext context)
         {
+            // STEP-01: Set (errorCode, message).
             var (errorCode, message) = context.Response.StatusCode switch
             {
                 StatusCodes.Status404NotFound => (RouteNotFoundCode, RouteNotFoundMessage),
@@ -26,11 +27,13 @@ namespace ANGI.WebApi.Configs
                 _ => (null, null)
             };
 
+            // STEP-02: Return Task.CompletedTask early when errorCode is missing.
             if (errorCode is null)
             {
                 return Task.CompletedTask;
             }
 
+            // STEP-03: Return the result of context.Response.WriteAsJsonAsync.
             return context.Response.WriteAsJsonAsync(new ApiResponse<object>
             {
                 Success = false,

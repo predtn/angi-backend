@@ -16,14 +16,17 @@ public sealed class CreateBlogRequestDtoValidatorTests
     [InlineData(255, 20)]
     public async Task Validate_AtInclusiveBoundaries_ShouldSucceed(int titleLength, int imageCount)
     {
+        // STEP-01: Create request through ValidRequest, set request.Title to a new string, set request.CoverMediaId to 1, set request.RoadmapId to 1 and 1 more.
         var request = ValidRequest();
         request.Title = new string('a', titleLength);
         request.CoverMediaId = 1;
         request.RoadmapId = 1;
         request.ImageMediaIds = Enumerable.Range(1, imageCount).Select(value => (long)value).ToArray();
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.IsValid is true.
         result.IsValid.Should().BeTrue();
     }
 
@@ -39,12 +42,15 @@ public sealed class CreateBlogRequestDtoValidatorTests
         string? content,
         string property)
     {
+        // STEP-01: Create request through ValidRequest, set request.Title to title and set request.Content to content.
         var request = ValidRequest();
         request.Title = title!;
         request.Content = content!;
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == property);
     }
 
@@ -53,12 +59,15 @@ public sealed class CreateBlogRequestDtoValidatorTests
     [Fact]
     public async Task Validate_AboveMaximums_ShouldRejectTitleAndImages()
     {
+        // STEP-01: Create request through ValidRequest, set request.Title to a new string and set request.ImageMediaIds to Range().Select(filtered).ToArray().
         var request = ValidRequest();
         request.Title = new string('a', 256);
         request.ImageMediaIds = Enumerable.Range(1, 21).Select(value => (long)value).ToArray();
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors.Select(filtered) is equivalent to "Title".
         result.Errors.Select(error => error.PropertyName).Should().BeEquivalentTo("Title", "ImageMediaIds");
     }
 
@@ -67,13 +76,16 @@ public sealed class CreateBlogRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithNonPositiveIdentifiers_ShouldRejectEveryAffectedField()
     {
+        // STEP-01: Create request through ValidRequest, set request.CoverMediaId to 0, set request.RoadmapId to -1 and set request.ImageMediaIds to a test items.
         var request = ValidRequest();
         request.CoverMediaId = 0;
         request.RoadmapId = -1;
         request.ImageMediaIds = [1, 0, -2];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors.Select(filtered) is equivalent to "CoverMediaId".
         result.Errors.Select(error => error.PropertyName)
             .Should().BeEquivalentTo("CoverMediaId", "RoadmapId", "ImageMediaIds");
     }
@@ -83,11 +95,14 @@ public sealed class CreateBlogRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithDuplicateImageIdentifiers_ShouldRejectImages()
     {
+        // STEP-01: Create request through ValidRequest and set request.ImageMediaIds to a test items.
         var request = ValidRequest();
         request.ImageMediaIds = [7, 7];
 
+        // STEP-02: Validate request and keep result.
         var result = await _validator.ValidateAsync(request);
 
+        // STEP-03: Assert result.Errors has exactly one matching item.
         result.Errors.Should().ContainSingle(error => error.PropertyName == "ImageMediaIds");
     }
 

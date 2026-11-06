@@ -22,20 +22,28 @@ public sealed class ApproveMenuSubmissionUseCase(
     public async Task<ApproveMenuSubmissionResponseDto> ExecuteAsync(
         long submissionId, ApproveMenuSubmissionRequestDto request, CancellationToken ct)
     {
+        // STEP-01: Validate the request.
         await validator.ValidateAndThrowAsync(request, ct);
+        // STEP-02: Check the caller's permission through MenuPermissionGuard.RequireAsync.
         var reviewerId = await MenuPermissionGuard.RequireAsync(currentUser, repository, ct);
+        // STEP-03: Open the database transaction.
         await using var transaction = await unitOfWork.BeginTransactionAsync(ct);
+        // STEP-04: Prepare submission from repository.LockAsync.
         var submission = await repository.LockAsync(submissionId, ct)
             ?? throw new NotFoundException("SUBMISSION_NOT_FOUND", "Không tìm thấy bản menu.");
+        // STEP-05: Check the pending rule through MenuReviewDecision.RequirePending.
         MenuReviewDecision.RequirePending(submission);
+        // STEP-06: Prepare changes through submission.Items.ToDictionary, retained through Where(filtered).Select(filtered).ToHashSet and more.
         var changes = submission.Items.ToDictionary(item => item, item => RestaurantMenuMapper.MapItem(item).Change);
         var retained = submission.Items.Where(item => item.SourceDishId.HasValue)
             .Select(item => item.SourceDishId!.Value).ToHashSet();
         var removed = submission.Restaurant.Dishes
             .Where(dish => dish.Status != DishStatus.Removed && !retained.Contains(dish.Id)).ToArray();
 
+        // STEP-07: For each dish in removed, set dish.Status.
         foreach (var dish in removed)
             dish.Status = DishStatus.Removed;
+        // STEP-08: For each item in submission.Items, check whether item.SourceDishId is missing.
         foreach (var item in submission.Items)
         {
             if (item.SourceDishId is null)
@@ -61,11 +69,17 @@ public sealed class ApproveMenuSubmissionUseCase(
             }
         }
 
+        // STEP-09: Call MenuReviewDecision.Record.
         MenuReviewDecision.Record(submission, reviewerId, request.ReviewNote, true, timeProvider, repository, auditLog);
+        // STEP-10: Load repository.LoadReviewerAsync.
         await repository.LoadReviewerAsync(submission, ct);
+        // STEP-11: Save the pending changes.
         await unitOfWork.SaveChangesAsync(ct);
+        // STEP-12: Commit the transaction.
         await transaction.CommitAsync(ct);
+        // STEP-13: Prepare source through RestaurantMenuMapper.MapSubmission.
         var source = RestaurantMenuMapper.MapSubmission(submission);
+        // STEP-14: Return a new ApproveMenuSubmissionResponseDto.
         return new ApproveMenuSubmissionResponseDto
         {
             Id = source.Id, RestaurantId = source.RestaurantId, Status = source.Status,

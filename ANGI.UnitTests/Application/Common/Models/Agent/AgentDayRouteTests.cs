@@ -11,7 +11,9 @@ public sealed class AgentDayRouteTests
     [Fact]
     public void Totals_AreDurableAndOverflowSafe()
     {
+        // STEP-01: Create route as AgentDayRoute.
         var route = new AgentDayRoute(1, true, false, [new(int.MaxValue, int.MaxValue), new(int.MaxValue, int.MaxValue)]);
+        // STEP-02: Read restored from the response; assert restored.TotalDistanceMeters is 2L * int.MaxValue and restored.TotalDurationSeconds is 2L * int.MaxValue.
         var restored = AgentJson.Read<AgentDayRoute>(AgentJson.Write(route));
         restored.TotalDistanceMeters.Should().Be(2L * int.MaxValue); restored.TotalDurationSeconds.Should().Be(2L * int.MaxValue);
     }
