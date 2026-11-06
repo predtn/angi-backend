@@ -30,7 +30,7 @@ public sealed class OpenAiAgentLlmServiceTests
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
-            using var state = JsonDocument.Parse(messages[1].GetProperty("content").GetString()!);
+            using var state = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
             state.RootElement.GetProperty("proposalMode").GetString().Should().Be("update");
             state.RootElement.GetProperty("proposalVersion").GetInt32().Should().Be(3);
             var issued = state.RootElement.GetProperty("issuedCandidateScopes")[0];
@@ -110,7 +110,7 @@ public sealed class OpenAiAgentLlmServiceTests
             root.GetProperty("max_completion_tokens").GetInt32().Should().Be(12000);
             root.TryGetProperty("reasoning_effort", out var reasoning).Should().Be(effort is not null);
             if (effort is not null) reasoning.GetString().Should().Be(effort);
-            root.GetProperty("messages")[3].GetProperty("tool_call_id").GetString().Should().Be("call-reco");
+            root.GetProperty("messages")[4].GetProperty("tool_call_id").GetString().Should().Be("call-reco");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
         // STEP-02: Get context from AgentTestData.Context, add the computed value to context.Exchanges and get result from Service().RunAsync.
@@ -322,13 +322,13 @@ public sealed class OpenAiAgentLlmServiceTests
             {
                 using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync());
                 var messages = body.RootElement.GetProperty("messages");
-                if (messages.GetArrayLength() > 2)
+                if (messages.GetArrayLength() > 3)
                 {
-                    var replay = messages[2].GetProperty("tool_calls")[0];
+                    var replay = messages[3].GetProperty("tool_calls")[0];
                     replay.GetProperty("id").GetString().Should().Be("call-signed");
                     replay.TryGetProperty("extra_content", out var metadata).Should().Be(signed);
                     if (signed) metadata.GetProperty("google").GetProperty("thought_signature").GetString().Should().Be("opaque-provider-signature");
-                    messages[3].GetProperty("tool_call_id").GetString().Should().Be("call-signed");
+                    messages[4].GetProperty("tool_call_id").GetString().Should().Be("call-signed");
                     return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
                 }
             }
@@ -355,13 +355,13 @@ public sealed class OpenAiAgentLlmServiceTests
     [Fact]
     public async Task RunAsync_VietnameseContextAndToolResult_RemainReadable()
     {
-        // STEP-01: Assert messages[1].content contains the expected text and messages[3].content contains the expected text.
+        // STEP-01: Assert messages[2].content contains the expected text and messages[4].content contains the expected text.
         var handler = new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
-            messages[1].GetProperty("content").GetString().Should().Contain("Hà Nội");
-            messages[3].GetProperty("content").GetString().Should().Contain("Phở bò Hà Nội");
+            messages[2].GetProperty("content").GetString().Should().Contain("Hà Nội");
+            messages[4].GetProperty("content").GetString().Should().Contain("Phở bò Hà Nội");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
         // STEP-02: Get context from AgentTestData.Context, set context.State to a copy of context.State and add the computed value to context.Exchanges.
@@ -595,9 +595,9 @@ public sealed class OpenAiAgentLlmServiceTests
             messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("only when the user gave nothing but a province").And.Contain("clarification=place_scope").And.Contain("clarification=preferences")
                 .And.Contain("budgetUnrestricted=true and budgetAmount=null").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
                 .And.Contain("gợi ý code giúp tôi trang giao diện").And.Contain("tôi muốn ăn ngọt").And.Contain("nhà tôi ở Cầu Giấy").And.Contain("Mention a plan only when hasPlan=true");
-            using var data = JsonDocument.Parse(messages[1].GetProperty("content").GetString()!);
+            using var data = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
-            data.RootElement.GetProperty("catalogProvinces")[0].GetString().Should().Be("Hà Nội");
+            JsonDocument.Parse(messages[1].GetProperty("content").GetString()!).RootElement.GetProperty("catalogProvinces")[0].GetString().Should().Be("Hà Nội");
             data.RootElement.TryGetProperty("intakeAside", out _).Should().BeFalse();
             body.RootElement.GetProperty("tools").EnumerateArray().Select(tool => tool.GetProperty("function").GetProperty("name").GetString()).Should().Contain("locate_places");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
@@ -618,7 +618,7 @@ public sealed class OpenAiAgentLlmServiceTests
         var handler = new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[2].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("dishOffered").GetBoolean().Should().BeTrue();
             body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Contain("món sở trường của tôi là gì")
                 .And.Contain("never out_of_scope").And.Contain("only when personalized=true").And.Contain("status=nothing_found")
@@ -668,7 +668,7 @@ public sealed class OpenAiAgentLlmServiceTests
         var handler = new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[2].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("currentDate").GetString().Should().Be(expected);
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
@@ -687,11 +687,11 @@ public sealed class OpenAiAgentLlmServiceTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    // TEST-29: The read step offers no tools, sends real chat turns with the latest message last, and only the rules of its stage; covers a new trip and a waiting answer.
-    /// <summary>The model reads the message without holding a tool it could reach for.</summary>
+    // TEST-29: The read step offers no tools, sends real chat turns with the latest message last, and its own short rules whatever the stage; covers a new trip and a waiting answer.
+    /// <summary>The model reads the message without holding a tool it could reach for, and without the rules for choosing candidates or building a plan.</summary>
     [Theory]
-    [InlineData(null, "# 4. A new trip", "# 8. Building the proposal")]
-    [InlineData(AgentConfirmationPolicy.AwaitingSave, "# 10. Constraints", "# 4. A new trip")]
+    [InlineData(null, "# A question waiting for an answer", "# 8. Building the proposal")]
+    [InlineData(AgentConfirmationPolicy.AwaitingSave, "# Planning a new trip", "# 7. Getting candidates")]
     public async Task RunAsync_ReadStep_HasNoToolsAndOnlyItsRules(string? awaited, string kept, string dropped)
     {
         // STEP-01: Get context in the read phase with one earlier exchange.
@@ -709,13 +709,13 @@ public sealed class OpenAiAgentLlmServiceTests
             root.TryGetProperty("tools", out _).Should().BeFalse();
             root.TryGetProperty("tool_choice", out _).Should().BeFalse();
             var messages = root.GetProperty("messages").EnumerateArray().ToArray();
-            messages[0].GetProperty("content").GetString().Should().Contain("You have no tools in this step").And.Contain(kept).And.NotContain(dropped);
+            messages[0].GetProperty("content").GetString().Should().Contain("You have no tools now").And.Contain(kept).And.NotContain(dropped);
             messages[^3].GetProperty("role").GetString().Should().Be("user");
             messages[^2].GetProperty("role").GetString().Should().Be("assistant");
             messages[^1].GetProperty("role").GetString().Should().Be("user");
             messages[^1].GetProperty("content").GetString().Should().Be("đừng");
-            messages[1].GetProperty("role").GetString().Should().Be("system");
-            using var data = JsonDocument.Parse(messages[1].GetProperty("content").GetString()!);
+            messages[2].GetProperty("role").GetString().Should().Be("system");
+            using var data = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("history").ValueKind.Should().Be(JsonValueKind.Null);
             data.RootElement.GetProperty("request").ValueKind.Should().Be(JsonValueKind.Null);
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
@@ -746,6 +746,53 @@ public sealed class OpenAiAgentLlmServiceTests
 
         // STEP-03: Assert the output is read.
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
+    }
+
+    // TEST-31: Requests with the same rules and tools share a prompt cache key whoever sends them; another step gets another key; the stable catalog sits before the turn's data.
+    /// <summary>Prompt caching only reuses an identical prefix, so the key follows the prefix and the catalog is kept out of the per-turn data.</summary>
+    [Fact]
+    public async Task RunAsync_CacheKey_FollowsThePrefix()
+    {
+        // STEP-01: Capture the key and the second message of each request.
+        var keys = new List<string>();
+        var catalogs = new List<string>();
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            keys.Add(body.RootElement.GetProperty("prompt_cache_key").GetString()!);
+            catalogs.Add(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+        // STEP-02: Send a read for two users, then a step with tools.
+        var first = AgentTestData.Context(); first.Phase = AgentTurnPhase.Read;
+        var second = new AgentContext { ConversationId = 8, UserId = 99, State = AgentTestData.State(), Phase = AgentTurnPhase.Read,
+            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { Content = "câu khác" } };
+        var acting = AgentTestData.Context();
+        foreach (var context in new[] { first, second, acting }) await Service(handler).RunAsync(context, false, CancellationToken.None);
+
+        // STEP-03: Assert the same key for both reads, another for the step with tools, and a catalog message holding no state.
+        keys[0].Should().StartWith("angi-agent-read-all-").And.Be(keys[1]);
+        keys[2].Should().StartWith("angi-agent-act-all-");
+        catalogs[0].Should().Contain("catalogTags").And.NotContain("currentDate");
+    }
+
+    // TEST-32: The prompt cache hit reported in usage is carried on the step, and a response without it leaves the count empty.
+    /// <summary>Lets the log show how much of each request was billed at the cached rate.</summary>
+    [Theory]
+    [InlineData(true)][InlineData(false)]
+    public async Task RunAsync_CachedTokens_AreReadFromUsage(bool reported)
+    {
+        // STEP-01: Answer with or without prompt_tokens_details.
+        var handler = new Handler(_ => Task.FromResult(reported
+            ? Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } }, usage = new { total_tokens = 9000, prompt_tokens_details = new { cached_tokens = 6144 } } })
+            : Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } }, usage = new { total_tokens = 9000 } })));
+
+        // STEP-02: Run the service.
+        var step = await Service(handler).RunAsync(AgentTestData.Context(), false, CancellationToken.None);
+
+        // STEP-03: Assert the tokens and the cached share.
+        step!.Tokens.Should().Be(9000);
+        step.CachedTokens.Should().Be(reported ? 6144 : null);
     }
 
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>

@@ -239,6 +239,9 @@ public sealed record AgentToolExchange(AgentToolCall[] Calls, JsonElement[] Resu
 /// <summary>Provider-neutral LLM step, containing either tool requests or one structured result.</summary>
 public sealed record AgentLlmStep(AgentToolCall[] Tools, AgentOutput? Output, int? Tokens = null, AgentLlmFailure? Failure = null)
 {
+    /// <summary>Input tokens the provider read from its prompt cache, billed at a fraction of the normal rate; null when the provider did not report it.</summary>
+    public int? CachedTokens { get; init; }
+
     /// <summary>Creates a failed step that cannot be mistaken for malformed model output requiring repair.</summary>
     public static AgentLlmStep Failed(AgentLlmFailureKind kind, int? httpStatus = null, int? retryAfterSeconds = null, int? tokens = null) =>
         new([], null, tokens, new(kind, httpStatus, retryAfterSeconds));

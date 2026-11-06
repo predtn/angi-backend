@@ -102,7 +102,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // STEP-20: Call telemetry.Record.
                 telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
                 {
-                    elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, callNumber = calls + 1,
+                    elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, step.CachedTokens, callNumber = calls + 1,
                     repair = repaired, limits.MaxOutputTokens, limits.ReasoningEffort,
                     schemaRepaired, proposalRepaired, emptyRepaired, coverageRepaired,
                     failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
