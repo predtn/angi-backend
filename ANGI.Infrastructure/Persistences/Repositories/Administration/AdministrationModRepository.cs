@@ -32,10 +32,10 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
             .AsNoTracking()
             .Where(user => user.Role.Code == ModRoleCode);
 
-        // STEP-02: When query has a value, prepare pattern from query.Trim and set users.
+        // STEP-02: When query has a value, prepare pattern from LikePattern.Contains and set users.
         if (!string.IsNullOrWhiteSpace(query))
         {
-            var pattern = $"%{EscapeLikePattern(query.Trim())}%";
+            var pattern = LikePattern.Contains(query);
             users = users.Where(user =>
                 EF.Functions.ILike(user.Email, pattern, "\\") ||
                 EF.Functions.ILike(user.DisplayName, pattern, "\\"));
@@ -156,10 +156,4 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
         await _context.UserSessions
             .Where(session => session.UserId == userId && session.RevokedAt == null)
             .ToListAsync(ct);
-
-    /// <summary>Escapes PostgreSQL LIKE metacharacters so the search term remains literal.</summary>
-    private static string EscapeLikePattern(string value) => value
-        .Replace("\\", "\\\\", StringComparison.Ordinal)
-        .Replace("%", "\\%", StringComparison.Ordinal)
-        .Replace("_", "\\_", StringComparison.Ordinal);
 }

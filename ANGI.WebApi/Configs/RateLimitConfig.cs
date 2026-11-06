@@ -40,8 +40,10 @@ namespace ANGI.WebApi.Configs
 
             services.AddRateLimiter(options =>
             {
-                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-                    CreatePartition(context, settings));
+                // A request must pass both: the general / per-email limit and, on the sensitive auth paths, the per-IP cap.
+                options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreatePartition(context, settings)),
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreateSensitiveIpPartition(context, settings)));
 
                 options.OnRejected = async (context, cancellationToken) =>
                 {
@@ -84,11 +86,8 @@ namespace ANGI.WebApi.Configs
                 return RateLimitPartition.GetNoLimiter("non-api");
             }
 
-            // STEP-02: Prepare path.
-            var path = context.Request.Path;
-            // STEP-03: Return the result of CreateFixedWindowPartition early when path equals ResendVerificationPath or path equals ForgotPasswordPath.
-            if (path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
-                path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase))
+            // STEP-02: Return the result of CreateFixedWindowPartition early when IsSensitiveAuthPath (forgot-password, resend) holds.
+            if (IsSensitiveAuthPath(context))
             {
                 return CreateFixedWindowPartition(
                     $"sensitive-auth:{GetEmailKey(context)}",
@@ -96,17 +95,36 @@ namespace ANGI.WebApi.Configs
                     TimeSpan.FromSeconds(settings.SensitiveAuthWindowSeconds));
             }
 
-            // STEP-04: Prepare userId from context.User.FindFirst and clientKey from GetIpAddress.
+            // STEP-03: Prepare userId from context.User.FindFirst and clientKey from GetIpAddress.
             var userId = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
             var clientKey = string.IsNullOrWhiteSpace(userId)
                 ? $"ip:{GetIpAddress(context)}"
                 : $"user:{userId}";
 
-            // STEP-05: Return the result of CreateFixedWindowPartition.
+            // STEP-04: Return the result of CreateFixedWindowPartition.
             return CreateFixedWindowPartition(
                 $"general:{clientKey}",
                 settings.GeneralPermitLimit,
                 TimeSpan.FromSeconds(settings.GeneralWindowSeconds));
+        }
+
+        /// <summary>Per-IP partition for forgot-password and resend; no limit on other paths.</summary>
+        private static RateLimitPartition<string> CreateSensitiveIpPartition(HttpContext context, RateLimitSettings settings)
+        {
+            return IsSensitiveAuthPath(context)
+                ? CreateFixedWindowPartition(
+                    $"sensitive-auth-ip:{GetIpAddress(context)}",
+                    settings.SensitiveAuthIpPermitLimit,
+                    TimeSpan.FromMinutes(settings.SensitiveAuthIpWindowMinutes))
+                : RateLimitPartition.GetNoLimiter("not-sensitive");
+        }
+
+        /// <summary>True for the endpoints that send an email to the address in the body.</summary>
+        private static bool IsSensitiveAuthPath(HttpContext context)
+        {
+            var path = context.Request.Path;
+            return path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
+                   path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Creates a fixed-window rate-limit partition with no request queue.</summary>
@@ -145,7 +163,9 @@ namespace ANGI.WebApi.Configs
                    settings.LoginPermitLimit > 0 &&
                    settings.LoginWindowMinutes > 0 &&
                    settings.SensitiveAuthPermitLimit > 0 &&
-                   settings.SensitiveAuthWindowSeconds > 0;
+                   settings.SensitiveAuthWindowSeconds > 0 &&
+                   settings.SensitiveAuthIpPermitLimit > 0 &&
+                   settings.SensitiveAuthIpWindowMinutes > 0;
         }
     }
 }

@@ -181,14 +181,15 @@ public sealed class RestaurantRepository : IRestaurantRepository
 
         if (!string.IsNullOrWhiteSpace(request.Q))
         {
-            var term = $"%{request.Q.Trim()}%";
-            query = query.Where(r => EF.Functions.ILike(r.Name, term) || EF.Functions.ILike(r.AddressLine, term));
+            var term = LikePattern.Contains(request.Q);
+            query = query.Where(r => EF.Functions.ILike(r.Name, term, LikePattern.Escape) ||
+                                     EF.Functions.ILike(r.AddressLine, term, LikePattern.Escape));
         }
 
         if (!string.IsNullOrWhiteSpace(request.Province))
         {
             var provinceTerm = ProvinceSearch.Pattern(request.Province);
-            query = query.Where(r => r.ProvinceName != null && EF.Functions.ILike(r.ProvinceName, provinceTerm));
+            query = query.Where(r => r.ProvinceName != null && EF.Functions.ILike(r.ProvinceName, provinceTerm, LikePattern.Escape));
         }
 
 

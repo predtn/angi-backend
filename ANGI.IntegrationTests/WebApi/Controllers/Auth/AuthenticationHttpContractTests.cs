@@ -319,6 +319,9 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
             var previousSecret = Environment.GetEnvironmentVariable("Jwt__SecretKey");
             var previousPermitLimit = Environment.GetEnvironmentVariable("RateLimit__SensitiveAuthPermitLimit");
             var previousWindowSeconds = Environment.GetEnvironmentVariable("RateLimit__SensitiveAuthWindowSeconds");
+            var previousIpPermitLimit = Environment.GetEnvironmentVariable("RateLimit__SensitiveAuthIpPermitLimit");
+            // These tests cover the per-email limit; the per-IP cap (TrustedClientIpHttpTests) stays out of the way.
+            Environment.SetEnvironmentVariable("RateLimit__SensitiveAuthIpPermitLimit", "10000");
             Environment.SetEnvironmentVariable("Jwt__SecretKey", secret);
             Environment.SetEnvironmentVariable(
                 "RateLimit__SensitiveAuthPermitLimit",
@@ -335,6 +338,7 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
                 Environment.SetEnvironmentVariable("Jwt__SecretKey", previousSecret);
                 Environment.SetEnvironmentVariable("RateLimit__SensitiveAuthPermitLimit", previousPermitLimit);
                 Environment.SetEnvironmentVariable("RateLimit__SensitiveAuthWindowSeconds", previousWindowSeconds);
+                Environment.SetEnvironmentVariable("RateLimit__SensitiveAuthIpPermitLimit", previousIpPermitLimit);
             }
         }
 
@@ -356,7 +360,8 @@ namespace ANGI.IntegrationTests.WebApi.Controllers.Auth
                     ["RateLimit:LoginPermitLimit"] = "5",
                     ["RateLimit:LoginWindowMinutes"] = "15",
                     ["RateLimit:SensitiveAuthPermitLimit"] = _sensitivePermitLimit.ToString(),
-                    ["RateLimit:SensitiveAuthWindowSeconds"] = _sensitiveWindowSeconds.ToString()
+                    ["RateLimit:SensitiveAuthWindowSeconds"] = _sensitiveWindowSeconds.ToString(),
+                    ["RateLimit:SensitiveAuthIpPermitLimit"] = "10000"
                 });
             });
             builder.ConfigureServices(services =>

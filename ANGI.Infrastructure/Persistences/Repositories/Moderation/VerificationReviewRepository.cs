@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Moderation;
 using ANGI.Application.DTOs.Moderation;
 using ANGI.Domain.Entities;
@@ -56,10 +57,10 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
         // STEP-02: When request.Province has a value, prepare province and set query.
         if (!string.IsNullOrWhiteSpace(request.Province))
         {
-            var province = $"%{request.Province}%";
+            var province = LikePattern.Contains(request.Province);
             query = query.Where(verification =>
                 verification.Restaurant.ProvinceName != null &&
-                EF.Functions.ILike(verification.Restaurant.ProvinceName, province));
+                EF.Functions.ILike(verification.Restaurant.ProvinceName, province, LikePattern.Escape));
         }
 
         // STEP-03: Call query.LongCountAsync and keep totalItems and AsSplitQuery().ToListAsync and keep items.

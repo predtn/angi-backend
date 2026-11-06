@@ -53,7 +53,8 @@ public sealed class PostgresApiFactory : WebApplicationFactory<Program>
             ["Jwt__SecretKey"] = JwtSecret,
             ["RateLimit__GeneralPermitLimit"] = "10000",
             ["RateLimit__LoginPermitLimit"] = "10000",
-            ["RateLimit__SensitiveAuthPermitLimit"] = "10000"
+            ["RateLimit__SensitiveAuthPermitLimit"] = "10000",
+            ["RateLimit__SensitiveAuthIpPermitLimit"] = "10000"
         };
         var previous = values.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);
         foreach (var (name, value) in values)
@@ -99,6 +100,7 @@ public sealed class PostgresApiFactory : WebApplicationFactory<Program>
                 ["RateLimit:LoginPermitLimit"] = "10000",
                 ["RateLimit:LoginWindowMinutes"] = "15",
                 ["RateLimit:SensitiveAuthPermitLimit"] = "10000",
+                ["RateLimit:SensitiveAuthIpPermitLimit"] = "10000",
                 ["RateLimit:SensitiveAuthWindowSeconds"] = "60",
                 ["Google:ClientId"] = "integration-client",
                 ["Brevo:BaseUrl"] = "http://127.0.0.1:1/",

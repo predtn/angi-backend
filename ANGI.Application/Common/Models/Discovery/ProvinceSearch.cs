@@ -13,6 +13,6 @@ public static class ProvinceSearch
     {
         var name = province.Trim();
         var prefix = AdministrativePrefixes.FirstOrDefault(value => name.StartsWith(value, StringComparison.OrdinalIgnoreCase));
-        return $"%{(prefix is null ? name : name[prefix.Length..].Trim())}%";
+        return LikePattern.Contains(prefix is null ? name : name[prefix.Length..]);
     }
 }

@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Domain.Enums;
@@ -11,9 +12,9 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
     /// <inheritdoc />
     public async Task<AgentCatalogMatch[]> SearchAsync(string kind, string name, string? province, int limit, CancellationToken ct)
     {
-        // STEP-01: Prepare term through name.Trim, pattern from term.Replace and restaurants through context.Restaurants.AsNoTracking().Where.
+        // STEP-01: Prepare term through name.Trim, pattern from LikePattern.Contains and restaurants through context.Restaurants.AsNoTracking().Where.
         var term = name.Trim();
-        var pattern = "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+        var pattern = LikePattern.Contains(term);
         var restaurants = context.Restaurants.AsNoTracking().Where(x =>
             x.VerificationStatus == RestaurantVerificationStatus.Verified && x.ModerationStatus == RestaurantModerationStatus.Visible);
         // STEP-02: When province exists, set restaurants.

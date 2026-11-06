@@ -111,6 +111,8 @@ namespace ANGI.UnitTests.WebApi
 
             settings.SensitiveAuthPermitLimit.Should().Be(1);
             settings.SensitiveAuthWindowSeconds.Should().Be(60);
+            settings.SensitiveAuthIpPermitLimit.Should().Be(5);
+            settings.SensitiveAuthIpWindowMinutes.Should().Be(15);
         }
 
         /// <summary>Creates an AUTH-03 context carrying the normalized rate-limit email and selected IP.</summary>
