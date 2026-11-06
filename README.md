@@ -95,7 +95,7 @@ dotnet user-secrets set "Jwt:SecretKey" "<at least 32 random characters>" --proj
 
 ### Migrations run on startup (Development only)
 
-Running the API in Development (`dotnet run --project ANGI.WebApi`, or F5 in the IDE) applies pending EF migrations before it starts, so after `git pull` you do not need `dotnet ef database update`. Other environments never migrate on startup; they run migrations as a deploy step.
+Running the API in Development (`dotnet run --project ANGI.WebApi`, or F5 in the IDE) applies pending EF migrations before it starts, so after `git pull` you do not need `dotnet ef database update`. Other environments never migrate on startup; they run migrations as a deploy step (see [Deploy](#deploy-render)).
 
 | What you see | Meaning |
 |---|---|
@@ -132,6 +132,7 @@ The init script `docker/postgres/init/01-roles-schemas.sh` runs **only when the 
 | `port is already allocated` | Another PostgreSQL uses 5432. Set `POSTGRES_PORT=5433` in `.env` and use that port in the connection string. |
 | Log shows `$'\r': command not found` | The script was checked out with CRLF. Run `rm docker/postgres/init/01-roles-schemas.sh && git checkout -- docker/postgres/init/01-roles-schemas.sh`, then `docker compose down -v` and start again. |
 | `Copy .env.example to .env first` | The `.env` file is missing. |
+| Startup migration fails with `permission denied to create extension "pg_trgm"` | Your data volume predates the extension in the init script (the service role cannot create it). Run once: `docker exec angi-postgres psql -U postgres -d angi -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"`, then start the API again. |
 
 ## External service keys
 
@@ -172,6 +173,41 @@ To check the Brevo keys, send both emails to your own address (the live test is 
 
 ```bash
 RUN_BREVO_LIVE_TESTS=1 BREVO_LIVE_TEST_TO=you@example.com dotnet test ANGI.IntegrationTests/ANGI.IntegrationTests.csproj --filter EmailServiceBrevoLiveTests
+```
+
+## Deploy (Render)
+
+The API ships as the Docker image built from the root `Dockerfile` (Render: **Docker** runtime, root directory `angi-backend`). The image runs as a non-root user on port 8080 and contains `/app/efbundle`, a self-contained EF migration bundle.
+
+| Render setting | Value |
+|---|---|
+| Health Check Path | `/health` (OPS-03: 200 when PostgreSQL answers, 503 `SERVICE_UNAVAILABLE` otherwise; not rate limited, no token) |
+| Pre-Deploy Command | `./efbundle` (applies pending migrations with `ConnectionStrings__Default`; the API itself never migrates outside Development) |
+| Database, once | As the database owner / superuser: `CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public; CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;` (the trigram indexes of DISH-01 search need `pg_trgm`; the `angi_backend` role cannot create extensions) |
+| Instances | 1. Rate limits, login-failure counts and the account-status cache live in memory, so a second instance would split them. |
+
+Environment variables on top of the [external service keys](#external-service-keys):
+
+| Variable | Value |
+|---|---|
+| `ASPNETCORE_ENVIRONMENT` | `Production` (the image default): JSON console logs, one object per line, for Render's log search |
+| `ConnectionStrings__Default` | The production database, role `angi_backend` |
+| `Jwt__SecretKey` | At least 32 random characters |
+| `Cors__AllowedOrigins__0` | The Vercel URL |
+| `Frontend__BaseUrl` | The Vercel URL |
+| `ForwardedHeaders__Enabled` | `true` (Render's proxy sets `X-Forwarded-For`) |
+| `TrustedClientIp__ProxyKey` | At least 32 random characters; the same value as `BACKEND_PROXY_KEY` on the frontend |
+
+`TrustedClientIp__ProxyKey` matters because the frontend calls the API from its Next.js server: without it every guest arrives with the Vercel server's IP and they all share one anonymous rate limit (100 requests / minute). With it, the frontend sends the browser IP in `X-Angi-Client-Ip` with `X-Angi-Proxy-Key`, and the API uses that IP only when the key matches (`TrustedClientIpMiddleware`). A wrong or missing key falls back to the connection IP, so a direct caller cannot choose its own IP. Leave it empty locally.
+
+Refresh tokens (AUTH-06): the frontend runs on several Vercel instances, so two requests whose access token expired together can both refresh with the same token. A token rotated less than 30 seconds earlier therefore gets its own parallel session (`user_sessions.replaced_by_session_id` links a rotated session to its successor). A token reused after 30 seconds, or one revoked by logout, is still treated as stolen and ends every session of the user.
+
+Check the image locally:
+
+```bash
+docker build -t angi-backend .
+docker run --rm -p 8080:8080 -e Jwt__SecretKey=<32+ chars> -e "ConnectionStrings__Default=Host=host.docker.internal;..." angi-backend
+curl http://localhost:8080/health
 ```
 
 ## Agent chat-only frontend
