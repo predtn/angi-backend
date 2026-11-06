@@ -33,7 +33,7 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
 
         if (!string.IsNullOrWhiteSpace(query))
         {
-            var pattern = $"%{EscapeLikePattern(query.Trim())}%";
+            var pattern = LikePattern.Contains(query);
             users = users.Where(user =>
                 EF.Functions.ILike(user.Email, pattern, "\\") ||
                 EF.Functions.ILike(user.DisplayName, pattern, "\\"));
@@ -148,10 +148,4 @@ public sealed class AdministrationModRepository : IAdministrationModRepository
         await _context.UserSessions
             .Where(session => session.UserId == userId && session.RevokedAt == null)
             .ToListAsync(ct);
-
-    /// <summary>Escapes PostgreSQL LIKE metacharacters so the search term remains literal.</summary>
-    private static string EscapeLikePattern(string value) => value
-        .Replace("\\", "\\\\", StringComparison.Ordinal)
-        .Replace("%", "\\%", StringComparison.Ordinal)
-        .Replace("_", "\\_", StringComparison.Ordinal);
 }

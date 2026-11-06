@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Moderation;
 using ANGI.Application.DTOs.Moderation;
 using ANGI.Domain.Entities;
@@ -24,9 +25,9 @@ public sealed class ReviewModerationRepository(ANGIContext context) : IReviewMod
 
         if (!string.IsNullOrWhiteSpace(request.Q))
         {
-            var term = $"%{request.Q.Trim()}%";
-            query = query.Where(r => (r.Content != null && EF.Functions.ILike(r.Content, term))
-                                     || EF.Functions.ILike(r.Restaurant.Name, term));
+            var term = LikePattern.Contains(request.Q);
+            query = query.Where(r => (r.Content != null && EF.Functions.ILike(r.Content, term, LikePattern.Escape))
+                                     || EF.Functions.ILike(r.Restaurant.Name, term, LikePattern.Escape));
         }
 
         if (request.RestaurantId.HasValue)

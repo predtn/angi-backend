@@ -35,8 +35,10 @@ namespace ANGI.WebApi.Configs
 
             services.AddRateLimiter(options =>
             {
-                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-                    CreatePartition(context, settings));
+                // A request must pass both: the general / per-email limit and, on the sensitive auth paths, the per-IP cap.
+                options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreatePartition(context, settings)),
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreateSensitiveIpPartition(context, settings)));
 
                 options.OnRejected = async (context, cancellationToken) =>
                 {
@@ -75,9 +77,7 @@ namespace ANGI.WebApi.Configs
                 return RateLimitPartition.GetNoLimiter("non-api");
             }
 
-            var path = context.Request.Path;
-            if (path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
-                path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase))
+            if (IsSensitiveAuthPath(context))
             {
                 return CreateFixedWindowPartition(
                     $"sensitive-auth:{GetEmailKey(context)}",
@@ -94,6 +94,25 @@ namespace ANGI.WebApi.Configs
                 $"general:{clientKey}",
                 settings.GeneralPermitLimit,
                 TimeSpan.FromSeconds(settings.GeneralWindowSeconds));
+        }
+
+        /// <summary>Per-IP partition for forgot-password and resend; no limit on other paths.</summary>
+        private static RateLimitPartition<string> CreateSensitiveIpPartition(HttpContext context, RateLimitSettings settings)
+        {
+            return IsSensitiveAuthPath(context)
+                ? CreateFixedWindowPartition(
+                    $"sensitive-auth-ip:{GetIpAddress(context)}",
+                    settings.SensitiveAuthIpPermitLimit,
+                    TimeSpan.FromMinutes(settings.SensitiveAuthIpWindowMinutes))
+                : RateLimitPartition.GetNoLimiter("not-sensitive");
+        }
+
+        /// <summary>True for the endpoints that send an email to the address in the body.</summary>
+        private static bool IsSensitiveAuthPath(HttpContext context)
+        {
+            var path = context.Request.Path;
+            return path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
+                   path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Creates a fixed-window rate-limit partition with no request queue.</summary>
@@ -132,7 +151,9 @@ namespace ANGI.WebApi.Configs
                    settings.LoginPermitLimit > 0 &&
                    settings.LoginWindowMinutes > 0 &&
                    settings.SensitiveAuthPermitLimit > 0 &&
-                   settings.SensitiveAuthWindowSeconds > 0;
+                   settings.SensitiveAuthWindowSeconds > 0 &&
+                   settings.SensitiveAuthIpPermitLimit > 0 &&
+                   settings.SensitiveAuthIpWindowMinutes > 0;
         }
     }
 }

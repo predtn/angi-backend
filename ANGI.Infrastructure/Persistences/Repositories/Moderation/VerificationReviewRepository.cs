@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Moderation;
 using ANGI.Application.DTOs.Moderation;
 using ANGI.Domain.Entities;
@@ -54,10 +55,10 @@ public sealed class VerificationReviewRepository : IVerificationReviewRepository
 
         if (!string.IsNullOrWhiteSpace(request.Province))
         {
-            var province = $"%{request.Province}%";
+            var province = LikePattern.Contains(request.Province);
             query = query.Where(verification =>
                 verification.Restaurant.ProvinceName != null &&
-                EF.Functions.ILike(verification.Restaurant.ProvinceName, province));
+                EF.Functions.ILike(verification.Restaurant.ProvinceName, province, LikePattern.Escape));
         }
 
         var totalItems = await query.LongCountAsync(ct);
