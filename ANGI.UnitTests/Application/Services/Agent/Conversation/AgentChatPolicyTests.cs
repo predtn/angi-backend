@@ -49,17 +49,7 @@ public sealed class AgentChatPolicyTests
     // STEP-01: Assert AgentConfirmationPolicy.IsSaveRequest() is false.
     public void IsSaveRequest_UncertainText_DoesNotAuthorize(string text) => AgentConfirmationPolicy.IsSaveRequest(text).Should().BeFalse();
 
-    // TEST-04: A request to preview before saving counts as a review request, while its negated form does not, so neither authorizes a commit.
-    /// <summary>Ensures a preview request is routed to review instead of being treated as permission to save.</summary>
-    [Fact]
-    public void IsReviewRequest_PreviewBeforeSaving_DoesNotAuthorizeCommit()
-    {
-        // STEP-01: Assert AgentConfirmationPolicy.IsReviewRequest() is true and AgentConfirmationPolicy.IsReviewRequest() is false.
-        AgentConfirmationPolicy.IsReviewRequest("hãy lập lịch giúp tôi để chốt lịch").Should().BeTrue();
-        AgentConfirmationPolicy.IsReviewRequest("đừng lập lịch giúp tôi để chốt lịch").Should().BeFalse();
-    }
-
-    // TEST-05: Constraint consent stages a detached proposal without changing the current hard limit.
+    // TEST-04: Constraint consent stages a detached proposal without changing the current hard limit.
     /// <summary>Ensures an explicit next-turn answer is required even when the model claims consent.</summary>
     [Fact]
     public void StageChange_Relaxation_KeepsCurrentConstraints()
@@ -77,7 +67,7 @@ public sealed class AgentChatPolicyTests
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
 
-    // TEST-06: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
+    // TEST-05: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
     /// <summary>Ensures the user can see exactly which meal request the model wants to change before agreeing.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -96,7 +86,7 @@ public sealed class AgentChatPolicyTests
         else reply.Should().NotContain("Bản lịch");
     }
 
-    // TEST-07: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
+    // TEST-06: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
     /// <summary>Prevents the user from being told to answer a question the message does not show.</summary>
     [Theory]
     [InlineData("question")][InlineData("change")][InlineData("planning")]
@@ -113,14 +103,4 @@ public sealed class AgentChatPolicyTests
         if (area == "question") reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
         else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
     }
-
-    // TEST-08: Only a request to see the plan counts as a view request; covers accents, no accents, both word orders, a greeting and a question about the plan.
-    /// <summary>The plan is listed again only for these messages, so an unrelated question never receives the whole itinerary.</summary>
-    [Theory]
-    [InlineData("Xem lịch", true)][InlineData("cho mình xem lại lịch", true)][InlineData("xem lo trinh", true)][InlineData("Liệt kê đề xuất", true)]
-    [InlineData("Lịch hiện tại có gì?", true)][InlineData("lich the nao", true)]
-    [InlineData("Xin chào", false)][InlineData("Giải thích bản nháp", false)][InlineData("Vì sao chọn món này", false)][InlineData("đổi bữa trưa", false)][InlineData("", false)]
-    public void IsPlanViewRequest_MatchesOnlyRequestsToSeeThePlan(string content, bool expected) =>
-        // STEP-01: Assert AgentConfirmationPolicy.IsPlanViewRequest() is expected.
-        AgentConfirmationPolicy.IsPlanViewRequest(content).Should().Be(expected);
 }

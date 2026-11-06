@@ -137,6 +137,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         try
         {
             // STEP-30: Prepare prepared, context and control from AgentConfirmationPolicy.DraftControl.
+            // Giữ đọc nguyên câu "làm lại từ đầu": khi roadmap đã bị xóa thì không dựng được context để hỏi model, và thông báo lỗi chỉ người dùng nhắn đúng câu này.
             AgentPreparedTurn prepared;
             AgentContext? context = null;
             var control = request.Command is "discard" or "reset" ? request.Command : AgentConfirmationPolicy.DraftControl(request.Content);
@@ -167,12 +168,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 context.State = context.State with { PendingSave = null, DishOffered = null };
                 var today = AgentConfirmationPolicy.Today(clock);
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
-                if (AgentConfirmationPolicy.IsReviewRequest(request.Content) && context.CurrentProposal?.Status == "ready" &&
-                    context.State.PendingQuestion is null && context.State.PendingStateChange is null && context.State.PendingPlanningRequest is null &&
-                    AgentConversationRules.SameConstraints(context.State, context.CurrentProposal.Snapshot.State))
-                    prepared = new("Lịch hiện tại ở thẻ bên dưới, bạn xem lại nhé. Ưng rồi thì cứ bảo mình chốt.", context.State, null, null);
                 // Câu lưu đầy đủ và ngày viết bằng số không phụ thuộc cách nói, nên không cần gọi LLM: chỉ backend được quyết định ghi roadmap.
-                else if (AgentConfirmationPolicy.DecideSave(context, pendingSave, today) is { } save)
+                if (AgentConfirmationPolicy.DecideSave(context, pendingSave, today) is { } save)
                     prepared = await SaveTurnAsync(conversation, userId, context, save, ct);
                 else
                 {

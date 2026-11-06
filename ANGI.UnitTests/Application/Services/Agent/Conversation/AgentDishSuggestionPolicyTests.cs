@@ -234,12 +234,12 @@ public sealed class AgentDishSuggestionPolicyTests
         AgentDishSuggestionPolicy.Worded(reply, Context(One), One).Should().Be(expected);
     }
 
-    // TEST-14: What the user needs to act on is added when the model leaves it out; covers an address, meals, both, and a sentence that placed them itself.
-    /// <summary>Conversation 158 repeated "nhưng nhà tôi Cầu Giấy" because no reply said where the restaurant was, and suggested a breakfast dish without saying so.</summary>
+    // TEST-14: A missing address is added, while meals stay the model's choice; covers an address, meals left out, both, and a sentence that placed them itself.
+    /// <summary>Conversation 158 repeated "nhưng nhà tôi Cầu Giấy" because no reply said where the restaurant was; conversation 196 showed a forced "(hợp bữa sáng, bữa trưa)" reading as a form.</summary>
     [Theory]
     [InlineData("1 Hàng Mành", null, "Thử {name1} ở {restaurant1}, {price1} nhé!", "Thử Bún Chả ở Quán A (1 Hàng Mành), 45.000 đồng nhé!")]
-    [InlineData(null, "bữa sáng", "Thử {name1} ở {restaurant1}, {price1} nhé!", "Thử Bún Chả (hợp bữa sáng) ở Quán A, 45.000 đồng nhé!")]
-    [InlineData("1 Hàng Mành", "bữa sáng", "Thử {name1} ở {restaurant1}, {price1} nhé!", "Thử Bún Chả (hợp bữa sáng) ở Quán A (1 Hàng Mành), 45.000 đồng nhé!")]
+    [InlineData(null, "bữa sáng", "Thử {name1} ở {restaurant1}, {price1} nhé!", "Thử Bún Chả ở Quán A, 45.000 đồng nhé!")]
+    [InlineData("1 Hàng Mành", "bữa sáng", "Thử {name1} ở {restaurant1}, {price1} nhé!", "Thử Bún Chả ở Quán A (1 Hàng Mành), 45.000 đồng nhé!")]
     [InlineData("1 Hàng Mành", "bữa sáng", "Sáng mai thử {name1} cho {meals1} ở {restaurant1}, {address1}, {price1} nhé!", "Sáng mai thử Bún Chả cho bữa sáng ở Quán A, 1 Hàng Mành, 45.000 đồng nhé!")]
     public void Worded_LeftOutFacts_AreAdded(string? address, string? meals, string reply, string shown)
     {

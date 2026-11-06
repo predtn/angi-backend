@@ -326,27 +326,27 @@ public sealed class AgentReplyBuilderTests
         AgentReplyBuilder.PlanNotes(snapshot).Should().Contain(expected);
     }
 
-    // TEST-19: Answer never dumps the plan for an unrelated question, and shows it only on request; covers another question, a view request over a
+    // TEST-19: Answer never dumps the plan for an unrelated question, and shows it only when the model read a wish to see it; covers another question, a view request over a
     // ready proposal, a view request over a saved plan and a view request with no plan.
-    /// <summary>Fixes "xin chào" and any other question receiving the entire itinerary as the reply.</summary>
+    /// <summary>Fixes "xin chào" and any other question receiving the entire itinerary as the reply; the model, not a regex on the user's words, decides what was asked.</summary>
     [Theory]
-    [InlineData("Giải thích bản nháp", "ready", AgentReplyBuilder.AnswerUnavailable)]
-    [InlineData("Xem lại lịch giúp mình", "ready", "Lịch hiện tại có 1 món, tổng khoảng 50.000 đồng/người. Bạn xem chi tiết ở thẻ bên dưới và trên bản đồ nhé.")]
-    [InlineData("Xem lại lịch giúp mình", "saved", "Đây là lịch 2 ngày đã lưu của bạn nhé.")]
-    [InlineData("Xem lại lịch giúp mình", "none", "Mình có thể lập lịch ăn uống từ những món và quán có trên ANGI.")]
-    public void Answer_ListsThePlanOnlyWhenAskedAndNoCardShowsIt(string content, string plan, string expected)
+    [InlineData(false, "ready", AgentReplyBuilder.AnswerUnavailable)]
+    [InlineData(true, "ready", "Lịch hiện tại có 1 món, tổng khoảng 50.000 đồng/người. Bạn xem chi tiết ở thẻ bên dưới và trên bản đồ nhé.")]
+    [InlineData(true, "saved", "Đây là lịch 2 ngày đã lưu của bạn nhé.")]
+    [InlineData(true, "none", "Mình có thể lập lịch ăn uống từ những món và quán có trên ANGI.")]
+    public void Answer_ListsThePlanOnlyWhenAskedAndNoCardShowsIt(bool planAsked, string plan, string expected)
     {
         // STEP-01: Get snapshot from AgentTestData.Snapshot, create context as AgentContext and get reply from AgentReplyBuilder.Answer.
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng", Price = 50000 });
         var context = new AgentContext
         {
             ConversationId = 7, UserId = 3, State = AgentTestData.State(), Source = plan == "none" ? null : snapshot,
-            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = content },
+            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "xem lịch" },
             CurrentProposal = plan != "ready" ? null
                 : new ANGI.Application.DTOs.Agent.AgentProposalDto(1, 1, "create", "ready", snapshot, new AgentValidation([], [], 50000, []), DateTime.UtcNow.AddHours(1))
         };
 
-        var reply = AgentReplyBuilder.Answer(context);
+        var reply = AgentReplyBuilder.Answer(context, planAsked);
 
         // STEP-02: Assert reply starts with expected and reply.Contains() is plan == "saved".
         reply.Should().StartWith(expected);

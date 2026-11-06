@@ -80,30 +80,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-03: Reviewing the existing proposal returns its full preview without calling the provider or committing.
-    /// <summary>Ensures reviewing a plan is free of model cost and never saves it.</summary>
-    [Fact]
-    public async Task ExecuteAsync_ReviewExistingProposal_ReturnsFullPreviewWithoutProviderOrCommit()
-    {
-        // STEP-01: Create fixture as AgentUseCaseFixture and set fixture.Conversation.CurrentProposalId to 9.
-        var fixture = new AgentUseCaseFixture();
-        fixture.Conversation.CurrentProposalId = 9;
-        // STEP-02: Read proposal through ReadyProposal.
-        var proposal = ReadyProposal(9, AgentTestData.Snapshot(AgentTestData.Item(), AgentTestData.Item(1, "b", 2)));
-        // STEP-03: Stub fixture.GetProposalSnapshotAsync and fixture.GetProposalAsync.
-        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
-        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
-        // STEP-04: Get request from Request and set request.Content to a test text.
-        var request = Request(); request.Content = "hãy lập lịch giúp tôi để chốt lịch";
-        // STEP-05: Run Create().ExecuteAsync with request and keep result.
-        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
-        // STEP-06: Assert result.Proposal.Snapshot.Items has 2 item(s) and result.Commit is null.
-        result.Proposal!.Snapshot.Items.Should().HaveCount(2); result.Commit.Should().BeNull();
-        // STEP-07: Verify fixture receives no other calls.
-        fixture.Llm.VerifyNoOtherCalls();
-    }
-
-    // TEST-04: Accepting a pending constraint change generates and persists a fresh complete preview.
+    // TEST-03: Accepting a pending constraint change generates and persists a fresh complete preview.
     /// <summary>Ensures an accepted constraint change produces a new full preview instead of reusing the old one.</summary>
     [Fact]
     public async Task ExecuteAsync_AcceptConstraintChange_GeneratesAndPersistsFreshCompletePreview()
@@ -145,7 +122,7 @@ public sealed class SendAgentMessageUseCaseTests
         ValidationResult = AgentJson.Write(new AgentValidation([], [], 50000, []))
     };
 
-    // TEST-05: A changed state without a fresh preview does not replay the old commit as a new save.
+    // TEST-04: A changed state without a fresh preview does not replay the old commit as a new save.
     /// <summary>Prevents an old commit result from being reported as a save of the changed state.</summary>
     [Fact]
     public async Task ExecuteAsync_ChangedStateWithoutFreshPreview_DoesNotReplayOldCommitAsNewSave()
@@ -170,7 +147,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-06: A completed stale-version retry replays its stored response without provider calls or extra saves.
+    // TEST-05: A completed stale-version retry replays its stored response without provider calls or extra saves.
     /// <summary>Checks replay-before-version validation using the real request hash implementation.</summary>
     [Fact]
     public async Task ExecuteAsync_CompletedRetry_ReplaysWithoutProviderOrSave()
@@ -193,7 +170,7 @@ public sealed class SendAgentMessageUseCaseTests
         (await ((Func<Task>)(async () => await useCase.ExecuteAsync(7, request, CancellationToken.None))).Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("MESSAGE_ID_REUSED");
     }
 
-    // TEST-07: Busy, stale and expired conversations reject admission before the LLM.
+    // TEST-06: Busy, stale and expired conversations reject admission before the LLM.
     /// <summary>Checks all pre-execution conversation guards at their boundary.</summary>
     [Theory]
     [InlineData("busy", "CONVERSATION_BUSY")][InlineData("version", "CONVERSATION_VERSION_CONFLICT")][InlineData("expired", "CONVERSATION_EXPIRED")]
@@ -212,7 +189,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-08: Persistent minute and daily quota exhaustion returns the correct retry delay without provider calls.
+    // TEST-07: Persistent minute and daily quota exhaustion returns the correct retry delay without provider calls.
     /// <summary>Verifies both independently configured per-user cost limits.</summary>
     [Theory]
     [InlineData(false, 60)][InlineData(true, 86400)]
@@ -231,7 +208,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-09: Provider failure resets rolled-back tracking before releasing only its own lease.
+    // TEST-08: Provider failure resets rolled-back tracking before releasing only its own lease.
     /// <summary>Prevents a recovery flush from persisting a partially prepared proposal.</summary>
     [Fact]
     public async Task ExecuteAsync_ProviderFailure_ReleasesLeaseWithCleanTracking()
@@ -248,7 +225,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Conversation.ProcessingAttemptId.Should().BeNull(); fixture.Message!.ProcessingStatus.Should().Be(ANGI.Domain.Enums.AgentProcessingStatus.Failed);
     }
 
-    // TEST-10: Equivalent decimal scales and province casing do not turn a completed business retry into a different message.
+    // TEST-09: Equivalent decimal scales and province casing do not turn a completed business retry into a different message.
     /// <summary>Checks canonical hashing ignores representation differences while retaining business identity.</summary>
     [Fact]
     public async Task ExecuteAsync_EquivalentStateRepresentation_Replays()
@@ -265,7 +242,7 @@ public sealed class SendAgentMessageUseCaseTests
         (await useCase.ExecuteAsync(7, request, CancellationToken.None)).Replayed.Should().BeTrue();
     }
 
-    // TEST-11: Explicit save without a preview produces a natural answer without calling the provider or creating a roadmap.
+    // TEST-10: Explicit save without a preview produces a natural answer without calling the provider or creating a roadmap.
     /// <summary>Supports chat-only saving without asking the client to construct a confirm request.</summary>
     [Fact]
     public async Task ExecuteAsync_SaveWithoutPreview_AnswersWithoutLlm()
@@ -280,7 +257,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls(); fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-12: A short affirmative accepts only the pending constraint snapshot and never saves a roadmap.
+    // TEST-11: A short affirmative accepts only the pending constraint snapshot and never saves a roadmap.
     /// <summary>Checks both acceptance and rejection without trusting model-generated consent.</summary>
     [Theory]
     [InlineData(true)]
@@ -312,7 +289,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-13: Whatever the model reads, a save question only commits on accept for its exact proposal version; covers a refusal, an unclear reply, and an accept with no matching question.
+    // TEST-12: Whatever the model reads, a save question only commits on accept for its exact proposal version; covers a refusal, an unclear reply, and an accept with no matching question.
     /// <summary>"Đừng nhé" once saved the plan being refused, because a word list read it as "đúng"; no reading here may write the roadmap.</summary>
     [Theory]
     [InlineData("decline", 1, "Mình chưa lưu")]
@@ -343,11 +320,12 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.Verify(x => x.LockAndGetTrackedAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 
-    // TEST-14: Ordinary or negated chat is sent to the model and cannot reach the deterministic save writer.
+    // TEST-13: Ordinary or negated chat, and a wish to review before saving, is sent to the model and cannot reach the deterministic save writer.
     /// <summary>Protects against ambiguous agreement and negative save instructions.</summary>
     [Theory]
     [InlineData("đồng ý")]
     [InlineData("đừng lưu lịch trình này")]
+    [InlineData("hãy lập lịch giúp tôi để chốt lịch")]
     public async Task ExecuteAsync_NotExplicitSave_NeverCommits(string content)
     {
         // STEP-01: Create fixture as AgentUseCaseFixture, get request from Request and set request.Content to content.
@@ -359,7 +337,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-15: Repeated prompt-only text creates distinct messages instead of replaying or conflicting with an earlier turn.
+    // TEST-14: Repeated prompt-only text creates distinct messages instead of replaying or conflicting with an earlier turn.
     /// <summary>Checks automatic allocation, a changed revision and retrying the returned ID without provider usage.</summary>
     [Fact]
     public async Task ExecuteAsync_PromptOnly_AllocatesFreshIdentityAndCanReplay()
@@ -387,7 +365,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-16: Supplying a stale version remains an explicit conflict even without a client-selected message ID.
+    // TEST-15: Supplying a stale version remains an explicit conflict even without a client-selected message ID.
     /// <summary>Checks that prompt-only defaults do not silently ignore requested concurrency protection.</summary>
     [Fact]
     public async Task ExecuteAsync_OptionalIdWithExplicitStaleVersion_StillConflicts()
@@ -402,7 +380,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-17: Prompt-only admission retains the busy, expiry and quota guards before provider execution.
+    // TEST-16: Prompt-only admission retains the busy, expiry and quota guards before provider execution.
     /// <summary>Checks that omission of transport metadata cannot bypass existing admission limits.</summary>
     [Theory]
     [InlineData("busy", "CONVERSATION_BUSY")]
@@ -423,7 +401,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-18: A wish to save the model read over a ready preview asks first and never saves or replans, whatever the wording.
+    // TEST-17: A wish to save the model read over a ready preview asks first and never saves or replans, whatever the wording.
     /// <summary>The model reads how people say it; the backend then names this exact proposal in a question before anything is written.</summary>
     [Fact]
     public async Task ExecuteAsync_SaveWishTheModelRead_AsksWithoutCommit()
@@ -452,7 +430,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Roadmaps.VerifyNoOtherCalls();
     }
 
-    // TEST-19: A wish to save while a clarification is open drops that question and asks about saving, writing nothing yet.
+    // TEST-18: A wish to save while a clarification is open drops that question and asks about saving, writing nothing yet.
     /// <summary>In conversation 193 "chốt đi" after an open question rebuilt the whole plan because a save wish was not allowed there.</summary>
     [Fact]
     public async Task ExecuteAsync_SaveWishWithOpenQuestion_AsksAboutSaving()
@@ -482,7 +460,7 @@ public sealed class SendAgentMessageUseCaseTests
     }
 
     /// <summary>Creates a complete real use case over isolated persistence/provider boundaries.</summary>
-    // TEST-20: A refusal the model read in an open clarification over a ready preview closes it and the plan stays current.
+    // TEST-19: A refusal the model read in an open clarification over a ready preview closes it and the plan stays current.
     /// <summary>Gives the user a way past a question so "chốt lịch này" works next, however they say no.</summary>
     [Theory]
     [InlineData("giữ nguyên")][InlineData("thôi dẹp đi")]
@@ -511,7 +489,7 @@ public sealed class SendAgentMessageUseCaseTests
         AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().BeNull();
     }
 
-    // TEST-21: Declining after an accepted change that produced no preview returns to the reviewed constraints, so the preview can be saved.
+    // TEST-20: Declining after an accepted change that produced no preview returns to the reviewed constraints, so the preview can be saved.
     /// <summary>Prevents "giữ nguyên" from leaving a state that no longer matches the preview and blocks saving.</summary>
     [Fact]
     public async Task ExecuteAsync_DeclineAfterFailedChange_RestoresReviewedConstraints()
@@ -537,7 +515,7 @@ public sealed class SendAgentMessageUseCaseTests
         AgentJson.Read<AgentState>(fixture.Conversation.State).MealRequests.Should().BeEmpty();
     }
 
-    // TEST-22: A save with an open clarification names that question and points to the way out.
+    // TEST-21: A save with an open clarification names that question and points to the way out.
     /// <summary>Prevents a dead end where the user is told to answer a question that is not shown.</summary>
     [Fact]
     public async Task ExecuteAsync_SaveWithOpenQuestion_NamesTheQuestion()
@@ -563,7 +541,7 @@ public sealed class SendAgentMessageUseCaseTests
         result.Reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
     }
 
-    // TEST-23: A reset on a conversation whose roadmap was deleted starts empty and detaches it instead of failing with 404.
+    // TEST-22: A reset on a conversation whose roadmap was deleted starts empty and detaches it instead of failing with 404.
     /// <summary>Gives a conversation attached to a deleted roadmap a way forward; every other message would be 404.</summary>
     [Fact]
     public async Task ExecuteAsync_ResetAfterRoadmapDeleted_DetachesAndStartsEmpty()
@@ -585,7 +563,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.VerifyNoOtherCalls();
     }
 
-    // TEST-24: A greeting with an open question keeps the current proposal as the result and the question open, with no "previous proposal kept" note.
+    // TEST-23: A greeting with an open question keeps the current proposal as the result, shows only the model's greeting and closes the question, with no "previous proposal kept" note.
     /// <summary>Prevents the fixed note from being appended to a social reply and verifies the turn is still stored and replayable.</summary>
     [Fact]
     public async Task ExecuteAsync_GreetingWithOpenQuestion_KeepsProposalWithoutExtraNote()
@@ -610,9 +588,9 @@ public sealed class SendAgentMessageUseCaseTests
         // STEP-07: Run useCase.ExecuteAsync with request and keep replay.
         var replay = await useCase.ExecuteAsync(7, request, CancellationToken.None);
 
-        // STEP-08: Assert result.Reply is the expected text and AgentJson.Read().PendingQuestion is the expected text.
-        result.Reply.Should().Be("Chào bạn nha!\nBạn muốn đổi món nào?");
-        AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().Be("Bạn muốn đổi món nào?");
+        // STEP-08: Assert result.Reply is only the model's greeting and the question no longer waits, as the user moved on.
+        result.Reply.Should().Be("Chào bạn nha!");
+        AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().BeNull();
         // STEP-09: Assert proposal.Status is Enums.AgentProposalStatus.Ready and fixture.Conversation.CurrentProposalId is 9.
         proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
         fixture.Conversation.CurrentProposalId.Should().Be(9);
@@ -622,7 +600,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-25: An out-of-scope message over a ready proposal keeps it committable: no new proposal, and the same proposal returned as still current.
+    // TEST-24: An out-of-scope message over a ready proposal keeps it committable: no new proposal, and the same proposal returned as still current.
     /// <summary>A refusal must not change the plan or block a later save.</summary>
     [Fact]
     public async Task ExecuteAsync_OutOfScope_KeepsReadyProposalCurrent()
@@ -653,7 +631,7 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-26: A dish suggestion ends an open save question so the next "ok" cannot save the plan; a greeting keeps it. Covers both.
+    // TEST-25: A dish suggestion ends an open save question so the next "ok" cannot save the plan; a greeting keeps it. Covers both.
     /// <summary>"Lưu nhé?", then "gợi ý 1 món", then "ok" would otherwise commit the plan while the user was answering the offer.</summary>
     [Theory]
     [InlineData(true)]
@@ -684,7 +662,7 @@ public sealed class SendAgentMessageUseCaseTests
         state.DishOffered.Should().Be(suggestion ? true : null);
     }
 
-    // TEST-27: The mark of an offered dish lives one turn: the model is told, and the stored state no longer holds it.
+    // TEST-26: The mark of an offered dish lives one turn: the model is told, and the stored state no longer holds it.
     /// <summary>A later "ok" must not be read against a suggestion several messages old.</summary>
     [Fact]
     public async Task ExecuteAsync_OfferedDish_LivesOneTurn()

@@ -365,22 +365,29 @@ public static class AgentReplyBuilder
             "Mình chưa hoàn tất lịch mới. Bạn muốn mình tìm thêm cho các bữa này hay thay đổi yêu cầu của các bữa đó?";
     }
 
-    /// <summary>Answers using a trusted tool outcome; the itinerary is shown only when asked for, never as a default reply to any other question.</summary>
-    public static string Answer(AgentContext context)
+    /// <summary>
+    /// Answers using a trusted tool outcome; the itinerary is shown only when the model read a wish to see it (it wrote the {plan} slot),
+    /// never as a default reply to any other question.
+    /// </summary>
+    public static string Answer(AgentContext context, bool planAsked = false)
     {
         // STEP-01: Return known early when context.ToolNotice ?? context.CatalogAnswer exists.
         if ((context.ToolNotice ?? context.CatalogAnswer) is { } known) return known;
-        // STEP-02: Return a fixed message early when context.Source is not { } source.
-        if (context.Source is not { } source)
+        // STEP-02: Return a fixed message early when context.Source is missing.
+        if (context.Source is null)
             return "Mình có thể lập lịch ăn uống từ những món và quán có trên ANGI. Bạn muốn lập lịch hoặc tìm món/quán nào?";
-        // STEP-03: Return AnswerUnavailable early when AgentConfirmationPolicy.IsPlanViewRequest(context.Request.Content) does not hold.
-        if (!AgentConfirmationPolicy.IsPlanViewRequest(context.Request.Content)) return AnswerUnavailable;
-        // STEP-04: Return one of two results depending on context.CurrentProposal.Status is "ready".
-        // Bản nháp đang hiện trên thẻ đề xuất nên chỉ cần trỏ tới đó; lịch đã lưu không có thẻ nào nên liệt kê ngay trong chat.
-        return context.CurrentProposal?.Status == "ready"
+        // STEP-03: Return the plan when it was asked for, otherwise AnswerUnavailable.
+        return planAsked ? Plan(context)! : AnswerUnavailable;
+    }
+
+    /// <summary>
+    /// The current plan in the backend's words, which fills the model's {plan} slot; null when there is no plan.
+    /// A draft is already shown on the proposal card, so it is only summed up; a saved plan has no card, so it is listed in the chat.
+    /// </summary>
+    public static string? Plan(AgentContext context) => context.Source is not { } source ? null
+        : context.CurrentProposal?.Status == "ready"
             ? $"Lịch hiện tại có {source.Items.Length} món, tổng khoảng {Money(source.Items.Sum(x => x.Price))} đồng/người. Bạn xem chi tiết ở thẻ bên dưới và trên bản đồ nhé."
             : Itinerary(source);
-    }
 
     internal static string Meal(string value) => value switch
     { "breakfast" => "bữa sáng", "lunch" => "bữa trưa", "dinner" => "bữa tối", "snack" => "bữa phụ", "late_night" => "bữa khuya", _ => "bữa ăn" };

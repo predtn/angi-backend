@@ -35,8 +35,16 @@ public static class AgentReplyGuard
     private static readonly Regex Numbers = new(@"\d+(?:[.,]\d+)*(?<unit>\s*(?:k|nghin|ngan)\b)?", RegexOptions.CultureInvariant);
 
     /// <summary>Picks the visible reply for a clarify or answer turn: trusted notices first, then checked model wording, then the fixed reply.</summary>
-    public static string Choose(AgentContext context, AgentOutput output) => ChooseIssue(context, output) is null ? output.Reply.Trim()
-        : output.Action == "clarify" ? AgentReplyBuilder.Clarify(context, output.Clarification) : AgentReplyBuilder.Answer(context);
+    public static string Choose(AgentContext context, AgentOutput output) => ChooseIssue(context, output) is null
+        ? (PlanAsked(context, output) ? output.Reply.Replace(PlanSlot, AgentReplyBuilder.Plan(context), StringComparison.Ordinal) : output.Reply).Trim()
+        : output.Action == "clarify" ? AgentReplyBuilder.Clarify(context, output.Clarification) : AgentReplyBuilder.Answer(context, PlanAsked(context, output));
+
+    // Model đọc ý muốn xem lịch theo mọi cách nói và đặt ô này; backend điền lịch thật, nên không cần đoán câu người dùng bằng regex.
+    private const string PlanSlot = "{plan}";
+
+    /// <summary>True when the model answered a wish to see the plan with the {plan} slot and a plan exists to fill it.</summary>
+    private static bool PlanAsked(AgentContext context, AgentOutput output) =>
+        output.Action == "answer" && context.Source is not null && output.Reply.Contains(PlanSlot, StringComparison.Ordinal);
 
     /// <summary>Why the model's wording cannot be shown on a clarify or answer turn, as a short code for the log; null when it can.</summary>
     public static string? ChooseIssue(AgentContext context, AgentOutput output)
@@ -52,13 +60,32 @@ public static class AgentReplyGuard
             if (context.Exchanges.Count > 0 && context.Source is null &&
                 (output.Clarification == "general" || output.Clarification is "trip_details" or "edit_scope" && AgentReplyBuilder.TripDetailsQuestion(context.State) is null))
                 return "after_tools";
-            return !output.Reply.TrimEnd().EndsWith('?') ? "no_question_mark" : QuestionIssue(output.Reply, context);
+            // Không đòi dấu "?": câu hỏi tiếng Việt hay kết bằng "nhé." và câu cố định thay vào cũng vậy; chỉ dữ kiện trong câu mới cần kiểm.
+            return QuestionIssue(output.Reply, context);
         }
-        // STEP-02: Return "backend_answer" early when the answer rests on a backend notice or the user asked to see the plan.
-        if (context.ToolNotice is not null || context.CatalogAnswer is not null || AgentConfirmationPolicy.IsPlanViewRequest(context.Request.Content)) return "backend_answer";
-        // STEP-03: Return the result of GroundingIssue.
-        return GroundingIssue(output.Reply, context);
+        // STEP-02: Return "backend_answer" early when the answer rests on a backend notice.
+        if (context.ToolNotice is not null || context.CatalogAnswer is not null) return "backend_answer";
+        // STEP-03: Return the result of GroundingIssue on the words around the {plan} slot, which the backend fills itself; the slot alone needs no words.
+        if (PlanAsked(context, output) && output.Reply.Replace(PlanSlot, "", StringComparison.Ordinal).Trim().Length == 0) return null;
+        return GroundingIssue(PlanAsked(context, output) ? output.Reply.Replace(PlanSlot, " ", StringComparison.Ordinal) : output.Reply, context);
     }
+
+    /// <summary>
+    /// What the model must fix for its reply to be shown, as feedback for one rewrite; null when the issue cannot be fixed by rewording,
+    /// because the backend owns that reply (a notice, the plan being listed, a question resting on backend evidence).
+    /// </summary>
+    public static string? RepairHint(string? issue) => issue switch
+    {
+        null or "fixed_question" or "backend_notice" or "after_tools" or "backend_answer" => null,
+        "number" => "it states a number nothing in the data or the user's words backs; leave numbers out",
+        "name" => "it names a place, dish or restaurant that neither the user nor the data mentioned",
+        "dish_word" => "it names a dish that is not in the data",
+        "claim" => "it claims a change, a saved plan or a fact (opening hours, fame, safety) that the backend did not confirm",
+        "too_long" => "it is too long; keep it to a few short sentences",
+        "empty" => "it is empty",
+        "not_vietnamese" => "it is not written in Vietnamese",
+        _ => "it is not plain conversational text (markup, code or internal terms)"
+    };
 
     /// <summary>A friendly opening clause for a new preview, or null. It runs before backend repairs, so it may state no fact at all.</summary>
     public static string? Opener(string? reply)
@@ -83,7 +110,7 @@ public static class AgentReplyGuard
         if (LengthOrFormIssue(text) is { } issue) return issue;
         // STEP-03: Prepare trusted through Trusted, then return the result of FactsIssue.
         var trusted = Trusted(context);
-        return FactsIssue(text, trusted, TrustedNumbers(context, trusted), context.DishWords);
+        return FactsIssue(text, trusted, trusted, TrustedNumbers(context, trusted), context.DishWords);
     }
 
     /// <summary>The check for a question: it states no fact, so it may name a dish or a place freely, but a number in it must still be backed.</summary>
@@ -115,20 +142,23 @@ public static class AgentReplyGuard
         // STEP-02: Prepare trusted through string.Join, then return the result of FactsIssue.
         var trusted = string.Join(' ', context.Request.Content, context.State.Province, context.State.Title, context.DishSuggestion?.Area, context.DishSuggestion?.AreaNotFound);
         var days =Enumerable.Range(1, context.State.NumDays ?? 0).Select(day => day.ToString(CultureInfo.InvariantCulture));
-        return FactsIssue(text, trusted, Numbers.Matches(trusted).Select(Value).Concat(days).ToHashSet(), context.DishWords);
+        // Địa danh có trong dữ liệu (tỉnh của catalog, địa chỉ quán vừa trả về) là dữ kiện thật: câu "ở Hà Nội nè" không bị thay bằng câu cố định. Số trong địa chỉ thì không được tin.
+        var names = string.Join(' ', trusted, string.Join(' ', context.CatalogProvinces ?? []),
+            string.Join(' ', (context.DishSuggestion?.Dishes ?? []).Select(dish => dish.Address)));
+        return FactsIssue(text, trusted, names, Numbers.Matches(trusted).Select(Value).Concat(days).ToHashSet(), context.DishWords);
     }
 
     private static string? LengthOrFormIssue(string text) => text.Length == 0 ? "empty" : text.Length > MaxReplyLength ? "too_long" : FormIssue(text);
 
     /// <summary>The first thing in the text the catalog cannot back: a claim, a number, a name or a dish word; null when all of it is backed.</summary>
-    private static string? FactsIssue(string text, string trusted, HashSet<string> numbers, IReadOnlySet<string>? dishWords)
+    private static string? FactsIssue(string text, string trusted, string names, HashSet<string> numbers, IReadOnlySet<string>? dishWords)
     {
         // STEP-01: Return "claim" early when Plain() matches Unbacked and Plain() does not match Admits.
         if (Unbacked.IsMatch(Plain(text)) && !Admits.IsMatch(Plain(text))) return "claim";
         // STEP-02: Return "number" early when numbers does not contain every number in the text.
         if (Numbers.Matches(text).Any(match => !numbers.Contains(Value(match)))) return "number";
-        // STEP-03: Return "name" or "dish_word" when the text uses one nothing backs.
-        return !NamesBacked(text, trusted) ? "name" : NamesUnbackedDish(text, trusted, dishWords) ? "dish_word" : null;
+        // STEP-03: Return "name" or "dish_word" when the text uses one nothing backs; a dish word must still come from the user or the stated scope, not from the dish just suggested.
+        return !NamesBacked(text, names) ? "name" : NamesUnbackedDish(text, trusted, dishWords) ? "dish_word" : null;
     }
 
     /// <summary>A number as plain digits, with a thousand-unit word ("60k") written out.</summary>
@@ -330,7 +360,7 @@ public static class AgentReplyGuard
     private static readonly HashSet<string> GenericFoodWords = ["mon", "mon an", "do an", "an", "quan", "quan an", "thuc an", "am thuc"];
 
     /// <summary>Shows the model's social reply unless it breaks a rule that holds whatever it is about; a social reply changes nothing, so it is free to talk like a person.</summary>
-    public static string ChatReply(string? reply, string content, AgentState state) => WithOpenQuestion(ChatIssue(reply, content, state) is null ? reply!.Trim() : ChatFallback, state);
+    public static string ChatReply(string? reply, string content, AgentState state) => ChatIssue(reply, content, state) is null ? reply!.Trim() : ChatFallback;
 
     /// <summary>The first rule a social reply breaks, as a short code for the log; null when it may be shown.</summary>
     public static string? ChatIssue(string? reply, string content, AgentState state)
@@ -350,22 +380,29 @@ public static class AgentReplyGuard
 
     /// <summary>
     /// Returns a fixed refusal and repeats the open question, so no model text is shown on this turn and the user keeps their place.
+    /// Only this reply repeats it: it is wholly the backend's, so the model has no sentence of its own in which to bring the question back.
     /// A food question naming a dish gets its own wording, because "mình chỉ giúp được về món ăn" would contradict refusing it.
     /// </summary>
-    public static string OutOfScopeReply(string content, string? suggestedDish, AgentState state, long? turnId) => WithOpenQuestion(NamedDish(content, suggestedDish) is { } dish
-        ? $"Mình chưa hướng dẫn được phần này vì ANGI không có dữ liệu về công thức, dinh dưỡng hay sức khỏe. Bạn có muốn mình tìm quán {dish} không?"
-        : OutOfScopeReplies[(turnId ?? 0) % OutOfScopeReplies.Length], state);
+    public static string OutOfScopeReply(string content, string? suggestedDish, AgentState state, long? turnId)
+    {
+        // STEP-01: Prepare the refusal, worded for a named dish when there is one.
+        var refusal = NamedDish(content, suggestedDish) is { } dish
+            ? $"Mình chưa hướng dẫn được phần này vì ANGI không có dữ liệu về công thức, dinh dưỡng hay sức khỏe. Bạn có muốn mình tìm quán {dish} không?"
+            : OutOfScopeReplies[(turnId ?? 0) % OutOfScopeReplies.Length];
+        // STEP-02: Return it, followed by the open question when one waits.
+        return state.PendingQuestion is { } question ? $"{refusal}\n{question}" : refusal;
+    }
 
     /// <summary>
     /// Shows the model's description of a dish when it states no number, health claim, change, code or internal term; otherwise a fixed line. Both offer to find the dish.
     /// Proper names stay allowed, because where a dish comes from is part of describing it.
     /// </summary>
-    public static string FoodInfoReply(string? reply, string content, string? suggestedDish, AgentState state)
+    public static string FoodInfoReply(string? reply, string content, string? suggestedDish)
     {
         // STEP-01: Prepare offer from NamedDish.
         var offer = NamedDish(content, suggestedDish) is { } dish ? $" Bạn có muốn mình tìm quán {dish} trên ANGI không?" : "";
-        // STEP-02: Return the result of WithOpenQuestion.
-        return WithOpenQuestion((FoodInfoIssue(reply) is null ? reply!.Trim() : FoodInfoFallback) + offer, state);
+        // STEP-02: Return the checked description followed by the offer.
+        return (FoodInfoIssue(reply) is null ? reply!.Trim() : FoodInfoFallback) + offer;
     }
 
     /// <summary>The first rule a dish description breaks, as a short code for the log; null when it may be shown.</summary>
@@ -386,10 +423,6 @@ public static class AgentReplyGuard
         return dish.Length is >= 2 and <= MaxDishLength && Regex.IsMatch(dish, @"^[\p{L}\p{M} ]+$", RegexOptions.CultureInvariant) &&
             !GenericFoodWords.Contains(Words(dish)) && $" {Words(content)} ".Contains($" {Words(dish)} ", StringComparison.Ordinal) ? dish : null;
     }
-
-    // Câu đang chờ trả lời vẫn còn hiệu lực sau lời chào, nên nhắc lại để người dùng biết cuộc trò chuyện đang dừng ở đâu.
-    internal static string WithOpenQuestion(string reply, AgentState state) =>
-        state.PendingQuestion is { } question ? $"{reply}\n{question}" : reply;
 
     private static string Accented(string text) => text.Normalize(NormalizationForm.FormC).ToLowerInvariant();
 }

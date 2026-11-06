@@ -239,28 +239,22 @@ public static class AgentConfirmationPolicy
         @"^(?:(?:toi (?:muon|xac nhan)|hay|dong y) )?(?:luu (?:lich trinh|lich|ban nhap|de xuat)(?: nay| hien tai)?|chot (?:lich trinh|lich|de xuat)(?: nay| hien tai)?|xac nhan luu(?: lich trinh| lich)?(?: nay)?|save (?:this )?(?:itinerary|plan))(?: giup toi| cho toi| nhe| di)?$",
         RegexOptions.CultureInvariant);
 
-    /// <summary>Requests a complete review before saving; this wording never authorizes a roadmap write.</summary>
-    public static bool IsReviewRequest(string content) => Regex.IsMatch(Normalize(content),
-        @"^(?:hay )?(?:lap|tong hop|hoan thien) (?:lich|lich trinh)(?: giup toi| cho toi)? de chot(?: lich| lich trinh)?$",
-        RegexOptions.CultureInvariant);
-
-    /// <summary>Recognizes a request to see the current plan, the only question answered by listing it again.</summary>
-    public static bool IsPlanViewRequest(string content) => Regex.IsMatch(Normalize(content),
-        @"\b(?:xem|in|liet ke|hien thi|tong hop)\b.*\b(?:lich|lo trinh|roadmap|ke hoach|de xuat|ban nhap)\b|\b(?:lich|lo trinh|roadmap|ke hoach)\b.*\b(?:co gi|the nao|ra sao|hien tai)\b",
-        RegexOptions.CultureInvariant);
-
-    /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
-    public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
-        ? $"Trước khi lưu, mình cần bạn trả lời: {question} Nếu không muốn đổi gì, bạn nhắn “giữ nguyên” rồi bảo mình chốt nhé."
-        : "Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.";
-
-    /// <summary>Resolves unambiguous draft controls before a provider call; other natural phrases remain model-interpreted.</summary>
+    /// <summary>
+    /// Resolves unambiguous draft controls before a provider call; other natural phrases remain model-interpreted.
+    /// Kept as a whole-message match like the save sentence: when the attached roadmap was deleted no context can be built for the model, and the error tells the user to send "làm lại từ đầu".
+    /// </summary>
     public static string? DraftControl(string content) => Normalize(content) switch
     {
         "bo ban nhap" or "bo nhap" or "huy ban nhap" or "bo de xuat" or "bo ban chinh sua" or "discard draft" => "discard",
         "lam lai tu dau" or "bat dau lai tu dau" or "bat dau ke hoach moi" or "reset" or "start over" => "reset",
         _ => null
     };
+
+    /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
+    public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
+        ? $"Trước khi lưu, mình cần bạn trả lời: {question} Nếu không muốn đổi gì, bạn nhắn “giữ nguyên” rồi bảo mình chốt nhé."
+        : "Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.";
+
 
     /// <summary>Stages validated proposed constraints, retaining the original state until the user confirms them.</summary>
     public static AgentPreparedTurn StageChange(AgentState current, AgentState proposed, bool hasPlan = true)

@@ -68,12 +68,12 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.IsGrounded("Mình tìm thấy Quán Cô Ba, giá 70.000 đồng.", context).Should().BeTrue();
     }
 
-    // TEST-06: Clarifications use model wording only for edit_scope and general with a real question; covers both, no question mark, a day restated and an unbacked number.
+    // TEST-06: Clarifications use model wording only for edit_scope and general with a real question; covers both, a question ending in "nhé." instead of "?", a day restated and an unbacked number.
     /// <summary>A clarifying question should restate what was understood rather than ask it again.</summary>
     [Theory]
     [InlineData("edit_scope", "Bạn muốn đổi món nào trong ngày 2?", true)]
     [InlineData("general", "Bạn muốn đổi bữa nào của ngày 1 nhỉ?", true)]
-    [InlineData("edit_scope", "Mình sẽ hỏi lại nhé.", false)]
+    [InlineData("edit_scope", "Bạn nói giúp mình ngày và bữa muốn đổi nhé.", true)]
     [InlineData("edit_scope", "Bạn muốn đổi món nào trong ngày 9?", false)]
     public void Choose_Clarify_UsesWordingOnlyWhenBacked(string kind, string reply, bool shown)
     {
@@ -137,13 +137,13 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.ChooseIssue(context, new AgentOutput { Action = "clarify", Clarification = kind, Reply = reply }).Should().Be(shown ? null : "after_tools");
     }
 
-    // TEST-10: Answers show backed wording, and fall back when unbacked, when a tool notice exists or when the user asked to see the plan.
+    // TEST-10: Answers show backed wording, and fall back when unbacked or when a tool notice exists; the user's words alone never list the plan.
     /// <summary>Trusted outcomes and the full itinerary stay backend-built.</summary>
     [Theory]
     [InlineData("Vì sao chọn món này?", "Món này còn trong ngân sách của bạn nhé.", null, true)]
     [InlineData("Vì sao chọn món này?", "Món này giá 45.000 đồng.", null, false)]
     [InlineData("Vì sao chọn món này?", "Món này còn trong ngân sách của bạn nhé.", "Chưa lấy được gợi ý.", false)]
-    [InlineData("Xem lại lịch giúp mình", "Lịch của bạn còn trong ngân sách nhé.", null, false)]
+    [InlineData("Xem lại lịch giúp mình", "Lịch của bạn còn trong ngân sách nhé.", null, true)]
     public void Choose_Answer_ShowsOnlyGroundedWording(string content, string reply, string? notice, bool shown)
     {
         // STEP-01: Get context from Context, set context.Request.Content to content, set context.ToolNotice to notice and get chosen from AgentReplyGuard.Choose.
@@ -158,7 +158,27 @@ public sealed class AgentGroundedReplyTests
         else chosen.Should().Be(AgentReplyBuilder.Answer(context));
     }
 
-    // TEST-11: An opener is friendly wording with no fact; covers a good one, the 60 and 61 character boundary, digits, a name, a claim, English and no ending mark.
+    // TEST-11: The {plan} slot is filled with the backend's own plan text; covers words around it, the slot alone, an unbacked fact around it and no plan to fill.
+    /// <summary>The model decides that the user wants to see the plan, in any wording; the plan itself always comes from the backend.</summary>
+    [Theory]
+    [InlineData("Lịch của bạn đây nhé: {plan}", true, "Lịch của bạn đây nhé: ")]
+    [InlineData("{plan}", true, "")]
+    [InlineData("Lịch giá 45.000 đồng nè: {plan}", true, "")]
+    [InlineData("Lịch của bạn đây nhé: {plan}", false, null)]
+    public void Choose_PlanSlot_IsFilledByTheBackend(string reply, bool hasPlan, string? lead)
+    {
+        // STEP-01: Get context from Context, with or without a plan, and get chosen from AgentReplyGuard.Choose.
+        var context = Context();
+        if (!hasPlan) context.Source = null;
+
+        var chosen = AgentReplyGuard.Choose(context, new AgentOutput { Action = "answer", Reply = reply });
+
+        // STEP-02: Assert the plan text follows the model's words, or the fixed answer when there is no plan.
+        if (lead is null) chosen.Should().Be(AgentReplyBuilder.Answer(context)).And.NotContain("{plan}");
+        else chosen.Should().Be((lead + AgentReplyBuilder.Plan(context)).Trim());
+    }
+
+    // TEST-12: An opener is friendly wording with no fact; covers a good one, the 60 and 61 character boundary, digits, a name, a claim, English and no ending mark.
     /// <summary>It is written before backend repairs may change dishes, so it can never state one.</summary>
     [Theory]
     [InlineData("Xong rồi nhé!", "Xong rồi nhé!")][InlineData("  Xong rồi nhé.  ", "Xong rồi nhé.")]
@@ -166,7 +186,7 @@ public sealed class AgentGroundedReplyTests
     // STEP-01: Assert AgentReplyGuard.Opener() is expected.
     public void Opener_AcceptsOnlyFactFreeWording(string? reply, string? expected) => AgentReplyGuard.Opener(reply).Should().Be(expected);
 
-    // TEST-12: Opener length boundary; covers exactly 120 and 121 characters.
+    // TEST-13: Opener length boundary; covers exactly 120 and 121 characters.
     /// <summary>An opener stays a short clause in front of the backend facts.</summary>
     [Theory]
     [InlineData(120, true)][InlineData(121, false)]
@@ -179,7 +199,7 @@ public sealed class AgentGroundedReplyTests
         (AgentReplyGuard.Opener(reply) is not null).Should().Be(accepted);
     }
 
-    // TEST-13: Code is told from Vietnamese; covers a function call, backticks, an assignment, brackets, a closing semicolon, a plain sentence and parentheses around words.
+    // TEST-14: Code is told from Vietnamese; covers a function call, backticks, an assignment, brackets, a closing semicolon, a plain sentence and parentheses around words.
     /// <summary>Stops a reply that carries out a coding request even when the model labels it as small talk.</summary>
     [Theory]
     [InlineData("print(\"hello\")", true)][InlineData("Bạn dùng `map` nhé", true)][InlineData("giá trị x = 5", true)][InlineData("mảng [1, 2]", true)]
@@ -187,14 +207,14 @@ public sealed class AgentGroundedReplyTests
     // STEP-01: Assert AgentReplyGuard.IsCode() is expected.
     public void IsCode_TellsCodeFromVietnamese(string text, bool expected) => AgentReplyGuard.IsCode(text).Should().Be(expected);
 
-    // TEST-14: "Sẽ đổi" is a promise only when stated; covers a question, a statement and a past claim, which stays rejected even as a question.
+    // TEST-15: "Sẽ đổi" is a promise only when stated; covers a question, a statement and a past claim, which stays rejected even as a question.
     /// <summary>Lets the model ask about a change naturally, while only the backend may say a change happened.</summary>
     [Theory]
     [InlineData("Mình sẽ đổi món nào cho bạn nhé?", true)][InlineData("Mình sẽ đổi món cho bạn nhé.", false)][InlineData("Mình đã đổi món rồi, được không?", false)]
     // STEP-01: Assert AgentReplyGuard.IsGrounded() is expected.
     public void IsGrounded_Promise_AllowedOnlyInAQuestion(string reply, bool expected) => AgentReplyGuard.IsGrounded(reply, Context()).Should().Be(expected);
 
-    // TEST-15: The model words the questions of a new trip and the other open questions; covers each kind, a missing place, a tool result and no question mark, and a kind resting on backend evidence stays fixed.
+    // TEST-16: The model words the questions of a new trip and the other open questions; covers each kind, a missing place, a tool result and no question mark, and a kind resting on backend evidence stays fixed.
     /// <summary>Keeps every question resting on backend evidence in its fixed wording, and only those.</summary>
     [Theory]
     [InlineData("trip_details", true, 0, "Không sao đâu, bạn ước chừng một mức được không?", true)]
@@ -206,7 +226,7 @@ public sealed class AgentGroundedReplyTests
     [InlineData("preferences", true, 0, "Bạn có khẩu vị riêng gì không?", true)]
     [InlineData("coverage", true, 0, "Bạn muốn đổi điều kiện gì không?", false)]
     [InlineData("trip_details", true, 1, "Không sao đâu, bạn ước chừng một mức được không?", true)]
-    [InlineData("trip_details", true, 0, "Không sao đâu, bạn ước chừng một mức nhé.", false)]
+    [InlineData("trip_details", true, 0, "Không sao đâu, bạn ước chừng một mức nhé.", true)]
     public void Choose_TripQuestion_WordedOnlyWhenAllowed(string kind, bool placeKnown, int toolRounds, string reply, bool shown)
     {
         // STEP-01: Get context from Context, set context.State to a copy of context.State and 2 more.
@@ -220,7 +240,7 @@ public sealed class AgentGroundedReplyTests
         result.Should().Be(shown ? reply : AgentReplyBuilder.Clarify(context, kind));
     }
 
-    // TEST-16: A name a tool returned backs the wording even with Vietnamese letters, which the stored JSON keeps as escapes.
+    // TEST-17: A name a tool returned backs the wording even with Vietnamese letters, which the stored JSON keeps as escapes.
     /// <summary>Without this every accented dish from a tool result counts as invented and the natural reply is thrown away.</summary>
     [Fact]
     public void IsGrounded_NameFromToolResult_Passes()
@@ -233,7 +253,7 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.IsGrounded("Bạn thử Bún Riêu nhé.", context).Should().BeTrue();
     }
 
-    // TEST-17: Only a word that starts at least five dish names counts; covers four and five names, case, accents and an empty catalog.
+    // TEST-18: Only a word that starts at least five dish names counts; covers four and five names, case, accents and an empty catalog.
     /// <summary>Rare first words such as "lòng" or "ba" are everyday Vietnamese and must not block a normal sentence.</summary>
     [Fact]
     public void DishWords_KeepOnlyCommonFirstWords()
@@ -246,7 +266,7 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.DishWords([]).Should().BeEmpty();
     }
 
-    // TEST-18: A common dish word needs backing; covers an invented one, one the user wrote, one from the plan, one from a tool result, a look-alike without its accent, and a reply with none.
+    // TEST-19: A common dish word needs backing; covers an invented one, one the user wrote, one from the plan, one from a tool result, a look-alike without its accent, and a reply with none.
     /// <summary>Catches an invented dish in lower case, which the capital-letter check cannot see.</summary>
     [Theory]
     [InlineData("Món của bạn là phở đó.", "Món này thế nào?", false)]
@@ -267,7 +287,7 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.IsGrounded(reply, context).Should().Be(grounded);
     }
 
-    // TEST-19: The words around slots may only use what the user wrote; covers plain words, the user's own figure and dish, a written price, a plan's dish, a tool's name and an unbacked dish word.
+    // TEST-20: The words around slots may only use what the user wrote; covers plain words, the user's own figure and dish, a written price, a plan's dish, a tool's name and an unbacked dish word.
     /// <summary>Every fact belongs in a slot, so a correct name written out is still refused.</summary>
     [Theory]
     [InlineData("Bạn thử ở nhé!", true)]
@@ -292,7 +312,7 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.IsGroundedTemplate(text, context).Should().Be(grounded);
     }
 
-    // TEST-20: A refused wording is reported with the rule it broke; covers empty, too long, English, markup, code, a change claim, an internal term, fame, a number, a name, a dish word and a backed reply.
+    // TEST-21: A refused wording is reported with the rule it broke; covers empty, too long, English, markup, code, a change claim, an internal term, fame, a number, a name, a dish word and a backed reply.
     /// <summary>The code goes to the log instead of the wording, so a review can see why replies are replaced.</summary>
     [Theory]
     [InlineData("", 0, "empty")]
@@ -318,14 +338,14 @@ public sealed class AgentGroundedReplyTests
         AgentReplyGuard.GroundingIssue(length > 0 ? reply + new string('!', length) : reply, context).Should().Be(issue);
     }
 
-    // TEST-21: A question the model cannot word is reported with why; covers a backend question kind, a tool notice, a searched turn, no question mark and a shown question.
-    /// <summary>Separates what the rules forbid from what the model got wrong.</summary>
+    // TEST-22: A question the model cannot word is reported with why; covers a backend question kind, a tool notice, a searched turn, a question ending in "nhé." and a shown question.
+    /// <summary>Separates what the rules forbid from what the model got wrong; conversations 197 and 198 lost natural questions only because they ended in "nhé." instead of "?".</summary>
     [Theory]
     [InlineData("coverage", "Bạn muốn gì nào?", "kind", "fixed_question")]
     [InlineData("trip_details", "Bạn đi đâu nào?", "noplace", null)]
     [InlineData("general", "Bạn muốn gì nào?", "notice", "backend_notice")]
     [InlineData("general", "Bạn muốn gì nào?", "searched", "after_tools")]
-    [InlineData("general", "Bạn muốn gì nào.", "kind", "no_question_mark")]
+    [InlineData("general", "Bạn nhắn mình khẩu vị nhé.", "kind", null)]
     [InlineData("general", "Bạn muốn gì nào?", "kind", null)]
     public void ChooseIssue_NamesWhyAQuestionIsReplaced(string kind, string reply, string setup, string? issue)
     {
@@ -370,7 +390,7 @@ public sealed class AgentGroundedReplyTests
         return context;
     }
 
-    // TEST-22: Natural wording about the final dishes is kept as written.
+    // TEST-23: Natural wording about the final dishes is kept as written.
     /// <summary>This is the point of the feature: each dish and each day explains itself.</summary>
     [Fact]
     public void AttachNotes_VerifiableWording_IsKept()
@@ -385,7 +405,7 @@ public sealed class AgentGroundedReplyTests
         result.DaySummaries.Should().ContainSingle().Which.Summary.Should().StartWith("Ngày này");
     }
 
-    // TEST-23: Wording the backend cannot verify is dropped; covers an invented price, an unknown name, fame, hours, internal terms and excess length.
+    // TEST-24: Wording the backend cannot verify is dropped; covers an invented price, an unknown name, fame, hours, internal terms and excess length.
     /// <summary>A missing sentence is invisible to the user; a false fact in a travel plan is not.</summary>
     [Theory]
     [InlineData("Món này chỉ 45.000 đồng thôi.")]
@@ -404,7 +424,7 @@ public sealed class AgentGroundedReplyTests
         result.DaySummaries.Should().BeEmpty();
     }
 
-    // TEST-24: One bad sentence does not cost the good one.
+    // TEST-25: One bad sentence does not cost the good one.
     /// <summary>Keeps what can be verified from a partly invented note.</summary>
     [Fact]
     public void AttachNotes_OneBadSentence_KeepsTheOther()
@@ -416,7 +436,7 @@ public sealed class AgentGroundedReplyTests
         result.DishNotes.Should().ContainSingle().Which.Should().Be(new AgentDishNote(1, "Sợi mì vàng, nước dùng sánh.", null));
     }
 
-    // TEST-25: A note about a dish the backend swapped out afterwards never shows.
+    // TEST-26: A note about a dish the backend swapped out afterwards never shows.
     /// <summary>The notes run after the repairs, so the card cannot describe a dish that is no longer there.</summary>
     [Fact]
     public void AttachNotes_DishNoLongerInPreview_IsDropped()
@@ -428,7 +448,7 @@ public sealed class AgentGroundedReplyTests
         result.DishNotes.Should().BeEmpty();
     }
 
-    // TEST-26: A day summary may name only that day's dishes, so one written before a swap is not shown.
+    // TEST-27: A day summary may name only that day's dishes, so one written before a swap is not shown.
     /// <summary>Stops a conclusion that praises a dish from another day or one that was replaced.</summary>
     [Fact]
     public void AttachNotes_SummaryNamingAnotherDaysDish_IsDropped()
@@ -440,7 +460,7 @@ public sealed class AgentGroundedReplyTests
         result.DaySummaries.Should().BeEmpty();
     }
 
-    // TEST-27: An edit keeps what it did not touch: other dishes' notes and unchanged days' summaries stay, a changed day's summary goes.
+    // TEST-28: An edit keeps what it did not touch: other dishes' notes and unchanged days' summaries stay, a changed day's summary goes.
     /// <summary>A small edit does not make the rest of the card go blank, nor leave a conclusion about dishes that left.</summary>
     [Fact]
     public void AttachNotes_Edit_KeepsOnlyWhatStillApplies()
@@ -459,7 +479,7 @@ public sealed class AgentGroundedReplyTests
         result.DaySummaries.Should().ContainSingle().Which.Should().Be(new AgentDaySummary(2, "Kết luận ngày hai."));
     }
 
-    // TEST-28: A preview made without the model, such as removing a dish, keeps the notes it still has.
+    // TEST-29: A preview made without the model, such as removing a dish, keeps the notes it still has.
     /// <summary>Non-model turns must not wipe the card.</summary>
     [Fact]
     public void AttachNotes_NoModelOutput_KeepsEarlierNotes()

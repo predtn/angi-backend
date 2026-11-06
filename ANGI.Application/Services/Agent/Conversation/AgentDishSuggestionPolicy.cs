@@ -91,19 +91,15 @@ public static class AgentDishSuggestionPolicy
     private static string Template(string? reply) => PriceUnit.Replace((reply ?? "").Trim(), "$1");
 
     /// <summary>
-    /// Adds what a user needs to act on a suggestion when the model left it out: where the restaurant is, and that the dish is for certain meals only.
-    /// A reply without an address once left a user asking the same thing three turns running, so this never depends on the model's wording.
+    /// Adds where the restaurant is when the model left it out. A reply without an address once left a user asking the same thing three turns running.
+    /// Meals are the model's choice: forcing "(hợp bữa sáng)" into every reply read as a form, even late at night.
     /// </summary>
     private static string Completed(string template, IReadOnlyList<AgentSuggestedDish> dishes)
     {
-        // STEP-01: For each dish, place its missing address after the restaurant and its missing meals after the name.
+        // STEP-01: For each dish, place its missing address after the restaurant.
         foreach (var (dish, number) in dishes.Select((dish, index) => (dish, index + 1)))
-        {
             if (dish.Address is not null && !template.Contains($"{{address{number}}}", StringComparison.Ordinal))
                 template = template.Replace($"{{restaurant{number}}}", $"{{restaurant{number}}} ({{address{number}}})", StringComparison.Ordinal);
-            if (dish.Meals is not null && !template.Contains($"{{meals{number}}}", StringComparison.Ordinal))
-                template = template.Replace($"{{name{number}}}", $"{{name{number}}} (hợp {{meals{number}}})", StringComparison.Ordinal);
-        }
         // STEP-02: Return template.
         return template;
     }

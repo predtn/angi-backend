@@ -242,18 +242,37 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     return new(output.Reply, turnState, null, null, Answer: answer);
                 }
                 // Đồng ý mà không có câu hỏi nào đang chờ: lối đi an toàn là hỏi lại về việc lưu, vì bước đó chưa ghi gì; câu model viết có thể đã nói như thể việc đã xong ("Chốt nhé!").
-                if (output.Action == "request_save" || output is { Action: "answer", PendingAnswer: AgentConfirmationPolicy.Accept, State: null, Items.Length: 0, Changes.Length: 0 } && context.CurrentProposal?.Status == "ready")
+                // Khi một câu hỏi làm rõ đang chờ, "đồng ý" là trả lời câu đó ("giữ nguyên" cho "muốn đổi món nào?"), không phải ý muốn lưu: câu model viết được hiện như thường.
+                if (output.Action == "request_save" || output is { Action: "answer", PendingAnswer: AgentConfirmationPolicy.Accept, State: null, Items.Length: 0, Changes.Length: 0 }
+                    && context.AwaitedAnswer is null && context.CurrentProposal?.Status == "ready")
                 {
                     telemetry.Record("request_save", context.ConversationId, context.TurnId, context.AttemptId);
                     return new(output.Reply, turnState, null, null, "request_save");
                 }
-                // Model trả lời mà không viết gì (thường vì đọc ra một câu trả lời cho câu hỏi không hề có): cho viết lại một lần thay vì đưa câu cố định, vốn không đáp lại điều người dùng vừa nói.
-                if (!replyRepaired && calls + 1 < limits.MaxLlmCalls && output.Action == "answer" && AgentReplyGuard.ChooseIssue(context, output) == "empty")
+                // Câu model viết không qua kiểm tra: cho viết lại một lần, nói rõ lỗi, thay vì đưa ngay câu cố định, vốn không đáp lại điều người dùng vừa nói.
+                // Chỉ kiểm ở đây khi lượt chưa nhận gì từ model; câu hỏi làm rõ đi tiếp và nếu sai thì dùng câu cố định, vì backend có thể còn thay nó bằng câu hỏi theo thứ tự.
+                // Câu trả lời kèm thay đổi state hay món còn qua các bước của backend có thể thay câu, nên chỉ viết lại câu trả lời thuần.
+                // Chỉ ở bước đọc chưa gọi tool: lời gọi lại rẻ; sau khi đã gọi tool, viết lại nghĩa là lặp cả lượt đắt, nên giữ câu cố định như trước.
+                if (!replyRepaired && phase == AgentTurnPhase.Read && context.Exchanges.Count == 0 && calls + 1 < limits.MaxLlmCalls &&
+                    (output.Action is "chat" or "food_info" || output is { Action: "answer", State: null, Items.Length: 0, Changes.Length: 0 }))
                 {
-                    telemetry.Record("empty_reply", context.ConversationId, context.TurnId, context.AttemptId, new { output.PendingAnswer, awaited = context.AwaitedAnswer });
-                    context.RepairFeedback = "The reply was empty and no question is waiting for this answer. Reply naturally to the user's latest message in a short sentence, with pendingAnswer=null, changing nothing.";
-                    replyRepaired = repaired = sameRead = true;
-                    continue;
+                    if (output.Action == "answer") await LoadDishWordsAsync(context, timeout.Token);
+                    var issue = output.Action switch
+                    {
+                        "answer" => AgentReplyGuard.ChooseIssue(context, output),
+                        "chat" => AgentReplyGuard.ChatIssue(output.Reply, context.Request.Content, turnState),
+                        _ => AgentReplyGuard.FoodInfoIssue(output.Reply)
+                    };
+                    if (AgentReplyGuard.RepairHint(issue) is { } hint)
+                    {
+                        telemetry.Record("reply_repair", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, issue, output.PendingAnswer, awaited = context.AwaitedAnswer });
+                        // Câu trả lời rỗng thường do đọc ra một câu trả lời cho câu hỏi không hề có, nên nhắc rõ là không có gì đang chờ.
+                        context.RepairFeedback = output.Action == "answer" && issue == "empty"
+                            ? "The reply was empty and no question is waiting for this answer. Reply naturally to the user's latest message in a short sentence, with pendingAnswer=null, changing nothing."
+                            : $"Your reply could not be shown because {hint}. Keep the same action and write the reply again, naturally, answering the user's latest message.";
+                        replyRepaired = repaired = sameRead = true;
+                        continue;
+                    }
                 }
                 // STEP-26: When output.Action is one of the listed values, call telemetry.Record, prepare social from AgentReplyGuard.OutOfScopeReply and 1 more action(s).
                 // Dừng trước khi nhận state của model: câu lạc đề không được đổi điều kiện chuyến đi, và mọi items/changes kèm theo đều bị bỏ qua.
@@ -263,13 +282,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     var social = output.Action switch
                     {
                         "chat" => AgentReplyGuard.ChatReply(output.Reply, context.Request.Content, turnState),
-                        "food_info" => AgentReplyGuard.FoodInfoReply(output.Reply, context.Request.Content, output.SuggestedDish, turnState),
+                        "food_info" => AgentReplyGuard.FoodInfoReply(output.Reply, context.Request.Content, output.SuggestedDish),
                         _ => AgentReplyGuard.OutOfScopeReply(context.Request.Content, output.SuggestedDish, turnState, context.TurnId)
                     };
                     // Câu từ chối vốn luôn là của backend nên không tính là bị thay.
                     if (output.Action != "out_of_scope") RecordReplaced(context, output, social, output.Action == "chat"
                         ? AgentReplyGuard.ChatIssue(output.Reply, context.Request.Content, turnState) : AgentReplyGuard.FoodInfoIssue(output.Reply));
-                    return new(social, turnState, null, null, output.Action);
+                    // Câu từ chối nhắc lại câu hỏi nên câu hỏi vẫn mở. Với câu model tự viết, người dùng đã nói sang chuyện khác: câu hỏi cũ không còn treo,
+                    // nó vẫn nằm trong lịch sử model đọc và model tự quyết có hỏi lại không.
+                    return new(social, output.Action == "out_of_scope" ? turnState : turnState with { PendingQuestion = null }, null, null, output.Action);
                 }
                 // STEP-27: Return the new result early when output.Action is one of the listed values.
                 // Model có thể bổ sung/siết điều kiện, nhưng không được tự nới ràng buộc đã chốt.
@@ -694,7 +715,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     /// <summary>Logs that a check threw away the model's wording, never the wording itself, so reviews can see how often the checks block it.</summary>
     private void RecordReplaced(AgentContext context, AgentOutput output, string shown, string? reason)
     {
-        if (output.Reply.Trim() is { Length: > 0 } written && !shown.StartsWith(written, StringComparison.Ordinal))
+        // Không có lý do nghĩa là câu của model đã qua kiểm tra; câu hiển thị chỉ khác vì backend điền ô (như {plan}), không phải bị thay.
+        if (reason is not null && output.Reply.Trim() is { Length: > 0 } written && !shown.StartsWith(written, StringComparison.Ordinal))
             telemetry.Record("reply_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Clarification, reason });
     }
 
@@ -714,8 +736,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
         // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.
         if (output is { Reply: not null } && reply == suggestion.FixedReply) RecordReplaced(context, output, reply, AgentDishSuggestionPolicy.WordingIssue(output.Reply, context, suggestion));
-        // STEP-03: Return the new result. A question still open stays open and is repeated, so one wrong reading cannot lose the plan being built.
-        return new(AgentReplyGuard.WithOpenQuestion(reply, turnState), turnState with { DishOffered = true }, null, null, "chat");
+        // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
+        return new(reply, turnState with { DishOffered = true, PendingQuestion = null }, null, null, "chat");
     }
 
     /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>

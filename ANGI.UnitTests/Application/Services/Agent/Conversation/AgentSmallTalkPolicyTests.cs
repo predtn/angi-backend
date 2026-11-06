@@ -39,17 +39,17 @@ public sealed class AgentSmallTalkPolicyTests
         // STEP-01: Assert AgentReplyGuard.ChatReply() is AgentReplyGuard.ChatFallback.
         AgentReplyGuard.ChatReply(reply, "", AgentTestData.State()).Should().Be(AgentReplyGuard.ChatFallback);
 
-    // TEST-04: An open question is repeated after a model-written social reply and after the fallback.
-    /// <summary>Keeps the reminder independent of whether the model wording was accepted.</summary>
+    // TEST-04: An open question is never glued onto a social reply, whether the model's wording or the fallback is shown.
+    /// <summary>Conversation 196 showed "Mình chưa hiểu ý bạn lắm…" under every reply; the model sees the question in the history and brings it back itself when it matters.</summary>
     [Theory]
     [InlineData("Mình vẫn ổn nhé!", "Mình vẫn ổn nhé!")][InlineData("Giá 50k", AgentReplyGuard.ChatFallback)]
-    public void ChatReply_OpenQuestion_IsRepeated(string reply, string shown)
+    public void ChatReply_OpenQuestion_IsNotAppended(string reply, string shown)
     {
         // STEP-01: Derive state from a copy of AgentTestData.State().
         var state = AgentTestData.State() with { PendingQuestion = "Bạn muốn đổi món nào?" };
 
         // STEP-02: Assert AgentReplyGuard.ChatReply() is the expected text.
-        AgentReplyGuard.ChatReply(reply, "", state).Should().Be($"{shown}\nBạn muốn đổi món nào?");
+        AgentReplyGuard.ChatReply(reply, "", state).Should().Be(shown);
     }
 
     // TEST-05: The refusal is the owner's exact sentence whenever no dish is offered; covers null, empty, one letter, 41 characters, digits,
@@ -87,7 +87,7 @@ public sealed class AgentSmallTalkPolicyTests
     public void FoodInfoReply_ChecksWording(string reply, bool shown)
     {
         // STEP-01: Get result from AgentReplyGuard.FoodInfoReply.
-        var result = AgentReplyGuard.FoodInfoReply(reply, "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng", new AgentState());
+        var result = AgentReplyGuard.FoodInfoReply(reply, "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng");
 
         // STEP-02: Assert result starts with the expected value.
         result.Should().StartWith(shown ? reply : AgentReplyGuard.FoodInfoFallback).And.EndWith("Bạn có muốn mình tìm quán Mì Quảng trên ANGI không?");
@@ -108,7 +108,7 @@ public sealed class AgentSmallTalkPolicyTests
     }
 
     // TEST-09: A refusal repeats the open question; covers the fixed refusal and the named-dish refusal.
-    /// <summary>The user sees why the request was declined and where the conversation is waiting.</summary>
+    /// <summary>The refusal is wholly the backend's, so it is the one reply that carries the question for the user.</summary>
     [Theory]
     [InlineData("Giải toán", null)][InlineData("Cách nấu phở", "phở")]
     public void OutOfScopeReply_RepeatsOpenQuestion(string content, string? dish)
@@ -157,7 +157,7 @@ public sealed class AgentSmallTalkPolicyTests
     [InlineData("Mì Quảng thường có nguồn gốc từ Quảng Nam.", true)][InlineData("Bạn dùng print(\"mì\") nhé.", false)]
     public void FoodInfoReply_Code_FallsBack(string reply, bool shown) =>
         // STEP-01: Assert AgentReplyGuard.FoodInfoReply() is the expected value.
-        AgentReplyGuard.FoodInfoReply(reply, "Mì Quảng là gì?", null, new AgentState()).Should().Be(shown ? reply : AgentReplyGuard.FoodInfoFallback);
+        AgentReplyGuard.FoodInfoReply(reply, "Mì Quảng là gì?", null).Should().Be(shown ? reply : AgentReplyGuard.FoodInfoFallback);
 
     // TEST-14: A refused social reply is reported with the rule it broke; covers empty, too long, markup, a claim, code, a name and a shown reply.
     /// <summary>The first reply of a conversation was replaced with no way of knowing why.</summary>

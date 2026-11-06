@@ -544,8 +544,9 @@ public sealed class AgentOrchestratorTests
     {
         // STEP-01: Mock IAgentLlmService; stub llm.RunAsync.
         var llm = new Mock<IAgentLlmService>();
-        llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
+        llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentLlmStep.Failed(AgentLlmFailureKind.ProviderUnavailable, 503))
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
         // STEP-02: Assert Create().RunAsync().Reply contains the expected text.
         (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("có trên ANGI").And.NotContain("Recovered");
@@ -578,8 +579,9 @@ public sealed class AgentOrchestratorTests
     {
         // STEP-01: Mock IAgentLlmService; stub llm.RunAsync.
         var llm = new Mock<IAgentLlmService>();
-        llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
+        llm.SetupSequence(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentLlmStep([], null, Failure: new(AgentLlmFailureKind.RateLimited, 429, 1, "RESOURCE_EXHAUSTED", reason)))
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")))
             .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Recovered")));
         // STEP-02: Assert depending on recover, Create().RunAsync().Reply contains the expected text, Create().RunAsync().Reply contains the expected text and 1 more.
         if (recover) (await Create(llm.Object).RunAsync(AgentTestData.Context(), CancellationToken.None)).Reply.Should().Contain("có trên ANGI").And.NotContain("Recovered");
@@ -1025,7 +1027,7 @@ public sealed class AgentOrchestratorTests
         context.Request.Content = "Hôm nay bạn thế nào?";
         // STEP-02: Mock IAgentLlmService; stub llm.RunAsync.
         var llm = new Mock<IAgentLlmService>();
-        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput
             { Action = "chat", Reply = draft, State = new AgentState { Province = "Hue", NumDays = 9 }, Items = [AgentTestData.Item(9, "z")] }));
 
         // STEP-03: Get result from Create().RunAsync.
@@ -1111,29 +1113,30 @@ public sealed class AgentOrchestratorTests
         result.State.PendingPlanningRequest.Should().Be(pending);
     }
 
-    // TEST-45: A question answered by the model no longer dumps the plan; a request to see it over a saved plan still lists it.
-    /// <summary>Verifies the end-to-end behaviour of the answer action for both kinds of message.</summary>
+    // TEST-45: A question answered by the model no longer dumps the plan; when the model reads a wish to see a saved plan and writes {plan}, the backend lists it.
+    /// <summary>Verifies the end-to-end behaviour of the answer action for both kinds of message; the user's wording is read by the model, not by a regex.</summary>
     [Theory]
-    [InlineData("Vì sao chọn món này?", false)]
-    [InlineData("Xem lại lịch giúp mình", true)]
-    public async Task RunAsync_AnswerAction_ListsPlanOnlyWhenAsked(string content, bool listed)
+    [InlineData("Vì sao chọn món này?", "Bạn nói rõ hơn giúp mình nhé.", false)]
+    [InlineData("cho mình coi lại cái lịch phát", "Lịch của bạn đây nhé: {plan}", true)]
+    public async Task RunAsync_AnswerAction_ListsPlanOnlyWhenAsked(string content, string reply, bool listed)
     {
         // STEP-01: Get context from AgentTestData.Context and set context.Request.Content to content.
         var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item() with { DishName = "Mì Quảng" }));
         context.Request.Content = content;
         // STEP-02: Mock IAgentLlmService; stub llm.RunAsync.
         var llm = new Mock<IAgentLlmService>();
-        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer(reply)));
 
         // STEP-03: Get result from Create().RunAsync.
         var result = await Create(llm.Object).RunAsync(context, default);
 
-        // STEP-04: Assert result.Reply.Contains() is listed and depending on !listed, result.Reply is AgentReplyBuilder.AnswerUnavailable.
+        // STEP-04: Assert result.Reply.Contains() is listed, the slot never reaches the user and an unrelated answer is the model's own.
         result.Reply.Contains("Mì Quảng").Should().Be(listed);
-        if (!listed) result.Reply.Should().Be(AgentReplyBuilder.AnswerUnavailable);
+        result.Reply.Should().NotContain("{plan}");
+        if (!listed) result.Reply.Should().Be(reply);
     }
 
-    // TEST-46: An empty reply is not a failure: refusals and social messages use the backend's fixed text in one call; this was the "hướng dẫn tôi" 503.
+    // TEST-46: An empty reply is not a failure: a refusal uses the backend's fixed text in one call, and an empty social reply gets one rewrite before the fixed text; this was the "hướng dẫn tôi" 503.
     /// <summary>Reproduces conversation 88: the model left reply empty because the backend owns the refusal, which cost repairs and ended in a 503.</summary>
     [Theory]
     [InlineData("out_of_scope", AgentReplyGuard.OutOfScope)]
@@ -1145,15 +1148,15 @@ public sealed class AgentOrchestratorTests
         context.Request.Content = "hướng dẫn tôi gọt vỏ cam";
         // STEP-02: Mock IAgentLlmService; stub llm.RunAsync.
         var llm = new Mock<IAgentLlmService>();
-        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "" }));
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "" }));
 
         // STEP-03: Get result from Create().RunAsync.
         var result = await Create(llm.Object).RunAsync(context, default);
 
         // STEP-04: Assert result.Reply is expected.
         result.Reply.Should().Be(expected);
-        // STEP-05: Verify RunAsync is called once.
-        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        // STEP-05: Verify a refusal takes one call, and an empty chat reply one rewrite before the fallback.
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(action == "chat" ? 2 : 1));
     }
 
     // TEST-47: An empty reply on a clarify turn also falls back to the fixed wording without a repair call; an empty answer is covered by RunAsync_EmptyAnswer_IsWrittenOnce.
@@ -1414,9 +1417,10 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Get aside from the model answering a question about the questions.
         var aside = await Create(Scripted(new AgentLlmStep([], new AgentOutput { Action = "chat", Reply = "Mình cần biết địa điểm để chọn quán nha." })).Object, intakeCatalog: IntakeCatalog())
             .RunAsync(IntakeContext("vì sao bạn lại hỏi mình nhiều câu như vậy", state), default);
-        // STEP-04: Assert the question stays open and is repeated after the answer.
+        // STEP-04: Assert the questions stay at the same step while only the model's answer is shown, with no question glued after it.
         aside.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
-        aside.Reply.Should().EndWith(AgentIntakePolicy.PlaceQuestion);
+        aside.Reply.Should().Be("Mình cần biết địa điểm để chọn quán nha.");
+        aside.State.PendingQuestion.Should().BeNull();
     }
 
     // TEST-58: A message stating everything is taken whole and only what is missing is asked; a plan attempted before the preferences question gets it, and a stated taste goes to its own question.
@@ -1856,8 +1860,11 @@ public sealed class AgentOrchestratorTests
         result.State.RadiusKm.Should().BeNull();
     }
 
-    // TEST-78: A dish suggested in the middle of the planning questions keeps the trip values and the open question, which is repeated.
-    /// <summary>In conversation 160 "tôi không biết" was misread as asking for a dish and the plan being built was lost; one wrong reading must not cost the user their place.</summary>
+    // TEST-78: A dish suggested in the middle of the planning questions keeps the trip values and the questions' step; the old question is not glued onto the model's reply.
+    /// <summary>
+    /// In conversation 160 "tôi không biết" was misread as asking for a dish and the plan being built was lost; one wrong reading must not cost the user their place.
+    /// Conversation 196 showed the glued question under every suggestion, so the step lives in the state and the question in the history the model reads.
+    /// </summary>
     [Fact]
     public async Task RunAsync_DishSuggestionDuringIntake_KeepsQuestionAndTrip()
     {
@@ -1868,10 +1875,10 @@ public sealed class AgentOrchestratorTests
 
         var result = await Suggesting(llm.Object, intake: true).RunAsync(context, default);
 
-        // STEP-02: Assert result.Reply contains "Dish 1" and the question, result.Snapshot is null and result.State matches the condition.
-        result.Reply.Should().Contain("Dish 1").And.EndWith(AgentIntakePolicy.PreferencesQuestion);
+        // STEP-02: Assert result.Reply contains "Dish 1" without the question, result.Snapshot is null and result.State keeps the trip and the step.
+        result.Reply.Should().Contain("Dish 1").And.NotContain(AgentIntakePolicy.PreferencesQuestion);
         result.Snapshot.Should().BeNull();
-        result.State.Should().Match<AgentState>(x => x.PlanningIntake == AgentIntakePolicy.Preferences && x.PendingQuestion == AgentIntakePolicy.PreferencesQuestion && x.NumDays == 7 && x.BudgetAmount == 3500000);
+        result.State.Should().Match<AgentState>(x => x.PlanningIntake == AgentIntakePolicy.Preferences && x.PendingQuestion == null && x.NumDays == 7 && x.BudgetAmount == 3500000);
     }
 
     /// <summary>Records what each provider call was allowed to do, because the context object is reused through the turn.</summary>
@@ -1965,27 +1972,52 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-83: Agreeing with nothing waiting never reaches the user as a claim: with a ready plan it becomes a wish to save, which only asks; with no plan it stays an answer.
-    /// <summary>Conversation 194 answered "chốt đi" with "Chốt nhé!" and saved nothing.</summary>
+    // TEST-83: A social reply that fails a fact check is written once more with the reason, still in the read step; a second failure shows the fallback; out_of_scope is never rewritten.
+    /// <summary>The fixed line answers nothing the user said, so the model gets one chance to fix what was wrong before the backend falls back to it.</summary>
     [Theory]
-    [InlineData("ready", "request_save")]
-    [InlineData(null, null)]
-    public async Task RunAsync_AcceptWithNothingWaiting_BecomesASaveWish(string? status, string? action)
+    [InlineData("chat", "Ừ, trời đẹp thật đó!", 2, "Ừ, trời đẹp thật đó!")]
+    [InlineData("chat", "Giá chỉ 50k thôi.", 2, AgentReplyGuard.ChatFallback)]
+    [InlineData("out_of_scope", "", 1, null)]
+    public async Task RunAsync_FailedSocialReply_IsWrittenOnce(string action, string second, int calls, string? shown)
     {
-        // STEP-01: Get a context with or without a ready proposal and script the reading.
+        // STEP-01: Get a context and script a first reply naming a place nobody stated, then the second output.
+        var context = AgentTestData.Context();
+        context.Request.Content = "hôm nay trời đẹp ghê";
+        var seen = new List<(AgentTurnPhase Phase, string? Tool)>();
+        var llm = Phases(seen, new AgentLlmStep([], new AgentOutput { Action = action, Reply = "Ở Paris chắc cũng đẹp lắm!" }), new AgentLlmStep([], new AgentOutput { Action = action, Reply = second }));
+
+        // STEP-02: Get result from Create().RunAsync.
+        var result = await Create(llm.Object).RunAsync(context, default);
+
+        // STEP-03: Assert the calls stayed in the read step and, for chat, the shown reply.
+        seen.Should().HaveCount(calls).And.OnlyContain(item => item.Phase == AgentTurnPhase.Read);
+        if (shown is not null) result.Reply.Should().Be(shown);
+    }
+
+    // TEST-84: Agreeing with nothing waiting never reaches the user as a claim: with a ready plan it becomes a wish to save, which only asks; with no plan it stays an answer;
+    // with a clarification waiting it answers that question and the model's reply is shown.
+    /// <summary>Conversation 194 answered "chốt đi" with "Chốt nhé!" and saved nothing; conversation 198 answered "giữ nguyên" to "muốn đổi món nào?" with the save question.</summary>
+    [Theory]
+    [InlineData("ready", null, "request_save")]
+    [InlineData(null, null, null)]
+    [InlineData("ready", AgentConfirmationPolicy.AwaitingQuestion, null)]
+    public async Task RunAsync_AcceptWithNothingWaiting_BecomesASaveWish(string? status, string? awaited, string? action)
+    {
+        // STEP-01: Get a context with or without a ready proposal and an open question, and script the reading.
         var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
         var context = new AgentContext { ConversationId = 7, UserId = 3, State = snapshot.State, Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { Content = "chốt đi" },
-            CurrentProposal = status is null ? null : new(9, 2, "create", status, snapshot, new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1)) };
+            CurrentProposal = status is null ? null : new(9, 2, "create", status, snapshot, new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1)), AwaitedAnswer = awaited };
         var llm = Scripted(new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Chốt nhé!", PendingAnswer = "accept" }));
 
         // STEP-02: Get result from Create().RunAsync.
         var result = await Create(llm.Object).RunAsync(context, default);
 
-        // STEP-03: Assert the action.
+        // STEP-03: Assert the action, and that a reply to an open question is the model's own.
         result.Action.Should().Be(action);
+        if (awaited is not null) result.Reply.Should().Be("Chốt nhé!");
     }
 
-    // TEST-84: A tool asked for outside the read step is refused with the usual question, not run.
+    // TEST-85: A tool asked for outside the read step is refused with the usual question, not run.
     /// <summary>Stops the use_tool action from becoming a way round the tool limits.</summary>
     [Fact]
     public async Task RunAsync_UseToolOutsideRead_IsNotRun()
@@ -2003,7 +2035,7 @@ public sealed class AgentOrchestratorTests
         result.Snapshot.Should().BeNull();
     }
 
-    // TEST-85: A dish already suggested in this conversation is left out, so asking again gives another one.
+    // TEST-86: A dish already suggested in this conversation is left out, so asking again gives another one.
     /// <summary>"Bất kì" must not repeat the same dish forever.</summary>
     [Fact]
     public async Task RunAsync_RepeatedSuggestion_GivesAnotherDish()
@@ -2020,7 +2052,7 @@ public sealed class AgentOrchestratorTests
         result.State.DishOffered.Should().BeTrue();
     }
 
-    // TEST-86: The model reads every message that used to get a backend reply, and its own wording is shown; covers greetings, thanks, help, vague edits, a bare "ok", tastes, novelty and a missing meal, with no trip, over an empty roadmap and over a plan.
+    // TEST-87: The model reads every message that used to get a backend reply, and its own wording is shown; covers greetings, thanks, help, vague edits, a bare "ok", tastes, novelty and a missing meal, with no trip, over an empty roadmap and over a plan.
     /// <summary>The user asked for the model to hold the conversation, with the backend guarding from behind.</summary>
     [Theory]
     [InlineData("none", "alo")]
@@ -2062,7 +2094,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-87: The model's question about a taste or a vague edit is shown and stays open, and it opens no planning questions over an empty roadmap; an invented figure falls back to the fixed question.
+    // TEST-88: The model's question about a taste or a vague edit is shown and stays open, and it opens no planning questions over an empty roadmap; an invented figure falls back to the fixed question.
     /// <summary>"Nhẹ" must continue this exchange, not start asking for the trip's place, duration and budget.</summary>
     [Theory]
     [InlineData("taste_intensity", "Bạn thích cay nhẹ hay vừa?", true)]
@@ -2087,7 +2119,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().BeNull();
     }
 
-    // TEST-88: A suggestion with conditions costs two provider calls: the model reads the conditions, then words the reply from the tool's facts; a state it returns is ignored.
+    // TEST-89: A suggestion with conditions costs two provider calls: the model reads the conditions, then words the reply from the tool's facts; a state it returns is ignored.
     /// <summary>The user reads the model's own sentence while the plan and trip values stay untouched.</summary>
     [Fact]
     public async Task RunAsync_ConditionedSuggestion_ShowsModelWordingAndKeepsState()
@@ -2112,7 +2144,7 @@ public sealed class AgentOrchestratorTests
         context.ToolsClosed.Should().BeTrue();
     }
 
-    // TEST-89: A question about what a dish is like is answered, and neither that answer nor a refused recipe contradicts itself; covers the message of the bug report.
+    // TEST-90: A question about what a dish is like is answered, and neither that answer nor a refused recipe contradicts itself; covers the message of the bug report.
     /// <summary>"Mì Quảng có vị như thế nào" used to get "mình chỉ giúp được về món ăn".</summary>
     [Theory]
     [InlineData("food_info", "Mì Quảng có vị như thế nào vậy bạn?", "Mì Quảng thường đậm đà, nước dùng sền sệt.", "Mì Quảng thường đậm đà")]
@@ -2136,7 +2168,7 @@ public sealed class AgentOrchestratorTests
         result.State.Province.Should().Be("Hà Nội");
     }
 
-    // TEST-90: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
+    // TEST-91: A model state that leaves the trip values empty neither erases them nor asks to confirm "số ngày: ; ngân sách:  đồng"; this is what wiped conversation 138.
     /// <summary>Only a real change reaches the confirmation question.</summary>
     [Fact]
     public async Task RunAsync_ModelLeavesTripValuesEmpty_KeepsThemWithoutConfirmation()
@@ -2157,7 +2189,7 @@ public sealed class AgentOrchestratorTests
         result.State.Should().Match<AgentState>(x => x.PendingStateChange == null && x.NumDays == 7 && x.BudgetAmount == 3500000 && x.OriginMode == "pinned" && x.OriginLatitude == 21.03m);
     }
 
-    // TEST-91: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
+    // TEST-92: Removing a pin the user names still asks to confirm, so the guard against empty values does not take that choice away.
     /// <summary>Keeps the explicit way out of a pinned search.</summary>
     [Fact]
     public async Task RunAsync_UserRemovesPin_StillAsksToConfirm()
@@ -2178,7 +2210,7 @@ public sealed class AgentOrchestratorTests
         result.State.PendingStateChange!.OriginMode.Should().Be("none");
     }
 
-    // TEST-92: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
+    // TEST-93: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
     /// <summary>A model reply cannot hold hundreds of items, so these trips would otherwise end in a truncated output.</summary>
     [Theory]
     [InlineData(15)]
@@ -2221,7 +2253,7 @@ public sealed class AgentOrchestratorTests
             It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-93: The duration limit reads up to 100 days in a message and refuses just above it.
+    // TEST-94: The duration limit reads up to 100 days in a message and refuses just above it.
     /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
     [Theory]
     [InlineData("lập lịch Hà Nội 30 ngày", 30)]
@@ -2237,7 +2269,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().NotContain("Số ngày phải");
     }
 
-    // TEST-94: A user who has not decided a budget gets no second confirmation and no plan yet: the preferences question comes next, states the missing budget, and costs one call.
+    // TEST-95: A user who has not decided a budget gets no second confirmation and no plan yet: the preferences question comes next, states the missing budget, and costs one call.
     /// <summary>Budget is optional in chat, while the order of the questions before a plan stays the same.</summary>
     [Fact]
     public async Task RunAsync_UndecidedBudget_AsksPreferencesWithoutConfirmation()
@@ -2264,7 +2296,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-95: A model that jumps to ranking with the budget undecided is stopped by the tool, so the preferences question still comes first and no further call is made.
+    // TEST-96: A model that jumps to ranking with the budget undecided is stopped by the tool, so the preferences question still comes first and no further call is made.
     /// <summary>Guards the order of the steps against the model, not only through the prompt.</summary>
     [Fact]
     public async Task RunAsync_UndecidedBudgetThenRecommendation_StillAsksPreferencesFirst()
@@ -2288,7 +2320,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-96: The model's question about missing trip details is shown when backed, and replaced by the fixed one when it invents a figure; the question stays open in both.
+    // TEST-97: The model's question about missing trip details is shown when backed, and replaced by the fixed one when it invents a figure; the question stays open in both.
     /// <summary>The wording may answer what the user said, while the facts stay checked.</summary>
     [Theory]
     [InlineData("Không sao đâu, bạn ước chừng một mức cho mỗi người được không?", true)]
@@ -2310,7 +2342,7 @@ public sealed class AgentOrchestratorTests
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
     }
 
-    // TEST-97: Before a plan exists the model still cannot drop a budget the user gave: the unrestricted state waits for the user's confirmation.
+    // TEST-98: Before a plan exists the model still cannot drop a budget the user gave: the unrestricted state waits for the user's confirmation.
     /// <summary>Only an unset budget may be left open without asking, so the exception cannot be used to skip a limit.</summary>
     [Fact]
     public async Task RunAsync_UnrestrictedOverAStatedBudget_StillNeedsConfirmation()
@@ -2331,7 +2363,8 @@ public sealed class AgentOrchestratorTests
         result.State.PendingStateChange!.BudgetUnrestricted.Should().BeTrue();
     }
 
-    // TEST-98: An off-topic or social reply during the budget question keeps the question and the whole request, so the next message continues where the user left off.
+    // TEST-99: An off-topic or social reply during the budget question keeps the whole request, so the next message continues where the user left off;
+    // only the backend's refusal repeats the question, while a social reply is the model's own words.
     /// <summary>Passing the reply to the model must not lose the user's place in the questions.</summary>
     [Theory]
     [InlineData("out_of_scope")][InlineData("chat")]
@@ -2350,10 +2383,11 @@ public sealed class AgentOrchestratorTests
         // STEP-04: Assert result.State.PlanningIntake is AgentIntakePolicy.Details, result.State.PendingPlanningRequest is pending and 1 more.
         result.State.PlanningIntake.Should().Be(AgentIntakePolicy.Details);
         result.State.PendingPlanningRequest.Should().Be(pending);
-        result.Reply.Should().EndWith(BudgetQuestionState().PendingQuestion);
+        if (action == "out_of_scope") result.Reply.Should().EndWith(BudgetQuestionState().PendingQuestion);
+        else result.Reply.Should().Be("Dạ bạn.");
     }
 
-    // TEST-99: A chat turn over code or an unbacked name shows the fixed reply and logs the replacement without the wording; shown wording and refusals log nothing.
+    // TEST-100: A chat turn over code or an unbacked name shows the fixed reply and logs the replacement without the wording; shown wording and refusals log nothing.
     /// <summary>Lets reviews measure how often the checks block the model, and never stores what the model wrote.</summary>
     [Theory]
     [InlineData("chat", "print(\"hello\")", true)]
@@ -2367,7 +2401,7 @@ public sealed class AgentOrchestratorTests
         // STEP-02: Mock IAgentTelemetry and IAgentLlmService; stub llm.RunAsync.
         var telemetry = new Mock<IAgentTelemetry>();
         var llm = new Mock<IAgentLlmService>();
-        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = reply }));
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = reply }));
 
         // STEP-03: Get result from Create().RunAsync.
         var result = await Create(llm.Object, telemetry: telemetry.Object).RunAsync(context, default);
@@ -2383,7 +2417,7 @@ public sealed class AgentOrchestratorTests
             It.Is<object>(data => System.Text.Json.JsonSerializer.Serialize(data, AgentJson.Options).Contains(reply.StartsWith("print") ? "\"reason\":\"code\"" : "\"reason\":\"name\""))), Times.Once);
     }
 
-    // TEST-100: Consecutive refusals in one conversation use different fixed wordings and show no model text.
+    // TEST-101: Consecutive refusals in one conversation use different fixed wordings and show no model text.
     /// <summary>Keeps repeated refusals from reading like a machine while nothing the model wrote reaches the user.</summary>
     [Fact]
     public async Task RunAsync_ConsecutiveRefusals_VaryWithoutModelText()
@@ -2402,7 +2436,7 @@ public sealed class AgentOrchestratorTests
         replies.Should().OnlyHaveUniqueItems().And.BeSubsetOf(AgentReplyGuard.OutOfScopeReplies);
     }
 
-    // TEST-101: Wording that fails its check shows the fixed reply and logs the replacement; covers a written price, a missing restaurant, an extra dish in lower case and an unranked taste claim.
+    // TEST-102: Wording that fails its check shows the fixed reply and logs the replacement; covers a written price, a missing restaurant, an extra dish in lower case and an unranked taste claim.
     /// <summary>The user always gets a true sentence, and a failed check costs no extra call.</summary>
     [Theory]
     [InlineData("Mình gợi ý {name1} ở {restaurant1}, {price1}, khoảng 45.000 đồng nhé.")]
@@ -2427,7 +2461,7 @@ public sealed class AgentOrchestratorTests
         telemetry.Verify(x => x.Record("reply_replaced", context.ConversationId, context.TurnId, context.AttemptId, It.IsAny<object>()), Times.Once);
     }
 
-    // TEST-102: When the wording call yields nothing usable the dish is still given, with no retry; covers invalid output, a provider failure that normally retries and a further tool request.
+    // TEST-103: When the wording call yields nothing usable the dish is still given, with no retry; covers invalid output, a provider failure that normally retries and a further tool request.
     /// <summary>The dish is already chosen, so a failed wording call must not become an error or spend more calls.</summary>
     [Theory]
     [InlineData("invalid")]
@@ -2455,7 +2489,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-103: A turn timeout during the wording call still gives the dish; the caller's own cancellation is rethrown instead.
+    // TEST-104: A turn timeout during the wording call still gives the dish; the caller's own cancellation is rethrown instead.
     /// <summary>Only the backend's deadline falls back; a client that left must not get a reply stored for it.</summary>
     [Theory]
     [InlineData(false)]
@@ -2479,7 +2513,7 @@ public sealed class AgentOrchestratorTests
         else (await act()).Reply.Should().StartWith("Mình gợi ý Dish 1 ở Real restaurant");
     }
 
-    // TEST-104: With no provider call left for the wording, the fixed reply is shown at once.
+    // TEST-105: With no provider call left for the wording, the fixed reply is shown at once.
     /// <summary>Keeps the call limit binding without losing the dish already chosen.</summary>
     [Fact]
     public async Task RunAsync_NoCallLeftForWording_ShowsFixedReply()
@@ -2499,7 +2533,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-105: With no dish found the model words it, unless it names a dish nothing backs or the call fails; covers a plain sentence, an invented dish and a failure.
+    // TEST-106: With no dish found the model words it, unless it names a dish nothing backs or the call fails; covers a plain sentence, an invented dish and a failure.
     /// <summary>The one case with no facts is where a model could offer a dish ANGI does not have.</summary>
     [Theory]
     [InlineData("Trên ANGI chưa có món nào hợp, bạn thử bỏ bớt điều kiện nhé.", true)]
@@ -2520,7 +2554,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Be(shown ? reply : AgentDishSuggestionPolicy.NothingFound);
     }
 
-    // TEST-106: A question about the user's own favourites is worded by the model; in an answer, a guess at a dish in lower case is replaced because an answer states facts of the plan.
+    // TEST-107: A question about the user's own favourites is worded by the model; in an answer, a guess at a dish in lower case is replaced because an answer states facts of the plan.
     /// <summary>A social reply may mention food, so the prompt carries the rule there; an answer with no plan behind it still cannot name one.</summary>
     [Theory]
     [InlineData("chat", "Mình chưa biết món bạn thích nhất, để mình gợi ý theo khẩu vị của bạn nhé?", true)]
@@ -2546,7 +2580,7 @@ public sealed class AgentOrchestratorTests
         catalog.Verify(x => x.GetDishNamesAsync(It.IsAny<CancellationToken>()), action == "answer" ? Times.Once() : Times.Never());
     }
 
-    // TEST-107: Over a plan even a request with no conditions goes to the model, leaves out the plan's dish, invites adding the suggestion, marks the offer and changes nothing else.
+    // TEST-108: Over a plan even a request with no conditions goes to the model, leaves out the plan's dish, invites adding the suggestion, marks the offer and changes nothing else.
     /// <summary>"Vừa lập xong, gợi ý 1 món bất kì" used to repeat a dish of the plan and offer no way to add it.</summary>
     [Fact]
     public async Task RunAsync_PlainSuggestionOverPlan_InvitesAddingAnotherDish()
@@ -2568,7 +2602,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-108: When the wording call fails over a plan, the fixed reply still invites adding the dish; with no plan it does not.
+    // TEST-109: When the wording call fails over a plan, the fixed reply still invites adding the dish; with no plan it does not.
     /// <summary>The way into the plan must not depend on the model answering, and there is no plan to add to without one.</summary>
     [Theory]
     [InlineData(true, "Muốn cho vào lịch thì nhắn mình ngày và bữa nhé.")]
@@ -2587,7 +2621,7 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().EndWith(ending);
     }
 
-    // TEST-109: A plan proposed with a taste level the user never stated gets one repair, then the question goes to the user with nothing changed; a model that then asks is shown.
+    // TEST-110: A plan proposed with a taste level the user never stated gets one repair, then the question goes to the user with nothing changed; a model that then asks is shown.
     /// <summary>"Tôi thích ăn cay" must not become spicy=0.75 in a plan, which is the invention conversation 10 suffered from.</summary>
     [Theory]
     [InlineData(true)]
@@ -2616,7 +2650,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    // TEST-110: A question from the model drops a guessed level without a repair, and a level the user stated is stored without its quote.
+    // TEST-111: A question from the model drops a guessed level without a repair, and a level the user stated is stored without its quote.
     /// <summary>A question costs no second call, and the quote must never reach stored state or a comparison of constraints.</summary>
     [Theory]
     [InlineData("clarify", null, false)]
@@ -2640,7 +2674,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // TEST-111: A preview shows the model's sentence filled with the final plan's total; a sentence that fails its check falls back to the fixed summary and logs the replacement.
+    // TEST-112: A preview shows the model's sentence filled with the final plan's total; a sentence that fails its check falls back to the fixed summary and logs the replacement.
     /// <summary>Makes previews read naturally at no extra provider call, since the slots are filled after the backend's checks.</summary>
     [Theory]
     [InlineData("Lịch xong rồi nè, tổng khoảng {total}, bạn xem rồi chốt nhé!", true)]
