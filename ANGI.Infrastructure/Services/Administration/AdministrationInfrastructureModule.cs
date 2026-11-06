@@ -14,6 +14,7 @@ public static class AdministrationInfrastructureModule
         services.AddScoped<IAdministrationPermissionRepository, AdministrationPermissionRepository>();
         services.AddScoped<IAdministrationDashboardRepository, AdministrationDashboardRepository>();
         services.AddScoped<IAdministrationOutboxRepository, AdministrationOutboxRepository>();
+        services.AddScoped<IAdministrationAuditLogRepository, AdministrationAuditLogRepository>();
         return services;
     }
 }

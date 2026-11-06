@@ -391,11 +391,24 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                     b.HasKey("Id")
                         .HasName("pk_audit_logs");
 
-                    b.HasIndex("ActorId")
-                        .HasDatabaseName("ix_audit_logs_actor_id");
+                    b.HasIndex("CreatedAt")
+                        .IsDescending()
+                        .HasDatabaseName("ix_audit_logs_created_at");
 
-                    b.HasIndex("SubjectUserId")
-                        .HasDatabaseName("ix_audit_logs_subject_user_id");
+                    b.HasIndex("Action", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_audit_logs_action_created_at");
+
+                    b.HasIndex("ActorId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_audit_logs_actor_id_created_at");
+
+                    b.HasIndex("EntityType", "EntityId")
+                        .HasDatabaseName("ix_audit_logs_entity_type_entity_id");
+
+                    b.HasIndex("SubjectUserId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_audit_logs_subject_user_id_created_at");
 
                     b.ToTable("audit_logs", "core");
                 });
