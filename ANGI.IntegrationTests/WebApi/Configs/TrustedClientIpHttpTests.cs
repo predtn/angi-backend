@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -79,6 +80,40 @@ public sealed class TrustedClientIpHttpTests
         }
     }
 
+    // TEST-05: One visitor cannot send forgot-password mail to many addresses; another visitor is unaffected.
+    /// <summary>Verifies the per-IP cap on forgot-password across different emails (the per-email limit alone allowed spam).</summary>
+    [Fact]
+    public async Task ForgotPassword_ForManyEmailsFromOneIp_ShouldHitTheIpCap()
+    {
+        await using var factory = new TrustedClientIpApiFactory(ProxyKey);
+        using var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var index = 0; index < 4; index++)
+        {
+            statuses.Add(await ForgotPasswordAsync(client, $"user{index}@example.test", "198.51.100.1"));
+        }
+
+        var otherVisitor = await ForgotPasswordAsync(client, "user9@example.test", "198.51.100.2");
+
+        statuses.Take(3).Should().NotContain(HttpStatusCode.TooManyRequests);
+        statuses[3].Should().Be(HttpStatusCode.TooManyRequests);
+        otherVisitor.Should().NotBe(HttpStatusCode.TooManyRequests);
+    }
+
+    /// <summary>Posts forgot-password for the email as the given visitor IP and returns the status.</summary>
+    private static async Task<HttpStatusCode> ForgotPasswordAsync(HttpClient client, string email, string clientIp)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/forgot-password")
+        {
+            Content = JsonContent.Create(new { email })
+        };
+        request.Headers.Add("X-Angi-Proxy-Key", ProxyKey);
+        request.Headers.Add("X-Angi-Client-Ip", clientIp);
+        using var response = await client.SendAsync(request);
+        return response.StatusCode;
+    }
+
     /// <summary>Sends anonymous requests with the proxy key and client IP headers and returns their statuses.</summary>
     private static async Task<HttpStatusCode[]> StatusesAsync(HttpClient client, string key, string clientIp, int count)
     {
@@ -110,6 +145,7 @@ public sealed class TrustedClientIpHttpTests
                 ["ConnectionStrings__Default"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1",
                 ["RateLimit__GeneralPermitLimit"] = "2",
                 ["RateLimit__GeneralWindowSeconds"] = "60",
+                ["RateLimit__SensitiveAuthIpPermitLimit"] = "3",
                 ["TrustedClientIp__ProxyKey"] = proxyKey.Length == 0 ? null : proxyKey
             };
             var previous = values.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);
