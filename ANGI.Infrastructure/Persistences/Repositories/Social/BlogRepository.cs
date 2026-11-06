@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using System.Text.Json;
 using ANGI.Application.Common.Interfaces.Repositories.Social;
 using ANGI.Application.Common.Models.Audit;
@@ -54,10 +55,10 @@ public sealed class BlogRepository : IBlogRepository
 
         if (!string.IsNullOrWhiteSpace(q))
         {
-            var term = $"%{q.Trim()}%";
+            var term = LikePattern.Contains(q);
             query = query.Where(blog =>
-                EF.Functions.ILike(blog.Title, term) ||
-                EF.Functions.ILike(blog.Content, term));
+                EF.Functions.ILike(blog.Title, term, LikePattern.Escape) ||
+                EF.Functions.ILike(blog.Content, term, LikePattern.Escape));
         }
 
         if (authorId.HasValue)

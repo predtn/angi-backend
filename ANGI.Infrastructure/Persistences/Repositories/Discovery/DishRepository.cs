@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Discovery;
 using ANGI.Application.Common.Models.Discovery;
 using ANGI.Domain.Entities;
@@ -54,14 +55,15 @@ public sealed class DishRepository : IDishRepository
 
         if (!string.IsNullOrWhiteSpace(filter.Query))
         {
-            var term = $"%{filter.Query.Trim()}%";
-            query = query.Where(dish => EF.Functions.ILike(dish.Name, term) || EF.Functions.ILike(dish.Restaurant.Name, term));
+            var term = LikePattern.Contains(filter.Query);
+            query = query.Where(dish => EF.Functions.ILike(dish.Name, term, LikePattern.Escape) ||
+                                        EF.Functions.ILike(dish.Restaurant.Name, term, LikePattern.Escape));
         }
 
         if (!string.IsNullOrWhiteSpace(filter.Province))
         {
             var term = ProvinceSearch.Pattern(filter.Province);
-            query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
+            query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term, LikePattern.Escape));
         }
 
 
@@ -179,7 +181,7 @@ public sealed class DishRepository : IDishRepository
         if (!string.IsNullOrWhiteSpace(province))
         {
             var term = ProvinceSearch.Pattern(province);
-            query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term));
+            query = query.Where(dish => dish.Restaurant.ProvinceName != null && EF.Functions.ILike(dish.Restaurant.ProvinceName, term, LikePattern.Escape));
         }
 
         return await query
