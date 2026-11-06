@@ -63,9 +63,18 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                 "Tệp vượt quá dung lượng cho phép.");
         }
 
+        // The declared type comes from the client: the content must start like that type too.
+        var (header, content) = await MediaSignature.ReadHeaderAsync(request.Content!, ct);
+        if (!MediaSignature.Matches(normalizedMimeType, header))
+        {
+            throw new BadRequestException(
+                "UNSUPPORTED_MEDIA_TYPE",
+                "Nội dung tệp không khớp với định dạng đã chọn.");
+        }
+
         var isPrivate = request.Purpose is "verification_doc" or "report_evidence";
         var upload = await _cloudinaryService.UploadAsync(
-            request.Content!,
+            content,
             request.FileName,
             normalizedMimeType,
             request.Purpose,
