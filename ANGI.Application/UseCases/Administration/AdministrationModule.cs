@@ -7,6 +7,8 @@ using ANGI.Application.UseCases.Administration.GetFailedOutboxMessages;
 using ANGI.Application.UseCases.Administration.GetModDetail;
 using ANGI.Application.UseCases.Administration.GetModPermissions;
 using ANGI.Application.UseCases.Administration.GetPermissionCatalog;
+using ANGI.Application.UseCases.Administration.GetSystemAuditLogDetail;
+using ANGI.Application.UseCases.Administration.GetSystemAuditLogs;
 using ANGI.Application.UseCases.Administration.ListMods;
 using ANGI.Application.UseCases.Administration.ReplaceModPermissions;
 using ANGI.Application.UseCases.Administration.ReplaceModRolePermissions;
@@ -33,6 +35,8 @@ public static class AdministrationModule
         services.AddScoped<IGetDashboardTimeSeriesUseCase, GetDashboardTimeSeriesUseCase>();
         services.AddScoped<IGetDashboardTopUseCase, GetDashboardTopUseCase>();
         services.AddScoped<IGetFailedOutboxMessagesUseCase, GetFailedOutboxMessagesUseCase>();
+        services.AddScoped<IGetSystemAuditLogsUseCase, GetSystemAuditLogsUseCase>();
+        services.AddScoped<IGetSystemAuditLogDetailUseCase, GetSystemAuditLogDetailUseCase>();
         return services;
     }
 }
