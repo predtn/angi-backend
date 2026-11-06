@@ -8,6 +8,18 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (!builder.Environment.IsDevelopment())
+{
+    // One JSON object per line, so the host's log viewer (Render) can search by level, category and exception.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(options =>
+    {
+        options.IncludeScopes = true;
+        options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+        options.UseUtcTimestamp = true;
+    });
+}
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddWebApi(builder.Configuration);
@@ -15,6 +27,7 @@ builder.Services.AddWebApi(builder.Configuration);
 var app = builder.Build();
 
 app.UseForwardedHeadersIfEnabled();
+app.UseMiddleware<TrustedClientIpMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseApiStatusCodePages();
 
@@ -41,6 +54,7 @@ app.UseAuthorization();
 app.UseMiddleware<AccountStatusMiddleware>();
 
 app.MapControllers();
+app.MapHealthCheckEndpoint();
 
 app.Run();
 

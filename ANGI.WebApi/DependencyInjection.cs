@@ -16,6 +16,7 @@ namespace ANGI.WebApi
         {
             services.AddScoped<ExceptionHandlingMiddleware>();
             services.AddScoped<RateLimitPartitionMiddleware>();
+            services.AddScoped<TrustedClientIpMiddleware>();
             services.AddScoped<AccountStatusMiddleware>();
             services.AddScoped<NullBodyValidationFilter>();
 
@@ -53,6 +54,8 @@ namespace ANGI.WebApi
             services.AddCorsConfiguration(configuration);
             services.AddRateLimitConfiguration(configuration);
             services.AddForwardedHeadersConfiguration(configuration);
+            services.AddTrustedClientIpConfiguration(configuration);
+            services.AddHealthCheckConfiguration();
 
             return services;
         }

@@ -19,6 +19,13 @@ namespace ANGI.Application.UseCases.Auth.Refresh
         private const string InvalidTokenCode = "REFRESH_TOKEN_INVALID";
         private const string InvalidTokenMessage = "Refresh token không hợp lệ hoặc đã hết hạn.";
 
+        /// <summary>
+        /// How long a token that was just rotated may be sent again. The frontend runs on several instances, so two
+        /// requests whose access token expired together can both refresh with the same token; the second one gets its
+        /// own valid pair instead of being treated as theft (API Design AUTH-06).
+        /// </summary>
+        public static readonly TimeSpan ReuseGracePeriod = TimeSpan.FromSeconds(30);
+
         private readonly IValidator<RefreshTokenRequestDto> _validator;
         private readonly IAuthenticationRepository _authenticationRepository;
         private readonly IAuthenticationTokenService _tokenService;
@@ -60,6 +67,18 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 throw InvalidRefreshToken();
             }
 
+            if (session.RevokedAt.HasValue && IsRecentRotation(session, now))
+            {
+                if (!IsUsableSuccessor(session.ReplacedBySession!, now) || session.User.Status != UserStatus.Active)
+                {
+                    // Rotated, then logged out or blocked: refuse without treating it as theft.
+                    throw InvalidRefreshToken();
+                }
+
+                // A concurrent refresh already rotated this token: issue a parallel session and keep the first one.
+                return await IssueSessionAsync(session, now, transaction, rotate: false, ct);
+            }
+
             if (session.RevokedAt.HasValue)
             {
                 await RevokeAllActiveSessionsAsync(session.UserId, now, ct);
@@ -75,7 +94,20 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 throw InvalidRefreshToken();
             }
 
-            session.RevokedAt = now;
+            return await IssueSessionAsync(session, now, transaction, rotate: true, ct);
+        }
+
+        /// <summary>
+        /// Adds a new session for the same user and device and returns its token pair; when rotating, the current session
+        /// is revoked and linked to the new one so a late duplicate of its token can be recognised.
+        /// </summary>
+        private async Task<AuthResultDto> IssueSessionAsync(
+            UserSession session,
+            DateTime now,
+            IUnitOfWorkTransaction transaction,
+            bool rotate,
+            CancellationToken ct)
+        {
             var refreshToken = _tokenService.CreateRefreshToken();
             var newSession = new UserSession
             {
@@ -86,6 +118,11 @@ namespace ANGI.Application.UseCases.Auth.Refresh
                 ExpiresAt = refreshToken.ExpiresAt
             };
             _authenticationRepository.AddSession(newSession);
+            if (rotate)
+            {
+                session.RevokedAt = now;
+                session.ReplacedBySession = newSession;
+            }
 
             await _unitOfWork.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -101,6 +138,22 @@ namespace ANGI.Application.UseCases.Auth.Refresh
 
             var needsPreferenceSurvey = await GetNeedsPreferenceSurveyAsync(session.User, ct);
             return AuthenticationResponseMapper.Map(session.User, tokens, needsPreferenceSurvey);
+        }
+
+        /// <summary>True when the session was revoked by a refresh (not a logout) within the grace period.</summary>
+        private static bool IsRecentRotation(UserSession session, DateTime now)
+        {
+            return session.ReplacedBySession is not null &&
+                   session.RevokedAt!.Value > now - ReuseGracePeriod;
+        }
+
+        /// <summary>
+        /// The successor still stands for this login: active, or itself rotated (a newer refresh, not a logout), and not expired.
+        /// </summary>
+        private static bool IsUsableSuccessor(UserSession successor, DateTime now)
+        {
+            return successor.ExpiresAt > now &&
+                   (!successor.RevokedAt.HasValue || successor.ReplacedBySessionId.HasValue);
         }
 
         /// <summary>Revokes every active session when reuse of an old refresh token is detected.</summary>

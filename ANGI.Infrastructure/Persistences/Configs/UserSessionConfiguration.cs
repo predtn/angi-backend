@@ -15,6 +15,11 @@ namespace ANGI.Infrastructure.Persistences.Configs
             builder.HasIndex(x => x.RefreshTokenHash).IsUnique();
 
             builder.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasOne(x => x.ReplacedBySession)
+                .WithMany()
+                .HasForeignKey(x => x.ReplacedBySessionId)
+                .OnDelete(DeleteBehavior.SetNull);
         }
     }
 }

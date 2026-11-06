@@ -15,6 +15,8 @@ namespace ANGI.Infrastructure.Persistences.Configs
                 table.HasCheckConstraint("ck_dishes_price", "price >= 0"));
 
             builder.Property(x => x.Name).HasMaxLength(200);
+            // DISH-01 q searches ILIKE '%term%', which a b-tree cannot serve.
+            builder.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops").HasDatabaseName("ix_dishes_name_trgm");
             builder.Property(x => x.DishForm).HasMaxLength(10).HasDefaultValue(DishForm.Other);
             builder.Property(x => x.LikeCount).HasDefaultValue(0);
             builder.Property(x => x.DislikeCount).HasDefaultValue(0);

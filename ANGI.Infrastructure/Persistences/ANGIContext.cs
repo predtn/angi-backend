@@ -83,6 +83,8 @@ namespace ANGI.Infrastructure.Persistences
         {
             modelBuilder.HasDefaultSchema(Schema);
             modelBuilder.HasPostgresExtension("citext");
+            // Trigram GIN indexes for the "%term%" name search of DISH-01 (dishes.name, restaurants.name).
+            modelBuilder.HasPostgresExtension("pg_trgm");
 
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(ANGIContext).Assembly);
 

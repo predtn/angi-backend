@@ -123,6 +123,7 @@ public sealed class UploadMediaUseCaseTests
         request.FileName = "document.pdf";
         request.MimeType = "Application/PDF";
         request.Purpose = "verification_doc";
+        request.Content = new MemoryStream("%PDF-1.7"u8.ToArray());
 
         var result = await useCase.ExecuteAsync(request, CancellationToken.None);
 
@@ -206,10 +207,75 @@ public sealed class UploadMediaUseCaseTests
             unitOfWork.Object);
     }
 
+    // TEST-07: Reject a file whose bytes do not match the declared type, before calling storage.
+    /// <summary>A renamed file (here an HTML page sent as a PDF, or a PNG sent as JPEG) never reaches Cloudinary.</summary>
+    [Theory]
+    [InlineData("application/pdf", "verification_doc", new byte[] { 0x3C, 0x68, 0x74, 0x6D, 0x6C })]
+    [InlineData("image/jpeg", "restaurant", new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })]
+    [InlineData("image/png", "restaurant", new byte[0])]
+    public async Task ExecuteAsync_WithContentNotMatchingMimeType_ShouldThrowUnsupportedMediaType(
+        string mimeType,
+        string purpose,
+        byte[] content)
+    {
+        var cloudinary = new Mock<ICloudinaryService>();
+        var useCase = CreateUseCase(cloudinary, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        var request = ValidImageRequest();
+        request.MimeType = mimeType;
+        request.Purpose = purpose;
+        request.Content = new MemoryStream(content);
+
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<BadRequestException>();
+        exception.Which.ErrorCode.Should().Be("UNSUPPORTED_MEDIA_TYPE");
+        cloudinary.VerifyNoOtherCalls();
+    }
+
+    // TEST-08: Accept each supported signature and hand storage the whole file from its first byte.
+    /// <summary>JPEG, PNG, WebP and PDF headers pass; the stream is rewound after the header is read.</summary>
+    [Theory]
+    [InlineData("image/jpeg", "restaurant", "FFD8FFE000104A464946")]
+    [InlineData("image/png", "restaurant", "89504E470D0A1A0A0000000D")]
+    [InlineData("image/webp", "restaurant", "524946462400000057454250")]
+    [InlineData("application/pdf", "verification_doc", "255044462D312E37")]
+    public async Task ExecuteAsync_WithMatchingSignature_ShouldUploadFromTheStart(string mimeType, string purpose, string hex)
+    {
+        var bytes = Convert.FromHexString(hex);
+        byte[]? uploaded = null;
+        var cloudinary = new Mock<ICloudinaryService>();
+        cloudinary.Setup(service => service.UploadAsync(
+                It.IsAny<Stream>(), It.IsAny<string>(), mimeType, purpose, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<Stream, string, string, string, bool, CancellationToken>((stream, _, _, _, _, _) =>
+            {
+                using var copy = new MemoryStream();
+                stream.CopyTo(copy);
+                uploaded = copy.ToArray();
+            })
+            .ReturnsAsync(new MediaUploadResult("image/upload/restaurant/file", "https://cdn.test/file"));
+        var useCase = CreateUseCase(cloudinary, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        var request = ValidImageRequest();
+        request.MimeType = mimeType;
+        request.Purpose = purpose;
+        request.Content = new MemoryStream(bytes);
+
+        await useCase.ExecuteAsync(request, CancellationToken.None);
+
+        uploaded.Should().Equal(bytes);
+    }
+
+    /// <summary>A 1 KB file that starts with the given bytes.</summary>
+    private static byte[] Header(params byte[] start)
+    {
+        var bytes = new byte[1024];
+        start.CopyTo(bytes, 0);
+        return bytes;
+    }
+
     /// <summary>Creates a minimal valid image upload request.</summary>
     private static UploadMediaRequestDto ValidImageRequest() => new()
     {
-        Content = new MemoryStream(new byte[1024]),
+        Content = new MemoryStream(Header(0xFF, 0xD8, 0xFF, 0xE0)),
         FileName = "photo.jpg",
         MimeType = "image/jpeg",
         SizeBytes = 1024,

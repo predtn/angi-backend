@@ -32,6 +32,23 @@ namespace ANGI.WebApi.Configs
             return services;
         }
 
+        /// <summary>
+        /// Binds TrustedClientIp:ProxyKey for TrustedClientIpMiddleware: empty (off) or at least 32 characters, like the
+        /// other shared secrets.
+        /// </summary>
+        public static IServiceCollection AddTrustedClientIpConfiguration(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            services.AddOptions<TrustedClientIpSettings>()
+                .Bind(configuration.GetSection(TrustedClientIpSettings.SectionName))
+                .Validate(
+                    settings => settings.ProxyKey.Length == 0 || settings.ProxyKey.Length >= 32,
+                    "TrustedClientIp:ProxyKey must be empty or at least 32 characters.")
+                .ValidateOnStart();
+            return services;
+        }
+
         /// <summary>Applies the forwarded client IP and scheme first, before anything reads RemoteIpAddress.</summary>
         public static IApplicationBuilder UseForwardedHeadersIfEnabled(this WebApplication app)
         {
