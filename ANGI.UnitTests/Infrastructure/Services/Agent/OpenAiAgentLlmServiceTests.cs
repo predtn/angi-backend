@@ -33,7 +33,8 @@ public sealed class OpenAiAgentLlmServiceTests
             using var state = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
             state.RootElement.GetProperty("proposalMode").GetString().Should().Be("update");
             state.RootElement.GetProperty("proposalVersion").GetInt32().Should().Be(3);
-            var issued = state.RootElement.GetProperty("issuedCandidateScopes")[0];
+            using var current = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
+            var issued = current.RootElement.GetProperty("issuedCandidateScopes")[0];
             issued.GetProperty("dayNumber").GetInt32().Should().Be(1);
             issued.GetProperty("mealSlot").GetString().Should().Be("breakfast");
             issued.GetProperty("dishIds")[0].GetInt32().Should().Be(221);
@@ -322,13 +323,15 @@ public sealed class OpenAiAgentLlmServiceTests
             {
                 using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync());
                 var messages = body.RootElement.GetProperty("messages");
-                if (messages.GetArrayLength() > 3)
+                var all = messages.EnumerateArray().ToArray();
+                var at = Array.FindIndex(all, message => message.TryGetProperty("tool_calls", out _));
+                if (at >= 0)
                 {
-                    var replay = messages[3].GetProperty("tool_calls")[0];
+                    var replay = all[at].GetProperty("tool_calls")[0];
                     replay.GetProperty("id").GetString().Should().Be("call-signed");
                     replay.TryGetProperty("extra_content", out var metadata).Should().Be(signed);
                     if (signed) metadata.GetProperty("google").GetProperty("thought_signature").GetString().Should().Be("opaque-provider-signature");
-                    messages[4].GetProperty("tool_call_id").GetString().Should().Be("call-signed");
+                    all[at + 1].GetProperty("tool_call_id").GetString().Should().Be("call-signed");
                     return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
                 }
             }
@@ -360,7 +363,7 @@ public sealed class OpenAiAgentLlmServiceTests
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
-            messages[2].GetProperty("content").GetString().Should().Contain("Hà Nội");
+            messages[messages.GetArrayLength() - 1].GetProperty("content").GetString().Should().Contain("Hà Nội");
             messages[4].GetProperty("content").GetString().Should().Contain("Phở bò Hà Nội");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
@@ -593,9 +596,9 @@ public sealed class OpenAiAgentLlmServiceTests
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
             messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("only when the user gave nothing but a province").And.Contain("clarification=place_scope").And.Contain("clarification=preferences")
-                .And.Contain("budgetUnrestricted=true and budgetAmount=null").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
+                .And.Contain("When budgetAmount=null, say plainly that the plan has no budget").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
                 .And.Contain("gợi ý code giúp tôi trang giao diện").And.Contain("tôi muốn ăn ngọt").And.Contain("nhà tôi ở Cầu Giấy").And.Contain("Mention a plan only when hasPlan=true");
-            using var data = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
+            using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
             JsonDocument.Parse(messages[1].GetProperty("content").GetString()!).RootElement.GetProperty("catalogProvinces")[0].GetString().Should().Be("Hà Nội");
             data.RootElement.TryGetProperty("intakeAside", out _).Should().BeFalse();
@@ -609,7 +612,26 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-26: The model is told to word a suggestion from the tool's facts, to claim taste only when ranked by it, and to admit it does not know the user's own favourites.
+    // TEST-26: Over a plan, the model is told to fetch several moved itinerary days in one full-scope call, so later days are not left on old dishes (conversation 221).
+    /// <summary>With three tool rounds, one call per day never reached days 2 and 3.</summary>
+    [Fact]
+    public async Task RunAsync_PlanWithMovedDays_AsksForOneFullScopeCall()
+    {
+        // STEP-01: Assert the rules sent over a plan name the single full-scope call.
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should()
+                .Contain("Several days: make ONE get_recommendation call with scope=full, never one call per day").And.Contain("the other days' source rows copied unchanged");
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+
+        // STEP-02: Get a context over a plan and assert the request is read.
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item()));
+        (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
+    }
+
+    // TEST-27: The model is told to word a suggestion from the tool's facts, to claim taste only when ranked by it, and to admit it does not know the user's own favourites.
     /// <summary>These rules keep the model's natural wording inside what the backend's checks accept.</summary>
     [Fact]
     public async Task RunAsync_Request_DeclaresSuggestionAndFavouriteRules()
@@ -618,7 +640,7 @@ public sealed class OpenAiAgentLlmServiceTests
         var handler = new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[2].GetProperty("content").GetString()!);
+            using var data = JsonDocument.Parse(body.RootElement.GetProperty("messages")[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("dishOffered").GetBoolean().Should().BeTrue();
             body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Contain("món sở trường của tôi là gì")
                 .And.Contain("never out_of_scope").And.Contain("only when personalized=true").And.Contain("status=nothing_found")
@@ -633,7 +655,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-27: The wording call closes tools and asks for the reply, never for a proposal; covers a suggestion found and the ordinary exhausted-tools message.
+    // TEST-28: The wording call closes tools and asks for the reply, never for a proposal; covers a suggestion found and the ordinary exhausted-tools message.
     /// <summary>The "return the final proposal" message would push the model away from wording the suggestion.</summary>
     [Theory]
     [InlineData(true, "The suggestion above is ready")]
@@ -658,7 +680,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-28: The date given to the model is the Vietnam date the backend uses; covers just before and at 17:00 UTC, when the day changes in Vietnam.
+    // TEST-29: The date given to the model is the Vietnam date the backend uses; covers just before and at 17:00 UTC, when the day changes in Vietnam.
     /// <summary>Stops "ngày mai" from meaning a different day to the model and to the backend's save check between midnight and 07:00.</summary>
     [Theory]
     [InlineData(16, 59, "2026-11-04")][InlineData(17, 0, "2026-11-05")]
@@ -687,7 +709,7 @@ public sealed class OpenAiAgentLlmServiceTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    // TEST-29: The read step offers no tools, sends real chat turns with the latest message last, and its own short rules whatever the stage; covers a new trip and a waiting answer.
+    // TEST-30: The read step offers no tools, sends real chat turns with the latest message last, and its own short rules whatever the stage; covers a new trip and a waiting answer.
     /// <summary>The model reads the message without holding a tool it could reach for, and without the rules for choosing candidates or building a plan.</summary>
     [Theory]
     [InlineData(null, "# A question waiting for an answer", "# 8. Building the proposal")]
@@ -710,12 +732,12 @@ public sealed class OpenAiAgentLlmServiceTests
             root.TryGetProperty("tool_choice", out _).Should().BeFalse();
             var messages = root.GetProperty("messages").EnumerateArray().ToArray();
             messages[0].GetProperty("content").GetString().Should().Contain("You have no tools now").And.Contain(kept).And.NotContain(dropped);
-            messages[^3].GetProperty("role").GetString().Should().Be("user");
-            messages[^2].GetProperty("role").GetString().Should().Be("assistant");
+            messages[2].GetProperty("role").GetString().Should().Be("user");
+            messages[3].GetProperty("role").GetString().Should().Be("assistant");
             messages[^1].GetProperty("role").GetString().Should().Be("user");
             messages[^1].GetProperty("content").GetString().Should().Be("đừng");
-            messages[2].GetProperty("role").GetString().Should().Be("system");
-            using var data = JsonDocument.Parse(messages[2].GetProperty("content").GetString()!);
+            messages[4].GetProperty("role").GetString().Should().Be("system");
+            using var data = JsonDocument.Parse(messages[4].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("history").ValueKind.Should().Be(JsonValueKind.Null);
             data.RootElement.GetProperty("request").ValueKind.Should().Be(JsonValueKind.Null);
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
@@ -725,7 +747,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-30: The forced step offers only the named tool and must call it.
+    // TEST-31: The forced step offers only the named tool and must call it.
     /// <summary>After reading, the model cannot pick a different tool.</summary>
     [Fact]
     public async Task RunAsync_ForcedStep_OffersOnlyTheNamedTool()
@@ -748,7 +770,7 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
-    // TEST-31: Requests with the same rules and tools share a prompt cache key whoever sends them; another step gets another key; the stable catalog sits before the turn's data.
+    // TEST-32: Requests with the same rules and tools share a prompt cache key whoever sends them; another step gets another key; the stable catalog sits before the turn's data.
     /// <summary>Prompt caching only reuses an identical prefix, so the key follows the prefix and the catalog is kept out of the per-turn data.</summary>
     [Fact]
     public async Task RunAsync_CacheKey_FollowsThePrefix()
@@ -776,7 +798,7 @@ public sealed class OpenAiAgentLlmServiceTests
         catalogs[0].Should().Contain("catalogTags").And.NotContain("currentDate");
     }
 
-    // TEST-32: The prompt cache hit reported in usage is carried on the step, and a response without it leaves the count empty.
+    // TEST-33: The prompt cache hit reported in usage is carried on the step, and a response without it leaves the count empty.
     /// <summary>Lets the log show how much of each request was billed at the cached rate.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]

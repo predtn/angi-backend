@@ -114,7 +114,7 @@ public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCan
     long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
     AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null, string[]? Notes = null);
 
-/// <summary>Model-worded text about one dish in a preview; shown only after AgentReplyGuard checked it. Never saved to the roadmap.</summary>
+/// <summary>Model-worded text about one dish in a preview; shown as the model wrote it. Never saved to the roadmap.</summary>
 public sealed record AgentDishNote(int DishId, string? Intro, string? Reason);
 
 /// <summary>Model-worded conclusion about one day of a preview, checked the same way.</summary>
@@ -154,11 +154,15 @@ public sealed class AgentContext
     public Domain.Entities.Roadmap? Roadmap { get; init; }
     public required DTOs.Agent.SendAgentMessageRequestDto Request { get; init; }
     public List<AgentTranscript> History { get; init; } = [];
+    /// <summary>Oldest history messages left out of the prompt when the turn would exceed the context limit; History itself stays whole for evidence checks.</summary>
+    public int PromptHistorySkip { get; set; }
+    /// <summary>The history the model reads this turn.</summary>
+    public IEnumerable<AgentTranscript> PromptHistory => History.Skip(PromptHistorySkip);
     public List<AgentCandidateGrant> Grants { get; } = [];
     /// <summary>The rest of each ranked list, never sent to the model; only the backend uses it to replace an avoidable repeat.</summary>
     public List<AgentCandidateGrant> ReserveGrants { get; } = [];
     public List<AgentToolExchange> Exchanges { get; } = [];
-    /// <summary>The model's wording for the preview this turn produced, for AgentReplyGuard to check against the final dishes.</summary>
+    /// <summary>The model's wording for the preview this turn produced, attached to the final dishes.</summary>
     public AgentOutput? PreviewOutput { get; set; }
     /// <summary>Latest backend-observed availability per requested day/meal in this turn.</summary>
     public List<AgentMealCoverage> MealCoverage { get; } = [];
@@ -197,8 +201,6 @@ public sealed class AgentContext
     public string? PlaceNote { get; set; }
     /// <summary>What suggest_dish found; the turn ends once the model has worded it, because no plan is involved.</summary>
     public AgentDishSuggestion? DishSuggestion { get; set; }
-    /// <summary>Words that start many catalog dish names; a reply may use one only when something it may quote backs it.</summary>
-    public IReadOnlySet<string>? DishWords { get; set; }
     /// <summary>A long plan cut to the days this message names, sent to the model instead of Source; null sends Source whole.</summary>
     public AgentSnapshot? PromptSource { get; set; }
     /// <summary>The question the backend is waiting on, for the model to read this message against; null when nothing waits.</summary>

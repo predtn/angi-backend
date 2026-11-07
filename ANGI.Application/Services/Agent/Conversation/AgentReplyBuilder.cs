@@ -17,7 +17,6 @@ public static class AgentReplyBuilder
         "Bạn có thể nói rõ hơn hoặc điều chỉnh yêu cầu, ví dụ ngày/bữa, món muốn ăn, ngân sách hoặc khẩu vị.";
     // Chỉ còn lặp khi cả danh sách gợi ý của bữa đó (kể cả món dự phòng) không còn món khác tên phù hợp; không suy ra catalog thiếu món.
     public const string RepeatNote = "Một số món xuất hiện ở nhiều bữa vì danh sách gợi ý phù hợp cho các bữa đó không còn món khác.";
-    public const string NoveltyQuestion = "Bạn muốn món khác các món trong lịch hiện tại, hay món bạn chưa từng ăn? ANGI chưa có đủ dữ liệu để xác nhận toàn bộ lịch sử ăn uống của bạn.";
     private const int MaxNamedChanges = 3;
     // Các ô model được đặt trong câu về bản nháp; backend điền sau khi đã kiểm tra xong món.
     private static readonly Regex ProposalSlot = new(@"\{(?<slot>total|numDays|place|changes)\}", RegexOptions.CultureInvariant);
@@ -77,18 +76,11 @@ public static class AgentReplyBuilder
         return [.. notes];
     }
 
-    /// <summary>
-    /// Fills the model's sentence about a preview with the facts of the final, validated plan, and adds the total and an edit's changes when it left them out; null when
-    /// its own words add a number, name or dish. The model writes this before the backend's repairs, so only slots filled now can be true.
-    /// </summary>
-    public static string? WordedSummary(string? reply, AgentSnapshot snapshot, AgentSnapshot? source, AgentContext context)
+    /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
+    public static string FillSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
     {
-        // STEP-01: Return null early when WordedSummaryIssue() exists.
-        if (WordedSummaryIssue(reply, snapshot, source, context) is not null) return null;
-        // STEP-02: Prepare changes and total, then fill each slot.
         var changes = Changes(snapshot, source);
         var total = $"{Money(snapshot.Items.Sum(item => item.Price))} đồng/người";
-        // Câu mô tả thay đổi đã mở đầu bằng động từ của nó: model viết "Mình bỏ {changes}" thì thành "bỏ bỏ".
         var template = (reply ?? "").Trim();
         if (changes?.Split(' ')[0] is { Length: > 0 } verb) template = Regex.Replace(template, $@"(?<!\p{{L}}){Regex.Escape(verb)}\s+(?=\{{changes\}})", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         var filled = ProposalSlot.Replace(template, match => match.Groups["slot"].Value switch
@@ -96,35 +88,42 @@ public static class AgentReplyBuilder
             "total" => total,
             "numDays" => $"{snapshot.State.NumDays}",
             "place" => Safe(snapshot.State.Province),
-            _ => changes!
+            _ => changes ?? ""
         });
         if (filled.Length > 0 && template.StartsWith('{')) filled = char.ToUpperInvariant(filled[0]) + filled[1..];
-        // STEP-03: Prepare missing, and return the sentence followed by the facts it left out.
-        // Giữ lời của model thay vì bỏ cả câu chỉ vì thiếu ô: dữ kiện vẫn đủ, do backend viết nối theo.
-        var missing = MissingSlots(reply, snapshot, source);
-        if (missing.Length == 0) return filled;
-        var ended = filled[^1] is '.' or '!' or '?' or '…' ? filled : filled + ".";
-        return string.Join(' ', missing.Select(slot => slot == "changes" ? $"Cụ thể: {changes}." : $"Tổng {(changes is null ? "" : "giờ ")}khoảng {total}.").Prepend(ended));
+        return filled;
     }
 
-    /// <summary>The facts a preview must state that the model's sentence has no slot for.</summary>
-    public static string[] MissingSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
+    /// <summary>THÍ NGHIỆM: gắn ghi chú món và tóm tắt ngày model viết vào bản nháp, không kiểm; chỉ bỏ ghi chú rỗng. Ghi chú cũ của món còn lại được giữ.</summary>
+    public static AgentSnapshot AttachNotes(AgentSnapshot snapshot, AgentContext context)
     {
-        var used = ProposalSlot.Matches((reply ?? "").Trim()).Select(match => match.Groups["slot"].Value).ToHashSet();
-        return new[] { Changes(snapshot, source) is null ? null : "changes", "total" }.OfType<string>().Where(slot => !used.Contains(slot)).ToArray();
+        var dishNotes = (context.Source?.DishNotes ?? []).ToDictionary(note => note.DishId);
+        var present = snapshot.Items.Select(item => item.DishId).ToHashSet();
+        foreach (var note in context.PreviewOutput?.DishNotes ?? [])
+            if (present.Contains(note.DishId) && NoteText(note.Intro) is var intro && NoteText(note.Reason) is var reason && (intro is not null || reason is not null))
+                dishNotes[note.DishId] = new(note.DishId, intro, reason);
+        return snapshot with
+        {
+            DishNotes = [.. dishNotes.Values.Where(note => present.Contains(note.DishId)).OrderBy(note => note.DishId)],
+            DaySummaries = [.. snapshot.Items.Select(item => item.DayNumber).Distinct().Order().SelectMany(day => DaySummary(day, snapshot, context))]
+        };
     }
 
-    /// <summary>Why the model's sentence about a preview cannot be shown, as a short code for the log; null when it can.</summary>
-    public static string? WordedSummaryIssue(string? reply, AgentSnapshot snapshot, AgentSnapshot? source, AgentContext context)
+    /// <summary>A day's new summary, or its earlier one if the day still holds the same dishes; an old summary must not describe dishes that left.</summary>
+    private static IEnumerable<AgentDaySummary> DaySummary(short day, AgentSnapshot snapshot, AgentContext context)
     {
-        // STEP-01: Prepare template and used through ProposalSlot.Matches.
-        var template = (reply ?? "").Trim();
-        var used = ProposalSlot.Matches(template).Select(match => match.Groups["slot"].Value).ToHashSet();
-        // STEP-02: Return "unknown_slot" when the slots do not fit this plan.
-        if (Changes(snapshot, source) is null && used.Contains("changes") || used.Contains("place") && string.IsNullOrWhiteSpace(snapshot.State.Province)) return "unknown_slot";
-        // STEP-03: Return the result of AgentReplyGuard.TemplateIssue for the words around the slots.
-        return AgentReplyGuard.TemplateIssue(ProposalSlot.Replace(template, " ").Trim(), context);
+        if ((context.PreviewOutput?.DaySummaries ?? []).FirstOrDefault(summary => summary.DayNumber == day) is { } written && NoteText(written.Summary) is { } summary)
+        {
+            yield return new(day, summary);
+            yield break;
+        }
+        var before = context.Source?.Items.Where(item => item.DayNumber == day).Select(item => item.DishId).ToHashSet();
+        if (before is not null && before.SetEquals(snapshot.Items.Where(item => item.DayNumber == day).Select(item => item.DishId)) &&
+            context.Source?.DaySummaries?.FirstOrDefault(earlier => earlier.DayNumber == day) is { } earlier)
+            yield return earlier;
     }
+
+    private static string? NoteText(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     /// <summary>What an edit changed in words, or null for a plan with nothing kept from before.</summary>
     private static string? Changes(AgentSnapshot snapshot, AgentSnapshot? source)
@@ -194,39 +193,6 @@ public static class AgentReplyBuilder
 
     private static string Day(DateOnly date) => date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
 
-    /// <summary>Asks about an edit using what is already known: the chosen dish, the named meal or day and what it holds now.</summary>
-    private static string EditScope(AgentContext context)
-    {
-        // STEP-01: Prepare items and names.
-        var items = context.Source?.Items ?? [];
-        var names = (IEnumerable<AgentItem> found) => string.Join(", ", found.Select(item => Safe(item.DishName)).Distinct().Take(MaxNamedChanges));
-        // STEP-02: Return the formatted text early when items.FirstOrDefault(filtered) exists.
-        if (items.FirstOrDefault(item => item.ItemKey == context.Request.SelectedItemKey) is { } selected)
-            return $"Bạn muốn đổi {Safe(selected.DishName)} thế nào: sang món khác, món rẻ hơn hay bỏ món này?";
-        // STEP-03: Prepare references through AgentMealScopePolicy.Read.
-        var references = AgentMealScopePolicy.Read(context.Request.Content, context.State);
-        // STEP-04: When references.Meals.FirstOrDefault() has the expected shape, prepare label through Meal, prepare inMeal through items.Where(filtered).ToArray and 1 more action(s).
-        if (references.Meals.FirstOrDefault() is { DayNumber: { } mealDay, MealSlot: { } meal })
-        {
-            var label = Meal(meal);
-            var inMeal = items.Where(item => item.DayNumber == mealDay && item.MealSlot == meal).ToArray();
-            return inMeal.Length > 0
-                ? $"{char.ToUpperInvariant(label[0])}{label[1..]} ngày {mealDay} đang có {names(inMeal)}. Bạn muốn đổi sang món gì, hay bỏ bữa này?"
-                : $"{char.ToUpperInvariant(label[0])}{label[1..]} ngày {mealDay} đang trống. Bạn muốn thêm món gì?";
-        }
-        // STEP-05: When references.Days.Length > 0, prepare day, prepare inDay through items.Where(filtered).ToArray and 1 more action(s).
-        if (references.Days.Length > 0)
-        {
-            var day = references.Days[0];
-            var inDay = items.Where(item => item.DayNumber == day).ToArray();
-            return inDay.Length > 0 ? $"Ngày {day} đang có {names(inDay)}. Bạn muốn đổi món nào, hay thay cả ngày?" : $"Ngày {day} đang trống. Bạn muốn thêm món gì?";
-        }
-        // STEP-06: Prepare sample from Safe.
-        var sample = items.FirstOrDefault(item => item.DishName is not null) is { } first ? $" hoặc “bỏ món {Safe(first.DishName)}”" : "";
-        // STEP-07: Return the formatted text.
-        return $"Bạn muốn đổi món nào, hay cả lịch? Ví dụ “đổi bữa trưa ngày 1”{sample}.";
-    }
-
     /// <summary>Lists a saved itinerary by day and meal in chat, for a user who asked to see it while no proposal card is on screen.</summary>
     public static string Itinerary(AgentSnapshot snapshot)
     {
@@ -270,14 +236,6 @@ public static class AgentReplyBuilder
     private static IEnumerable<string> DeclaredMeals(AgentSnapshot snapshot, ILookup<(short DayNumber, string MealSlot), AgentItem> itemsByMeal, short day) =>
         AgentStateValidator.Meals.Where(meal => meal is not ("snack" or "late_night") || itemsByMeal[(day, meal)].Any() || snapshot.State.MealSlots.Contains(meal));
 
-    /// <summary>Answers a bare save intent with what would be saved and the exact save wording, without saving or changing the plan.</summary>
-    public static string SaveConfirmation(DTOs.Agent.AgentProposalDto? proposal) => proposal?.Status switch
-    {
-        "ready" => $"Mình lưu lịch hiện tại ({proposal.Snapshot.Items.Length} món, tổng {Money(proposal.Snapshot.Items.Sum(x => x.Price))} đồng/người) nhé?",
-        "committed" => "Lịch này đã được lưu rồi. Bạn muốn chỉnh gì thêm không?",
-        _ => NothingToSave
-    };
-
     /// <summary>Names the required trip values still unknown, or null when none is missing.</summary>
     public static string? TripDetailsQuestion(AgentState state)
     {
@@ -288,58 +246,9 @@ public static class AgentReplyBuilder
         var missing = new List<string>();
         // STEP-03: When state.NumDays has no value, call missing.Add.
         if (!state.NumDays.HasValue) missing.Add("số ngày");
-        // STEP-04: When state.BudgetAmount is missing and state.BudgetUnrestricted is false, call missing.Add.
-        if (state.BudgetAmount is null && !state.BudgetUnrestricted) missing.Add("ngân sách cho một người (tổng chuyến hoặc mỗi ngày)");
+        // STEP-04: Budget is optional: a trip with no stated budget is planned with none.
         // STEP-05: Return one of two results depending on missing.Count is 0.
         return missing.Count == 0 ? null : $"Bạn cho mình biết {string.Join(", ", missing)} để lập lịch nhé?";
-    }
-
-    /// <summary>Asks only unresolved required values or the model's allowlisted clarification intent.</summary>
-    public static string Clarify(AgentContext context, string? kind)
-    {
-        // STEP-01: Return notice early when context.ToolNotice exists.
-        if (context.ToolNotice is { } notice) return notice;
-        // STEP-02: Return tripQuestion early when TripDetailsQuestion() exists.
-        if (TripDetailsQuestion(context.State) is { } tripQuestion) return tripQuestion;
-        // STEP-03: Prepare tastes through string.Join.
-        // Gọi đúng tên vị người dùng vừa nhắc và dùng chung thang chữ với câu hỏi khẩu vị cố định của backend.
-        var tastes = string.Join(", ", AgentTasteClarificationPolicy.MentionedTastes(context.Request.Content));
-        // STEP-04: Return the value selected by kind.
-        return kind switch
-        {
-            "place_scope" => AgentIntakePolicy.ScopeQuestion(context.State.Province),
-            "preferences" => AgentIntakePolicy.PreferencesWording(context.State),
-            "taste_scope" => $"Bạn muốn áp dụng khẩu vị {(tastes.Length > 0 ? tastes : "này")} cho toàn chuyến hay ngày/bữa cụ thể nào? Bạn muốn cập nhật các bữa đã có hay chỉ các gợi ý tiếp theo?",
-            "taste_intensity" => tastes.Length > 0 ? $"Bạn muốn mức {tastes} như thế nào: không, nhẹ, vừa, nhiều hay rất nhiều?"
-                : "Bạn muốn vị nào và ở mức nào: không, nhẹ, vừa, nhiều hay rất nhiều?",
-            "edit_scope" => EditScope(context),
-            "novelty" => NoveltyQuestion,
-            // Câu hỏi về catalog dùng kết quả tra cứu thật (tên không tìm thấy, các lựa chọn gần đúng) khi có.
-            "catalog_choice" => context.CatalogNotice ?? "Bạn muốn chọn món hoặc quán nào trong các kết quả mình vừa tìm được?",
-            "coverage" => Coverage(context),
-            "catalog_support" => context.CatalogNotice ?? "Mình chưa có đủ dữ liệu trên ANGI để xác nhận yêu cầu này. Bạn có muốn chọn tiêu chí khác không?",
-            "budget" => "Ngân sách hiện tại có thể chưa đủ cho các món phù hợp. Bạn muốn tăng ngân sách, bớt số ngày/bữa, hay đặt mức giá tối đa mỗi bữa để mình chọn món rẻ hơn?",
-            // Chưa có lịch nào: không mời "xem lại đề xuất". Đã lấy gợi ý mà chưa ghép được lịch thì nói rõ là chưa hoàn tất.
-            _ when context.Source is null => context.Exchanges.Count > 0 ? PlanningIncomplete
-                : "Mình đã có địa điểm, số ngày và ngân sách. Bạn muốn mình lập lịch ngay hay bổ sung yêu cầu về bữa, món hoặc khẩu vị?",
-            _ => "Bạn muốn xem lại lịch hiện tại hay thay đổi ngày/bữa hoặc món nào?"
-        };
-    }
-
-    /// <summary>True when the only reason a proposal failed validation is a total above the trip budget.</summary>
-    public static bool OverBudgetOnly(AgentValidation? validation) => validation is { Errors.Length: > 0 } &&
-        validation.Errors.All(error => error == AgentProposalValidator.BudgetExceeded);
-
-    /// <summary>
-    /// Asks how to resolve a budget the authorized dishes did not fit, with the observed figures, instead of a generic failure.
-    /// Only the user may raise the budget, drop meals or cap prices; the backend never relaxes the budget itself.
-    /// </summary>
-    public static string BudgetShortfall(AgentState state, AgentValidation validation)
-    {
-        var perMeal = AgentScopedPlanning.BudgetPerMeal(state) is { } amount
-            ? $" (khoảng {Money(amount)} đồng/bữa cho {AgentScopedPlanning.MealCount(state)} bữa)" : "";
-        return $"Các món phù hợp mình tìm được có tổng {Money(validation.TotalCost)} đồng/người, vượt ngân sách {Money(state.BudgetAmount ?? 0)} đồng " +
-            $"cho cả chuyến{perMeal}. Bạn muốn tăng ngân sách, bớt số ngày/bữa, hay đặt mức giá tối đa mỗi bữa để mình chọn món rẻ hơn?";
     }
 
     /// <summary>Only current, backend-observed empty meals support a claim of missing choices.</summary>

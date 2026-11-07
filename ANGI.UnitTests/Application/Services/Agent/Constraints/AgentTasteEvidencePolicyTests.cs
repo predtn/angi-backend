@@ -29,25 +29,7 @@ public sealed class AgentTasteEvidencePolicyTests
         AgentConstraintGuard.UnbackedTastes(context, proposed).Should().BeEquivalentTo(backed ? [] : new[] { "spicy" });
     }
 
-    // TEST-02: A proposal over a named taste with nothing new in state acts on a level nobody stated; covers a bare taste, no taste named, a look-alike word, a taste with a level already kept and a state that records the level.
-    /// <summary>The model chose dishes without writing a target, so the check on quotes alone never sees this.</summary>
-    [Theory]
-    [InlineData("thích ăn cay", false, false, true)]
-    [InlineData("đổi bữa trưa ngày 1 sang món khác", false, false, false)]
-    [InlineData("chưa có gì đâu", false, false, false)]
-    [InlineData("thích ăn cay", true, false, false)]
-    [InlineData("thích ăn cay", false, true, false)]
-    public void ActsOnUnstatedLevel_OnlyWhenStateRecordsNothing(string content, bool alreadyKept, bool recorded, bool expected)
-    {
-        // STEP-01: Prepare the state before and after the turn.
-        var before = Context(content).State with { TasteTargets = alreadyKept ? [new("spicy", .25)] : [] };
-        var after = recorded ? before with { TasteTargets = [new("spicy", .5)] } : before;
-
-        // STEP-02: Assert AgentConstraintGuard.ActsOnUnstatedLevel() is expected.
-        AgentConstraintGuard.ActsOnUnstatedLevel(content, before, after).Should().Be(expected);
-    }
-
-    // TEST-03: Words from an earlier message or the request being clarified also back a level, because the answer may come over several turns.
+    // TEST-02: Words from an earlier message or the request being clarified also back a level, because the answer may come over several turns.
     /// <summary>"Vừa" answering a question is a level even though the current message says something else.</summary>
     [Theory]
     [InlineData("history")]
@@ -63,7 +45,7 @@ public sealed class AgentTasteEvidencePolicyTests
         AgentConstraintGuard.UnbackedTastes(context, context.State with { TasteTargets = [new("spicy", .5, "Vừa")] }).Should().BeEmpty();
     }
 
-    // TEST-04: The model's own earlier reply never backs a level.
+    // TEST-03: The model's own earlier reply never backs a level.
     /// <summary>A level the assistant suggested is not one the user chose.</summary>
     [Fact]
     public void Unbacked_AssistantWords_DoNotBackALevel()
@@ -76,7 +58,7 @@ public sealed class AgentTasteEvidencePolicyTests
         AgentConstraintGuard.UnbackedTastes(context, context.State with { TasteTargets = [new("spicy", .75, "cay nhiều")] }).Should().Equal("spicy");
     }
 
-    // TEST-05: A target already in the state needs no quote, while changing its level or scope does; covers unchanged, another level, a whole trip moved to one day and another meal.
+    // TEST-04: A target already in the state needs no quote, while changing its level or scope does; covers unchanged, another level, a whole trip moved to one day and another meal.
     /// <summary>The model keeps resending state every turn, so only what it changes is checked.</summary>
     [Theory]
     [InlineData("same", false)]
@@ -101,7 +83,7 @@ public sealed class AgentTasteEvidencePolicyTests
         AgentConstraintGuard.UnbackedTastes(context, proposed).Any().Should().Be(unbacked);
     }
 
-    // TEST-06: Nothing is checked with no proposed state or after the user confirmed the change; a proposal with no taste passes.
+    // TEST-05: Nothing is checked with no proposed state or after the user confirmed the change; a proposal with no taste passes.
     /// <summary>A confirmed change was already agreed by the user, so it must not ask again.</summary>
     [Theory]
     [InlineData("none")]
@@ -118,7 +100,7 @@ public sealed class AgentTasteEvidencePolicyTests
         AgentConstraintGuard.UnbackedTastes(context, proposed).Should().BeEmpty();
     }
 
-    // TEST-07: Quotes are dropped from targets and overrides, and a state without any is returned as the same instance.
+    // TEST-06: Quotes are dropped from targets and overrides, and a state without any is returned as the same instance.
     /// <summary>A quote stored in state would make the same target look different and force a needless replan.</summary>
     [Fact]
     public void WithoutQuotes_DropsThemEverywhere()

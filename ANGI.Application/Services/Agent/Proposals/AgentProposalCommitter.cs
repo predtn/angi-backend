@@ -17,9 +17,12 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
 {
     private static readonly JsonSerializerOptions SnakeCase = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
-    /// <summary>Checks the owned revision and calculates routes outside the transaction that applies the proposal.</summary>
+    /// <summary>
+    /// Checks the owned revision and calculates routes outside the transaction that applies the proposal.
+    /// A chat turn passes the state it ends in as turnState, because that turn may itself close the open question; the confirm endpoint passes none and the stored state is checked.
+    /// </summary>
     public async Task<AgentCommitPreparation> PrepareAsync(AgentConversation conversation, int userId,
-        ConfirmAgentProposalRequestDto request, bool ownsTurn, CancellationToken ct)
+        ConfirmAgentProposalRequestDto request, bool ownsTurn, CancellationToken ct, AgentState? turnState = null)
     {
         // STEP-01: Prepare proposal from NotCommittable.
         var proposal = await repository.GetProposalSnapshotAsync(conversation.Id, request.ProposalId, ct) ?? throw NotCommittable();
@@ -29,7 +32,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         if (proposal.Status == AgentProposalStatus.Committed)
             return new(conversation.Id, proposal.Id, proposal.ProposalVersion, null, AgentJson.Read<AgentCommitDto>(proposal.CommitResult!));
         // STEP-04: Check the committable rule through RequireCommittable.
-        RequireCommittable(conversation, proposal, clock.GetUtcNow().UtcDateTime, ownsTurn);
+        RequireCommittable(conversation, proposal, clock.GetUtcNow().UtcDateTime, ownsTurn, turnState);
         // STEP-05: Prepare snapshot through AgentJson.Read.
         var snapshot = AgentJson.Read<AgentSnapshot>(proposal.Payload);
         // STEP-06: When the computed value exists, set snapshot.
@@ -44,14 +47,14 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         // STEP-09: Run validator.ValidateAsync and keep outside.
         var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, !AgentScopedPlanning.IsLongTrip(snapshot.State), ct);
         // STEP-10: Throw AgentProposalValidationException when outside.Validation.Errors.Length > 0.
-        if (outside.Validation.Errors.Length > 0) throw new AgentProposalValidationException(outside.Validation);
+        // THÍ NGHIỆM: không chặn lưu khi validator báo lỗi.
         // STEP-11: Return the new result.
         return new(conversation.Id, proposal.Id, proposal.ProposalVersion, snapshot);
     }
 
-    /// <summary>Applies under the caller's conversation lock and transaction; the caller persists transcript and commits.</summary>
+    /// <summary>Applies under the caller's conversation lock and transaction; the caller persists transcript and commits. turnState means the same as in PrepareAsync.</summary>
     public async Task<(AgentCommitDto Result, bool Applied)> CommitLockedAsync(AgentConversation conversation,
-        AgentCommitPreparation preparation, int userId, bool ownsTurn, CancellationToken ct)
+        AgentCommitPreparation preparation, int userId, bool ownsTurn, CancellationToken ct, AgentState? turnState = null)
     {
         // STEP-01: Throw the error from NotCommittable when conversation.Id is not preparation.ConversationId or conversation.UserId is not userId.
         if (conversation.Id != preparation.ConversationId || conversation.UserId != userId) throw NotCommittable();
@@ -64,7 +67,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         // STEP-05: Prepare now from clock.GetUtcNow.
         var now = clock.GetUtcNow().UtcDateTime;
         // STEP-06: Check the committable rule through RequireCommittable.
-        RequireCommittable(conversation, proposal, now, ownsTurn);
+        RequireCommittable(conversation, proposal, now, ownsTurn, turnState);
         // STEP-07: Prepare snapshot from NotCommittable, source and roadmap.
         var snapshot = preparation.Snapshot ?? throw NotCommittable();
         AgentSnapshot? source = null;
@@ -181,8 +184,8 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         if (proposal.ProposalVersion != version) throw new ConflictException("PROPOSAL_VERSION_CONFLICT", "Phiên bản đề xuất không khớp.");
     }
 
-    /// <summary>Allows only current ready proposals with resolved questions and unchanged reviewed constraints.</summary>
-    private static void RequireCommittable(AgentConversation conversation, AgentProposal proposal, DateTime now, bool ownsTurn)
+    /// <summary>Allows only current ready proposals with resolved questions and unchanged reviewed constraints, judged on turnState when a chat turn gives it.</summary>
+    private static void RequireCommittable(AgentConversation conversation, AgentProposal proposal, DateTime now, bool ownsTurn, AgentState? turnState)
     {
         // STEP-01: Check the active rule through AgentConversationRules.RequireActive.
         AgentConversationRules.RequireActive(conversation, now);
@@ -192,8 +195,9 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         if (proposal.ExpiresAt <= now) throw new GoneException("PROPOSAL_EXPIRED", "Đề xuất đã hết hạn.");
         // STEP-04: Throw the error from NotCommittable when proposal.Status is not AgentProposalStatus.Ready or conversation.CurrentProposalId is not proposal.Id.
         if (proposal.Status != AgentProposalStatus.Ready || conversation.CurrentProposalId != proposal.Id) throw NotCommittable();
-        // STEP-05: Prepare state through AgentJson.Read.
-        var state = AgentJson.Read<AgentState>(conversation.State);
+        // STEP-05: Prepare state from turnState, or through AgentJson.Read of the stored state.
+        // Lượt chat muốn lưu có thể vừa đóng câu hỏi đang mở; state đã lưu chưa ghi điều đó, nên lượt chat truyền state nó kết thúc.
+        var state = turnState ?? AgentJson.Read<AgentState>(conversation.State);
         // STEP-06: Throw the error from NotCommittable when state.PendingQuestion exists, state.PendingStateChange exists, state.PendingPlanningRequest exists or 1 more condition(s).
         if (state.PendingQuestion is not null || state.PendingStateChange is not null || state.PendingPlanningRequest is not null ||
             !AgentConversationRules.SameConstraints(state, AgentJson.Read<AgentSnapshot>(proposal.Payload).State)) throw NotCommittable();

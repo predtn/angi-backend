@@ -36,6 +36,13 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         ["hoang thanh thang long"] = (21.0352m, 105.8402m), ["chua mot cot"] = (21.0359m, 105.8336m)
     };
     private const double SamePlaceKm = 2;
+    // Từ mở đầu tên một loại cơ sở (đã bỏ dấu). Cụm người dùng viết bắt đầu bằng một từ này thì kết quả bản đồ là một cơ sở đúng là thứ họ tìm.
+    private static readonly string[] InstitutionWords =
+    [
+        "dai hoc", "truong", "hoc vien", "cao dang", "benh vien", "cho", "sieu thi", "trung tam thuong mai", "toa nha", "khu do thi", "san bay", "ga",
+        "ben xe", "cong vien", "bao tang", "chua", "den", "nha tho", "khach san", "cong ty", "khu cong nghiep", "khu cong nghe cao", "san van dong",
+        "nha van hoa", "thu vien"
+    ];
     // Nơi ngoài dữ liệu ANGI. Bản đồ được hỏi "Đà Nẵng, Hà Nội" sẽ trả một địa điểm ở Hà Nội có tên chứa chữ đó, nên phải chặn trước khi hỏi bản đồ.
     // Tỉnh đã có quán được nhận ra sớm hơn ở IsProvince, nên khi dữ liệu mở rộng thì danh sách này không cản.
     private static readonly HashSet<string> Elsewhere = new(StringComparer.Ordinal)
@@ -180,6 +187,12 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         var named = usable.Where(x => IsBusiness(x) && $" {AgentIntakePolicy.Plain(x.Name)} ".Contains($" {term} ", StringComparison.Ordinal)).ToArray();
         // STEP-04: Return the collected values early when named.FirstOrDefault(filtered) exists.
         if (named.FirstOrDefault(x => WithoutProvince(AgentIntakePolicy.Plain(x.Name), province) == term) is { } exact) return (exact.Latitude, exact.Longitude);
+        // Người dùng gọi tên một cơ sở theo loại ("Đại học FPT", "Bệnh viện Bạch Mai"): kết quả là một cơ sở duy nhất có tên BẮT ĐẦU bằng đúng cụm đó
+        // thì chính là nơi họ tìm, dù tên dài hơn ("Đại học FPT Hà Nội (Cơ sở Hòa Lạc)", hội thoại 222). Một tên trống không có loại ("Thủy Tiên")
+        // vẫn không tin cơ sở mượn tên ("Thủy Tiên Plaza"), và cụm chỉ nằm giữa tên ("Ký túc xá gần Đại học FPT") vẫn bị từ chối.
+        if (named.Length == 1 && InstitutionWords.Any(kind => $"{term} ".StartsWith($"{kind} ", StringComparison.Ordinal)) &&
+            $"{WithoutProvince(AgentIntakePolicy.Plain(named[0].Name), province)} ".StartsWith($"{term} ", StringComparison.Ordinal))
+            return (named[0].Latitude, named[0].Longitude);
         // STEP-05: Prepare cluster through named.Select(filtered).MaxBy.
         var cluster = named.Select(x => named.Where(other => NearbyArea.DistanceKm(x.Latitude, x.Longitude, other.Latitude, other.Longitude) <= SamePlaceKm).ToArray())
             .MaxBy(group => group.Length);

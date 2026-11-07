@@ -134,20 +134,6 @@ public sealed class AgentConstraintGuard
             .Select(entry => entry.Target.Dimension).Distinct().ToArray();
     }
 
-    /// <summary>
-    /// True when a proposal would change a plan over a taste the message names, yet the state records neither that taste nor any other new condition:
-    /// the model picked dishes for a level nobody stated, which no quote check can see because it wrote no target.
-    /// </summary>
-    public static bool ActsOnUnstatedLevel(string content, AgentState before, AgentState after)
-    {
-        // STEP-01: Return false early when the message names no taste or the state records a new condition.
-        var named = AgentTasteClarificationPolicy.MentionedTastes(content);
-        if (named.Length == 0 || !SameUserConstraints(before, after)) return false;
-        // STEP-02: Prepare known and return whether a named taste has no level yet.
-        var known = Scoped(before).Select(entry => AgentReplyBuilder.TasteName(entry.Target.Dimension)).ToHashSet();
-        return named.Any(taste => !known.Contains(taste));
-    }
-
     /// <summary>Drops the quotes once checked, so they never reach stored state or a comparison of constraints.</summary>
     public static AgentState WithoutQuotes(AgentState state) => Scoped(state).All(entry => entry.Target.LevelQuote is null) ? state : state with
     {
@@ -242,16 +228,6 @@ public sealed class AgentConstraintGuard
     private static bool SameRequestNames(AgentMealRequest previous, AgentMealRequest current) => previous.DayNumber == current.DayNumber &&
         previous.MealSlot == current.MealSlot && previous.DishName == current.DishName && previous.RestaurantName == current.RestaurantName &&
         previous.RestaurantId == current.RestaurantId;
-
-    // Chỉ so ràng buộc người dùng đặt: hồ sơ khẩu vị được backend khởi tạo khi xếp hạng, ghi chú/tiêu đề do model viết
-    // và các trường do backend quản lý không phải là yêu cầu thay đổi của người dùng.
-    public static bool SameUserConstraints(AgentState before, AgentState after) => AgentConversationRules.SameConstraints(Strip(before), Strip(after));
-
-    private static AgentState Strip(AgentState state) => state with
-    {
-        Note = null, Title = "", Preferences = null, PendingPlanningRequest = null, PendingStateChange = null,
-        SourceRoadmapUpdatedAt = null, HistoryStartSequence = null
-    };
 
     // Removed meals
 

@@ -465,7 +465,7 @@ public sealed class AgentToolExecutorTests
     // keeps the taste the model just accepted and never queries the catalog or reco; covers budget, days and province.
     /// <summary>Ensures missing trip values become a user question instead of a contract failure that turns the chat into HTTP 503.</summary>
     [Theory]
-    [InlineData("budget")][InlineData("days")][InlineData("province")]
+    [InlineData("days")][InlineData("province")]
     public async Task ExecuteAsync_TripDetailsMissing_ReturnsNoticeWithoutRanking(string missing)
     {
         // STEP-01: Create fixture through AgentTestData.Validator.
@@ -1373,34 +1373,6 @@ public sealed class AgentToolExecutorTests
     /// <summary>Builds the suggest_dish call a model makes with no condition.</summary>
     private static AgentToolCall SuggestCall() => new("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: []), AgentJson.Options));
 
-    // TEST-49: A recommendation requested once the trip is settled is held back until the preferences question has been asked.
-    /// <summary>Keeps the order of the questions enforced in the tool, even when the model tries to plan early.</summary>
-    [Fact]
-    public async Task ExecuteAsync_PreferencesDue_ReturnsNoticeWithoutRanking()
-    {
-        // STEP-01: Create fixture through AgentTestData.Validator.
-        // STEP-02: Mock IRecommendationService.
-        var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>();
-        // STEP-03: Get context from AgentTestData.Context, set context.Request.Content to a test text and 3 more.
-        var context = AgentTestData.Context();
-        context.CatalogProvinces = ["Ho Chi Minh City"];
-        context.Request.Content = "chưa chốt ngân sách";
-        context.State = context.State with { BudgetAmount = null };
-        context.ConstraintBaseline = context.State with { BudgetUnrestricted = true };
-        var input = Input() with { State = context.State with { BudgetUnrestricted = true } };
-        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
-
-        // STEP-04: Run tools.ExecuteAsync with context and keep result.
-        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
-
-        // STEP-05: Assert result.status is "missing_trip_details", context.TripDetailsMissing is true and context.State.BudgetUnrestricted is true.
-        result.GetProperty("status").GetString().Should().Be("missing_trip_details");
-        context.TripDetailsMissing.Should().BeTrue();
-        context.State.BudgetUnrestricted.Should().BeTrue();
-        // STEP-06: Verify GetCandidateIdsAsync is never called.
-        fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
     /// <summary>Returns valid strict recommendation arguments with explicit empty lists.</summary>
     private static AgentRecommendationInput Input() => new(null, "Da Nang", "full", null, null, [], [], []);
     /// <summary>Serializes a complete strict tool call using the public camel-case contract.</summary>
@@ -1408,7 +1380,7 @@ public sealed class AgentToolExecutorTests
 
     private static readonly NearbyArea Center = new(21.03m, 105.85m, 5m);
 
-    // TEST-50: Inside one band the nearer dish comes first; a dish clearly better on taste stays ahead however far it is.
+    // TEST-49: Inside one band the nearer dish comes first; a dish clearly better on taste stays ahead however far it is.
     /// <summary>Ensures the rule the user chose: a near dish only overtakes a dish of about the same taste.</summary>
     [Fact]
     public void OrderNearby_NearlyEqualScores_NearerFirst_ClearlyBetterTasteStaysAhead()
@@ -1424,7 +1396,7 @@ public sealed class AgentToolExecutorTests
         ordered.Select(dish => dish.Id).Should().Equal(2, 1, 3);
     }
 
-    // TEST-51: The band edge: exactly under the limit shares a band with the best dish, at the limit starts the next band; covers the boundary both ways.
+    // TEST-50: The band edge: exactly under the limit shares a band with the best dish, at the limit starts the next band; covers the boundary both ways.
     /// <summary>Pins the meaning of "gần bằng nhau" so a later change to it is deliberate.</summary>
     [Theory]
     [InlineData(.9, new[] { 2, 1 })]
@@ -1439,7 +1411,7 @@ public sealed class AgentToolExecutorTests
         ordered.Select(dish => dish.Id).Should().Equal(expected);
     }
 
-    // TEST-52: Equal scores, as for an account with no taste survey, are ordered by distance alone; equal distance keeps the ranking.
+    // TEST-51: Equal scores, as for an account with no taste survey, are ordered by distance alone; equal distance keeps the ranking.
     /// <summary>Ensures long ties cannot hide a near restaurant, and the order stays stable when distance cannot decide.</summary>
     [Fact]
     public void OrderNearby_AllTied_UsesDistanceThenKeepsRanking()
@@ -1452,7 +1424,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.OrderNearby([At(1, 0.01m), At(2, 0.01m)], new Dictionary<int, double> { [1] = .44, [2] = .44 }, Center).Select(dish => dish.Id).Should().Equal(1, 2);
     }
 
-    // TEST-53: Dishes with no score stay after scored ones in their order; a list with none is returned unchanged; an empty list stays empty.
+    // TEST-52: Dishes with no score stay after scored ones in their order; a list with none is returned unchanged; an empty list stays empty.
     /// <summary>Ensures missing data never invents a position.</summary>
     [Fact]
     public void OrderNearby_MissingScores_StayLastInOrder()
@@ -1466,7 +1438,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.OrderNearby([], new Dictionary<int, double>(), Center).Should().BeEmpty();
     }
 
-    // TEST-54: Branches of one dish reduce to the nearest while the dish keeps its first position; different dishes are untouched.
+    // TEST-53: Branches of one dish reduce to the nearest while the dish keeps its first position; different dishes are untouched.
     /// <summary>Ensures "Phở" near the place is offered rather than the better-rated branch across the city.</summary>
     [Fact]
     public void NearestBranches_KeepsNearestAtFirstPosition()
@@ -1480,7 +1452,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.NearestBranches([farBranch, other, nearBranch], dish => dish.Name, Center).Select(dish => dish.Id).Should().Equal(3, 2);
     }
 
-    // TEST-55: A taste stated in the request reaches reco for this ranking only, over the trip's taste and the profile; a level off the scale is dropped, state stays, and a user with no profile is not called personalized.
+    // TEST-54: A taste stated in the request reaches reco for this ranking only, over the trip's taste and the profile; a level off the scale is dropped, state stays, and a user with no profile is not called personalized.
     /// <summary>"Gợi ý món chua" must change the ranking without changing the trip or claiming a match reco would not make for a user with no interactions.</summary>
     [Theory]
     [InlineData(true)]
@@ -1520,7 +1492,7 @@ public sealed class AgentToolExecutorTests
         context.State.Should().BeSameAs(before);
     }
 
-    // TEST-56: A dish already in the plan is left out of a suggestion unless nothing else fits, and the tool says a plan exists; with no plan it says so.
+    // TEST-55: A dish already in the plan is left out of a suggestion unless nothing else fits, and the tool says a plan exists; with no plan it says so.
     /// <summary>"Gợi ý 1 món" right after planning used to name a dish the plan already holds.</summary>
     [Theory]
     [InlineData(new[] { 1 }, 2, true)]

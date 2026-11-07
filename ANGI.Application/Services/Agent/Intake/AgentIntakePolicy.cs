@@ -24,10 +24,6 @@ public static class AgentIntakePolicy
     public const string PreferencesQuestion = "Bạn có khẩu vị riêng hay yêu cầu gì cho từng ngày, từng bữa không? Ví dụ: ít cay, bữa tối ngày 1 ăn hải sản. " +
         "Nếu không có, bạn nhắn “không” để mình lập lịch luôn nhé.";
 
-    private static readonly Regex PreferenceWords = new(
-        @"\b(?:bua (?:sang|trua|toi|phu|khuya)|ngay \d+ (?:an|chi)|mon|quan|an chay|hai san|khong an|di ung|khau vi|an vat|do uong)\b", RegexOptions.CultureInvariant);
-    // Câu trả lời "không có yêu cầu gì" cho câu hỏi khẩu vị, kể cả nút "Không, lập lịch luôn nhé."; "không ăn cay" không khớp.
-    private static readonly Regex Declines = new(@"^(?:khong|ko|thoi|bo qua|khong co|khong can|khong co gi)(?:\s+(?:lap lich luon|lap lich|luon|nhe|nha|dau|a|ban))*$", RegexOptions.CultureInvariant);
     private static readonly (string Alias, string Name)[] Aliases =
         [("hn", "ha noi"), ("hcm", "ho chi minh"), ("tphcm", "ho chi minh"), ("tp hcm", "ho chi minh"), ("sai gon", "ho chi minh"), ("saigon", "ho chi minh")];
 
@@ -35,6 +31,13 @@ public static class AgentIntakePolicy
     public static bool Eligible(AgentContext context) => context.Request.Command == "chat" && context.State.PendingStateChange is null && !HasPlan(context);
 
     /// <summary>A plan exists once a ready proposal or a saved item exists; an empty roadmap is still only a trip frame.</summary>
+    /// <summary>
+    /// True once the user is planning in this conversation: a plan exists, a planning question was asked, or a planning request is being
+    /// clarified. Trip values loaded from the roadmap the chat was opened on do not count, so a bare taste there is still a dish idea.
+    /// </summary>
+    public static bool PlanningStarted(AgentContext context) =>
+        HasPlan(context) || context.State.PlanningIntake is not null || context.State.PendingPlanningRequest is not null;
+
     public static bool HasPlan(AgentContext context) => context.CurrentProposal?.Status == "ready" || context.Source is { Items.Length: > 0 };
 
     /// <summary>True when the turn supplies coordinates that still need a province.</summary>
@@ -47,13 +50,6 @@ public static class AgentIntakePolicy
     /// </summary>
     public static AgentState Baseline(AgentState state) => state with { Province = null, NumDays = null, BudgetUnrestricted = state.BudgetUnrestricted || state.BudgetAmount is null };
 
-    /// <summary>
-    /// True when the trip is settled and the preferences question has not been asked, so a new plan must wait for it. A taste or request already in the state has answered it.
-    /// This reads the state only, never the user's wording. A trip submitted through the constraints form goes straight to planning, while the location button only answers where.
-    /// </summary>
-    public static bool PreferencesDue(AgentContext context) => context.CatalogProvinces is not null && Eligible(context) && !context.ReplanAfterConfirmation && context.State.PlanningIntake != Preferences &&
-        context.Request.ConfirmedState?.OriginMode is null or "gps" && AgentReplyBuilder.TripDetailsQuestion(context.State) is null && !StatesPreference(context.State);
-
     /// <summary>The preferences question as fixed text and the state that records it was asked; says plainly when the plan will have no budget.</summary>
     public static (string Reply, AgentState State) AskPreferences(AgentState state)
     {
@@ -65,17 +61,6 @@ public static class AgentIntakePolicy
     /// <summary>The fixed wording of the preferences question.</summary>
     public static string PreferencesWording(AgentState state) =>
         (state is { BudgetUnrestricted: true, BudgetAmount: null } ? AgentReplyBuilder.NoBudgetNote + " " : "") + PreferencesQuestion;
-
-    /// <summary>The fixed wording of the question after a bare province.</summary>
-    public static string ScopeQuestion(string? province) =>
-        $"Bạn muốn mình chọn quán trong toàn {AgentReplyBuilder.Safe(province)}, quanh một khu như Cầu Giấy, theo hành trình từng ngày như “Ngày 1 ở Hoàn Kiếm, ngày 2 đi Lăng Bác”, hay quanh vị trí hiện tại?";
-
-    /// <summary>The reply when the user names a province ANGI has no data for.</summary>
-    public static string UnknownPlaceReply(string place, IReadOnlyCollection<string> provinces) =>
-        $"Mình chưa có dữ liệu quán ăn ở {AgentReplyBuilder.Safe(place)}. {Coverage(provinces)} {PlaceQuestion}";
-
-    /// <summary>The reply when no restaurant lies near the coordinates the user shared.</summary>
-    public static string NoRestaurantNearby(string where, IReadOnlyCollection<string> provinces) => $"{where} {Coverage(provinces)} {PlaceQuestion}";
 
     /// <summary>
     /// Writes a province the model read in the catalog's spelling; one the catalog does not have is dropped and remembered, so the trip never starts somewhere with no restaurants.
@@ -105,6 +90,14 @@ public static class AgentIntakePolicy
         return messages.Any(message => FindProvince(message, [province]) is not null) ? proposed : proposed with { Province = null };
     }
 
+    /// <summary>The one catalog province a roadmap title names; null when it names none or several.</summary>
+    public static string? ProvinceInTitle(string title, IEnumerable<string> provinces)
+    {
+        var plain = Plain(title);
+        var named = provinces.Where(province => FindProvince(plain, [province]) is not null).Take(2).ToArray();
+        return named.Length == 1 ? named[0] : null;
+    }
+
     /// <summary>Matches a catalog province by whole words without accents, including common short names.</summary>
     public static string? FindProvince(string plainText, IEnumerable<string> provinces)
     {
@@ -124,33 +117,6 @@ public static class AgentIntakePolicy
 
     private static string Coverage(IReadOnlyCollection<string> provinces) => provinces.Count == 0 ? "Hiện ANGI chưa có dữ liệu quán ăn."
         : $"Hiện ANGI có dữ liệu ở {string.Join(", ", provinces.Take(10).Select(AgentReplyBuilder.Safe))}.";
-
-    /// <summary>True when the state already holds something only a preference could have put there.</summary>
-    private static bool StatesPreference(AgentState state) => state.TasteTargets.Length > 0 || state.TasteOverrides.Length > 0 || state.MealRequests.Length > 0 ||
-        state.TagIds.Length > 0 || state.ExcludeTagIds.Length > 0 || state.MaxPricePerMeal.HasValue;
-
-    // "tham quan" và "quận" bỏ dấu đều có chữ "quan", dễ nhầm với "quán".
-    private static bool StatesFoodRequest(string message) =>
-        PreferenceWords.IsMatch(Plain(Regex.Replace(message.Normalize(NormalizationForm.FormC), "tham quan|quận", " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)));
-
-    /// <summary>
-    /// A new plan with no special request, whose one search returned dishes for every declared meal: more candidates add cost but
-    /// no choice, so the model assembles the plan next. A side dish or named request keeps the tools open. This only saves calls: reading a message wrongly here decides no outcome.
-    /// </summary>
-    public static bool PlanCovered(AgentContext context)
-    {
-        // STEP-01: Prepare state and content.
-        var state = context.State;
-        // Khẩu vị đã nằm trong vector của lượt tìm nên không cần tìm thêm; yêu cầu về món hay bữa thì có thể cần tìm riêng.
-        var content = context.Request.Content;
-        // STEP-02: Return false early when context.IntakeComplete is false, state.MealSlots.Length is 0, state.MealRequests.Length > 0 or 2 more condition(s).
-        if (!context.IntakeComplete || state.MealSlots.Length == 0 || state.MealRequests.Length > 0 ||
-            !Declines.IsMatch(Plain(content)) && AgentTasteClarificationPolicy.MentionedTastes(content).Length == 0 ||
-            (state.PendingPlanningRequest?.Messages ?? []).Append(content).Any(StatesFoodRequest)) return false;
-        // STEP-03: Return the result of Slots().Where(filtered).All.
-        return AgentScopedPlanning.Slots(state, new()).Where(slot => state.MealSlots.Contains(slot.Meal))
-            .All(slot => context.MealCoverage.Any(meal => meal.DayNumber == slot.Day && meal.MealSlot == slot.Meal && meal.AvailableCount > 0));
-    }
 
     internal static string Plain(string text)
     {

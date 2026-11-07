@@ -131,6 +131,26 @@ public static class AgentScopedPlanning
         return !state.TagIds.Concat(request.TagIds).Concat(searchTagIds ?? []).Any(categories.Contains);
     }
 
+    /// <summary>
+    /// True when a catalog dish answers a requested name: the same name, or a dish of the family the name stands for, whose name holds
+    /// every requested word in order ("cà ri" fits "Cơm Cà Ri Nhật Gà Chiên"). A one-word name under three letters is too broad for a family.
+    /// </summary>
+    public static bool FitsName(string requested, string dishName, bool ignoreAccents = true)
+    {
+        if (Normalize(requested) == Normalize(dishName)) return true;
+        var wanted = Words(requested);
+        if (wanted.Trim().Length < 3) return false;
+        return Words(dishName).Contains(wanted, StringComparison.Ordinal) ||
+            ignoreAccents && Words(WithoutAccents(dishName)).Contains(Words(WithoutAccents(requested)), StringComparison.Ordinal);
+    }
+
+    private static string Words(string text) => " " + string.Join(' ', System.Text.RegularExpressions.Regex.Split(text.ToLowerInvariant(), @"[^\p{L}\p{N}]+")
+        .Where(word => word.Length > 0)) + " ";
+
+    private static string WithoutAccents(string text) => new string(text.Normalize(System.Text.NormalizationForm.FormD)
+        .Where(character => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray())
+        .Normalize(System.Text.NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd');
+
     /// <summary>Normalizes case and spacing without treating a near name as an exact identity.</summary>
     public static string? Normalize(string? name) => name is null ? null : string.Join(' ', name.Split((char[]?)null,
         StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
