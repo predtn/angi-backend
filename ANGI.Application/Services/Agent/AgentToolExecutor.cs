@@ -98,8 +98,19 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // userId luôn lấy từ context đã xác thực, không phải tham số do model cung cấp.
         // Khẩu vị "bữa 2 ngày 1" được giữ đúng bữa trước khi tính vector, kể cả khi model ghi thành cả ngày 1.
         if (!context.ReplanAfterConfirmation)
-            context.State = statePolicy.Accept(context.State, AgentConstraintGuard.RetainPlacements(
-                AgentMealScopePolicy.Narrow(AgentConstraintGuard.WithoutErased(AgentIntakePolicy.WithCatalogProvince(AgentIntakePolicy.WithoutUnstatedProvince(AgentContextBuilder.KeepKnown(input.State, context.State), context), context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests), context.ConstraintBaseline);
+        {
+            var proposedState = AgentConstraintGuard.RetainPlacements(
+                AgentMealScopePolicy.Narrow(AgentConstraintGuard.WithoutErased(AgentIntakePolicy.WithCatalogProvince(AgentIntakePolicy.WithoutUnstatedProvince(AgentContextBuilder.KeepKnown(input.State, context.State), context), context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests);
+            try { context.State = statePolicy.Accept(context.State, proposedState, context.ConstraintBaseline); }
+            catch (AgentStateChangeRequiredException change)
+            {
+                // Nới điều kiện (tăng ngân sách, bỏ yêu cầu món...) do model đọc được áp luôn như ở AcceptRaw của orchestrator:
+                // backend không còn giữ chờ xác nhận và không trả câu cố định "Bạn nhắn “ok” để đổi…" (hội thoại 223).
+                telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);
+                context.State = change.Proposed with { PendingStateChange = context.State.PendingStateChange, SourceRoadmapUpdatedAt = context.State.SourceRoadmapUpdatedAt,
+                    HistoryStartSequence = context.State.HistoryStartSequence };
+            }
+        }
         // STEP-02: When AgentScopedPlanning.IsLongTrip(context.State) holds, context.State.MealSlots.Length is 0 and context.Source is not { Items.Length: > 0 }, set context.State.
         // Backend tự ghép chuyến dài theo bữa, nên phải biết các bữa ngay cả khi model không ghi mealSlots.
         if (AgentScopedPlanning.IsLongTrip(context.State) && context.State.MealSlots.Length == 0 && context.Source is not { Items.Length: > 0 })

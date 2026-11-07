@@ -1150,7 +1150,26 @@ public sealed class AgentToolExecutorTests
         fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-41: A suggestion counts as personalized only when the user has a taste profile and reco confirms ranking with it; covers a real vector, an empty profile, a zero vector, a rating fallback and an unavailable profile.
+    // TEST-41: A relaxed condition the model sends with get_recommendation is applied at once, with nothing staged and no exception that would turn into a fixed backend reply (conversation 223).
+    /// <summary>Keeps the tool path in line with the model's own state, which is applied as written.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RelaxedStateInRecommendation_IsAppliedWithoutStaging()
+    {
+        // STEP-01: Create fixture through AgentTestData.Validator, create tools, and a context whose trip excludes tag 5.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<int>());
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context(); context.State = context.State with { ExcludeTagIds = [5] };
+
+        // STEP-02: Wrap tools.ExecuteAsync with a get_recommendation call that drops the excluded tag in act.
+        var act = () => tools.ExecuteAsync(context, Call(Input() with { State = context.State with { ExcludeTagIds = [] } }), CancellationToken.None);
+
+        // STEP-03: Assert act does not throw, the tag is no longer excluded and no change waits for confirmation.
+        await act.Should().NotThrowAsync();
+        context.State.ExcludeTagIds.Should().BeEmpty(); context.State.PendingStateChange.Should().BeNull();
+    }
+
+    // TEST-42: A suggestion counts as personalized only when the user has a taste profile and reco confirms ranking with it; covers a real vector, an empty profile, a zero vector, a rating fallback and an unavailable profile.
     /// <summary>The model may only say "theo khẩu vị của bạn" when that is what actually happened.</summary>
     [Theory]
     [InlineData("vector", "conversation", true)]
@@ -1186,7 +1205,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion!.Personalized.Should().Be(personalized);
     }
 
-    // TEST-42: With no dish found the tool says so to the model, carries no dish and keeps the fixed line for a failed wording; the ranking service is not asked.
+    // TEST-43: With no dish found the tool says so to the model, carries no dish and keeps the fixed line for a failed wording; the ranking service is not asked.
     /// <summary>Tells the model there is nothing to word, instead of letting it make something up.</summary>
     [Fact]
     public async Task ExecuteAsync_SuggestDishNothingFound_ReportsNothingFound()
@@ -1210,7 +1229,7 @@ public sealed class AgentToolExecutorTests
         reco.Verify(x => x.RecommendConversationAsync(It.IsAny<int>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-43: A place named for a suggestion narrows the search around it inside its province, and the reply is told where it searched.
+    // TEST-44: A place named for a suggestion narrows the search around it inside its province, and the reply is told where it searched.
     /// <summary>Conversation 158 kept suggesting Hai Bà Trưng and Hà Đông to someone who said they live in Cầu Giấy, because the tool could not take a place.</summary>
     [Fact]
     public async Task ExecuteAsync_SuggestDishWithArea_SearchesAroundIt()
@@ -1234,7 +1253,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion.FixedReply.Should().Contain("quanh Cầu Giấy");
     }
 
-    // TEST-44: A place that cannot be located is reported rather than ignored in silence, and a province is no place to search around.
+    // TEST-45: A place that cannot be located is reported rather than ignored in silence, and a province is no place to search around.
     /// <summary>The user must be told the dish is not filtered by what they said.</summary>
     [Theory]
     [InlineData("abcde xyz", "abcde xyz")]
@@ -1257,7 +1276,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion.AreaNotFound.Should().Be(notFound);
     }
 
-    // TEST-45: A dish tagged for one meal says so when the user named no meal, and stays quiet when they named one.
+    // TEST-46: A dish tagged for one meal says so when the user named no meal, and stays quiet when they named one.
     /// <summary>Conversation 158 offered a breakfast-only dish without saying so, and the user replied that they wanted lunch.</summary>
     [Theory]
     [InlineData(null, "bữa sáng")]
@@ -1280,7 +1299,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion!.Dishes[0].Meals.Should().Be(meals);
     }
 
-    // TEST-46: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
+    // TEST-47: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
     /// <summary>The model reads the itinerary; where each place is stays the backend's.</summary>
     [Fact]
     public async Task ExecuteAsync_LocatePlaces_StoresDaysAndNote()
@@ -1301,7 +1320,7 @@ public sealed class AgentToolExecutorTests
         context.PlaceNote.Should().Contain("ngày 1 quanh Cầu Giấy");
     }
 
-    // TEST-47: A whole-trip area becomes the search circle; a name nowhere on ANGI is reported as not found and changes nothing.
+    // TEST-48: A whole-trip area becomes the search circle; a name nowhere on ANGI is reported as not found and changes nothing.
     /// <summary>"Cầu Giấy" for the whole trip and a place outside the data take different paths.</summary>
     [Theory]
     [InlineData("Cầu Giấy", "located")]
@@ -1322,7 +1341,7 @@ public sealed class AgentToolExecutorTests
         context.State.Province.Should().Be(status == "located" ? "Hà Nội" : null);
     }
 
-    // TEST-48: Arguments outside the contract go back to the model without changing anything; covers nothing named, no days, a day out of range on each side and a name too long.
+    // TEST-49: Arguments outside the contract go back to the model without changing anything; covers nothing named, no days, a day out of range on each side and a name too long.
     /// <summary>Bad arguments are the model's to fix, and must not fail the turn.</summary>
     [Theory]
     [InlineData("empty")]
@@ -1380,7 +1399,7 @@ public sealed class AgentToolExecutorTests
 
     private static readonly NearbyArea Center = new(21.03m, 105.85m, 5m);
 
-    // TEST-49: Inside one band the nearer dish comes first; a dish clearly better on taste stays ahead however far it is.
+    // TEST-50: Inside one band the nearer dish comes first; a dish clearly better on taste stays ahead however far it is.
     /// <summary>Ensures the rule the user chose: a near dish only overtakes a dish of about the same taste.</summary>
     [Fact]
     public void OrderNearby_NearlyEqualScores_NearerFirst_ClearlyBetterTasteStaysAhead()
@@ -1396,7 +1415,7 @@ public sealed class AgentToolExecutorTests
         ordered.Select(dish => dish.Id).Should().Equal(2, 1, 3);
     }
 
-    // TEST-50: The band edge: exactly under the limit shares a band with the best dish, at the limit starts the next band; covers the boundary both ways.
+    // TEST-51: The band edge: exactly under the limit shares a band with the best dish, at the limit starts the next band; covers the boundary both ways.
     /// <summary>Pins the meaning of "gần bằng nhau" so a later change to it is deliberate.</summary>
     [Theory]
     [InlineData(.9, new[] { 2, 1 })]
@@ -1411,7 +1430,7 @@ public sealed class AgentToolExecutorTests
         ordered.Select(dish => dish.Id).Should().Equal(expected);
     }
 
-    // TEST-51: Equal scores, as for an account with no taste survey, are ordered by distance alone; equal distance keeps the ranking.
+    // TEST-52: Equal scores, as for an account with no taste survey, are ordered by distance alone; equal distance keeps the ranking.
     /// <summary>Ensures long ties cannot hide a near restaurant, and the order stays stable when distance cannot decide.</summary>
     [Fact]
     public void OrderNearby_AllTied_UsesDistanceThenKeepsRanking()
@@ -1424,7 +1443,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.OrderNearby([At(1, 0.01m), At(2, 0.01m)], new Dictionary<int, double> { [1] = .44, [2] = .44 }, Center).Select(dish => dish.Id).Should().Equal(1, 2);
     }
 
-    // TEST-52: Dishes with no score stay after scored ones in their order; a list with none is returned unchanged; an empty list stays empty.
+    // TEST-53: Dishes with no score stay after scored ones in their order; a list with none is returned unchanged; an empty list stays empty.
     /// <summary>Ensures missing data never invents a position.</summary>
     [Fact]
     public void OrderNearby_MissingScores_StayLastInOrder()
@@ -1438,7 +1457,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.OrderNearby([], new Dictionary<int, double>(), Center).Should().BeEmpty();
     }
 
-    // TEST-53: Branches of one dish reduce to the nearest while the dish keeps its first position; different dishes are untouched.
+    // TEST-54: Branches of one dish reduce to the nearest while the dish keeps its first position; different dishes are untouched.
     /// <summary>Ensures "Phở" near the place is offered rather than the better-rated branch across the city.</summary>
     [Fact]
     public void NearestBranches_KeepsNearestAtFirstPosition()
@@ -1452,7 +1471,7 @@ public sealed class AgentToolExecutorTests
         AgentToolExecutor.NearestBranches([farBranch, other, nearBranch], dish => dish.Name, Center).Select(dish => dish.Id).Should().Equal(3, 2);
     }
 
-    // TEST-54: A taste stated in the request reaches reco for this ranking only, over the trip's taste and the profile; a level off the scale is dropped, state stays, and a user with no profile is not called personalized.
+    // TEST-55: A taste stated in the request reaches reco for this ranking only, over the trip's taste and the profile; a level off the scale is dropped, state stays, and a user with no profile is not called personalized.
     /// <summary>"Gợi ý món chua" must change the ranking without changing the trip or claiming a match reco would not make for a user with no interactions.</summary>
     [Theory]
     [InlineData(true)]
@@ -1492,7 +1511,7 @@ public sealed class AgentToolExecutorTests
         context.State.Should().BeSameAs(before);
     }
 
-    // TEST-55: A dish already in the plan is left out of a suggestion unless nothing else fits, and the tool says a plan exists; with no plan it says so.
+    // TEST-56: A dish already in the plan is left out of a suggestion unless nothing else fits, and the tool says a plan exists; with no plan it says so.
     /// <summary>"Gợi ý 1 món" right after planning used to name a dish the plan already holds.</summary>
     [Theory]
     [InlineData(new[] { 1 }, 2, true)]

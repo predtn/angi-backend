@@ -86,10 +86,13 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         }
         // STEP-09: Load repository.LockCatalogAsync.
         await repository.LockCatalogAsync(snapshot.Items.Select(item => item.DishId).Distinct().ToArray(), ct);
-        // STEP-10: Run validator.ValidateAsync and keep current.
+        // STEP-10: Run validator.ValidateAsync and keep current, which reprices the items from the catalog.
         var current = await validator.ValidateAsync(snapshot, source, true, false, ct);
-        // STEP-11: Throw AgentProposalValidationException when current.Validation.Errors.Length > 0.
-        if (current.Validation.Errors.Length > 0) throw new AgentProposalValidationException(current.Validation);
+        // STEP-11: Throw AgentProposalValidationException only for integrity errors.
+        // Lỗi luật lập lịch (vượt ngân sách, không hợp bữa, lặp món...) không chặn: chat đã cho xem lịch dù có các lỗi đó và người dùng chọn lưu (hội thoại 223).
+        // Chỉ chặn điều làm roadmap sai dữ liệu: món không còn, giá đổi so với bản đã xem, cấu trúc hỏng, ID item nguồn gắn sai món.
+        var blocking = await validator.IntegrityErrorsAsync(snapshot, source, ct);
+        if (blocking.Length > 0) throw new AgentProposalValidationException(current.Validation with { Errors = blocking });
         // STEP-12: Prepare mapping through Apply.
         var mapping = Apply(roadmap, current.Snapshot);
         // STEP-13: Queue the items through EnqueueImpressions.

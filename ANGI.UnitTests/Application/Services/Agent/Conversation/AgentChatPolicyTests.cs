@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.DTOs.Agent;
 using ANGI.Application.Services.Agent.Conversation;
 using FluentAssertions;
 
@@ -83,5 +84,57 @@ public sealed class AgentChatPolicyTests
     {
         // STEP-01: Assert AgentConfirmationPolicy.IsResetPhrase(content) equals expected.
         AgentConfirmationPolicy.IsResetPhrase(content).Should().Be(expected);
+    }
+
+    // TEST-06: A ready plan matches the trip it was made for, also with only a clarification open or a different start date; a changed budget, a staged change,
+    // a planning request, a plan that is not ready or no plan does not.
+    /// <summary>Decides when a chat save may write, and what the model is told before it answers a save wish.</summary>
+    [Theory]
+    [InlineData("same", true)][InlineData("question", true)][InlineData("start", true)][InlineData("budget", false)]
+    [InlineData("change", false)][InlineData("planning", false)][InlineData("committed", false)][InlineData("none", false)]
+    public void PlanMatchesTrip_HoldsOnlyForTheTripTheReadyPlanWasMadeFor(string area, bool expected)
+    {
+        // STEP-01: Create snapshot from AgentTestData, then derive state and proposal for area.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        var state = area switch
+        {
+            "question" => snapshot.State with { PendingQuestion = "Bạn muốn đổi bữa nào?" },
+            "start" => snapshot.State with { StartDate = new DateOnly(2027, 1, 1) },
+            "budget" => snapshot.State with { BudgetAmount = 700000 },
+            "change" => snapshot.State with { PendingStateChange = snapshot.State with { BudgetAmount = 700000 } },
+            "planning" => snapshot.State with { PendingPlanningRequest = new(["x"]) },
+            _ => snapshot.State
+        };
+        var proposal = area == "none" ? null : new AgentProposalDto(9, 2, "create", area == "committed" ? "committed" : "ready", snapshot,
+            new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1));
+
+        // STEP-02: Assert AgentConfirmationPolicy.PlanMatchesTrip(state, proposal) equals expected.
+        AgentConfirmationPolicy.PlanMatchesTrip(state, proposal).Should().Be(expected);
+    }
+
+    // TEST-07: A save wish over a dated plan commits at once, while an undated plan commits nothing and waits for the date on the proposal's exact version; covers both.
+    /// <summary>Keeps the roadmap's start date step: the backend waits for the date and the model asks for it.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveWish_CommitsOnlyWithAStartDate(bool dated)
+    {
+        // STEP-01: Create a ready proposal and a context whose trip has a start date or none.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        snapshot = snapshot with { State = snapshot.State with { StartDate = dated ? new DateOnly(2099, 1, 1) : null } };
+        var context = new AgentContext
+        {
+            ConversationId = 7, UserId = 3, State = snapshot.State,
+            Request = new SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "chốt đi" },
+            CurrentProposal = new AgentProposalDto(9, 2, "create", "ready", snapshot, new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1))
+        };
+
+        // STEP-02: Run SaveWish and SaveNeedsStartDate.
+        var decision = AgentConfirmationPolicy.SaveWish(context, new DateOnly(2098, 1, 1));
+        var needsDate = AgentConfirmationPolicy.SaveNeedsStartDate(context);
+
+        // STEP-03: Assert a dated plan commits and needs no date, and an undated one waits for the date of proposal 9 version 2.
+        decision.Commit.Should().Be(dated); needsDate.Should().Be(!dated);
+        if (!dated) decision.Pending.Should().Be(new AgentPendingSave(9, 2, AgentConfirmationPolicy.StageDate));
     }
 }

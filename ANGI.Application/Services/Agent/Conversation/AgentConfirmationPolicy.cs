@@ -44,6 +44,22 @@ public static class AgentConfirmationPolicy
         return state.PendingQuestion is not null && state.PendingPlanningRequest is null && proposal?.Status == "ready" ? AwaitingQuestion : null;
     }
 
+    /// <summary>
+    /// True when the current ready proposal can be saved as the trip now stands: no staged change or planning request waits, and the trip values match the ones it was made for.
+    /// An open clarification does not count, because a wish to save closes it. The model is told this value, and a chat save writes only when it holds.
+    /// </summary>
+    public static bool PlanMatchesTrip(AgentState state, AgentProposalDto? proposal) => proposal is { Status: "ready" } &&
+        state.PendingStateChange is null && state.PendingPlanningRequest is null && AgentConversationRules.SameConstraints(state, proposal.Snapshot.State);
+
+    /// <summary>True when a save wish would save a plan with no start date: nothing is written yet and the model asks which day the trip starts.</summary>
+    public static bool SaveNeedsStartDate(AgentContext context) => PlanMatchesTrip(context.State, context.CurrentProposal) && StartDate(context) is null;
+
+    /// <summary>
+    /// What a save wish the model read does with a plan that matches the trip: commit when the start date is known, otherwise wait for it on the
+    /// proposal's exact version. The date question is the model's to word; the backend only records that it waits.
+    /// </summary>
+    public static AgentSaveDecision SaveWish(AgentContext context, DateOnly today) => StartDate(context) is null ? AskDate(context, today) : new(null, Commit: true);
+
     /// <summary>True when the save question names this exact proposal version, so an answer can never save a different plan.</summary>
     public static bool IsCurrent(AgentPendingSave? pending, AgentProposalDto? proposal) => pending is not null && proposal is { Status: "ready" } &&
         proposal.ProposalId == pending.ProposalId && proposal.Version == pending.ProposalVersion;

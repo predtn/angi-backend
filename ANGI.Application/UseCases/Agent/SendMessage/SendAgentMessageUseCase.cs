@@ -184,7 +184,12 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                     {
                         // Muốn lưu nghĩa là không còn cần câu hỏi làm rõ đang mở, nên về đúng điều kiện của bản đề xuất. Việc này chưa ghi gì: bước sau vẫn hỏi trước khi lưu.
                         context.State = context.AwaitedAnswer == AgentConfirmationPolicy.AwaitingQuestion ? context.CurrentProposal!.Snapshot.State with { PendingQuestion = null } : asked;
-                        prepared = context.CurrentProposal?.Status == "ready" ? await SaveTurnAsync(conversation, userId, context, new(null, Commit: true), ct, prepared.Reply) : prepared; // THÍ NGHIỆM: lưu ngay, không hỏi
+                        // Chỉ lưu khi lịch còn khớp điều kiện chuyến đi. Lệch thì không ghi gì và giữ câu model viết:
+                        // model đã được báo planMatchesTrip=false nên tự nói lịch chưa theo điều kiện mới, thay vì người dùng nhận lỗi 409.
+                        // Có ngày bắt đầu thì lưu ngay; chưa có thì chờ ngày (model được báo saveNeedsStartDate=true nên tự hỏi), "để sau" vẫn lưu được không ngày.
+                        if (AgentConfirmationPolicy.PlanMatchesTrip(context.State, context.CurrentProposal))
+                            prepared = await SaveTurnAsync(conversation, userId, context, AgentConfirmationPolicy.SaveWish(context, today), ct, prepared.Reply);
+                        else telemetry.Record("save_skipped", id, message.TurnId, attemptId, new { reason = context.CurrentProposal?.Status == "ready" ? "plan_mismatch" : "no_ready_plan" });
                     }
                     // Lời chào hay câu ngoài phạm vi không trả lời câu hỏi lưu nhưng cũng không hủy nó.
                     // Vừa gợi ý món thì khác: "ok" tiếp theo là đáp lời mời đó, không được hiểu thành đồng ý lưu lịch.

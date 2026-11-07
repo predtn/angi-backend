@@ -44,6 +44,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     private const string SaveReply = "Mình lưu lịch này cho bạn nhé.";
     /// <summary>The reply the scripted model writes with its reading of an answer to an open question.</summary>
     private const string AnswerReply = "Mình hiểu rồi nhé.";
+    /// <summary>The reply the scripted model writes for a save wish when it is told the plan no longer matches the trip.</summary>
+    private const string StalePlanReply = "Lịch hiện tại chưa theo ngân sách mới. Bạn muốn mình cập nhật lịch trước rồi mới lưu không?";
     private static long _nextClientMessageId;
 
     // TEST-01: A trip prompt with an unscoped taste gets the model's question and no ranking, with no target saved; covers 3-day sour and 5-day spicy prompts.
@@ -1247,10 +1249,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-39: A budget change the model reads is applied at once with nothing staged and writes no roadmap.
-    /// <summary>Checks over HTTP and PostgreSQL that a constraint the model read is trusted as written and never saves on its own.</summary>
+    // TEST-39: A budget change the model reads is applied at once with nothing staged; a save wish over the plan made for the old budget then gets the model's
+    // own reply instead of a 409, and no roadmap is written.
+    /// <summary>Checks over HTTP and PostgreSQL that a constraint the model read is trusted as written, and that a plan which no longer matches the trip is never saved.</summary>
     [PostgresEndToEndFact]
-    public async Task ChatOnly_ConstraintChange_AppliesWithoutStagingOrSaving()
+    public async Task ChatOnly_ConstraintChange_AppliesAndStalePlanIsNotSaved()
     {
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host, derive client from scenario.Client and call EnableChatPlanning.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
@@ -1267,7 +1270,17 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-05: Assert changed.Reply is the model's reply, changed.Commit is null, state.BudgetAmount is 700000 and nothing is staged.
         changed.Reply.Should().Be("Mình tăng ngân sách lên 700000 đồng nhé."); changed.Commit.Should().BeNull();
         state.BudgetAmount.Should().Be(700000); state.PendingStateChange.Should().BeNull();
-        // STEP-06: Assert in the database no roadmap exists.
+        // STEP-06: Set scenario.Llm.Override to a save wish whose reply follows planMatchesTrip, the value the real model is sent, and record that value.
+        bool? matched = null;
+        scenario.Llm.Override = context =>
+        {
+            matched = AgentConfirmationPolicy.PlanMatchesTrip(context.State, context.CurrentProposal);
+            return new([], new AgentOutput { Action = "request_save", Reply = matched.Value ? SaveReply : StalePlanReply });
+        };
+        // STEP-07: Obtain stale through SendChatAsync; assert it succeeds with the model's reply, no commit, and the model was told the plan no longer matches.
+        var stale = await SendChatAsync(client, conversation.ConversationId, changed.ConversationVersion, "ok lưu lại giúp mình");
+        stale.Reply.Should().Be(StalePlanReply); stale.Commit.Should().BeNull(); matched.Should().BeFalse();
+        // STEP-08: Assert in the database no roadmap exists.
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
@@ -1391,7 +1404,41 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-44: Scalar documents a content-only request without fixed identity/version values that manual users might reuse.
+    // TEST-44: A preview over the trip budget, shown by the chat despite that rule, is saved when the user asks, instead of failing with 409 (conversation 223).
+    /// <summary>Checks over HTTP and PostgreSQL that plan rules such as the budget no longer block the roadmap writer, while integrity checks still do.</summary>
+    [PostgresEndToEndFact]
+    public async Task ChatOnly_OverBudgetPreview_IsSavedOnRequest()
+    {
+        // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host and derive client from scenario.Client.
+        var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
+        // STEP-02: Script the model to plan one lunch under a 20000 budget that every seeded dish exceeds.
+        scenario.Llm.Override = context =>
+        {
+            if (context.Exchanges.Count == 0)
+            {
+                context.History.Add(new("user", "ngân sách 20000 đồng"));
+                return new([new("over-budget", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
+                    State: new AgentState { Province = "Ho Chi Minh City", NumDays = 1, StartDate = TripStart, BudgetAmount = 20000, BudgetQuote = "20000 đồng" },
+                    TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null);
+            }
+            return new([], new AgentOutput { Action = "create_proposal", Reply = "Bản xem trước bữa trưa", Items =
+                [new AgentItem("over-lunch", null, 1, "lunch", 0, context.Exchanges[0].Results[0].GetProperty("items")[0].GetProperty("dishId").GetInt32())] });
+        };
+        // STEP-03: Obtain conversation through OpenAsync and preview through SendChatAsync; assert the ready preview costs more than the budget.
+        var conversation = await OpenAsync(client);
+        var preview = await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
+        preview.Proposal!.Status.Should().Be("ready");
+        preview.Proposal.Snapshot.Items.Sum(item => item.Price).Should().BeGreaterThan(20000);
+        // STEP-04: Obtain saved through SendChatAsync with the model reading a save wish; assert saved.Commit is not null.
+        scenario.Llm.Override = null;
+        var saved = await SendChatAsync(client, conversation.ConversationId, preview.ConversationVersion, "lưu lịch trình này");
+        saved.Commit.Should().NotBeNull(); saved.Reply.Should().Be(SaveReply);
+        // STEP-05: Assert in the database one roadmap holds the saved lunch.
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
+        (await factory.ExecuteDbAsync(db => db.RoadmapItems.CountAsync())).Should().Be(1);
+    }
+
+    // TEST-45: Scalar documents a content-only request without fixed identity/version values that manual users might reuse.
     /// <summary>Checks the generated OpenAPI example consumed by the manual testing UI.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_OpenApi_PublishesMinimalRequestExample()
@@ -1412,7 +1459,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         example.GetProperty("content").GetString().Should().Contain("Hà Nội");
     }
 
-    // TEST-45: Chat alternatives exclude current scoped dishes before ranking without requiring a frontend command.
+    // TEST-46: Chat alternatives exclude current scoped dishes before ranking without requiring a frontend command.
     /// <summary>Verifies inferred alternative scope is enforced by backend candidate filtering and proposal validation.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_Alternative_ExcludesPreviousDish()
@@ -1440,7 +1487,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         alternative.Proposal.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-46: A manual roadmap edit after a preview prevents a later chat save from overwriting that edit.
+    // TEST-47: A manual roadmap edit after a preview prevents a later chat save from overwriting that edit.
     /// <summary>Checks source-revision fencing for the chat confirmation transport.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_ManualRoadmapEdit_BlocksStaleSave()
@@ -1469,7 +1516,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).Title.Should().Be("Keep manual title");
     }
 
-    // TEST-47: Prompt-only messages permit repeated text and skip existing explicit IDs while preserving retry/conflict semantics.
+    // TEST-48: Prompt-only messages permit repeated text and skip existing explicit IDs while preserving retry/conflict semantics.
     /// <summary>Exercises omitted/null transport metadata and replays the returned server identity with a scripted provider.</summary>
     [PostgresEndToEndFact]
     public async Task PromptOnly_RepeatedContent_GetsDistinctIdsAndSupportsExplicitReplay()
@@ -1519,7 +1566,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         });
     }
 
-    // TEST-48: Content-only planning and a chat save keep the same atomic, idempotent roadmap writer: a retry replays the commit and a second save wish writes nothing more.
+    // TEST-49: Content-only planning and a chat save keep the same atomic, idempotent roadmap writer: a retry replays the commit and a second save wish writes nothing more.
     /// <summary>Verifies retrying the returned message ID calls no provider, and neither the retry nor a later save wish creates a second roadmap.</summary>
     [PostgresEndToEndFact]
     public async Task PromptOnly_PreviewAndSave_ProducesOneRoadmap()
@@ -1548,7 +1595,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
-    // TEST-49: Omitting identity/version does not admit a second concurrent message while the first owns its processing lease.
+    // TEST-50: Omitting identity/version does not admit a second concurrent message while the first owns its processing lease.
     /// <summary>Checks prompt-only busy fencing with a blocked scripted provider, then completes the original turn.</summary>
     [PostgresEndToEndFact]
     public async Task PromptOnly_ConcurrentMessage_IsBusyBeforeProvider()
@@ -1579,7 +1626,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.AgentMessages.CountAsync(message => message.Role == AgentMessageRole.User))).Should().Be(1);
     }
 
-    // TEST-50: Real adapter failures use one fake HTTP request and preserve the existing ready preview through failed-turn recovery.
+    // TEST-51: Real adapter failures use one fake HTTP request and preserve the existing ready preview through failed-turn recovery.
     /// <summary>Exercises rate limits, authentication, provider unavailability and HTTP timeout through the complete backend stack.</summary>
     [PostgresEndToEndFact]
     public async Task ProviderFailures_DoNotRepairOrReplacePreview()
@@ -1617,7 +1664,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-51: Only a received schema-invalid model response permits one repair through the real adapter.
+    // TEST-52: Only a received schema-invalid model response permits one repair through the real adapter.
     /// <summary>Verifies bounded repair preserves the current proposal and never writes an official roadmap.</summary>
     [PostgresEndToEndFact]
     public async Task ProviderSchemaFailure_RepairsOnceAndPreservesPreview()
@@ -1640,7 +1687,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-52: Four concurrent first opens for one roadmap create exactly one conversation (one 201, three 200).
+    // TEST-53: Four concurrent first opens for one roadmap create exactly one conversation (one 201, three 200).
     /// <summary>Verifies the unique open path under concurrency.</summary>
     [PostgresEndToEndFact]
     public async Task ConcurrentFirstOpen_CreatesOnlyOneConversation()
@@ -1670,7 +1717,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         finally { foreach (var response in responses) response.Dispose(); }
     }
 
-    // TEST-53: Concurrent reopens return the same conversation; after expiry the read is 410 and a reopen keeps the identity but resets context.
+    // TEST-54: Concurrent reopens return the same conversation; after expiry the read is 410 and a reopen keeps the identity but resets context.
     /// <summary>Checks conversation identity and context reset across expiry.</summary>
     [PostgresEndToEndFact]
     public async Task ConcurrentOpenAndExpiredReopen_KeepIdentityAndResetContext()
@@ -1718,7 +1765,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.AgentConversations.CountAsync())).Should().Be(1);
     }
 
-    // TEST-54: Cleanup purges old messages without renewing activity, keeps recent replay, rejects the purged message with 410 and allows new turns.
+    // TEST-55: Cleanup purges old messages without renewing activity, keeps recent replay, rejects the purged message with 410 and allows new turns.
     /// <summary>Verifies retention cleanup preserves counters and idempotent replay.</summary>
     [PostgresEndToEndFact]
     public async Task ActiveCleanup_PreservesReplayAndCountersWithoutRenewingActivity()
@@ -1760,7 +1807,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync())).LastMessageSequence.Should().BeGreaterThan(before.LastMessageSequence);
     }
 
-    // TEST-55: The real reco service ranks with the conversation vector and counts impressions only for committed dishes; covers confirm endpoint and chat save.
+    // TEST-56: The real reco service ranks with the conversation vector and counts impressions only for committed dishes; covers confirm endpoint and chat save.
     /// <summary>Exercises the live reco contract end to end when a reco URL and key are configured.</summary>
     [RecoEndToEndTheory]
     [InlineData(false)]
@@ -1876,7 +1923,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         JsonSerializer.Deserialize<double[]>(row.GetString(6))!.Should().Equal(snapshot.State.Preferences.EffectiveVector);
     }
 
-    // TEST-56: An edit naming nothing gets the model's question and keeps the preview; a save wish the model reads next saves that same preview at once,
+    // TEST-57: An edit naming nothing gets the model's question and keeps the preview; a save wish the model reads next saves that same preview at once,
     // since wanting to save means the open question is no longer needed, and its reply is shown as written.
     /// <summary>Verifies through HTTP and PostgreSQL that a save intent is never turned into a new plan and saves exactly the reviewed preview.</summary>
     [PostgresEndToEndFact]
@@ -1913,7 +1960,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         });
     }
 
-    // TEST-57: A refusal the model read in an open clarification closes it, so the same preview is saved by the next save message.
+    // TEST-58: A refusal the model read in an open clarification closes it, so the same preview is saved by the next save message.
     /// <summary>Verifies through HTTP and PostgreSQL that a question the user declines no longer blocks saving.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_DeclineQuestion_ThenSaveCommitsPreview()
@@ -1943,7 +1990,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
-    // TEST-58: After the attached roadmap is deleted, a message answers 404 naming the way forward, and a reset detaches it and starts empty.
+    // TEST-59: After the attached roadmap is deleted, a message answers 404 naming the way forward, and a reset detaches it and starts empty.
     /// <summary>Verifies through HTTP and PostgreSQL that a conversation whose roadmap was deleted is not left permanently failing.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_RoadmapDeleted_ResetDetachesConversation()
@@ -1974,7 +2021,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).RoadmapId.Should().BeNull();
     }
 
-    // TEST-59: Over a ready preview, the model's greeting and its refusal of an out-of-scope request are shown as written, and the same preview can still be saved.
+    // TEST-60: Over a ready preview, the model's greeting and its refusal of an out-of-scope request are shown as written, and the same preview can still be saved.
     /// <summary>Verifies through HTTP and PostgreSQL that social and refused turns are stored without touching the plan.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_GreetingAndOutOfScope_KeepPreviewSavable()
@@ -2011,10 +2058,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
-    // TEST-60: A save wish over an undated preview saves it at once with no start date, in one model call; the date can be set later.
-    /// <summary>Verifies through HTTP and PostgreSQL that a missing start date no longer blocks or delays a chat save.</summary>
+    // TEST-61: A save wish over an undated preview writes nothing and shows the model's date question; the start date the model reads from the answer is then saved on the roadmap.
+    /// <summary>Verifies through HTTP and PostgreSQL that a chat save asks for the start date first, as the roadmap's date step requires, with every reply worded by the model.</summary>
     [PostgresEndToEndFact]
-    public async Task ChatOnly_SaveWithoutDate_SavesUndatedRoadmap()
+    public async Task ChatOnly_SaveWithoutDate_AsksThenStoresTheDate()
     {
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host, derive client from scenario.Client and call EnableChatPlanning.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
@@ -2022,19 +2069,32 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-02: Obtain conversation through OpenAsync; assert SendChatAsync confirms Plan one lunch.
         var conversation = await OpenAsync(client);
         await SendChatAsync(client, conversation.ConversationId, conversation.Version, "Plan one lunch");
-        // STEP-03: Derive calls from scenario.Llm.Calls.
-        var calls = scenario.Llm.Calls;
 
-        // STEP-04: Obtain saved through SendPromptAsync; assert saved.Commit is not null and saved.Reply is the model's reply.
-        var saved = await SendPromptAsync(client, conversation.ConversationId, "chốt lịch này");
-        saved.Commit.Should().NotBeNull(); saved.Reply.Should().Be(SaveReply);
-        // STEP-05: Assert in the database the single roadmap has no start date.
-        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).StartDate.Should().BeNull();
-        // STEP-06: Assert scenario.Llm.Calls is one more, for reading the save wish.
-        scenario.Llm.Calls.Should().Be(calls + 1);
+        // STEP-03: Script the save wish with the model's date question; obtain asked through SendPromptAsync.
+        const string question = "Bạn muốn bắt đầu lịch từ ngày nào? Chưa biết thì nhắn “để sau” nhé.";
+        scenario.Llm.Override = _ => new([], new AgentOutput { Action = "request_save", Reply = question });
+        var asked = await SendPromptAsync(client, conversation.ConversationId, "chốt đi");
+        // STEP-04: Assert asked shows the model's question, commits nothing, and the preview is still ready with no roadmap.
+        asked.Reply.Should().Be(question); asked.Commit.Should().BeNull();
+        (await GetAsync(client, conversation.ConversationId)).CurrentProposal!.Status.Should().Be("ready");
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
+
+        // STEP-05: Script the model reading the awaited date answer as 2099-06-15; obtain saved through SendPromptAsync.
+        string? awaited = null;
+        scenario.Llm.Override = context =>
+        {
+            awaited = context.AwaitedAnswer;
+            return new([], new AgentOutput { Action = "answer", Reply = "Mình lưu lịch bắt đầu ngày 15/06/2099 nhé.", PendingAnswer = "accept", AnswerStartDate = "2099-06-15" });
+        };
+        var saved = await SendPromptAsync(client, conversation.ConversationId, "15/6/2099");
+        // STEP-06: Assert the model was waited on for save_date, saved.Commit is not null and the reply is the model's.
+        awaited.Should().Be(AgentConfirmationPolicy.AwaitingSaveDate);
+        saved.Commit.Should().NotBeNull(); saved.Reply.Should().Be("Mình lưu lịch bắt đầu ngày 15/06/2099 nhé.");
+        // STEP-07: Assert in the database the single roadmap starts on 2099-06-15.
+        (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).StartDate.Should().Be(new DateOnly(2099, 6, 15));
     }
 
-    // TEST-61: An agreement the model reads while no question is open saves nothing, and a later save wish saves the dated preview at once with its start date.
+    // TEST-62: An agreement the model reads while no question is open saves nothing, and a later save wish saves the dated preview at once with its start date.
     /// <summary>Verifies a short "ok" never writes on its own, while the model's save wish does.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_AcceptWithoutQuestion_SavesNothingUntilSaveWish()
@@ -2059,7 +2119,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).StartDate.Should().Be(TripStart);
     }
 
-    // TEST-62: AGENT-04 stores a start date sent by the save dialog, and the proposal stays reusable for its replay.
+    // TEST-63: AGENT-04 stores a start date sent by the save dialog, and the proposal stays reusable for its replay.
     /// <summary>Verifies the save button path, which never goes through chat, can also set the date.</summary>
     [PostgresEndToEndFact]
     public async Task Confirm_WithStartDate_StoresItOnTheRoadmap()
@@ -2085,7 +2145,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await GetAsync(client, conversation.ConversationId)).State.StartDate.Should().Be(new DateOnly(2099, 6, 15));
     }
 
-    // TEST-63: A new plan goes through the place, scope, duration and budget, then preferences, worded by the model with the order and each stage kept by the backend; an unknown province is answered with where ANGI has data, then "không" plans once.
+    // TEST-64: A new plan goes through the place, scope, duration and budget, then preferences, worded by the model with the order and each stage kept by the backend; an unknown province is answered with where ANGI has data, then "không" plans once.
     /// <summary>Verifies the reported conversation end to end over the real HTTP contract and PostgreSQL.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_NewPlan_ModelAsksInOrderThenPlans()
@@ -2133,7 +2193,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         restored.State.PlanningIntake.Should().BeNull();
     }
 
-    // TEST-64: A long conversation comes back whole after a reload while the model still sees its bounded window, and tool rows count against neither.
+    // TEST-65: A long conversation comes back whole after a reload while the model still sees its bounded window, and tool rows count against neither.
     /// <summary>Replays the shape of conversation 158, where tool rows filled the window and a reload showed 12 of 50 messages.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_LongConversation_ReloadRestoresEveryMessage()
@@ -2160,7 +2220,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         historySizes[^1].Should().Be(20);
     }
 
-    // TEST-65: Current location sent as confirmed state resolves the nearest catalog province and default radius; a far location sets no province and goes to the model like any message.
+    // TEST-66: Current location sent as confirmed state resolves the nearest catalog province and default radius; a far location sets no province and goes to the model like any message.
     /// <summary>Verifies geographic planning over the real HTTP contract and PostgreSQL coordinates, without any map provider.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_CurrentLocation_ResolvesProvinceFromCoordinates()

@@ -58,7 +58,42 @@ public sealed class AgentProposalValidatorTests
         result.Snapshot.Items.Single().Price.Should().BeGreaterThan(0);
     }
 
-    // TEST-03: Reselecting a fallback-ranked dish requires a fresh grant and then carries the new request ID; covers create_proposal and patch_proposal.
+    // TEST-03: Only integrity errors block a save: an over-budget plan has none although ValidateAsync reports the budget, while a changed price,
+    // a dish missing from the catalog and a trip with no day count each do; covers all four.
+    /// <summary>Keeps a plan the chat showed savable despite plan-rule errors, while data that would make the roadmap wrong is still refused (conversation 223).</summary>
+    [Theory]
+    [InlineData("budget", null)]
+    [InlineData("price", "Giá món 1 đã thay đổi; cần xem đề xuất mới.")]
+    [InlineData("missing", "Món 99 không còn khả dụng.")]
+    [InlineData("structure", "Chưa chốt đủ tỉnh, số ngày hoặc câu hỏi đang chờ.")]
+    public async Task IntegrityErrorsAsync_BlocksOnlyDataErrors(string area, string? expected)
+    {
+        // STEP-01: Build a one-item snapshot priced like the catalog dish, then break it for area.
+        var item = AgentTestData.Item() with { Price = 50000 };
+        var snapshot = AgentTestData.Snapshot(item);
+        snapshot = area switch
+        {
+            "budget" => snapshot with { State = snapshot.State with { BudgetAmount = 10000 } },
+            "price" => snapshot with { Items = [item with { Price = 40000 }] },
+            "missing" => snapshot with { Items = [item with { DishId = 99 }] },
+            "structure" => snapshot with { State = snapshot.State with { NumDays = null } },
+            _ => snapshot
+        };
+        var validator = AgentTestData.Validator(AgentTestData.Dish()).Validator;
+
+        // STEP-02: Run IntegrityErrorsAsync and keep errors.
+        var errors = await validator.IntegrityErrorsAsync(snapshot, null, default);
+
+        // STEP-03: Assert the over-budget plan has no integrity error but is still reported over budget, and each broken plan carries its error.
+        if (expected is null)
+        {
+            errors.Should().BeEmpty();
+            (await validator.ValidateAsync(snapshot, null, true, false, default)).Validation.Errors.Should().Contain(AgentProposalValidator.BudgetExceeded);
+        }
+        else errors.Should().Contain(expected);
+    }
+
+    // TEST-04: Reselecting a fallback-ranked dish requires a fresh grant and then carries the new request ID; covers create_proposal and patch_proposal.
     /// <summary>Ensures a re-ranked dish never keeps stale fallback provenance.</summary>
     [Theory]
     [InlineData("create_proposal")]
@@ -90,7 +125,7 @@ public sealed class AgentProposalValidatorTests
         (await validator.ValidateAsync(result.Snapshot, source, true, false, default)).Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-04: A taste change after ranking invalidates the old grant and requires new candidates.
+    // TEST-05: A taste change after ranking invalidates the old grant and requires new candidates.
     /// <summary>Blocks dishes ranked under a different taste fingerprint.</summary>
     [Fact]
     public async Task ValidateAsync_TasteChangedAfterRanking_RequiresNewCandidates()
@@ -105,7 +140,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().NotBeEmpty();
     }
 
-    // TEST-05: Reprice an issued candidate from the backend and calculate the day route before ready.
+    // TEST-06: Reprice an issued candidate from the backend and calculate the day route before ready.
     /// <summary>Verifies backend metadata overrides all untrusted proposal metadata.</summary>
     [Fact]
     public async Task ValidateAsync_ValidCandidate_PopulatesTrustedMetadata()
@@ -122,7 +157,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Routes.Should().HaveCount(1);
     }
 
-    // TEST-06: Reject unavailable catalog states, hard constraints, wrong scopes and forged source identity.
+    // TEST-07: Reject unavailable catalog states, hard constraints, wrong scopes and forged source identity.
     /// <summary>Checks each deterministic rejection class independently.</summary>
     [Theory]
     [InlineData("missing")][InlineData("hidden")][InlineData("removed")][InlineData("sold-out")][InlineData("restaurant-closed")]
@@ -177,7 +212,7 @@ public sealed class AgentProposalValidatorTests
         fixture.Routes.Verify(x => x.CalculateRouteAsync(It.IsAny<RouteCoordinate?>(), It.IsAny<IReadOnlyList<RouteCoordinate>>(), It.IsAny<RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-07: A price change or unavailable dish before confirmation cannot be silently committed.
+    // TEST-08: A price change or unavailable dish before confirmation cannot be silently committed.
     /// <summary>Requires a refreshed preview for any changed business price, including decreases.</summary>
     [Theory]
     [InlineData(49999)][InlineData(50001)]
@@ -191,7 +226,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().Contain(x => x.Contains("Giá"));
     }
 
-    // TEST-08: New replacements require a candidate grant from this turn even when an older snapshot once authorized the same ID.
+    // TEST-09: New replacements require a candidate grant from this turn even when an older snapshot once authorized the same ID.
     /// <summary>Prevents old candidate grants from authorizing a newly added or replaced dish in a later turn.</summary>
     [Fact]
     public async Task ValidateAsync_NewReplacement_RequiresFreshScopedGrant()
@@ -210,7 +245,7 @@ public sealed class AgentProposalValidatorTests
         current.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-09: Removing the final saved item is valid while creating an empty official roadmap from chat is rejected.
+    // TEST-10: Removing the final saved item is valid while creating an empty official roadmap from chat is rejected.
     /// <summary>Checks the empty-itinerary boundary without inventing destination or unlimited-budget consent for a removal-only update.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -225,7 +260,7 @@ public sealed class AgentProposalValidatorTests
         (result.Validation.Errors.Length == 0).Should().Be(update);
     }
 
-    // TEST-10: An unchanged source item is valid without reranking and retains its recommendation request ID.
+    // TEST-11: An unchanged source item is valid without reranking and retains its recommendation request ID.
     /// <summary>Verifies explanation/reordering paths can reuse existing provenance.</summary>
     [Fact]
     public async Task ValidateAsync_UnchangedSource_DoesNotRequireNewGrant()
@@ -239,7 +274,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().BeEmpty(); result.Snapshot.Items.Single().RequestId.Should().Be(item.RequestId);
     }
 
-    // TEST-11: Rejected item keys are exposed for repair only when a missing scoped grant is the sole error; covers scope-only,
+    // TEST-12: Rejected item keys are exposed for repair only when a missing scoped grant is the sole error; covers scope-only,
     // scope plus budget and a valid proposal.
     /// <summary>Prevents backend substitution from masking any other business error.</summary>
     [Theory]
@@ -260,7 +295,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Should().HaveCount(area switch { "scope-only" => 1, "scope-and-budget" => 2, _ => 0 });
     }
 
-    // TEST-12: A drink-only breakfast is rejected by default but accepted when the user asked for drinks at that breakfast or when the slot was kept unchanged from the source; covers default, drink request and retained slot.
+    // TEST-13: A drink-only breakfast is rejected by default but accepted when the user asked for drinks at that breakfast or when the slot was kept unchanged from the source; covers default, drink request and retained slot.
     /// <summary>Ensures main meals contain a main dish unless the user's explicit request or an untouched saved slot says otherwise.</summary>
     [Theory]
     [InlineData("default")][InlineData("drink-request")][InlineData("retained")]
@@ -287,7 +322,7 @@ public sealed class AgentProposalValidatorTests
         else result.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-13: A new item repeating an earlier dish name is flagged for backend replacement only when an unused authorized dish fits that position; the flag never becomes an error; covers with and without a spare dish.
+    // TEST-14: A new item repeating an earlier dish name is flagged for backend replacement only when an unused authorized dish fits that position; the flag never becomes an error; covers with and without a spare dish.
     /// <summary>Lets the backend vary a multi-day plan while never blocking a plan whose catalog cannot avoid the repeat.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -308,7 +343,7 @@ public sealed class AgentProposalValidatorTests
         else result.Validation.AvoidableRepeatItemKeys.Should().BeNull();
     }
 
-    // TEST-14: A declared meal may stay empty when the user removed it or the source already lacked it; covers a skipped meal, a pre-existing gap,
+    // TEST-15: A declared meal may stay empty when the user removed it or the source already lacked it; covers a skipped meal, a pre-existing gap,
     // a gap this edit creates, a day new to this plan and a meal slot new to this plan.
     /// <summary>Stops an unrelated edit being rejected for a meal removed earlier, while a real coverage gap still blocks.</summary>
     [Theory]
@@ -334,7 +369,7 @@ public sealed class AgentProposalValidatorTests
         result.Validation.Errors.Any(error => error.StartsWith("Chưa có món cho bữa", StringComparison.Ordinal)).Should().Be(!valid);
     }
 
-    // TEST-15: Budget repair swaps the most expensive new dish for a cheaper ranked dish of that position; requested names and retained rows stay.
+    // TEST-16: Budget repair swaps the most expensive new dish for a cheaper ranked dish of that position; requested names and retained rows stay.
     /// <summary>Avoids asking the user to raise a budget while cheaper ranked dishes exist.</summary>
     [Fact]
     public async Task RepairBudgetAsync_CheaperRankedDish_BringsTotalWithinBudget()
@@ -355,7 +390,7 @@ public sealed class AgentProposalValidatorTests
         repaired.Value.Snapshot.Items.Select(item => item.DishId).Should().Equal(3, 2);
     }
 
-    // TEST-16: Budget repair returns null when it cannot fit; covers no cheaper dish, no budget, a requested dish name and a retained source row.
+    // TEST-17: Budget repair returns null when it cannot fit; covers no cheaper dish, no budget, a requested dish name and a retained source row.
     /// <summary>Keeps the honest budget question when no cheaper authorized dish can solve the overrun.</summary>
     [Theory]
     [InlineData("no-cheaper")][InlineData("no-budget")][InlineData("named")][InlineData("retained")]
@@ -376,7 +411,7 @@ public sealed class AgentProposalValidatorTests
         (await validator.RepairBudgetAsync(new(state, [item], [grant], Scope: new()), source, [grant], default)).Should().BeNull();
     }
 
-    // TEST-17: A dish must lie within its own day's place; another day without a place accepts it, and a day place overrides the trip's origin radius.
+    // TEST-18: A dish must lie within its own day's place; another day without a place accepts it, and a day place overrides the trip's origin radius.
     /// <summary>Ensures a model cannot move day-1 dishes across the city, which is the point of following the itinerary.</summary>
     [Fact]
     public async Task ValidateAsync_DayArea_AppliesOnlyToItsDay()
@@ -398,7 +433,7 @@ public sealed class AgentProposalValidatorTests
         (await Errors(AgentTestData.State() with { OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m, RadiusKm = 3m, DayAreas = [near] })).Should().BeEmpty();
     }
 
-    // TEST-18: A widened meal accepts a dish within its wider radius; another meal of that day, or a dish past that radius, is still rejected.
+    // TEST-19: A widened meal accepts a dish within its wider radius; another meal of that day, or a dish past that radius, is still rejected.
     /// <summary>Ensures widening one meal never loosens the rest of the day, and passes the dish the search issued.</summary>
     [Fact]
     public async Task ValidateAsync_WidenedMeal_AppliesOnlyToThatMeal()
