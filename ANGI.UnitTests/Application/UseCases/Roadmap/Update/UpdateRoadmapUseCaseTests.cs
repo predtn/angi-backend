@@ -224,6 +224,44 @@ public sealed class UpdateRoadmapUseCaseTests
         result.Itinerary.Single().Items.Single().MyFeedback.Should().Be("like");
     }
 
+    // TEST-09: Set, keep and clear the destination province independently of the other fields.
+    /// <summary>Verifies RM-04 trims a supplied province, keeps it when omitted and clears it with null or blank.</summary>
+    [Fact]
+    public async Task ExecuteAsync_DestinationProvince_ShouldBeSetKeptAndCleared()
+    {
+        // STEP-01: Create roadmap through CreateRoadmap and fixture through CreateFixture.
+        var roadmap = CreateRoadmap(1);
+        var fixture = CreateFixture(roadmap);
+
+        // STEP-02: Set the province; assert it is trimmed and returned in the overview.
+        var set = await fixture.UseCase.ExecuteAsync(
+            roadmap.Id,
+            new UpdateRoadmapRequestDto { DestinationProvince = "  Tỉnh Gia Lai  " },
+            CancellationToken.None);
+        roadmap.DestinationProvince.Should().Be("Tỉnh Gia Lai");
+        set.Overview.DestinationProvince.Should().Be("Tỉnh Gia Lai");
+
+        // STEP-03: Omit it while changing the title; assert it is kept.
+        await fixture.UseCase.ExecuteAsync(
+            roadmap.Id,
+            new UpdateRoadmapRequestDto { Title = "Other" },
+            CancellationToken.None);
+        roadmap.DestinationProvince.Should().Be("Tỉnh Gia Lai");
+
+        // STEP-04: Send blank, then null; assert both clear it.
+        await fixture.UseCase.ExecuteAsync(
+            roadmap.Id,
+            new UpdateRoadmapRequestDto { DestinationProvince = "   " },
+            CancellationToken.None);
+        roadmap.DestinationProvince.Should().BeNull();
+        roadmap.DestinationProvince = "Tỉnh Gia Lai";
+        await fixture.UseCase.ExecuteAsync(
+            roadmap.Id,
+            new UpdateRoadmapRequestDto { DestinationProvince = null },
+            CancellationToken.None);
+        roadmap.DestinationProvince.Should().BeNull();
+    }
+
     /// <summary>Creates a contiguous roadmap aggregate with the requested number of empty days.</summary>
     private static Domain.Entities.Roadmap CreateRoadmap(short numDays)
     {

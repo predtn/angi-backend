@@ -145,6 +145,9 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         roadmap.OriginLatitude = state.OriginMode == "pinned" ? state.OriginLatitude : null;
         roadmap.OriginLongitude = state.OriginMode == "pinned" ? state.OriginLongitude : null;
         roadmap.OriginLabel = state.OriginMode == "pinned" ? state.OriginLabel : null;
+        // A province settled in the conversation becomes the roadmap's destination; none keeps the saved one.
+        if (!string.IsNullOrWhiteSpace(state.Province))
+            roadmap.DestinationProvince = state.Province.Trim();
         // STEP-03: Prepare existing through roadmap.Days.SelectMany(filtered).ToDictionary and retained through Where(filtered).Select(filtered).ToHashSet.
         var existing = roadmap.Days.SelectMany(day => day.Items).ToDictionary(item => item.Id);
         var retained = snapshot.Items.Where(item => item.SourceItemId.HasValue).Select(item => item.SourceItemId!.Value).ToHashSet();

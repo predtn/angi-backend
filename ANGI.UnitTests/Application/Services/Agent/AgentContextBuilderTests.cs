@@ -103,6 +103,19 @@ public sealed class AgentContextBuilderTests
         AgentContextBuilder.StateFromRoadmap(roadmap).Province.Should().BeNull();
     }
 
+    // TEST-05b: A saved destination is the conversation's province, even when the dishes span several.
+    /// <summary>Verifies the roadmap's own destination comes before what its dishes suggest.</summary>
+    [Fact]
+    public void StateFromRoadmap_SavedDestination_IsTheProvince()
+    {
+        // STEP-01: Build a roadmap whose dishes are in two provinces and whose destination is saved.
+        var a = AgentTestData.Dish(); var b = AgentTestData.Dish(2); b.Restaurant.ProvinceName = "Other";
+        var roadmap = new ANGI.Domain.Entities.Roadmap { NumDays = 2, Title = "Trip", DestinationProvince = "Thành phố Hà Nội",
+            Days = [new RoadmapDay { Items = [new RoadmapItem { Dish = a }, new RoadmapItem { Dish = b }] }] };
+        // STEP-02: Assert the province is the saved destination.
+        AgentContextBuilder.StateFromRoadmap(roadmap).Province.Should().Be("Thành phố Hà Nội");
+    }
+
     // TEST-06: A client's confirmed state can neither invent the mark of an offered dish nor keep one the stored state holds.
     /// <summary>That mark changes how "ok" is read, so only the backend may set it.</summary>
     [Fact]

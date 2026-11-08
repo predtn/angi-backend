@@ -125,4 +125,18 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
         result.Errors.Should().Contain(error => error.PropertyName == "Title");
         result.Errors.Should().Contain(error => error.PropertyName == "NumDays");
     }
+
+    // Destination province: up to 100 characters, null allowed.
+    /// <summary>Verifies the destination province keeps the length of the catalog names.</summary>
+    [Fact]
+    public void Validate_DestinationProvinceLength_ShouldAllowHundredAndRejectMore()
+    {
+        var validator = new CreateRoadmapRequestDtoValidator();
+        validator.Validate(new CreateRoadmapRequestDto { Title = "Trip", NumDays = 1, DestinationProvince = new string('a', 100) })
+            .Errors.Should().NotContain(error => error.PropertyName == "DestinationProvince");
+        validator.Validate(new CreateRoadmapRequestDto { Title = "Trip", NumDays = 1, DestinationProvince = null })
+            .Errors.Should().NotContain(error => error.PropertyName == "DestinationProvince");
+        validator.Validate(new CreateRoadmapRequestDto { Title = "Trip", NumDays = 1, DestinationProvince = new string('a', 101) })
+            .Errors.Should().Contain(error => error.PropertyName == "DestinationProvince");
+    }
 }

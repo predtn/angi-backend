@@ -475,6 +475,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             (await db.AgentMessages.CountAsync(x => x.Role == AgentMessageRole.User)).Should().Be(1);
             (await db.AgentProposals.SingleAsync()).Status.Should().Be(AgentProposalStatus.Committed);
             (await db.Roadmaps.SingleAsync()).UpdatedAt.Should().BeAfter(first.RoadmapUpdatedAt);
+            // The province settled in the conversation became the roadmap's destination.
+            (await db.Roadmaps.SingleAsync()).DestinationProvince.Should().Be("Ho Chi Minh City");
         });
     }
 

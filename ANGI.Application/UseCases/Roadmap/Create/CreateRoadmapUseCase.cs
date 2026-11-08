@@ -51,7 +51,8 @@ public sealed class CreateRoadmapUseCase : ICreateRoadmapUseCase
             OriginMode = originMode,
             OriginLatitude = originMode == RoadmapOriginMode.Pinned ? request.OriginLatitude : null,
             OriginLongitude = originMode == RoadmapOriginMode.Pinned ? request.OriginLongitude : null,
-            OriginLabel = originMode == RoadmapOriginMode.Pinned ? NormalizeOptional(request.OriginLabel) : null
+            OriginLabel = originMode == RoadmapOriginMode.Pinned ? NormalizeOptional(request.OriginLabel) : null,
+            DestinationProvince = NormalizeOptional(request.DestinationProvince)
         };
         // STEP-03: While dayNumber <= request.NumDays, call roadmap.Days.Add.
         for (short dayNumber = 1; dayNumber <= request.NumDays; dayNumber++)

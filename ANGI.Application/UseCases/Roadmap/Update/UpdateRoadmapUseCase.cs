@@ -87,6 +87,12 @@ public sealed class UpdateRoadmapUseCase : IUpdateRoadmapUseCase
         {
             roadmap.BudgetAmount = request.BudgetAmount;
         }
+
+        // STEP-04: When request.DestinationProvinceSpecified is true, set roadmap.DestinationProvince (blank clears it).
+        if (request.DestinationProvinceSpecified)
+        {
+            roadmap.DestinationProvince = NormalizeOptional(request.DestinationProvince);
+        }
     }
 
     /// <summary>Resolves the effective origin and enforces the pinned coordinate invariant.</summary>

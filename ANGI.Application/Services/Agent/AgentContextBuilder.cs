@@ -100,14 +100,19 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         Title = string.IsNullOrWhiteSpace(proposed.Title) || proposed.Title == new AgentState().Title ? current.Title : proposed.Title
     };
 
-    /// <summary>Initializes only values present in an owned roadmap; an ambiguous province stays unknown.</summary>
+    /// <summary>
+    /// Initializes only values present in an owned roadmap: its saved destination, else the one province of
+    /// its dishes; an ambiguous province stays unknown.
+    /// </summary>
     public static AgentState StateFromRoadmap(Domain.Entities.Roadmap roadmap)
     {
         var provinces = roadmap.Days.SelectMany(x => x.Items).Select(x => x.Dish.Restaurant?.ProvinceName)
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         return new AgentState
         {
-            Province = provinces.Length == 1 ? provinces[0] : null, Title = roadmap.Title, NumDays = roadmap.NumDays,
+            Province = !string.IsNullOrWhiteSpace(roadmap.DestinationProvince) ? roadmap.DestinationProvince
+                : provinces.Length == 1 ? provinces[0] : null,
+            Title = roadmap.Title, NumDays = roadmap.NumDays,
             StartDate = roadmap.StartDate, BudgetAmount = roadmap.BudgetAmount, OriginMode = AgentJson.Name(roadmap.OriginMode),
             OriginLatitude = roadmap.OriginLatitude, OriginLongitude = roadmap.OriginLongitude, OriginLabel = roadmap.OriginLabel,
             SourceRoadmapUpdatedAt = roadmap.UpdatedAt
