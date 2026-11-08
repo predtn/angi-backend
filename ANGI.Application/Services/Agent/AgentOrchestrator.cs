@@ -42,6 +42,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var repaired = false;
         var schemaRepaired = false;
         var proposalRepaired = false;
+        var assembled = false;
         // Đề xuất rỗng có lượt sửa riêng để không tiêu mất lượt sửa lỗi validation của lịch đủ món sau đó.
         var emptyRepaired = false;
         var coverageRepaired = false;
@@ -190,6 +191,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.ReserveGrants.Clear();
                     telemetry.Record("long_trip_assembled", context.ConversationId, context.TurnId, context.AttemptId, new { days = context.State.NumDays, items = longPlan.Items.Length });
                     step = new([], longPlan, step.Tokens);
+                    assembled = true;
                 }
                 // STEP-24: Prepare output.
                 var output = step.Output!;
@@ -210,6 +212,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         new { output.Action, output.Clarification, replyLength = output.Reply?.Length, schemaRepaired });
                     if (schemaRepaired) return Misunderstood(context, turnState, output.Reply);
                     schemaRepaired = repaired = sameRead = true;
+                    continue;
+                }
+                // Mọi câu người dùng thấy đều do model viết, backend không có câu thay thế. Câu rỗng (hội thoại 239: "chốt lịch này" lưu xong mà không có chữ nào)
+                // được gửi lại cho model sửa một lần; vẫn rỗng thì báo lỗi có kiểm soát thay vì hiện tin nhắn trống.
+                if (string.IsNullOrWhiteSpace(output.Reply) && output.Action != "use_tool" && !assembled)
+                {
+                    telemetry.Record("empty_reply", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, emptyRepaired });
+                    if (emptyRepaired || calls + 1 >= limits.MaxLlmCalls) throw Unavailable();
+                    context.RejectedOutput = output;
+                    context.RepairFeedback = "The reply was empty. Keep the same action and data, and write the reply the user will see: one or two short Vietnamese sentences, never empty.";
+                    emptyRepaired = repaired = sameRead = true;
                     continue;
                 }
                 // Chỉ ghi lựa chọn và độ dài, không ghi nội dung: để biết model đã đọc ra gì khi một lượt đi sai.
@@ -342,9 +355,18 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 try { snapshot = builder.Build(context, output); }
                 catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE")
                 {
-                    // THÍ NGHIỆM: không vòng sửa, không để backend tự ghép lịch thay model.
+                    // Không để backend tự ghép lịch thay model. Câu trả lời của bản nháp là template ({total}, {changes}...) chỉ được điền khi có lịch,
+                    // nên trả nguyên câu đó làm người dùng thấy chỗ trống (hội thoại 236, 238). Model được sửa một lần với đúng lý do bị từ chối;
+                    // vẫn hỏng thì báo lỗi có kiểm soát thay vì hiện template.
                     telemetry.Record("proposal_unusable", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope, reason = error.Message });
-                    return new(Raw(output.Reply), context.State, null, null);
+                    if (!proposalRepaired && calls + 1 < limits.MaxLlmCalls)
+                    {
+                        context.RejectedOutput = output;
+                        context.RepairFeedback = error.Message;
+                        proposalRepaired = repaired = true;
+                        continue;
+                    }
+                    throw Unavailable();
                 }
                 if (context.RestoredMeals.Length > 0)
                     telemetry.Record("out_of_edit_meals_restored", context.ConversationId, context.TurnId, context.AttemptId, new { output.EditMeals, restored = context.RestoredMeals });

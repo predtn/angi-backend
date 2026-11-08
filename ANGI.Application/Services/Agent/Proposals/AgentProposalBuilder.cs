@@ -52,16 +52,30 @@ public sealed class AgentProposalBuilder
                     throw Invalid($"Đề xuất chỉ gồm các món ngoài phạm vi {(output.Scope.DayNumber is { } day ? $"ngày {day}" : "đã chọn")}{(output.Scope.MealSlot is { } slot ? $", bữa {slot}" : "")}. Chỉ gửi món thay thế thuộc đúng phạm vi đó.");
             }
             // STEP-07: Throw the error from Invalid when output.Items is missing, output.Items.Length is 0, output.Changes is missing or 1 more condition(s).
-            if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
+            // Lý do này là phản hồi cho lần sửa của model (hội thoại 240, 241, 244: model gửi đề xuất không có món nào và lặp lại khi chỉ được báo "không hợp lệ").
+            if (output.Items is null || output.Items.Length == 0)
+                throw Invalid("create_proposal không có món nào. Gửi món mới cho từng bữa cần đổi trong items (dishId từ ứng viên đã được cấp), hoặc dùng patch_proposal với changes replace.");
+            if (output.Changes is null || output.Changes.Length != 0) throw Invalid("create_proposal phải có changes=[]; món mới nằm trong items.");
             // STEP-08: Throw the error from Invalid when Select(filtered).Distinct().ToArray() has the expected shape.
             if (output.Items.Where(item => !output.Scope.Contains(item)).Select(item => $"ngày {item.DayNumber} {AgentReplyBuilder.Meal(item.MealSlot)}")
                 .Distinct().ToArray() is { Length: > 0 } outOfScope)
                 // Phản hồi cụ thể để lần sửa của model biết bỏ món nào, thay vì trả về đề xuất rỗng.
                 throw Invalid($"Món nằm ngoài phạm vi yêu cầu ({string.Join(", ", outOfScope)}). Chỉ gửi các món thuộc phạm vi đã chọn; " +
                     "món ngoài phạm vi được giữ nguyên.");
-            // STEP-09: Throw the error from Invalid when Select(filtered).Distinct().Count() is not output.Items.Length.
+            // STEP-09: Give a fresh key to every repeated item key.
+            // Khóa món chỉ là định danh kỹ thuật: model đôi khi lặp lại một khóa cho hai bữa (hội thoại 238), nên backend đặt khóa mới cho lần lặp
+            // thay vì bỏ cả lịch. Lần xuất hiện đầu giữ khóa cũ để vẫn khớp món nguồn.
             if (output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
-                throw Invalid("Khóa món bị trùng trong đề xuất.");
+            {
+                var taken = output.Items.Select(item => item.ItemKey).Concat(original.Select(item => item.ItemKey)).ToHashSet(StringComparer.Ordinal);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                output = output with { Items = output.Items.Select(item =>
+                {
+                    if (seen.Add(item.ItemKey)) return item;
+                    var fresh = Enumerable.Range(2, int.MaxValue - 2).Select(n => $"{item.DayNumber}-{item.MealSlot}-{n}").First(taken.Add);
+                    return item with { ItemKey = fresh };
+                }).ToArray() };
+            }
             // STEP-10: Prepare replaced through original.Where().ToArray.
             var replaced = original.Where(output.Scope.Contains).ToArray();
             // STEP-11: When context.Request.SelectedItemKey exists, set replaced and throw the error from Invalid when output.Items.Length is not 1 and more.
@@ -105,7 +119,12 @@ public sealed class AgentProposalBuilder
                     continue;
                 }
                 // STEP-20: Add the built entries to items.
-                items.Add(Clean(previous is null ? item : item with { ItemKey = previous.ItemKey }, previous));
+                // Một món mới không khớp khóa nào có thể nhận khóa của món nguồn cùng bữa, trùng với khóa model đặt cho món khác (hội thoại 241): đặt khóa mới.
+                var built = Clean(previous is null ? item : item with { ItemKey = previous.ItemKey }, previous);
+                if (items.Any(existing => existing.ItemKey == built.ItemKey))
+                    built = built with { ItemKey = Enumerable.Range(2, int.MaxValue - 2).Select(n => $"{built.DayNumber}-{built.MealSlot}-{n}")
+                        .First(key => items.All(existing => existing.ItemKey != key) && output.Items.All(other => other.ItemKey != key)) };
+                items.Add(built);
             }
         }
         else if (output.Action == "patch_proposal")

@@ -541,8 +541,12 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         {
             if (context.RejectedOutput is { } rejected)
                 messages.Add(new { role = "assistant", content = JsonSerializer.Serialize(rejected, PromptJson) });
-            messages.Add(new { role = "user", content = "The previous output was invalid. Correct the previous draft using the source and already issued candidates. " + context.RepairFeedback +
-                " You may submit create_proposal with complete scoped items in both create/update modes, or patch_proposal with explicit changes for a source. Preserve scope, stable source keys and the supplied proposalVersion. Return exactly the supplied strict schema; do not invent IDs, claim missing catalog data without evidence, or loosen constraints." });
+            // Lỗi chỉ ở câu trả lời của một action không phải bản nháp (ví dụ request_save trả câu rỗng): không gợi ý dựng bản nháp, kẻo model đổi action.
+            var draftRepair = context.RejectedOutput?.Action is null or "create_proposal" or "patch_proposal";
+            messages.Add(new { role = "user", content = draftRepair
+                ? "The previous output was invalid. Correct the previous draft using the source and already issued candidates. " + context.RepairFeedback +
+                    " You may submit create_proposal with complete scoped items in both create/update modes, or patch_proposal with explicit changes for a source. Preserve scope, stable source keys and the supplied proposalVersion. Return exactly the supplied strict schema; do not invent IDs, claim missing catalog data without evidence, or loosen constraints."
+                : "The previous output was invalid. " + context.RepairFeedback + " Return exactly the supplied strict schema." });
         }
         // STEP-05: Prepare toolsExhausted.
         // A repeated identical request closes tools early: another round would only resend the same candidates.

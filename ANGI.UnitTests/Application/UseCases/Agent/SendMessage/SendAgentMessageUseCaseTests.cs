@@ -70,7 +70,7 @@ public sealed class SendAgentMessageUseCaseTests
     }
 
     /// <summary>A model turn that only reports how it read the reply to the open question.</summary>
-    private static AgentLlmStep Answered(string reading) => new([], new AgentOutput { Action = "answer", Reply = "", PendingAnswer = reading });
+    private static AgentLlmStep Answered(string reading) => new([], new AgentOutput { Action = "answer", Reply = "Ừ, mình làm theo nhé.", PendingAnswer = reading });
 
     /// <summary>Creates a ready, unexpired proposal entity for conversation 7 that wraps the given snapshot.</summary>
     private static ANGI.Domain.Entities.AgentProposal ReadyProposal(long id, AgentSnapshot snapshot) => new()
