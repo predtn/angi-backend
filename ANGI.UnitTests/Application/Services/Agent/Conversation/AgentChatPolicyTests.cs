@@ -1,4 +1,5 @@
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.DTOs.Agent;
 using ANGI.Application.Services.Agent.Conversation;
 using FluentAssertions;
 
@@ -19,37 +20,7 @@ public sealed class AgentChatPolicyTests
             .Should().Contain("“ok”").And.Contain("“thôi”").And.NotContain("xác nhận thay đổi");
     }
 
-    // TEST-02: Whole-message save instructions support Vietnamese accents and polite variants.
-    /// <summary>Allows explicit saving without requiring a frontend command or proposal identifier.</summary>
-    [Theory]
-    [InlineData("lưu lịch trình này")]
-    [InlineData("Tôi muốn lưu lịch này")]
-    [InlineData("Xác nhận lưu lịch trình này!")]
-    [InlineData("Lưu lịch trình này giúp tôi.")]
-    [InlineData("save this itinerary")]
-    [InlineData("Tôi muốn chốt lịch này")]
-    [InlineData("chốt lịch trình này giúp tôi")]
-    // STEP-01: Assert AgentConfirmationPolicy.IsSaveRequest() is true.
-    public void IsSaveRequest_ExplicitInstruction_Authorizes(string text) => AgentConfirmationPolicy.IsSaveRequest(text).Should().BeTrue();
-
-    // TEST-03: Negated, quoted, conditional and vague agreement text never authorizes an official write.
-    /// <summary>Prevents model interpretation or substring matching from turning ordinary chat into a commit.</summary>
-    [Theory]
-    [InlineData("đồng ý")]
-    [InlineData("ok")]
-    [InlineData("đừng lưu lịch trình này")]
-    [InlineData("không lưu lịch này")]
-    [InlineData("lưu lịch trình này?")]
-    [InlineData("\"lưu lịch trình này\"")]
-    [InlineData("Nếu giá rẻ thì lưu lịch trình này")]
-    [InlineData("Giải thích câu lưu lịch trình này")]
-    [InlineData("đừng chốt lịch này")]
-    [InlineData("chốt lịch này?")]
-    [InlineData("hãy lập lịch giúp tôi để chốt lịch")]
-    // STEP-01: Assert AgentConfirmationPolicy.IsSaveRequest() is false.
-    public void IsSaveRequest_UncertainText_DoesNotAuthorize(string text) => AgentConfirmationPolicy.IsSaveRequest(text).Should().BeFalse();
-
-    // TEST-04: Constraint consent stages a detached proposal without changing the current hard limit.
+    // TEST-02: Constraint consent stages a detached proposal without changing the current hard limit.
     /// <summary>Ensures an explicit next-turn answer is required even when the model claims consent.</summary>
     [Fact]
     public void StageChange_Relaxation_KeepsCurrentConstraints()
@@ -67,7 +38,7 @@ public sealed class AgentChatPolicyTests
         result.Snapshot.Should().BeNull(); result.Commit.Should().BeNull();
     }
 
-    // TEST-05: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
+    // TEST-03: The consent question names each removed, added and changed day/meal request and mentions an unchanged plan only when one exists; covers with and without a plan.
     /// <summary>Ensures the user can see exactly which meal request the model wants to change before agreeing.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -86,7 +57,7 @@ public sealed class AgentChatPolicyTests
         else reply.Should().NotContain("Bản lịch");
     }
 
-    // TEST-06: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
+    // TEST-04: A blocked save names the open question and the way out; a pending change or planning request keeps the general message.
     /// <summary>Prevents the user from being told to answer a question the message does not show.</summary>
     [Theory]
     [InlineData("question")][InlineData("change")][InlineData("planning")]
@@ -102,5 +73,68 @@ public sealed class AgentChatPolicyTests
         // STEP-02: Assert depending on area == "question", reply contains the expected text, reply contains the expected text and reply is the expected text.
         if (area == "question") reply.Should().Contain("Bạn muốn đổi bữa nào?").And.Contain("giữ nguyên");
         else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
+    }
+
+    // TEST-05: Only the whole reset sentence matches, with or without accents, case or a final mark; a longer message, a discard sentence or blank text does not.
+    /// <summary>Keeps the reset sentence of the deleted-roadmap error recognizable without reading any other wording.</summary>
+    [Theory]
+    [InlineData("làm lại từ đầu", true)][InlineData("  Làm lại từ đầu!  ", true)][InlineData("lam lai tu dau.", true)][InlineData("Bắt đầu kế hoạch mới", true)]
+    [InlineData("start over", true)][InlineData("làm lại từ đầu giúp mình đi", false)][InlineData("bỏ bản nháp", false)][InlineData("", false)][InlineData("   ", false)]
+    public void IsResetPhrase_MatchesOnlyTheWholeResetSentence(string content, bool expected)
+    {
+        // STEP-01: Assert AgentConfirmationPolicy.IsResetPhrase(content) equals expected.
+        AgentConfirmationPolicy.IsResetPhrase(content).Should().Be(expected);
+    }
+
+    // TEST-06: A ready plan matches the trip it was made for, also with only a clarification open or a different start date; a changed budget, a staged change,
+    // a planning request, a plan that is not ready or no plan does not.
+    /// <summary>Decides when a chat save may write, and what the model is told before it answers a save wish.</summary>
+    [Theory]
+    [InlineData("same", true)][InlineData("question", true)][InlineData("start", true)][InlineData("budget", false)]
+    [InlineData("change", false)][InlineData("planning", false)][InlineData("committed", false)][InlineData("none", false)]
+    public void PlanMatchesTrip_HoldsOnlyForTheTripTheReadyPlanWasMadeFor(string area, bool expected)
+    {
+        // STEP-01: Create snapshot from AgentTestData, then derive state and proposal for area.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        var state = area switch
+        {
+            "question" => snapshot.State with { PendingQuestion = "Bạn muốn đổi bữa nào?" },
+            "start" => snapshot.State with { StartDate = new DateOnly(2027, 1, 1) },
+            "budget" => snapshot.State with { BudgetAmount = 700000 },
+            "change" => snapshot.State with { PendingStateChange = snapshot.State with { BudgetAmount = 700000 } },
+            "planning" => snapshot.State with { PendingPlanningRequest = new(["x"]) },
+            _ => snapshot.State
+        };
+        var proposal = area == "none" ? null : new AgentProposalDto(9, 2, "create", area == "committed" ? "committed" : "ready", snapshot,
+            new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1));
+
+        // STEP-02: Assert AgentConfirmationPolicy.PlanMatchesTrip(state, proposal) equals expected.
+        AgentConfirmationPolicy.PlanMatchesTrip(state, proposal).Should().Be(expected);
+    }
+
+    // TEST-07: A save wish over a dated plan commits at once, while an undated plan commits nothing and waits for the date on the proposal's exact version; covers both.
+    /// <summary>Keeps the roadmap's start date step: the backend waits for the date and the model asks for it.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveWish_CommitsOnlyWithAStartDate(bool dated)
+    {
+        // STEP-01: Create a ready proposal and a context whose trip has a start date or none.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        snapshot = snapshot with { State = snapshot.State with { StartDate = dated ? new DateOnly(2099, 1, 1) : null } };
+        var context = new AgentContext
+        {
+            ConversationId = 7, UserId = 3, State = snapshot.State,
+            Request = new SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "chốt đi" },
+            CurrentProposal = new AgentProposalDto(9, 2, "create", "ready", snapshot, new AgentValidation([], [], 0, []), DateTime.UtcNow.AddHours(1))
+        };
+
+        // STEP-02: Run SaveWish and SaveNeedsStartDate.
+        var decision = AgentConfirmationPolicy.SaveWish(context, new DateOnly(2098, 1, 1));
+        var needsDate = AgentConfirmationPolicy.SaveNeedsStartDate(context);
+
+        // STEP-03: Assert a dated plan commits and needs no date, and an undated one waits for the date of proposal 9 version 2.
+        decision.Commit.Should().Be(dated); needsDate.Should().Be(!dated);
+        if (!dated) decision.Pending.Should().Be(new AgentPendingSave(9, 2, AgentConfirmationPolicy.StageDate));
     }
 }

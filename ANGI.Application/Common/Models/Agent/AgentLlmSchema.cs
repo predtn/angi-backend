@@ -80,7 +80,7 @@ public static class AgentLlmSchema
             ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
             ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
-            ["alternative"] = Scalar("boolean")
+            ["alternative"] = Scalar("boolean"), ["maxLegKm"] = Nullable(Scalar("number"))
         }),
         ["estimate_day_route"] = Obj(new()
         {

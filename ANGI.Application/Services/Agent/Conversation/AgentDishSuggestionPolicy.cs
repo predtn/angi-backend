@@ -16,13 +16,9 @@ public static class AgentDishSuggestionPolicy
 
     private static readonly HashSet<string> GenericNameWords =
         ["mot", "1", "cai", "mon", "an", "do", "thuc", "quan", "bat", "ki", "ky", "nao", "gi", "ngon", "cung", "duoc", "tuy", "ngau", "nhien"];
-    // Đọc câu của model, không đọc câu người dùng: chưa xếp theo khẩu vị thì không được nói là theo khẩu vị, trừ khi đang nói rõ là chưa.
-    private static readonly Regex TasteClaim = new(@"\b(?:theo|dua (?:theo|tren)|hop(?: voi)?|phu hop(?: voi)?|dung)\s+(?:gu|khau vi|so thich)\b", RegexOptions.CultureInvariant);
-    private static readonly Regex Denied = new(@"\b(?:chua|khong)\b", RegexOptions.CultureInvariant);
     // Model viết câu quanh các ô này, backend điền dữ kiện: tên, quán và giá không thể sai hay bị tráo giữa các món.
     private static readonly Regex Slot = new(@"\{(?<field>name|restaurant|price|address|meals)(?<dish>\d{1,2})\}", RegexOptions.CultureInvariant);
     private static readonly Regex PriceUnit = new(@"(\{price\d{1,2}\})\s*(?:đồng|đ|vnđ|vnd)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly string[] RequiredSlots = ["name", "restaurant", "price"];
 
     /// <summary>True when a catalog name is only generic words ("món ăn bất kì"), so a lookup could never find it.</summary>
     public static bool IsGenericName(string name)
@@ -59,64 +55,21 @@ public static class AgentDishSuggestionPolicy
             string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine), mealAsked ? null : Meals(dish))).ToArray(),
         personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked), hasPlan, area, areaNotFound);
 
-    /// <summary>Fills the model's slots with the suggestion's facts when the slots fit and the words around them claim nothing false; otherwise the fixed reply.</summary>
-    public static string Worded(string? reply, AgentContext context, AgentDishSuggestion suggestion)
+    /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
+    public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(Template(reply), slot =>
     {
-        // STEP-01: When WordingIssue() exists, return the fixed reply, led by the model's own words when it wrote no slot and those words are safe.
-        // Không có ô nào mà câu vẫn sạch nghĩa là model chỉ viết lời mở đầu: giữ lời đó, dữ kiện đã có trong câu cố định theo sau.
-        if (WordingIssue(reply, context, suggestion) is { } issue)
-            return issue == "no_slot" && IsSafeOpening(Template(reply), context, suggestion) ? $"{Template(reply)} {suggestion.FixedReply}" : suggestion.FixedReply;
-        // STEP-02: Return the template with each slot filled, after adding the facts the model left out.
-        return Slot.Replace(Completed(Template(reply), suggestion.Dishes), slot =>
+        var index = int.Parse(slot.Groups["dish"].Value) - 1;
+        if (index < 0 || index >= suggestion.Dishes.Length) return slot.Value;
+        var dish = suggestion.Dishes[index];
+        return slot.Groups["field"].Value switch
         {
-            var dish = suggestion.Dishes[int.Parse(slot.Groups["dish"].Value) - 1];
-            return slot.Groups["field"].Value switch { "name" => dish.Name, "restaurant" => dish.Restaurant, "price" => $"{AgentReplyBuilder.Money(dish.Price)} đồng", "meals" => dish.Meals!, _ => dish.Address! };
-        });
-    }
-
-    /// <summary>Why the model's sentence cannot be shown, as a short code for the log; null when it can.</summary>
-    public static string? WordingIssue(string? reply, AgentContext context, AgentDishSuggestion suggestion)
-    {
-        // STEP-01: Prepare template through Template.
-        var template = Template(reply);
-        // STEP-02: Return the code when the slots do not fit, the words around them fail their check or they claim a taste ranking that did not happen.
-        return SlotsIssue(Slot.Matches(template), suggestion.Dishes) ?? AgentReplyGuard.TemplateIssue(Slot.Replace(template, " ").Trim(), context) ??
-            (!suggestion.Personalized && ClaimsTaste(template) ? "taste_claim" : null);
-    }
-
-    private static bool IsSafeOpening(string text, AgentContext context, AgentDishSuggestion suggestion) =>
-        AgentReplyGuard.TemplateIssue(text, context) is null && (suggestion.Personalized || !ClaimsTaste(text));
+            "name" => dish.Name, "restaurant" => dish.Restaurant, "price" => $"{AgentReplyBuilder.Money(dish.Price)} đồng",
+            "meals" => dish.Meals ?? slot.Value, _ => dish.Address ?? slot.Value
+        };
+    });
 
     // Backend điền giá kèm đơn vị, nên bỏ đơn vị model viết thêm để không thành "45.000 đồng đồng".
     private static string Template(string? reply) => PriceUnit.Replace((reply ?? "").Trim(), "$1");
-
-    /// <summary>
-    /// Adds where the restaurant is when the model left it out. A reply without an address once left a user asking the same thing three turns running.
-    /// Meals are the model's choice: forcing "(hợp bữa sáng)" into every reply read as a form, even late at night.
-    /// </summary>
-    private static string Completed(string template, IReadOnlyList<AgentSuggestedDish> dishes)
-    {
-        // STEP-01: For each dish, place its missing address after the restaurant.
-        foreach (var (dish, number) in dishes.Select((dish, index) => (dish, index + 1)))
-            if (dish.Address is not null && !template.Contains($"{{address{number}}}", StringComparison.Ordinal))
-                template = template.Replace($"{{restaurant{number}}}", $"{{restaurant{number}}} ({{address{number}}})", StringComparison.Ordinal);
-        // STEP-02: Return template.
-        return template;
-    }
-
-    /// <summary>What is wrong with the slots: none at all, one pointing at no fact, one dish's slots split by another's, or a dish missing its name, restaurant or price; null when they fit.</summary>
-    private static string? SlotsIssue(MatchCollection slots, IReadOnlyList<AgentSuggestedDish> dishes)
-    {
-        // STEP-01: Prepare used through slots.Select(filtered).ToArray, then return "no_slot" early when a dish exists and no slot does.
-        var used = slots.Select(slot => (Field: slot.Groups["field"].Value, Dish: int.Parse(slot.Groups["dish"].Value))).ToArray();
-        if (used.Length == 0 && dishes.Count > 0) return "no_slot";
-        // STEP-02: Return "unknown_slot" early when a slot names no dish, or an address or meals its dish does not have.
-        if (used.Any(slot => slot.Dish < 1 || slot.Dish > dishes.Count || slot.Field == "address" && dishes[slot.Dish - 1].Address is null || slot.Field == "meals" && dishes[slot.Dish - 1].Meals is null)) return "unknown_slot";
-        // STEP-03: Return "split_slot" early when one dish's slots are split by another's.
-        if (used.Where((slot, index) => index == 0 || slot.Dish != used[index - 1].Dish).Count() != used.Select(slot => slot.Dish).Distinct().Count()) return "split_slot";
-        // STEP-04: Return "missing_slot" when a dish lacks its name, restaurant or price.
-        return Enumerable.Range(1, dishes.Count).All(dish => RequiredSlots.All(field => used.Contains((field, dish)))) ? null : "missing_slot";
-    }
 
     private static string Named(Dish dish, bool mealAsked) =>
         AgentReplyBuilder.Safe(dish.Name) + (!mealAsked && Meals(dish) is { } meals ? $" (hợp {meals})" : "");
@@ -134,9 +87,6 @@ public static class AgentDishSuggestionPolicy
         // STEP-03: Return the labels in meal order.
         return string.Join(", ", UseCases.Validators.Agent.AgentStateValidator.Meals.Where(tagged.Contains).Select(AgentReplyBuilder.Meal));
     }
-
-    private static bool ClaimsTaste(string reply) =>
-        Regex.Split(AgentReplyGuard.Plain(reply), @"[.!?\n]").Any(sentence => TasteClaim.IsMatch(sentence) && !Denied.IsMatch(sentence));
 
     private static string Normalize(string text)
     {

@@ -20,6 +20,69 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
     private static bool AlreadyEmpty(AgentSnapshot? source, short day, string meal) => source is not null && day <= source.State.NumDays &&
         source.State.MealSlots.Contains(meal) && !source.Items.Any(item => item.DayNumber == day && item.MealSlot == meal);
 
+    /// <summary>
+    /// Fills each item's name, price, restaurant and coordinates from the catalog without judging it, for a proposal shown despite
+    /// validation errors; an id the catalog does not know keeps what the model wrote. The total is the sum of the known prices.
+    /// </summary>
+    public async Task<(AgentSnapshot Snapshot, decimal Total)> ReadCatalogAsync(AgentSnapshot snapshot, CancellationToken ct)
+    {
+        var catalog = (await dishes.GetCardDishesAsync(snapshot.Items.Select(x => x.DishId).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
+        var items = snapshot.Items.Select(item => catalog.TryGetValue(item.DishId, out var dish)
+            ? item with { Price = dish.Price, DishName = dish.Name, RestaurantName = dish.Restaurant.Name,
+                Latitude = dish.Restaurant.Latitude, Longitude = dish.Restaurant.Longitude }
+            : item).ToArray();
+        return (snapshot with { Items = items }, items.Sum(item => item.Price));
+    }
+
+    /// <summary>
+    /// The errors that still block writing a roadmap: an ill-formed trip or plan, a dish that no longer exists or is not public, a price changed since the
+    /// user saw it, and a source item ID moved onto another dish. Plan rules such as budget, meal fit, repeats or candidate scope do not block, because the
+    /// chat shows a plan despite them and the user decided to save it.
+    /// </summary>
+    public async Task<string[]> IntegrityErrorsAsync(AgentSnapshot snapshot, AgentSnapshot? source, CancellationToken ct)
+    {
+        // STEP-01: Return the structure errors early, since nothing else can be read from an ill-formed plan.
+        var errors = await StructureErrorsAsync(snapshot, ct);
+        if (errors.Count > 0) return errors.ToArray();
+        // STEP-02: Load the catalog dishes and the source items the plan keeps.
+        var catalog = (await dishes.GetCardDishesAsync(snapshot.Items.Select(x => x.DishId).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
+        var original = (source?.Items ?? []).ToDictionary(x => x.ItemKey);
+        // STEP-03: For each item, report a missing or hidden dish, a changed price and a source item ID that does not belong to it.
+        foreach (var item in snapshot.Items)
+        {
+            if (!catalog.TryGetValue(item.DishId, out var dish) || !IsPublic(dish)) { errors.Add($"Món {item.DishId} không còn khả dụng."); continue; }
+            if (item.Price != dish.Price) errors.Add($"Giá món {item.DishId} đã thay đổi; cần xem đề xuất mới.");
+            original.TryGetValue(item.ItemKey, out var kept);
+            var retained = snapshot.RetainedItems?.SingleOrDefault(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId);
+            var unchanged = kept?.DishId == item.DishId || retained is not null;
+            if (item.SourceItemId.HasValue && (!unchanged || item.SourceItemId != kept?.SourceItemId)) errors.Add("Không được gắn ID item nguồn cho món khác.");
+        }
+        // STEP-04: Return the distinct errors.
+        return errors.Distinct().ToArray();
+    }
+
+    /// <summary>Checks the trip state and the plan's shape: province, days, open questions, keys, day and meal positions and size limits.</summary>
+    private static async Task<List<string>> StructureErrorsAsync(AgentSnapshot snapshot, CancellationToken ct)
+    {
+        // STEP-01: Prepare errors from the state validator.
+        var state = snapshot.State;
+        var emptyUpdate = snapshot.Items.Length == 0 && snapshot.BaseRoadmapId.HasValue;
+        var errors = (await new AgentStateValidator().ValidateAsync(state, ct)).Errors.Select(x => x.ErrorMessage).ToList();
+        // STEP-02: Report a missing province or day count and an open question or planning request.
+        // Ngân sách không bắt buộc: chưa có ngân sách nghĩa là lịch không giới hạn ngân sách.
+        if (!emptyUpdate && string.IsNullOrWhiteSpace(state.Province) ||
+            !state.NumDays.HasValue || state.PendingQuestion is not null || state.PendingPlanningRequest is not null)
+            errors.Add("Chưa chốt đủ tỉnh, số ngày hoặc câu hỏi đang chờ.");
+        // STEP-03: Report an empty, oversized or malformed item list, and return errors.
+        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItems || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
+                x.DayNumber < 1 || x.DayNumber > state.NumDays || !AgentStateValidator.Meals.Contains(x.MealSlot) || x.SortOrder < 0) ||
+            snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
+            snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||
+            snapshot.Items.GroupBy(x => x.DayNumber).Any(x => x.Count() > 24))
+            errors.Add("Cấu trúc lịch không hợp lệ hoặc vượt giới hạn.");
+        return errors;
+    }
+
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
@@ -29,17 +92,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         var warnings = new List<string>();
         var state = snapshot.State;
         var emptyUpdate = snapshot.Items.Length == 0 && snapshot.BaseRoadmapId.HasValue;
-        var stateValidation = await new AgentStateValidator().ValidateAsync(state, ct);
-        errors.AddRange(stateValidation.Errors.Select(x => x.ErrorMessage));
-        if (!emptyUpdate && (string.IsNullOrWhiteSpace(state.Province) || state.BudgetAmount is null && !state.BudgetUnrestricted) ||
-            !state.NumDays.HasValue || state.PendingQuestion is not null || state.PendingPlanningRequest is not null)
-            errors.Add("Chưa chốt đủ tỉnh, số ngày, ngân sách hoặc câu hỏi đang chờ.");
-        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItems || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
-                x.DayNumber < 1 || x.DayNumber > state.NumDays || !AgentStateValidator.Meals.Contains(x.MealSlot) || x.SortOrder < 0) ||
-            snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
-            snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||
-            snapshot.Items.GroupBy(x => x.DayNumber).Any(x => x.Count() > 24))
-            errors.Add("Cấu trúc lịch không hợp lệ hoặc vượt giới hạn.");
+        errors.AddRange(await StructureErrorsAsync(snapshot, ct));
         if (errors.Count > 0) return (snapshot, new(errors.ToArray(), [], 0, []));
         var allTags = await tags.GetTagsAsync(null, ct);
         if (state.TagIds.Concat(state.ExcludeTagIds).Concat(state.MealRequests.SelectMany(x => x.TagIds)).Except(allTags.Select(x => x.Id)).Any()) errors.Add("Bộ lọc chứa tag không tồn tại.");
@@ -86,7 +139,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (item.SourceItemId.HasValue && (!unchanged || item.SourceItemId != kept?.SourceItemId)) errors.Add("Không được gắn ID item nguồn cho món khác.");
             var tagSet = dish.DishTags.Select(x => x.TagId).ToHashSet();
             var requested = AgentScopedPlanning.Request(state, item.DayNumber, item.MealSlot);
-            if (requested.DishName is not null && AgentScopedPlanning.Normalize(requested.DishName) != AgentScopedPlanning.Normalize(dish.Name) ||
+            if (requested.DishName is not null && !AgentScopedPlanning.FitsName(requested.DishName, dish.Name) ||
                 requested.RestaurantName is not null && AgentScopedPlanning.Normalize(requested.RestaurantName) != AgentScopedPlanning.Normalize(dish.Restaurant.Name) ||
                 requested.RestaurantId.HasValue && requested.RestaurantId != dish.RestaurantId ||
                 requested.TagIds.Any(id => !tagSet.Contains(id)))
@@ -192,68 +245,6 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (spare) repeats.Add(item.ItemKey);
         }
         return repeats.ToArray();
-    }
-
-    /// <summary>
-    /// Replaces only items rejected for a missing day/meal grant, or avoidable repeats, with the best-ranked unused dish
-    /// already issued for that exact position under the same effective constraints. Returns null when a safe replacement does not exist.
-    /// </summary>
-    public async Task<AgentSnapshot?> RepairScopeAsync(AgentSnapshot snapshot, AgentSnapshot? source,
-        IReadOnlyList<AgentCandidateGrant> grants, IReadOnlyCollection<string> itemKeys, CancellationToken ct, bool repeatsOnly = false)
-    {
-        var state = snapshot.State;
-        var scope = snapshot.Scope ?? new();
-        var targets = snapshot.Items.Where(item => itemKeys.Contains(item.ItemKey)).ToArray();
-        var sourceItems = source?.Items ?? [];
-        // Chỉ sửa món mới trong phạm vi model được phép đổi. Nhiều vị trí sai cùng lúc cho thấy model hiểu sai yêu cầu,
-        // khi đó để model tự sửa thay vì backend thay phần lớn lịch. Món lặp đã đúng vị trí nên không cần giới hạn này.
-        if (targets.Length == 0 || targets.Length != itemKeys.Count || !repeatsOnly && targets.Length > Math.Max(1, snapshot.Items.Length / 3) ||
-            targets.Any(item => !scope.Contains(item) || sourceItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId)))
-            return null;
-        // Grant hẹp và mới hơn đứng trước; trong mỗi grant giữ nguyên thứ tự xếp hạng của Recommendation.
-        // Chỉ dùng grant có cùng fingerprint (khẩu vị, món/quán/tag yêu cầu) với vị trí cần thay.
-        var options = targets.ToDictionary(item => item.ItemKey, item => grants
-            .Select((grant, order) => (grant, order))
-            .Where(x => (!x.grant.DayNumber.HasValue || x.grant.DayNumber == item.DayNumber) &&
-                (x.grant.MealSlot is null || x.grant.MealSlot == item.MealSlot) &&
-                AgentScopedPlanning.Fingerprint(x.grant.Constraints, item.DayNumber, item.MealSlot) ==
-                AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot))
-            .OrderByDescending(x => (x.grant.DayNumber.HasValue ? 2 : 0) + (x.grant.MealSlot is null ? 0 : 1)).ThenByDescending(x => x.order)
-            .SelectMany(x => x.grant.DishIds).Distinct().ToArray());
-        var catalog = (await dishes.GetCardDishesAsync(options.Values.SelectMany(ids => ids)
-            .Concat(snapshot.Items.Select(item => item.DishId)).Distinct().ToArray(), ct)).ToDictionary(x => x.Id);
-        var kept = snapshot.Items.Where(item => !itemKeys.Contains(item.ItemKey)).ToArray();
-        // Không chọn lại món đang có trong lịch hoặc món cũ của nguồn để thay đổi vẫn là một lựa chọn mới.
-        var usedIds = kept.Select(item => item.DishId).Concat(sourceItems.Select(item => item.DishId)).ToHashSet();
-        var usedNames = kept.Where(item => catalog.ContainsKey(item.DishId))
-            .Select(item => AgentScopedPlanning.Normalize(catalog[item.DishId].Name)!).ToHashSet(StringComparer.Ordinal);
-        decimal PriceOf(AgentItem item) => catalog.TryGetValue(item.DishId, out var dish) ? dish.Price : 0;
-        // Món lặp có thể được giữ nguyên nên tổng tiền tính cả giá hiện tại của nó; thay món thì trừ giá cũ ra.
-        var total = kept.Sum(PriceOf) + (repeatsOnly ? targets.Sum(PriceOf) : 0);
-        var replacements = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var item in targets)
-        {
-            var current = repeatsOnly ? PriceOf(item) : 0;
-            var fits = options[item.ItemKey].Where(id => catalog.TryGetValue(id, out var dish) && IsPublic(dish) && FitsMeal(dish, item.MealSlot) &&
-                !usedIds.Contains(id) && (!state.MaxPricePerMeal.HasValue || dish.Price <= state.MaxPricePerMeal) &&
-                (state.BudgetAmount is not { } budget || total - current + dish.Price <= budget)).ToArray();
-            // Ưu tiên món khác tên với các món còn lại để lịch không lặp; nếu không có thì lấy món xếp hạng cao nhất hợp lệ.
-            var unusedName = fits.Where(id => !usedNames.Contains(AgentScopedPlanning.Normalize(catalog[id].Name)!)).Select(id => (int?)id).FirstOrDefault();
-            // Sửa món lặp chỉ có ích khi còn món khác tên. Vị trí đã hết lựa chọn thì giữ món cũ và sửa tiếp các vị trí khác,
-            // không bỏ cả lượt sửa chỉ vì một bữa (ví dụ ngày cuối chỉ còn các món đã dùng).
-            if (repeatsOnly && unusedName is null)
-            {
-                usedIds.Add(item.DishId);
-                if (catalog.TryGetValue(item.DishId, out var keptDish)) usedNames.Add(AgentScopedPlanning.Normalize(keptDish.Name)!);
-                continue;
-            }
-            if ((unusedName ?? fits.Select(id => (int?)id).FirstOrDefault()) is not { } replacement) return null;
-            replacements[item.ItemKey] = replacement;
-            usedIds.Add(replacement);
-            usedNames.Add(AgentScopedPlanning.Normalize(catalog[replacement].Name)!);
-            total += catalog[replacement].Price - current;
-        }
-        return replacements.Count == 0 ? null : WithReplacements(snapshot, grants, replacements);
     }
 
     /// <summary>

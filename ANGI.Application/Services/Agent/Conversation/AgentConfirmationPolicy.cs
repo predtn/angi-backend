@@ -44,6 +44,22 @@ public static class AgentConfirmationPolicy
         return state.PendingQuestion is not null && state.PendingPlanningRequest is null && proposal?.Status == "ready" ? AwaitingQuestion : null;
     }
 
+    /// <summary>
+    /// True when the current ready proposal can be saved as the trip now stands: no staged change or planning request waits, and the trip values match the ones it was made for.
+    /// An open clarification does not count, because a wish to save closes it. The model is told this value, and a chat save writes only when it holds.
+    /// </summary>
+    public static bool PlanMatchesTrip(AgentState state, AgentProposalDto? proposal) => proposal is { Status: "ready" } &&
+        state.PendingStateChange is null && state.PendingPlanningRequest is null && AgentConversationRules.SameConstraints(state, proposal.Snapshot.State);
+
+    /// <summary>True when a save wish would save a plan with no start date: nothing is written yet and the model asks which day the trip starts.</summary>
+    public static bool SaveNeedsStartDate(AgentContext context) => PlanMatchesTrip(context.State, context.CurrentProposal) && StartDate(context) is null;
+
+    /// <summary>
+    /// What a save wish the model read does with a plan that matches the trip: commit when the start date is known, otherwise wait for it on the
+    /// proposal's exact version. The date question is the model's to word; the backend only records that it waits.
+    /// </summary>
+    public static AgentSaveDecision SaveWish(AgentContext context, DateOnly today) => StartDate(context) is null ? AskDate(context, today) : new(null, Commit: true);
+
     /// <summary>True when the save question names this exact proposal version, so an answer can never save a different plan.</summary>
     public static bool IsCurrent(AgentPendingSave? pending, AgentProposalDto? proposal) => pending is not null && proposal is { Status: "ready" } &&
         proposal.ProposalId == pending.ProposalId && proposal.Version == pending.ProposalVersion;
@@ -73,22 +89,6 @@ public static class AgentConfirmationPolicy
     public const string StageConfirm = "confirm";
     public const string NotSaved = "Mình chưa lưu nhé. Ưng rồi thì cứ bảo mình chốt.";
 
-    /// <summary>Returns the save step for a message the backend can recognize without the model, or null when the model should read it.</summary>
-    public static AgentSaveDecision? DecideSave(AgentContext context, AgentPendingSave? pending, DateOnly today)
-    {
-        // STEP-01: Prepare content.
-        var content = context.Request.Content;
-        // STEP-02: When a start date is being asked for, use a date written in digits, or ask again when it cannot be read.
-        if (IsCurrent(pending, context.CurrentProposal) && pending!.Stage == StageDate)
-        {
-            if (ReadDate(content, today) is { } answer) return FromAnswer(context, pending, answer, today);
-            if (LooksLikeDate(content))
-                return new("Mình chưa đọc được ngày này. Bạn nhập ngày và tháng giúp mình, ví dụ " + Short(today.AddDays(7)) + " nhé.", pending);
-        }
-        // STEP-03: Return the result of Save when the message is a complete save sentence, otherwise null.
-        return IsSaveRequest(content) ? Save(context, today) : null;
-    }
-
     /// <summary>Carries out what the model read in a reply to the open save question; the question's proposal version was checked before the model was asked.</summary>
     public static AgentSaveDecision AnswerSave(AgentContext context, AgentPendingSave pending, AgentAnswer answer, DateOnly today)
     {
@@ -100,19 +100,6 @@ public static class AgentConfirmationPolicy
         if (answer.Kind == Defer) return new(null, Commit: true);
         // STEP-04: Check a named date like any other, or ask again: agreeing to save does not answer which day.
         return answer.Start is { } start ? FromAnswer(context, pending, new(start, answer.End), today) : AskDate(context, today);
-    }
-
-    /// <summary>A wish to save the model read in the user's wording: since no question named this version yet, it asks first and never commits on its own.</summary>
-    public static AgentSaveDecision RequestSave(AgentContext context, DateOnly today)
-    {
-        // STEP-01: Prepare proposal, then return the new result early when no ready proposal exists.
-        var proposal = context.CurrentProposal;
-        if (proposal?.Status != "ready") return new(AgentReplyBuilder.SaveConfirmation(proposal));
-        // STEP-02: Return the new result early when HasOpenItem(context.State) holds.
-        if (HasOpenItem(context.State)) return new(SaveBlocked(context.State));
-        // STEP-03: Return one of two results depending on StartDate() is missing.
-        return StartDate(context) is null ? AskDate(context, today)
-            : new(AgentReplyBuilder.SaveConfirmation(proposal), new(proposal.ProposalId, proposal.Version, StageConfirm));
     }
 
     /// <summary>An explicit instruction to save: commits a ready proposal once its start date is known, otherwise says what is missing.</summary>
@@ -176,43 +163,9 @@ public static class AgentConfirmationPolicy
 
     private const string Month = @"(?:/|-|\s*thang\s*)(?<{0}>\d{{1,2}})";
     private const string Year = @"(?:(?:/|-|\s*nam\s*)(?<{0}>\d{{4}}|\d{{2}}))?";
-    private static readonly string Joiner = @"\s*(?:-|den|toi)\s*";
-    private static readonly Regex Iso = new(@"\b(?<y>\d{4})-(?<m>\d{1,2})-(?<d>\d{1,2})\b", RegexOptions.CultureInvariant);
-    private static readonly Regex FullRange = new(@"\b(?<d>\d{1,2})" + string.Format(CultureInfo.InvariantCulture, Month, "m") + string.Format(CultureInfo.InvariantCulture, Year, "y") +
-        Joiner + @"(?<d2>\d{1,2})" + string.Format(CultureInfo.InvariantCulture, Month, "m2") + string.Format(CultureInfo.InvariantCulture, Year, "y2") + @"\b", RegexOptions.CultureInvariant);
-    private static readonly Regex SameMonthRange = new(@"\b(?<d>\d{1,2})" + Joiner + @"(?<d2>\d{1,2})" + string.Format(CultureInfo.InvariantCulture, Month, "m") +
-        string.Format(CultureInfo.InvariantCulture, Year, "y") + @"\b", RegexOptions.CultureInvariant);
-    private static readonly Regex Single = new(@"\b(?<d>\d{1,2})" + string.Format(CultureInfo.InvariantCulture, Month, "m") + string.Format(CultureInfo.InvariantCulture, Year, "y") + @"\b", RegexOptions.CultureInvariant);
-    private const string Lead = @"^(?:(?:di|bat dau|khoi hanh|chon|tu|vao|ngay)\s+)*";
-    // Một con số trơ trọi ("5", "ngày 5") có thể là ngày trong tháng hoặc ngày thứ 5 của lịch: hỏi lại, không đoán.
-    private static readonly Regex Ambiguous = new(Lead + @"\d{1,2}(?:\s+(?:nhe|nha|di))*$", RegexOptions.CultureInvariant);
 
     /// <summary>Today's calendar date for a Vietnam-based traveler; stored instants remain UTC.</summary>
     public static DateOnly Today(TimeProvider clock) => DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(7)).DateTime);
-
-    /// <summary>Returns the date the message states, or null when it states none or an impossible one such as 31/2.</summary>
-    public static AgentDateAnswer? ReadDate(string content, DateOnly today)
-    {
-        // STEP-01: Prepare text through Normalize.
-        var text = NormalizeDate(content);
-        // STEP-02: Return one of two results depending on Date() exists early when FullRange.Match() has the expected shape and Date() exists.
-        if (FullRange.Match(text) is { Success: true } full && Date(full, "d", "m", "y", today) is { } fullStart)
-            return Date(full, "d2", "m2", "y2", fullStart) is { } fullEnd ? new(fullStart, fullEnd) : null;
-        // STEP-03: Return one of two results depending on Date() exists early when SameMonthRange.Match() has the expected shape and Date() exists.
-        if (SameMonthRange.Match(text) is { Success: true } range && Date(range, "d", "m", "y", today) is { } rangeStart)
-            return Date(range, "d2", "m", "y", rangeStart) is { } rangeEnd ? new(rangeStart, rangeEnd) : null;
-        // STEP-04: Return one of two results depending on Date() exists early when Iso.Match() has the expected shape.
-        if (Iso.Match(text) is { Success: true } iso) return Date(iso, "d", "m", "y", today) is { } isoDate ? new(isoDate, null) : null;
-        // STEP-05: Return the date when Single.Match() has the expected shape, otherwise null.
-        return Single.Match(text) is { Success: true } single && Date(single, "d", "m", "y", today) is { } date ? new(date, null) : null;
-    }
-
-    /// <summary>True when the message tries to name a date but <see cref="ReadDate"/> could not use it, so asking again beats treating it as a new request.</summary>
-    public static bool LooksLikeDate(string content)
-    {
-        var text = NormalizeDate(content);
-        return Ambiguous.IsMatch(text) || Single.IsMatch(text) || Iso.IsMatch(text) || SameMonthRange.IsMatch(text) || FullRange.IsMatch(text);
-    }
 
     private static DateOnly? Date(Match match, string day, string month, string year, DateOnly notBefore)
     {
@@ -228,27 +181,7 @@ public static class AgentConfirmationPolicy
         return stated is null && date < notBefore && DateOnly.TryParseExact($"{y + 1:D4}-{m:D2}-{d:D2}", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var next) ? next : date;
     }
 
-    private static string NormalizeDate(string text) => Regex.Replace(new string(text.Normalize(NormalizationForm.FormD)
-        .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
-        .Normalize(NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd').Trim().TrimEnd('.', '!', '?'), @"\s+", " ");
-
     // Wording and staged changes
-
-    /// <summary>Recognizes a complete save instruction; negation, quotes, questions and generic yes never commit.</summary>
-    public static bool IsSaveRequest(string content) => Regex.IsMatch(Normalize(content),
-        @"^(?:(?:toi (?:muon|xac nhan)|hay|dong y) )?(?:luu (?:lich trinh|lich|ban nhap|de xuat)(?: nay| hien tai)?|chot (?:lich trinh|lich|de xuat)(?: nay| hien tai)?|xac nhan luu(?: lich trinh| lich)?(?: nay)?|save (?:this )?(?:itinerary|plan))(?: giup toi| cho toi| nhe| di)?$",
-        RegexOptions.CultureInvariant);
-
-    /// <summary>
-    /// Resolves unambiguous draft controls before a provider call; other natural phrases remain model-interpreted.
-    /// Kept as a whole-message match like the save sentence: when the attached roadmap was deleted no context can be built for the model, and the error tells the user to send "làm lại từ đầu".
-    /// </summary>
-    public static string? DraftControl(string content) => Normalize(content) switch
-    {
-        "bo ban nhap" or "bo nhap" or "huy ban nhap" or "bo de xuat" or "bo ban chinh sua" or "discard draft" => "discard",
-        "lam lai tu dau" or "bat dau lai tu dau" or "bat dau ke hoach moi" or "reset" or "start over" => "reset",
-        _ => null
-    };
 
     /// <summary>Names what still blocks saving, so the user is not left guessing which question is meant.</summary>
     public static string SaveBlocked(AgentState state) => state.PendingQuestion is { } question && state.PendingStateChange is null && state.PendingPlanningRequest is null
@@ -303,6 +236,12 @@ public static class AgentConfirmationPolicy
             else if (AgentJson.Write(before[key]) != AgentJson.Write(after[key])) yield return $"đổi yêu cầu món/quán cho {scope}";
         }
     }
+
+    /// <summary>
+    /// Matches the whole message against the reset sentence the ROADMAP_NOT_FOUND error tells the user to send.
+    /// Read only after the attached roadmap was deleted: no context can be built for the model then, so this is the conversation's only way out.
+    /// </summary>
+    public static bool IsResetPhrase(string content) => Normalize(content) is "lam lai tu dau" or "bat dau lai tu dau" or "bat dau ke hoach moi" or "reset" or "start over";
 
     /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>
     private static string Normalize(string content)

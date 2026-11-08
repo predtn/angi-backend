@@ -297,66 +297,7 @@ public sealed class AgentScopedPlanningTests
         (await fixture.Validator.ValidateAsync(tampered, source, true, false, default)).Validation.Errors.Should().NotBeEmpty();
     }
 
-    // TEST-15: A future-only taste answer creates a savable revision that keeps the current dishes without reranking.
-    /// <summary>Ensures a taste change for future suggestions can be saved without rebuilding the current plan.</summary>
-    [Fact]
-    public async Task FutureTasteOnlyAnswer_CreatesSavableRevisionWithoutReranking()
-    {
-        // STEP-01: Create fixture as AgentUseCaseFixture, get source from AgentTestData.Snapshot and get context from AgentTestData.Context.
-        var fixture = new AgentUseCaseFixture();
-        var source = AgentTestData.Snapshot(AgentTestData.Item() with { Price = 50000 });
-        var context = AgentTestData.Context(source); context.Request.Content = "ngày 1 cay rất nhiều, chỉ cho gợi ý sau";
-        // STEP-02: Stub fixture.RunAsync.
-        fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer() with { State = context.State with {
-                PreferenceApplication = "future", TasteOverrides = [new(1, null, [new("spicy", 1, "cay rất nhiều")])] } }));
-        // STEP-03: Get result from fixture.Orchestrator().RunAsync.
-        var result = await fixture.Orchestrator().RunAsync(context, default);
-        // STEP-04: Assert result.Snapshot is not null, result.Snapshot.Items[0].DishId is source.Items[0].DishId and 4 more.
-        result.Snapshot.Should().NotBeNull(); result.Snapshot!.Items[0].DishId.Should().Be(source.Items[0].DishId);
-        result.Snapshot.State.PreferenceApplication.Should().Be("future"); result.State.PendingQuestion.Should().BeNull();
-        context.Grants.Should().BeEmpty(); result.Reply.Should().Contain("gợi ý tiếp theo");
-    }
-
-    // TEST-16: A taste-update answer cannot claim the old proposal was updated when no new proposal was built.
-    /// <summary>Prevents the reply from telling the user a plan changed when it did not.</summary>
-    [Fact]
-    public async Task TasteUpdateAnswer_CannotClaimOldProposalWasUpdated()
-    {
-        // STEP-01: Create fixture as AgentUseCaseFixture and get context from AgentTestData.Context.
-        var fixture = new AgentUseCaseFixture(); var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item())); context.Request.Content = "ngày 1 cay rất nhiều";
-        // STEP-02: Stub fixture.RunAsync.
-        fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Đã cập nhật tất cả") with {
-                State = context.State with { TasteOverrides = [new(1, null, [new("spicy", 1, "cay rất nhiều")])] } }));
-        // STEP-03: Get result from fixture.Orchestrator().RunAsync.
-        var result = await fixture.Orchestrator().RunAsync(context, default);
-        // STEP-04: Assert result.Snapshot is null, result.State.PendingQuestion is not null and result.Reply contains the expected text.
-        result.Snapshot.Should().BeNull(); result.State.PendingQuestion.Should().NotBeNull();
-        result.Reply.Should().Contain("chưa có đề xuất cập nhật").And.NotContain("Đã cập nhật tất cả");
-        // STEP-05: Verify RunAsync is called 2 times.
-        fixture.Llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-    }
-
-    // TEST-17: Provider prose cannot invent user-visible catalog facts; covers answer and clarify actions.
-    /// <summary>Prevents unverified model prose from showing invented restaurant facts to the user.</summary>
-    [Theory]
-    [InlineData("answer")][InlineData("clarify")]
-    public async Task ProviderProse_CannotInventUserVisibleCatalogFacts(string action)
-    {
-        // STEP-01: Create fixture as AgentUseCaseFixture.
-        var fixture = new AgentUseCaseFixture();
-        // STEP-02: Stub fixture.RunAsync.
-        fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentLlmStep([], new() { Action = action, Reply = "Nhà hàng Bịa mở 24/24, miễn phí và chắc chắn không cay.", Clarification = action == "clarify" ? "taste_scope" : null }));
-        // STEP-03: Get result from fixture.Orchestrator().RunAsync.
-        var result = await fixture.Orchestrator().RunAsync(AgentTestData.Context(), default);
-        // STEP-04: Assert result.Reply does not contain the expected text, depending on action == "clarify", result.Reply contains the expected text and 1 more.
-        result.Reply.Should().NotContain("Bịa").And.NotContain("24/24").And.NotContain("miễn phí");
-        if (action == "clarify") result.Reply.Should().Contain("toàn chuyến").And.Contain("ngày/bữa");
-    }
-
-    // TEST-18: Snack requests for day-1 lunch and dinner split that day into meal scopes, keep day 2 whole, and the resulting grants validate a complete plan.
+    // TEST-15: Snack requests for day-1 lunch and dinner split that day into meal scopes, keep day 2 whole, and the resulting grants validate a complete plan.
     /// <summary>Reproduces conversation 16: one broad call must cover meals with different catalog requests without a second model round.</summary>
     [Fact]
     public async Task BroadRecommendation_HeterogeneousDaySplitsIntoMealScopesThatValidate()
@@ -383,7 +324,7 @@ public sealed class AgentScopedPlanningTests
         (await validator.ValidateAsync(plan, null, false, false, default, context.Grants)).Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-19: A split scope with no snack candidates reports zero coverage for those meals while other meals still return; when every meal is empty the call returns no_candidates without grants.
+    // TEST-16: A split scope with no snack candidates reports zero coverage for those meals while other meals still return; when every meal is empty the call returns no_candidates without grants.
     /// <summary>Ensures missing choices are reported per meal from evidence and never hide the meals that do have candidates.</summary>
     [Theory]
     [InlineData(false)][InlineData(true)]
@@ -411,7 +352,7 @@ public sealed class AgentScopedPlanningTests
         }
     }
 
-    // TEST-20: Branches sharing a dish name (ignoring case and spacing) reach reco once, as the first branch in rating order, so reco ranks distinct dishes.
+    // TEST-17: Branches sharing a dish name (ignoring case and spacing) reach reco once, as the first branch in rating order, so reco ranks distinct dishes.
     /// <summary>Prevents hundreds of copies of a few catalog dishes from filling every ranked slot with the same names.</summary>
     [Fact]
     public async Task Recommendation_SameNameBranches_AreRankedOncePerName()
@@ -440,7 +381,7 @@ public sealed class AgentScopedPlanningTests
         sent.Should().Equal(1, 3);
     }
 
-    // TEST-21: Breakfast ranks only main dishes by default, while a drinks-only breakfast request or a side-item search with a category filter ranks drinks without adding the main-dish filter; covers default, drinks-only request and side search.
+    // TEST-18: Breakfast ranks only main dishes by default, while a drinks-only breakfast request or a side-item search with a category filter ranks drinks without adding the main-dish filter; covers default, drinks-only request and side search.
     /// <summary>Answers "if I want only drinks for breakfast, does the Agent push a main dish?": the user's category request always wins.</summary>
     [Theory]
     [InlineData("default")][InlineData("drinks-only")][InlineData("side-search")]
@@ -479,7 +420,7 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Single().Constraints.TagIds.Should().Equal(filter.TagIds);
     }
 
-    // TEST-22: When a trip search is split (day-1 lunch has its own taste), a later part with the same ranking lists names the earlier
+    // TEST-19: When a trip search is split (day-1 lunch has its own taste), a later part with the same ranking lists names the earlier
     // part already offered first at the end, and an earlier one-meal part only reserves its top dish rather than its whole list.
     /// <summary>Keeps days 2..N from receiving the exact candidates of day 1 when their ranking inputs are identical.</summary>
     [Fact]
@@ -507,7 +448,7 @@ public sealed class AgentScopedPlanningTests
         context.Grants.Single(grant => grant.DayNumber == 2).DishIds.Should().Equal(2, 3, 1);
     }
 
-    // TEST-23: Recommendation results carry the trip budget split over the planned meals as a price reference, and none without a budget; covers both.
+    // TEST-20: Recommendation results carry the trip budget split over the planned meals as a price reference, and none without a budget; covers both.
     /// <summary>Gives the model a per-meal price reference so it can pick dishes that fit the trip budget.</summary>
     [Theory]
     [InlineData(true)][InlineData(false)]
@@ -562,7 +503,7 @@ public sealed class AgentScopedPlanningTests
     /// <summary>Builds a get_recommendation tool call from the given input, serialized with the agent JSON options.</summary>
     private static AgentToolCall Recommend(AgentRecommendationInput input) => new("rank", "get_recommendation", JsonSerializer.SerializeToElement(input, AgentJson.Options));
 
-    // TEST-24: Dropped dishes are remembered once, a dish back in the plan is forgotten, the list is bounded and an empty list stays null.
+    // TEST-21: Dropped dishes are remembered once, a dish back in the plan is forgotten, the list is bounded and an empty list stays null.
     /// <summary>Stops repeated "món khác" from cycling back without growing the LLM context without limit.</summary>
     [Fact]
     public void Replaced_TracksDroppedNamesWithinBound()

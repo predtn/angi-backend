@@ -87,6 +87,19 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         };
     }
 
+    /// <summary>
+    /// A state the model returns never blanks a trip fact already known, such as the province, length or start date of the roadmap the chat
+    /// was opened on: the model rewrites the whole state and often leaves out what the user did not repeat. A new value still replaces it.
+    /// </summary>
+    public static AgentState? KeepKnown(AgentState? proposed, AgentState current) => proposed is null ? null : proposed with
+    {
+        Province = string.IsNullOrWhiteSpace(proposed.Province) ? current.Province : proposed.Province,
+        NumDays = proposed.NumDays ?? current.NumDays,
+        StartDate = proposed.StartDate ?? current.StartDate,
+        BudgetAmount = proposed.BudgetAmount ?? (proposed.BudgetUnrestricted ? null : current.BudgetAmount),
+        Title = string.IsNullOrWhiteSpace(proposed.Title) || proposed.Title == new AgentState().Title ? current.Title : proposed.Title
+    };
+
     /// <summary>Initializes only values present in an owned roadmap; an ambiguous province stays unknown.</summary>
     public static AgentState StateFromRoadmap(Domain.Entities.Roadmap roadmap)
     {

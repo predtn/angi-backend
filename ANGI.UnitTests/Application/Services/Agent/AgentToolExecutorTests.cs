@@ -465,7 +465,7 @@ public sealed class AgentToolExecutorTests
     // keeps the taste the model just accepted and never queries the catalog or reco; covers budget, days and province.
     /// <summary>Ensures missing trip values become a user question instead of a contract failure that turns the chat into HTTP 503.</summary>
     [Theory]
-    [InlineData("budget")][InlineData("days")][InlineData("province")]
+    [InlineData("days")][InlineData("province")]
     public async Task ExecuteAsync_TripDetailsMissing_ReturnsNoticeWithoutRanking(string missing)
     {
         // STEP-01: Create fixture through AgentTestData.Validator.
@@ -1150,7 +1150,26 @@ public sealed class AgentToolExecutorTests
         fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-41: A suggestion counts as personalized only when the user has a taste profile and reco confirms ranking with it; covers a real vector, an empty profile, a zero vector, a rating fallback and an unavailable profile.
+    // TEST-41: A relaxed condition the model sends with get_recommendation is applied at once, with nothing staged and no exception that would turn into a fixed backend reply (conversation 223).
+    /// <summary>Keeps the tool path in line with the model's own state, which is applied as written.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RelaxedStateInRecommendation_IsAppliedWithoutStaging()
+    {
+        // STEP-01: Create fixture through AgentTestData.Validator, create tools, and a context whose trip excludes tag 5.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<int>());
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context(); context.State = context.State with { ExcludeTagIds = [5] };
+
+        // STEP-02: Wrap tools.ExecuteAsync with a get_recommendation call that drops the excluded tag in act.
+        var act = () => tools.ExecuteAsync(context, Call(Input() with { State = context.State with { ExcludeTagIds = [] } }), CancellationToken.None);
+
+        // STEP-03: Assert act does not throw, the tag is no longer excluded and no change waits for confirmation.
+        await act.Should().NotThrowAsync();
+        context.State.ExcludeTagIds.Should().BeEmpty(); context.State.PendingStateChange.Should().BeNull();
+    }
+
+    // TEST-42: A suggestion counts as personalized only when the user has a taste profile and reco confirms ranking with it; covers a real vector, an empty profile, a zero vector, a rating fallback and an unavailable profile.
     /// <summary>The model may only say "theo khẩu vị của bạn" when that is what actually happened.</summary>
     [Theory]
     [InlineData("vector", "conversation", true)]
@@ -1186,7 +1205,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion!.Personalized.Should().Be(personalized);
     }
 
-    // TEST-42: With no dish found the tool says so to the model, carries no dish and keeps the fixed line for a failed wording; the ranking service is not asked.
+    // TEST-43: With no dish found the tool says so to the model, carries no dish and keeps the fixed line for a failed wording; the ranking service is not asked.
     /// <summary>Tells the model there is nothing to word, instead of letting it make something up.</summary>
     [Fact]
     public async Task ExecuteAsync_SuggestDishNothingFound_ReportsNothingFound()
@@ -1210,7 +1229,7 @@ public sealed class AgentToolExecutorTests
         reco.Verify(x => x.RecommendConversationAsync(It.IsAny<int>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-43: A place named for a suggestion narrows the search around it inside its province, and the reply is told where it searched.
+    // TEST-44: A place named for a suggestion narrows the search around it inside its province, and the reply is told where it searched.
     /// <summary>Conversation 158 kept suggesting Hai Bà Trưng and Hà Đông to someone who said they live in Cầu Giấy, because the tool could not take a place.</summary>
     [Fact]
     public async Task ExecuteAsync_SuggestDishWithArea_SearchesAroundIt()
@@ -1234,7 +1253,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion.FixedReply.Should().Contain("quanh Cầu Giấy");
     }
 
-    // TEST-44: A place that cannot be located is reported rather than ignored in silence, and a province is no place to search around.
+    // TEST-45: A place that cannot be located is reported rather than ignored in silence, and a province is no place to search around.
     /// <summary>The user must be told the dish is not filtered by what they said.</summary>
     [Theory]
     [InlineData("abcde xyz", "abcde xyz")]
@@ -1257,7 +1276,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion.AreaNotFound.Should().Be(notFound);
     }
 
-    // TEST-45: A dish tagged for one meal says so when the user named no meal, and stays quiet when they named one.
+    // TEST-46: A dish tagged for one meal says so when the user named no meal, and stays quiet when they named one.
     /// <summary>Conversation 158 offered a breakfast-only dish without saying so, and the user replied that they wanted lunch.</summary>
     [Theory]
     [InlineData(null, "bữa sáng")]
@@ -1280,7 +1299,7 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion!.Dishes[0].Meals.Should().Be(meals);
     }
 
-    // TEST-46: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
+    // TEST-47: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
     /// <summary>The model reads the itinerary; where each place is stays the backend's.</summary>
     [Fact]
     public async Task ExecuteAsync_LocatePlaces_StoresDaysAndNote()
@@ -1301,7 +1320,7 @@ public sealed class AgentToolExecutorTests
         context.PlaceNote.Should().Contain("ngày 1 quanh Cầu Giấy");
     }
 
-    // TEST-47: A whole-trip area becomes the search circle; a name nowhere on ANGI is reported as not found and changes nothing.
+    // TEST-48: A whole-trip area becomes the search circle; a name nowhere on ANGI is reported as not found and changes nothing.
     /// <summary>"Cầu Giấy" for the whole trip and a place outside the data take different paths.</summary>
     [Theory]
     [InlineData("Cầu Giấy", "located")]
@@ -1322,7 +1341,7 @@ public sealed class AgentToolExecutorTests
         context.State.Province.Should().Be(status == "located" ? "Hà Nội" : null);
     }
 
-    // TEST-48: Arguments outside the contract go back to the model without changing anything; covers nothing named, no days, a day out of range on each side and a name too long.
+    // TEST-49: Arguments outside the contract go back to the model without changing anything; covers nothing named, no days, a day out of range on each side and a name too long.
     /// <summary>Bad arguments are the model's to fix, and must not fail the turn.</summary>
     [Theory]
     [InlineData("empty")]
@@ -1372,34 +1391,6 @@ public sealed class AgentToolExecutorTests
 
     /// <summary>Builds the suggest_dish call a model makes with no condition.</summary>
     private static AgentToolCall SuggestCall() => new("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: []), AgentJson.Options));
-
-    // TEST-49: A recommendation requested once the trip is settled is held back until the preferences question has been asked.
-    /// <summary>Keeps the order of the questions enforced in the tool, even when the model tries to plan early.</summary>
-    [Fact]
-    public async Task ExecuteAsync_PreferencesDue_ReturnsNoticeWithoutRanking()
-    {
-        // STEP-01: Create fixture through AgentTestData.Validator.
-        // STEP-02: Mock IRecommendationService.
-        var fixture = AgentTestData.Validator(); var reco = new Mock<IRecommendationService>();
-        // STEP-03: Get context from AgentTestData.Context, set context.Request.Content to a test text and 3 more.
-        var context = AgentTestData.Context();
-        context.CatalogProvinces = ["Ho Chi Minh City"];
-        context.Request.Content = "chưa chốt ngân sách";
-        context.State = context.State with { BudgetAmount = null };
-        context.ConstraintBaseline = context.State with { BudgetUnrestricted = true };
-        var input = Input() with { State = context.State with { BudgetUnrestricted = true } };
-        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
-
-        // STEP-04: Run tools.ExecuteAsync with context and keep result.
-        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
-
-        // STEP-05: Assert result.status is "missing_trip_details", context.TripDetailsMissing is true and context.State.BudgetUnrestricted is true.
-        result.GetProperty("status").GetString().Should().Be("missing_trip_details");
-        context.TripDetailsMissing.Should().BeTrue();
-        context.State.BudgetUnrestricted.Should().BeTrue();
-        // STEP-06: Verify GetCandidateIdsAsync is never called.
-        fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
 
     /// <summary>Returns valid strict recommendation arguments with explicit empty lists.</summary>
     private static AgentRecommendationInput Input() => new(null, "Da Nang", "full", null, null, [], [], []);
