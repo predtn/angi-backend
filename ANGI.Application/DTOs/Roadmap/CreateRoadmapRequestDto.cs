@@ -11,4 +11,5 @@ public sealed class CreateRoadmapRequestDto
     public decimal? OriginLatitude { get; set; }
     public decimal? OriginLongitude { get; set; }
     public string? OriginLabel { get; set; }
+    public string? DestinationProvince { get; set; }
 }

@@ -74,4 +74,18 @@ public sealed class UpdateRoadmapRequestDtoValidatorTests
             "Title", "NumDays", "BudgetAmount", "OriginMode", "OriginLatitude", "OriginLongitude", "OriginLabel"
         ]);
     }
+
+    // Destination province: up to 100 characters, null allowed.
+    /// <summary>Verifies the destination province keeps the length of the catalog names.</summary>
+    [Fact]
+    public void Validate_DestinationProvinceLength_ShouldAllowHundredAndRejectMore()
+    {
+        var validator = new UpdateRoadmapRequestDtoValidator();
+        validator.Validate(new UpdateRoadmapRequestDto { DestinationProvince = new string('a', 100) })
+            .Errors.Should().NotContain(error => error.PropertyName == "DestinationProvince");
+        validator.Validate(new UpdateRoadmapRequestDto { DestinationProvince = null })
+            .Errors.Should().NotContain(error => error.PropertyName == "DestinationProvince");
+        validator.Validate(new UpdateRoadmapRequestDto { DestinationProvince = new string('a', 101) })
+            .Errors.Should().Contain(error => error.PropertyName == "DestinationProvince");
+    }
 }

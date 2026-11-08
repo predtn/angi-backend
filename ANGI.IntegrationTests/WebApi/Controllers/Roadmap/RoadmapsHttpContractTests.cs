@@ -153,7 +153,7 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
     {
         // STEP-01: Get request from JsonRequest and attach the bearer token to request.
         using var request = JsonRequest("PATCH", "/api/v1/roadmaps/88", """
-            {"startDate":null,"budgetAmount":null,"originLabel":null}
+            {"startDate":null,"budgetAmount":null,"originLabel":null,"destinationProvince":null}
             """);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token("TRAVELER"));
 
@@ -166,6 +166,8 @@ public sealed class RoadmapsHttpContractTests : IClassFixture<RoadmapApiFactory>
         _factory.Update.LastRequest!.StartDateSpecified.Should().BeTrue();
         _factory.Update.LastRequest.BudgetAmountSpecified.Should().BeTrue();
         _factory.Update.LastRequest.OriginLabelSpecified.Should().BeTrue();
+        _factory.Update.LastRequest.DestinationProvinceSpecified.Should().BeTrue();
+        _factory.Update.LastRequest.TitleSpecified.Should().BeFalse();
     }
 
     // TEST-06: Bind RM-02 query parameters and serialize the complete paged response.

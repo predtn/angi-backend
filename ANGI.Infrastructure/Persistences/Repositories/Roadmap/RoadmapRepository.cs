@@ -89,6 +89,7 @@ public sealed class RoadmapRepository : IRoadmapRepository
                 OriginLatitude = roadmap.OriginLatitude,
                 OriginLongitude = roadmap.OriginLongitude,
                 OriginLabel = roadmap.OriginLabel,
+                DestinationProvince = roadmap.DestinationProvince,
                 CreatedAt = roadmap.CreatedAt,
                 UpdatedAt = roadmap.UpdatedAt
             })

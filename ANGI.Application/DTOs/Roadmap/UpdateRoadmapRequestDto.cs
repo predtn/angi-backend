@@ -13,6 +13,7 @@ public sealed class UpdateRoadmapRequestDto
     private decimal? _originLatitude;
     private decimal? _originLongitude;
     private string? _originLabel;
+    private string? _destinationProvince;
 
     public string? Title { get => _title; set { _title = value; TitleSpecified = true; } }
     public DateOnly? StartDate { get => _startDate; set { _startDate = value; StartDateSpecified = true; } }
@@ -22,6 +23,7 @@ public sealed class UpdateRoadmapRequestDto
     public decimal? OriginLatitude { get => _originLatitude; set { _originLatitude = value; OriginLatitudeSpecified = true; } }
     public decimal? OriginLongitude { get => _originLongitude; set { _originLongitude = value; OriginLongitudeSpecified = true; } }
     public string? OriginLabel { get => _originLabel; set { _originLabel = value; OriginLabelSpecified = true; } }
+    public string? DestinationProvince { get => _destinationProvince; set { _destinationProvince = value; DestinationProvinceSpecified = true; } }
 
     [JsonIgnore] public bool TitleSpecified { get; private set; }
     [JsonIgnore] public bool StartDateSpecified { get; private set; }
@@ -31,4 +33,5 @@ public sealed class UpdateRoadmapRequestDto
     [JsonIgnore] public bool OriginLatitudeSpecified { get; private set; }
     [JsonIgnore] public bool OriginLongitudeSpecified { get; private set; }
     [JsonIgnore] public bool OriginLabelSpecified { get; private set; }
+    [JsonIgnore] public bool DestinationProvinceSpecified { get; private set; }
 }

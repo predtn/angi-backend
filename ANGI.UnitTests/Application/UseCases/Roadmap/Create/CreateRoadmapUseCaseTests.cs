@@ -39,7 +39,8 @@ public sealed class CreateRoadmapUseCaseTests
             OriginMode = "PINNED",
             OriginLatitude = 16.061204m,
             OriginLongitude = 108.227531m,
-            OriginLabel = "  Hotel  "
+            OriginLabel = "  Hotel  ",
+            DestinationProvince = "  Thành phố Đà Nẵng  "
         }, CancellationToken.None);
 
         // STEP-04: Assert captured is not null, captured.UserId is 12, captured.Title is "Three-day trip", captured.OriginMode is RoadmapOriginMode.Pinned and 2 more.
@@ -48,7 +49,9 @@ public sealed class CreateRoadmapUseCaseTests
         captured.Title.Should().Be("Three-day trip");
         captured.OriginMode.Should().Be(RoadmapOriginMode.Pinned);
         captured.OriginLabel.Should().Be("Hotel");
+        captured.DestinationProvince.Should().Be("Thành phố Đà Nẵng");
         captured.Days.Select(day => day.DayNumber).Should().Equal(1, 2, 3);
+        result.Overview.DestinationProvince.Should().Be("Thành phố Đà Nẵng");
         // STEP-05: Assert result.Itinerary.Select(filtered) equals 1, result.Budget.TotalEstimatedCost is 0 and result.Overview.EndDate is a new DateOnly.
         result.Itinerary.Select(day => day.DayNumber).Should().Equal(1, 2, 3);
         result.Budget.TotalEstimatedCost.Should().Be(0);
@@ -78,6 +81,7 @@ public sealed class CreateRoadmapUseCaseTests
         captured.OriginLatitude.Should().BeNull();
         captured.OriginLongitude.Should().BeNull();
         captured.OriginLabel.Should().BeNull();
+        captured.DestinationProvince.Should().BeNull();
     }
 
     // TEST-03: Reject an unauthenticated caller before adding any aggregate.

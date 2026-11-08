@@ -37,6 +37,10 @@ public sealed class CreateRoadmapRequestDtoValidator : AbstractValidator<CreateR
             .MaximumLength(200)
             .WithMessage("Tên điểm xuất phát không được vượt quá 200 ký tự.")
             .When(x => x.OriginLabel is not null);
+        RuleFor(x => x.DestinationProvince)
+            .MaximumLength(100)
+            .WithMessage("Tên tỉnh / thành phố không được vượt quá 100 ký tự.")
+            .When(x => x.DestinationProvince is not null);
         RuleFor(x => x).Custom(ValidateOrigin);
     }
 

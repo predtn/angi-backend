@@ -18,6 +18,7 @@ public sealed class RoadmapSummaryDto
     public decimal? OriginLatitude { get; set; }
     public decimal? OriginLongitude { get; set; }
     public string? OriginLabel { get; set; }
+    public string? DestinationProvince { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

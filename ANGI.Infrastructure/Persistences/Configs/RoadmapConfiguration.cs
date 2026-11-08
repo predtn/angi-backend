@@ -31,6 +31,7 @@ namespace ANGI.Infrastructure.Persistences.Configs
             builder.Property(x => x.OriginLatitude).HasPrecision(9, 6);
             builder.Property(x => x.OriginLongitude).HasPrecision(9, 6);
             builder.Property(x => x.OriginLabel).HasMaxLength(200);
+            builder.Property(x => x.DestinationProvince).HasMaxLength(100);
 
             builder.HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
         }

@@ -17,6 +17,11 @@ namespace ANGI.Domain.Entities
         public decimal? OriginLatitude { get; set; }
         public decimal? OriginLongitude { get; set; }
         public string? OriginLabel { get; set; }
+        /// <summary>
+        /// The province or city the trip goes to, as the traveler chose it from the catalog (or as
+        /// derived from the pinned start); null when unknown. Frames the map and scopes suggestions.
+        /// </summary>
+        public string? DestinationProvince { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public DateTime? DeletedAt { get; set; }

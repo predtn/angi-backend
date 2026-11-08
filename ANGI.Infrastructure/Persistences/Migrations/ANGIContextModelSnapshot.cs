@@ -1932,6 +1932,11 @@ namespace ANGI.Infrastructure.Persistences.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
 
+                    b.Property<string>("DestinationProvince")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("destination_province");
+
                     b.Property<short>("NumDays")
                         .HasColumnType("smallint")
                         .HasColumnName("num_days");
