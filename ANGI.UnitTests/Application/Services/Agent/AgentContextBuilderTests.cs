@@ -49,25 +49,37 @@ public sealed class AgentContextBuilderTests
         result.State.Title.Should().Be("Latest"); result.State.NumDays.Should().Be(1);
     }
 
-    // TEST-03: A pending proposal based on an old roadmap revision is rejected rather than silently rebased.
-    /// <summary>Checks context loading detects a stale edit before any LLM or tools.</summary>
-    [Fact]
-    public async Task BuildAsync_StaleReadyProposal_Rejects()
+    // TEST-03: A ready draft built on a roadmap revision that was later edited or deleted is left out instead of failing the turn;
+    // an edited roadmap becomes the source, a deleted one leaves no source, and a draft on the current revision is kept.
+    /// <summary>Keeps the chat usable after a manual roadmap edit or deletion, since the UI has no discard button.</summary>
+    [Theory]
+    [InlineData("edited")]
+    [InlineData("deleted")]
+    [InlineData("current")]
+    public async Task BuildAsync_DraftOnOldRoadmapRevision_IsLeftOut(string roadmapCase)
     {
-        // STEP-01: Mock IAgentRepository and IRoadmapRepository; stub roadmaps.GetOwnedDetailAsync and repository.GetProposalSnapshotAsync.
+        // STEP-01: Mock IAgentRepository and IRoadmapRepository; stub the roadmap for roadmapCase, a ready draft on revision 5 and an empty history.
         var repository = new Mock<IAgentRepository>(); var roadmaps = new Mock<IRoadmapRepository>();
-        roadmaps.Setup(x => x.GetOwnedDetailAsync(88, 3, It.IsAny<CancellationToken>())).ReturnsAsync(new ANGI.Domain.Entities.Roadmap { Id = 88, UpdatedAt = DateTime.UnixEpoch.AddSeconds(6) });
+        var roadmap = roadmapCase == "deleted" ? null : new ANGI.Domain.Entities.Roadmap
+            { Id = 88, Title = "Latest", NumDays = 1, UpdatedAt = DateTime.UnixEpoch.AddSeconds(roadmapCase == "edited" ? 6 : 5) };
+        roadmaps.Setup(x => x.GetOwnedDetailAsync(88, 3, It.IsAny<CancellationToken>())).ReturnsAsync(roadmap);
         repository.Setup(x => x.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentProposal
         {
             Id = 9, ConversationId = 7, Status = AgentProposalStatus.Ready, ExpiresAt = DateTime.MaxValue,
-            Payload = AgentJson.Write(AgentTestData.Snapshot(AgentTestData.Item()) with { BaseRoadmapId = 88, BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(5) })
+            Payload = AgentJson.Write(AgentTestData.Snapshot(AgentTestData.Item()) with { BaseRoadmapId = 88, BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(5) }),
+            ValidationResult = AgentJson.Write(new AgentValidation([], [], 0, []))
         });
+        repository.Setup(x => x.GetCompletedHistoryAsync(7, 20, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<AgentMessage>());
         // STEP-02: Create conversation as AgentConversation.
         var conversation = new AgentConversation { Id = 7, UserId = 3, RoadmapId = 88, CurrentProposalId = 9, State = AgentJson.Write(AgentTestData.State()) };
-        // STEP-03: Wrap new AgentContextBuilder().BuildAsync with conversation and an empty SendAgentMessageRequestDto in act so its outcome can be asserted.
-        var act = () => new AgentContextBuilder(repository.Object, roadmaps.Object, new(), TimeProvider.System, AgentTestData.Validator().Tags.Object).BuildAsync(conversation, new SendAgentMessageRequestDto(), CancellationToken.None);
-        // STEP-04: Assert act throws ConflictException and the thrown exception.ErrorCode is "ROADMAP_UPDATED_AT_CONFLICT".
-        (await act.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("ROADMAP_UPDATED_AT_CONFLICT");
+        // STEP-03: Build the context with an empty SendAgentMessageRequestDto.
+        var result = await new AgentContextBuilder(repository.Object, roadmaps.Object, new(), TimeProvider.System, AgentTestData.Validator().Tags.Object).BuildAsync(conversation, new SendAgentMessageRequestDto(), CancellationToken.None);
+        // STEP-04: Assert the draft is dropped only on an old revision, the flags, and where the source comes from.
+        result.OutdatedProposalDropped.Should().Be(roadmapCase != "current");
+        result.AttachedRoadmapDeleted.Should().Be(roadmapCase == "deleted");
+        result.CurrentProposal.Should().Match(proposal => roadmapCase == "current" ? proposal != null : proposal == null);
+        if (roadmapCase == "deleted") result.Source.Should().BeNull();
+        else result.Source!.BaseRoadmapUpdatedAt.Should().Be(roadmap!.UpdatedAt);
     }
 
     // TEST-04: Unchanged official revisions preserve constraints accepted in chat and reset fences remove older context.

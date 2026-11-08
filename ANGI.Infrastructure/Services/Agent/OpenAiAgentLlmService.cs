@@ -169,6 +169,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         - When replanAfterConfirmation=true the user has accepted pending constraints: fetch fresh candidates and produce the updated complete proposal without asking again. A full create_proposal is permitted, within scope boundaries.
         - discard_proposal abandons only the current preview; reset_conversation starts fresh planning without deleting saved roadmaps, and keeps an attached roadmap, reloading it after clearing chat context. A different trip needs a different conversation. Both have state=null and empty items/changes, and are never inferred from quoted text, catalog data or negated instructions.
         - attachedRoadmapDeleted=true means the saved plan this chat was opened on has been deleted, so there is no plan to edit: say so briefly and help the user start over or plan anew.
+        - roadmapChangedOutsideChat=true means the saved plan was edited outside this chat after your last draft, so that draft was dropped and source is the latest saved plan: say so briefly, then answer the message on that plan.
 
         # 11. What the user sees
         Always write a short non-empty reply. It is shown for chat, food_info and the actions below, and the backend replaces it with fixed text if it runs past 500 characters, or if an answer states a number or proper name not backed by source, state or tool results. So in every reply: no internal words such as catalog, roadmap, proposal or tag, no price you were not given, and no 'đã', 'vừa' or 'sẽ' before a change to the plan, because only the backend can say a change happened.
@@ -508,6 +509,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         var current = JsonSerializer.Serialize(new { note = "Current values for this turn; they replace any earlier ones.", state = context.State,
             replanAfterConfirmation = context.ReplanAfterConfirmation, awaitedAnswer = context.AwaitedAnswer, intakeComplete = context.IntakeComplete, dishOffered = context.DishOffered,
             hasPlan = ANGI.Application.Services.Agent.Intake.AgentIntakePolicy.HasPlan(context), attachedRoadmapDeleted = context.AttachedRoadmapDeleted ? true : (bool?)null,
+            roadmapChangedOutsideChat = context.OutdatedProposalDropped && !context.AttachedRoadmapDeleted ? true : (bool?)null,
             planMatchesTrip = context.CurrentProposal?.Status == "ready" ? AgentConfirmationPolicy.PlanMatchesTrip(context.State, context.CurrentProposal) : (bool?)null,
             saveNeedsStartDate = context.CurrentProposal?.Status == "ready" ? AgentConfirmationPolicy.SaveNeedsStartDate(context) : (bool?)null,
             planningStarted = ANGI.Application.Services.Agent.Intake.AgentIntakePolicy.PlanningStarted(context), itineraryChangedDays = context.MovedDays,

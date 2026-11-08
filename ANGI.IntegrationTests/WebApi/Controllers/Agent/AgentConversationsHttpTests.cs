@@ -1489,10 +1489,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         alternative.Proposal.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-47: A manual roadmap edit after a preview prevents a later chat save from overwriting that edit.
-    /// <summary>Checks source-revision fencing for the chat confirmation transport.</summary>
+    // TEST-47: A manual roadmap edit after a preview drops that preview: the next message still reaches the model, which is told so,
+    // the stale draft is discarded and a save wish writes nothing over the manual edit.
+    /// <summary>Checks source-revision fencing for the chat save without locking the chat, since the UI has no discard button.</summary>
     [PostgresEndToEndFact]
-    public async Task ChatOnly_ManualRoadmapEdit_BlocksStaleSave()
+    public async Task ChatOnly_ManualRoadmapEdit_DropsStaleDraft()
     {
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host, derive client from scenario.Client and call EnableChatPlanning.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
@@ -1509,11 +1510,15 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         using var manual = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{saved.Commit!.RoadmapId}", new { title = "Keep manual title" });
         // STEP-06: Ensure manual succeeded.
         manual.EnsureSuccessStatusCode();
-        // STEP-07: Send POST {Path}/{conversation.ConversationId}/messages with a body of clientMessageId, expectedConversationVersion and content and keep failed.
-        using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
-            { clientMessageId = 9001, expectedConversationVersion = edit.ConversationVersion, content = "lưu lịch trình này" });
-        // STEP-08: Assert ErrorAsync confirms ROADMAP_UPDATED_AT_CONFLICT.
-        await ErrorAsync(failed, HttpStatusCode.Conflict, "ROADMAP_UPDATED_AT_CONFLICT");
+        // STEP-07: Keep what the model is told, then obtain save through SendChatAsync.
+        var told = new List<bool>();
+        scenario.Llm.Before = (context, _) => { told.Add(context.OutdatedProposalDropped); return Task.CompletedTask; };
+        var save = await SendChatAsync(client, conversation.ConversationId, edit.ConversationVersion, "lưu lịch trình này");
+        // STEP-08: Assert the model was told, nothing was committed or shown, and the stale draft is discarded and detached.
+        told.Should().Equal(true);
+        edit.Proposal.Should().NotBeNull(); save.Commit.Should().BeNull(); save.Proposal.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.AgentProposals.SingleAsync(p => p.Id == edit.Proposal!.ProposalId))).Status.Should().Be(AgentProposalStatus.Discarded);
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).CurrentProposalId.Should().BeNull();
         // STEP-09: Assert in the database factory.ExecuteDbAsync(filtered).Title is "Keep manual title".
         (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).Title.Should().Be("Keep manual title");
     }

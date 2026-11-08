@@ -301,6 +301,14 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         }
         // STEP-06: Prepare previous from repository.GetProposalAsync, created and commitResult.
         var previous = conversation.CurrentProposalId is { } proposalId ? await repository.GetProposalAsync(id, proposalId, ct) : null;
+        // Bản nháp dựng trên bản lịch đã bị sửa tay hay xóa đã bị bỏ khỏi context: bỏ luôn trong DB để UI, GET và lời model nói khớp nhau.
+        if (context?.OutdatedProposalDropped == true && previous?.Status == AgentProposalStatus.Ready)
+        {
+            previous.Status = AgentProposalStatus.Discarded;
+            conversation.CurrentProposalId = null;
+            conversation.CurrentProposal = null;
+            previous = null;
+        }
         AgentProposal? created = null;
         AgentCommitDto? commitResult = null;
         // STEP-07: When prepared.Commit exists, prepare committed through committer.CommitLockedAsync, set commitResult and 1 more action(s).
