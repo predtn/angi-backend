@@ -681,7 +681,7 @@ public sealed class OpenAiAgentLlmServiceTests
             body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Contain("món sở trường của tôi là gì")
                 .And.Contain("never out_of_scope").And.Contain("only when personalized=true").And.Contain("status=nothing_found")
                 .And.Contain("{name1}, {restaurant1}, {price1} and {address1}").And.Contain("means 0.75 for this call only").And.Contain("Outside suggest_dish, a bare preference")
-                .And.Contain("Set count to how many the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} when editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("beside that dish or replace it")
+                .And.Contain("Set count to how many the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} whenever editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("beside that dish or replace it")
                 .And.Contain("gợi ý món theo sở thích của tôi").And.NotContain("The backend answers the user itself");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
@@ -856,7 +856,7 @@ public sealed class OpenAiAgentLlmServiceTests
     /// <summary>Creates the strict response object while keeping every nullable field explicit.</summary>
     private static string Output() => JsonSerializer.Serialize(new { action = "answer", reply = "Explanation", state = (object?)null,
         suggestedDish = (string?)null, clarification = (string?)null, tool = (string?)null, pendingAnswer = (string?)null, answerStartDate = (string?)null, answerEndDate = (string?)null,
-        constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, items = Array.Empty<object>(), changes = Array.Empty<object>(), dishNotes = Array.Empty<object>(), daySummaries = Array.Empty<object>() });
+        constraintsChangeConfirmed = false, baseProposalVersion = (int?)null, scope = new { dayNumber = (short?)null, mealSlot = (string?)null }, editMeals = Array.Empty<object>(), items = Array.Empty<object>(), changes = Array.Empty<object>(), dishNotes = Array.Empty<object>(), daySummaries = Array.Empty<object>() });
     /// <summary>Creates a typed provider client configured with deterministic non-secret credentials.</summary>
     private static OpenAiAgentLlmService Service(HttpMessageHandler handler, string key = "test-key", AgentLimits? limits = null, string model = "configured-model") => new(
         new HttpClient(handler) { BaseAddress = new Uri("https://provider.test/v1/") }, Options.Create(new AiSettings { ApiKey = key, Model = model }), limits ?? new AgentLimits(), TimeProvider.System);

@@ -346,6 +346,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("proposal_unusable", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, output.Scope, reason = error.Message });
                     return new(Raw(output.Reply), context.State, null, null);
                 }
+                if (context.RestoredMeals.Length > 0)
+                    telemetry.Record("out_of_edit_meals_restored", context.ConversationId, context.TurnId, context.AttemptId, new { output.EditMeals, restored = context.RestoredMeals });
                 // STEP-39: When context.Source exists and output.Changes.Any matches the filter, set context.State and set snapshot.
                 // Model xóa một bữa theo yêu cầu người dùng: bữa đó được phép trống, nếu không luật đủ bữa sẽ từ chối đúng điều người dùng vừa yêu cầu.
                 if (context.Source is { } removalSource && output.Changes.Any(change => change.Type == "remove"))

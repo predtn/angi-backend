@@ -380,6 +380,57 @@ public sealed class AgentProposalBuilderTests
         AgentProposalBuilder.PromptSource(context).Should().BeNull();
     }
 
+    // TEST-20: Over a source, a full-scope selection that also changes a meal outside editMeals keeps that meal from the source and records it;
+    // with no editMeals, or an edit staying inside them, nothing is put back (conversation 214).
+    /// <summary>The model reads which meals to change; the backend makes sure no other meal of a saved plan is touched, without rejecting the turn.</summary>
+    [Theory]
+    [InlineData("stray")]
+    [InlineData("inside")]
+    [InlineData("none")]
+    public void Build_EditMeals_KeepsEveryOtherMealFromSource(string area)
+    {
+        // STEP-01: A plan of day 1 breakfast and dinner and day 2 lunch; the user named day 1 dinner and day 2 lunch.
+        var breakfast = AgentTestData.Item(1, "b1", 1, "breakfast");
+        var dinner = AgentTestData.Item(2, "d1", 1, "dinner");
+        var lunch = AgentTestData.Item(3, "l2", 2, "lunch");
+        var context = AgentTestData.Context(AgentTestData.Snapshot(breakfast, dinner, lunch));
+        AgentScope[] edits = area == "none" ? [] : [new(1, "dinner"), new(2, "lunch")];
+
+        // STEP-02: Build a full-scope selection replacing dinner and lunch, and also breakfast unless area is "inside".
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection", EditMeals = edits,
+            Items = [area == "inside" ? breakfast : AgentTestData.Item(7, "b1", 1, "breakfast"), AgentTestData.Item(8, "d1", 1, "dinner"), AgentTestData.Item(9, "l2", 2, "lunch")] });
+
+        // STEP-03: Assert breakfast is kept only when editMeals leave it out, both named meals change, and what was put back is recorded.
+        result.Items.Single(item => item.ItemKey == "b1").DishId.Should().Be(area == "none" ? 7 : 1);
+        result.Items.Single(item => item.ItemKey == "d1").DishId.Should().Be(8);
+        result.Items.Single(item => item.ItemKey == "l2").DishId.Should().Be(9);
+        result.Changes.Should().HaveCount(area == "none" ? 3 : 2);
+        context.RestoredMeals.Should().Equal(area == "stray" ? [new AgentScope(1, "breakfast")] : Array.Empty<AgentScope>());
+    }
+
+    // TEST-21: Candidates fetched per named meal (alternative slot scopes) allow a full-scope output whose editMeals stay inside them, and changes sent
+    // under create_proposal with no items are applied as a patch (conversation 236).
+    /// <summary>Keeps a correct per-meal edit from failing on its action label or on a scope wider than the candidate search.</summary>
+    [Theory]
+    [InlineData("create_proposal")]
+    [InlineData("patch_proposal")]
+    public void Build_PerMealCandidatesWithEditMeals_AcceptsFullScopeEdit(string action)
+    {
+        // STEP-01: A plan of day 1 breakfast and dinner and day 2 lunch, with candidates fetched for day 1 dinner and day 2 lunch only.
+        var breakfast = AgentTestData.Item(1, "b1", 1, "breakfast");
+        var context = AgentTestData.Context(AgentTestData.Snapshot(breakfast, AgentTestData.Item(2, "d1", 1, "dinner"), AgentTestData.Item(3, "l2", 2, "lunch")));
+        context.AlternativeScopes.AddRange([new(1, "dinner"), new(2, "lunch")]);
+
+        // STEP-02: Build replace changes for both named meals under scope full.
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = action, Reply = "Selection", EditMeals = [new(1, "dinner"), new(2, "lunch")],
+            Changes = [new("replace", "d1", AgentTestData.Item(8, "d1", 1, "dinner")), new("replace", "l2", AgentTestData.Item(9, "l2", 2, "lunch"))] });
+
+        // STEP-03: Assert both named meals changed and breakfast stayed.
+        result.Items.Single(item => item.ItemKey == "b1").Should().Be(breakfast);
+        result.Items.Single(item => item.ItemKey == "d1").DishId.Should().Be(8);
+        result.Items.Single(item => item.ItemKey == "l2").DishId.Should().Be(9);
+    }
+
     /// <summary>A plan of three dishes a day, named in order.</summary>
     private static AgentSnapshot Long(int days)
     {
