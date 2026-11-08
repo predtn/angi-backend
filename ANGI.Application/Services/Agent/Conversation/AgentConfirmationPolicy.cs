@@ -237,12 +237,6 @@ public static class AgentConfirmationPolicy
         }
     }
 
-    /// <summary>
-    /// Matches the whole message against the reset sentence the ROADMAP_NOT_FOUND error tells the user to send.
-    /// Read only after the attached roadmap was deleted: no context can be built for the model then, so this is the conversation's only way out.
-    /// </summary>
-    public static bool IsResetPhrase(string content) => Normalize(content) is "lam lai tu dau" or "bat dau lai tu dau" or "bat dau ke hoach moi" or "reset" or "start over";
-
     /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>
     private static string Normalize(string content)
     {

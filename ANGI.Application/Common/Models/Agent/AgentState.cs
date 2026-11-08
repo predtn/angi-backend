@@ -152,6 +152,8 @@ public sealed class AgentContext
     public DTOs.Agent.AgentProposalDto? CurrentProposal { get; init; }
     public List<AgentScope> AlternativeScopes { get; } = [];
     public Domain.Entities.Roadmap? Roadmap { get; init; }
+    /// <summary>Set when the roadmap this conversation was attached to has since been deleted; the model is told so and the turn goes on without it.</summary>
+    public bool AttachedRoadmapDeleted { get; init; }
     public required DTOs.Agent.SendAgentMessageRequestDto Request { get; init; }
     public List<AgentTranscript> History { get; init; } = [];
     /// <summary>Oldest history messages left out of the prompt when the turn would exceed the context limit; History itself stays whole for evidence checks.</summary>

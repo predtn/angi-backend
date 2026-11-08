@@ -136,14 +136,11 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         telemetry.Record("claimed", id, message.TurnId, attemptId);
         try
         {
-            // STEP-30: Prepare prepared, context and control from the button command, or from the reset sentence when the attached roadmap is gone.
-            // Câu "bỏ nháp"/"làm lại" thường do model đọc. Riêng khi roadmap đã bị xóa thì không dựng được context để hỏi model,
-            // và thông báo lỗi ROADMAP_NOT_FOUND chỉ người dùng nhắn đúng câu "làm lại từ đầu", nên chỉ lúc đó backend mới đọc câu này.
+            // STEP-30: Prepare prepared, context and control from the button command.
+            // Chỉ nút bấm đi thẳng; câu "bỏ nháp"/"làm lại" người dùng gõ luôn do model đọc, kể cả khi roadmap đã gắn bị xóa.
             AgentPreparedTurn prepared;
             AgentContext? context = null;
-            var control = request.Command is "discard" or "reset" ? request.Command
-                : AgentConfirmationPolicy.IsResetPhrase(request.Content) && conversation.RoadmapId is { } attachedId
-                    && await roadmaps.GetOwnedDetailAsync(attachedId, userId, ct) is null ? "reset" : null;
+            var control = request.Command is "discard" or "reset" ? request.Command : null;
             // STEP-31: When control is "discard" or "reset", prepare state through AgentJson.Read, check whether control is "reset" and more.
             if (control is "discard" or "reset")
             {
@@ -270,7 +267,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
     private async Task<AgentState> ResetStateAsync(AgentConversation conversation, long sequence, CancellationToken ct)
     {
         // STEP-01: Prepare roadmap from roadmaps.GetOwnedDetailAsync and state from AgentContextBuilder.StateFromRoadmap.
-        // Roadmap đã bị xóa: "làm lại từ đầu" là lối thoát duy nhất của hội thoại này, nên bắt đầu trống thay vì trả 404; FinishAsync gỡ liên kết.
+        // Roadmap đã bị xóa thì bắt đầu trống thay vì trả 404; FinishAsync gỡ liên kết.
         var roadmap = conversation.RoadmapId is { } id ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) : null;
         var state = roadmap is not null ? AgentContextBuilder.StateFromRoadmap(roadmap) : new AgentState();
         // STEP-02: Return a copy of state with updated fields.

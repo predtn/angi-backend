@@ -1992,7 +1992,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
-    // TEST-59: After the attached roadmap is deleted, a message answers 404 naming the way forward, and a reset detaches it and starts empty.
+    // TEST-59: After the attached roadmap is deleted, messages still reach the model, which is told so, and a reset it reads detaches the roadmap and starts empty.
     /// <summary>Verifies through HTTP and PostgreSQL that a conversation whose roadmap was deleted is not left permanently failing.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_RoadmapDeleted_ResetDetachesConversation()
@@ -2009,15 +2009,17 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-04: Ensure deleted succeeded.
         deleted.EnsureSuccessStatusCode();
 
-        // STEP-05: Send POST {Path}/{conversation.ConversationId}/messages with a body of content and keep missing.
-        using var missing = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "đổi bữa trưa ngày 1" });
-        // STEP-06: Obtain reset through SendPromptAsync and current through GetAsync; assert ErrorAsync confirms ROADMAP_NOT_FOUND.
+        // STEP-05: Keep what the model is told, then send an edit and the reset sentence through SendPromptAsync and read current through GetAsync.
+        var told = new List<bool>();
+        scenario.Llm.Before = (context, _) => { told.Add(context.AttachedRoadmapDeleted); return Task.CompletedTask; };
+        await SendPromptAsync(client, conversation.ConversationId, "đổi bữa trưa ngày 1");
         var reset = await SendPromptAsync(client, conversation.ConversationId, "làm lại từ đầu");
         var current = await GetAsync(client, conversation.ConversationId);
 
-        await ErrorAsync(missing, HttpStatusCode.NotFound, "ROADMAP_NOT_FOUND");
-        // STEP-07: Assert reset.Reply starts with the expected text, current.State.Province is null and current.CurrentProposal is null.
-        reset.Reply.Should().StartWith("Đã bắt đầu kế hoạch mới.");
+        // STEP-06: Assert both messages reached the model with attachedRoadmapDeleted set.
+        told.Should().NotBeEmpty().And.OnlyContain(deletedFlag => deletedFlag);
+        // STEP-07: Assert reset.Reply is the model's reply, current.State.Province is null and current.CurrentProposal is null.
+        reset.Reply.Should().Be("Mình làm lại từ đầu nhé.");
         current.State.Province.Should().BeNull(); current.CurrentProposal.Should().BeNull();
         // STEP-08: Assert in the database factory.ExecuteDbAsync(filtered).RoadmapId is null.
         (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).RoadmapId.Should().BeNull();
