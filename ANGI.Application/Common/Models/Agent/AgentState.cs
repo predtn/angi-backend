@@ -83,6 +83,9 @@ public sealed record AgentState
     /// <summary>First transcript sequence eligible for context after a fresh planning reset.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? HistoryStartSequence { get; init; }
+    /// <summary>First transcript sequence shown to the user; set only when an expired conversation is reopened, so a reset hides old messages from the model but not from the chat.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TranscriptStartSequence { get; init; }
 }
 
 /// <summary>Where the traveler is on one day; that day's dishes are searched within the radius around this point.</summary>

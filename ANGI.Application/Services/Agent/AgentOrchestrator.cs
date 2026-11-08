@@ -529,7 +529,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         {
             telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);
             return change.Proposed with { PendingStateChange = context.State.PendingStateChange, SourceRoadmapUpdatedAt = context.State.SourceRoadmapUpdatedAt,
-                HistoryStartSequence = context.State.HistoryStartSequence };
+                HistoryStartSequence = context.State.HistoryStartSequence, TranscriptStartSequence = context.State.TranscriptStartSequence };
         }
     }
 

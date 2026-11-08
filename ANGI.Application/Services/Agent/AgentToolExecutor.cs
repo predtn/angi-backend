@@ -108,7 +108,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 // backend không còn giữ chờ xác nhận và không trả câu cố định "Bạn nhắn “ok” để đổi…" (hội thoại 223).
                 telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);
                 context.State = change.Proposed with { PendingStateChange = context.State.PendingStateChange, SourceRoadmapUpdatedAt = context.State.SourceRoadmapUpdatedAt,
-                    HistoryStartSequence = context.State.HistoryStartSequence };
+                    HistoryStartSequence = context.State.HistoryStartSequence, TranscriptStartSequence = context.State.TranscriptStartSequence };
             }
         }
         // STEP-02: When AgentScopedPlanning.IsLongTrip(context.State) holds, context.State.MealSlots.Length is 0 and context.Source is not { Items.Length: > 0 }, set context.State.

@@ -1286,7 +1286,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-40: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context.
+    // TEST-40: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context from the model but not from the chat.
     /// <summary>Verifies reset preserves its roadmap and excludes pre-reset user messages.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_DiscardAndReset_PreserveSavedRoadmap()
@@ -1305,8 +1305,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-04: Obtain restored through GetAsync; assert reset.Proposal is null.
         reset.Proposal.Should().BeNull();
         var restored = await GetAsync(client, conversation.ConversationId);
-        // STEP-05: Assert restored.State.Province is "Ho Chi Minh City" and restored.State.HistoryStartSequence is greater than 0.
+        // STEP-05: Assert restored.State.Province is "Ho Chi Minh City", restored.State.HistoryStartSequence is greater than 0,
+        // and the chat still shows the pre-reset messages (conversation 232 lost every message after a reset).
         restored.State.Province.Should().Be("Ho Chi Minh City"); restored.State.HistoryStartSequence.Should().BeGreaterThan(0);
+        restored.Messages.Should().Contain(message => message.Content == "Original old planning text");
         // STEP-06: Assert context.Roadmap is not null, context.Source is not null, context.History holds no matching item and SendChatAsync succeeds.
         scenario.Llm.Override = context =>
         {

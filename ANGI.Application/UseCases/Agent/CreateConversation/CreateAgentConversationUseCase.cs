@@ -58,7 +58,7 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                         if (old?.Status == AgentProposalStatus.Ready) old.Status = AgentProposalStatus.Expired;
                     }
                     // STEP-13: Update existing: State, CurrentProposalId, CurrentProposal and Status.
-                    existing.State = AgentJson.Write(state with { HistoryStartSequence = (long)existing.LastMessageSequence + 1 });
+                    existing.State = AgentJson.Write(state with { HistoryStartSequence = (long)existing.LastMessageSequence + 1, TranscriptStartSequence = (long)existing.LastMessageSequence + 1 });
                     existing.CurrentProposalId = null; existing.CurrentProposal = null;
                     existing.Status = AgentConversationStatus.Active;
                     // STEP-14: Call AgentConversationRules.ClearLease.
@@ -80,7 +80,7 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                 // STEP-21: Return the new result.
                 return new(existing.Id, existing.Version, AgentJson.Name(existing.Status), current,
                     AgentConversationRules.Busy(existing, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
-                        x.SequenceNo >= (current.HistoryStartSequence ?? 0)).Select(x => new AgentTranscript(
+                        x.SequenceNo >= (current.TranscriptStartSequence ?? 0)).Select(x => new AgentTranscript(
                             AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToArray(),
                     proposal is null ? null : AgentContextBuilder.MapProposal(proposal)) { Reused = true };
             }

@@ -28,7 +28,7 @@ public sealed class GetAgentConversationUseCase(IAgentRepository repository, ICu
         // STEP-05: Return the new result.
         return new(id, conversation.Version, AgentJson.Name(conversation.Status), AgentJson.Read<AgentState>(conversation.State),
             AgentConversationRules.Busy(conversation, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
-                x.SequenceNo >= (AgentJson.Read<AgentState>(conversation.State).HistoryStartSequence ?? 0))
+                x.SequenceNo >= (AgentJson.Read<AgentState>(conversation.State).TranscriptStartSequence ?? 0))
                 .Select(x => new AgentTranscript(AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToArray(),
             proposal is null ? null : AgentContextBuilder.MapProposal(proposal));
     }

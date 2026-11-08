@@ -271,7 +271,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         var roadmap = conversation.RoadmapId is { } id ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) : null;
         var state = roadmap is not null ? AgentContextBuilder.StateFromRoadmap(roadmap) : new AgentState();
         // STEP-02: Return a copy of state with updated fields.
-        return state with { HistoryStartSequence = sequence };
+        // Reset chỉ cắt lịch sử model đọc; phần chat người dùng thấy vẫn giữ (hội thoại 232 mất hết tin nhắn sau mỗi lần reset).
+        return state with { HistoryStartSequence = sequence, TranscriptStartSequence = AgentJson.Read<AgentState>(conversation.State).TranscriptStartSequence };
     }
 
     /// <summary>Stores a result only while the same unexpired attempt still owns the claimed conversation revision.</summary>

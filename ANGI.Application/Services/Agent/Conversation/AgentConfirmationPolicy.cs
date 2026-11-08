@@ -216,7 +216,7 @@ public static class AgentConfirmationPolicy
             (hasPlan ? " Bản lịch hiện tại chưa thay đổi." : "");
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
             FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,
-            SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
+            SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence, TranscriptStartSequence = current.TranscriptStartSequence };
         // STEP-10: Return the new result.
         return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending, PendingPlanningRequest = null }, null, null);
     }

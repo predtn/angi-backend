@@ -19,7 +19,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         // STEP-01: Prepare stored through AgentJson.Read, state, roadmap from RoadmapMissing, proposal from repository.GetProposalSnapshotAsync and 1 more.
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
-            ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
+            ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence, TranscriptStartSequence = stored.TranscriptStartSequence,
                 Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
                 DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
             : stored;
