@@ -1,6 +1,6 @@
 # ANGI — Git, Commits and Pull Requests
 
-Rules for branches, commits and pull requests in `angi-backend` and `angi-reco`. Every branch, commit and pull request traces back to a Jira task (`ANGI-123`, from `.docs/ANGI_Jira_Plan_Ver*.xlsx`). Commit messages, pull request titles and descriptions are in English.
+Rules for branches, commits and pull requests in `angi-backend` and `angi-reco`. Every branch, commit and pull request traces back to a Jira task (`ANGI-123`, from `docs/ANGI_Jira_Plan_Ver*.xlsx`). Commit messages, pull request titles and descriptions are in English.
 
 ## 1. Branches
 
@@ -47,7 +47,7 @@ Refs: ANGI-12
 | `fix` | A bug fix |
 | `refactor` | Restructured code, same behavior |
 | `test` | Tests only |
-| `docs` | Documentation only (`.docs`, `.agents`, README) |
+| `docs` | Documentation only (`docs`, `.agents`, README) |
 | `chore` | Packages, config, `.gitignore`; adding a package is its own `chore(deps)` commit |
 | `build` | Build system, target framework |
 | `ci` | CI/CD workflows |
@@ -61,8 +61,8 @@ Optional. A change that belongs to one feature uses the module, even across laye
 
 | Repo | Module scopes | Layer / area scopes |
 |---|---|---|
-| angi-backend | `auth`, `account`, `restaurant`, `discovery`, `roadmap`, `social`, `notification`, `moderation`, `administration`, `audit`, `media`, `agent` | `domain`, `application`, `infra`, `webapi`, `test`, `deps`, `.agents`, `.docs` |
-| angi-reco | — | `api`, `db`, `deps`, `.docs` |
+| angi-backend | `auth`, `account`, `restaurant`, `discovery`, `roadmap`, `social`, `notification`, `moderation`, `administration`, `audit`, `media`, `agent` | `domain`, `application`, `infra`, `webapi`, `test`, `deps`, `.agents`, `docs` |
+| angi-reco | — | `api`, `db`, `deps`, `docs` |
 
 ### Subject
 
@@ -86,7 +86,7 @@ Never use `Closes #12`: the team does not use GitHub Issues.
 
 - One commit = one logical change. If the subject needs "and", split it.
 - The commit builds and its tests pass. Run what CI runs:
-  - angi-backend: `dotnet build ANGI.slnx`, `dotnet test ANGI.slnx` with `RUN_POSTGRES_INTEGRATION_TESTS=1` and `ANGI_TEST_POSTGRES_CONNECTION_STRING` set to the local `angi_test` database (README, CI), since CI runs the PostgreSQL tests that are skipped without them, and after any entity or configuration change `dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi`
+  - angi-backend: `dotnet build ANGI.slnx`, `dotnet test ANGI.slnx` with `RUN_POSTGRES_INTEGRATION_TESTS=1` and `ANGI_TEST_POSTGRES_CONNECTION_STRING` set to the local `angi_test` database (`docs/testing.md`, CI), since CI runs the PostgreSQL tests that are skipped without them, and after any entity or configuration change `dotnet ef migrations has-pending-model-changes -p ANGI.Infrastructure -s ANGI.WebApi`
   - angi-reco: `ruff check .`, `ruff format --check .`, `pytest`, and after any model change `alembic check`
 - Nothing generated or secret is staged: `bin/`, `obj/`, `.env`, user secrets, `appsettings.*.local.json`, caches.
 - Do not reformat or reorder whole files. In `appsettings.json`, `.csproj`, `pyproject.toml` only add lines.
@@ -104,4 +104,4 @@ Never use `Closes #12`: the team does not use GitHub Issues.
 - Description starts with `Jira: ANGI-123`, then: what changed, why, how to verify.
 - Merge only with **squash**. The squash body explains why and ends with `Refs: ANGI-123`.
 - A pull request needs green CI (`build-test` in angi-backend, `lint-test` in angi-reco) and one approval. Never merge it yourself.
-- Design document changes (`.docs`) that the code relies on go in the same pull request as the code (`project_architecture.md` §0).
+- Design document changes (`docs`) that the code relies on go in the same pull request as the code (`project_architecture.md` §0).
