@@ -4,7 +4,7 @@ Phiên bản: 1.1
 Ngày cập nhật: 26/10/2026
 Phạm vi: MVP 4 tuần, một Agent trong backend .NET, tái sử dụng Recommendation FastAPI và PostgreSQL hiện tại.
 
-Đây là module mở rộng bắt buộc của task ANGI-231. Tài liệu này chốt hợp đồng context, tools, proposal, confirm và chỉnh sửa roadmap sau khi lưu. API AGENT-01..04, DTO, enum, mã lỗi và ba bảng Agent được bổ sung trong `.docs/ANGI_API_Design_Ver1.8.xlsx` và `.docs/ANGI_Data_Dictionary_Ver1.2.xlsx` cùng thay đổi source. Hai workbook là nguồn quyết định hợp đồng; `.agents/coding_rule.md` và `.agents/project_architecture.md` quy định cách triển khai. Không cần xin lại quyết định bổ sung API/trường thuộc phạm vi Agent đã được yêu cầu.
+Đây là module mở rộng bắt buộc của task ANGI-231. Tài liệu này chốt hợp đồng context, tools, proposal, confirm và chỉnh sửa roadmap sau khi lưu. API AGENT-01..04, DTO, enum, mã lỗi và ba bảng Agent được bổ sung trong `docs/ANGI_API_Design_Ver1.8.xlsx` và `docs/ANGI_Data_Dictionary_Ver1.2.xlsx` cùng thay đổi source. Hai workbook là nguồn quyết định hợp đồng; `.agents/coding_rule.md` và `.agents/project_architecture.md` quy định cách triển khai. Không cần xin lại quyết định bổ sung API/trường thuộc phạm vi Agent đã được yêu cầu.
 
 ## I. Bài toán và quyết định kiến trúc
 
@@ -613,9 +613,9 @@ Người dùng có thể tiếp tục chỉnh proposal hoặc yêu cầu phươn
 
 ## XV. Tài liệu nguồn và phạm vi đồng bộ
 
-- `.docs/ANGI_API_Design_Ver1.8.xlsx`: AGENT-01..04 ở Backend API, Chi tiết Request-Response, DTO, JSON mẫu, Mã lỗi, Enum và UC ↔ API; tái sử dụng RM-08/RM-10/RM-11/RM-14 và RECO-05/RECO-06.
-- `.docs/ANGI_Data_Dictionary_Ver1.2.xlsx`: ba bảng core.agent_*, toàn bộ cột/khóa/CHECK/index và roadmaps.version. Không đổi schema recommendation.
-- `.docs/ANGI_Jira_Plan_Ver1.2.xlsx`: task ANGI-231, nhánh `feat/ANGI-231-agent-roadmap-conversations`, PR vào dev theo `.agents/commit_guide.md`.
+- `docs/ANGI_API_Design_Ver1.8.xlsx`: AGENT-01..04 ở Backend API, Chi tiết Request-Response, DTO, JSON mẫu, Mã lỗi, Enum và UC ↔ API; tái sử dụng RM-08/RM-10/RM-11/RM-14 và RECO-05/RECO-06.
+- `docs/ANGI_Data_Dictionary_Ver1.2.xlsx`: ba bảng core.agent_*, toàn bộ cột/khóa/CHECK/index và roadmaps.version. Không đổi schema recommendation.
+- `docs/ANGI_Jira_Plan_Ver1.2.xlsx`: task ANGI-231, nhánh `feat/ANGI-231-agent-roadmap-conversations`, PR vào dev theo `.agents/commit_guide.md`.
 - `.agents/coding_rule.md` và `.agents/project_architecture.md`: ranh giới layer, DI, ownership, transaction, validation, timestamp, migrations và response envelope.
 
 ID của conversation, proposal, message, roadmap, clientMessageId và attemptId dùng long/bigint; turnId lấy sequence_no của user message trong conversation. Không tạo UUID cho định danh Agent. requestId/reco_request_ids là tham chiếu Recommendation có hợp đồng UUID sẵn có, giữ nguyên để không phá RECO-05/IMP-01. itemKey là khóa tham chiếu ổn định của một dòng preview, không phải khóa chính DB.
@@ -722,7 +722,7 @@ and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
 ## Scoped planning extension
 
 The user-authorized 2026-10-30 `Agent Scoped v2` contract in both design workbooks and
-`.docs/Agent_Scoped_Planning_Ver2.0.md` supersedes overlapping whole-conversation taste and raw reply
+`docs/Agent_Scoped_Planning_Ver2.0.md` supersedes overlapping whole-conversation taste and raw reply
 rules. State carries scoped taste overrides/catalog meal requests in existing JSONB. Baseline,
 trip, day and meal inheritance is backend-owned; reco continues ranking with its current contract.
 Tools additionally allow read-only search_catalog. Named selectors cannot silently substitute;

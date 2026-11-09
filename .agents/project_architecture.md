@@ -8,10 +8,10 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 
 | Document | Decides |
 |---|---|
-| `.docs/ANGI_API_Design_Ver*.xlsx` | Every endpoint (request, response, status, error codes), the internal Reco API, sheet "Mã lỗi" (error codes), sheet "Enum" (allowed values), sample JSON |
-| `.docs/ANGI_Data_Dictionary_Ver*.xlsx` | Every table and column of schemas `core` and `recommendation`, with types, nullability, defaults and CHECKs |
-| `.docs/ANGI_Jira_Plan_Ver*.xlsx` | Task keys (`ANGI-123`) for branches and commits |
-| `angi-reco` repo, `.docs/Recommendation_System_Design_Ver*.docx` | Recommendation algorithm and the backend ↔ reco split |
+| `docs/ANGI_API_Design_Ver*.xlsx` | Every endpoint (request, response, status, error codes), the internal Reco API, sheet "Mã lỗi" (error codes), sheet "Enum" (allowed values), sample JSON |
+| `docs/ANGI_Data_Dictionary_Ver*.xlsx` | Every table and column of schemas `core` and `recommendation`, with types, nullability, defaults and CHECKs |
+| `docs/ANGI_Jira_Plan_Ver*.xlsx` | Task keys (`ANGI-123`) for branches and commits |
+| `angi-reco` repo, `docs/Recommendation_System_Design_Ver*.docx` | Recommendation algorithm and the backend ↔ reco split |
 
 - Implement exactly what the documents say. Before coding an endpoint, read its rows in sheets "Backend API" and "Chi tiết Request-Response"; before touching a table, read it in the Data Dictionary.
 - When the documents are silent, ambiguous or contradict each other, or the work needs something they do not contain (a new error code, enum value, column, endpoint field), stop and ask. The documents are updated first, then the code, in the same pull request.
@@ -108,7 +108,7 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 - Each role reads and writes only its own schema. The backend never maps or queries `recommendation.*`; it asks reco over HTTP.
 - No foreign key crosses schemas. `user_id` / `dish_id` in `recommendation` are `core.users.id` / `core.dishes.id`: never reuse or renumber those ids.
 - `core.audit_logs` is append-only: trigger `trg_audit_logs_append_only` rejects UPDATE, DELETE and TRUNCATE for every role, the owner included. How to write it: `coding_rule.md` §17.
-- Local setup (Docker, roles, connection string): `README.md`.
+- Local setup (Docker, roles, connection string): `README.md` and `docs/local-database.md`; keys: `docs/configuration.md`; deploy: `docs/deploy.md`.
 
 Column, entity and migration rules: `coding_rule.md` §15–16.
 
@@ -270,7 +270,7 @@ and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
 ## Agent scoped planning extension (2026-10-30)
 
 The `Agent Scoped v2` sheets in the API Design/Data Dictionary and
-`.docs/Agent_Scoped_Planning_Ver2.0.md` supersede whole-conversation-only taste rules.
+`docs/Agent_Scoped_Planning_Ver2.0.md` supersede whole-conversation-only taste rules.
 Keep the reco service/API, cold-start, save fencing and commit-only impressions unchanged.
 Baseline -> trip -> day -> meal inheritance is computed in Application from JSONB state;
 no entity/table/migration is added. Catalog meal requests are separate from taste dimensions.
