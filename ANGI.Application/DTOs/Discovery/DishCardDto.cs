@@ -5,6 +5,8 @@ public class DishCardDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    /// <summary>dishes.description, so a list shows it without one DISH-02 per card.</summary>
+    public string? Description { get; set; }
     public decimal Price { get; set; }
     public string? CoverUrl { get; set; }
     public string DishForm { get; set; } = string.Empty;

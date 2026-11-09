@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ANGI.Application.Common.Models;
 using ANGI.Application.DTOs.Discovery;
 using ANGI.Application.DTOs.Restaurant;
 using ANGI.Domain.Entities;
@@ -142,6 +143,33 @@ public sealed class BrowseDishesEndToEndTests : IClassFixture<PostgresApiFactory
     /// (like 100, lunch + soup). A closed and an unverified restaurant each have one dish. Only the four named dishes
     /// are candidates.
     /// </summary>
+    // TEST-06: The cards carry the description (dishes.description, restaurants.description), so a list never needs one
+    // DISH-02 or REST-02 per card to show it; an empty description stays null.
+    /// <summary>Ensures DISH-01 and REST-01 cards return the stored descriptions.</summary>
+    [PostgresEndToEndFact]
+    public async Task Browse_Cards_ShouldCarryTheDescriptions()
+    {
+        var world = await SeedAsync();
+        await _factory.ExecuteDbAsync(async context =>
+        {
+            var dish = await context.Dishes.Include(d => d.Restaurant).SingleAsync(d => d.Id == world.Dish["bunBo"]);
+            dish.Description = "Nước dùng hầm xương 8 tiếng, sả và mắm ruốc";
+            dish.Restaurant.Description = "Quán bún bò gia truyền 30 năm";
+            await context.SaveChangesAsync();
+            return 0;
+        });
+        using var client = _factory.CreateClient();
+
+        var dishes = (await PageAsync(client, "?limit=50")).Items;
+        dishes.Single(d => d.Id == world.Dish["bunBo"]).Description.Should().Be("Nước dùng hầm xương 8 tiếng, sả và mắm ruốc");
+        dishes.Single(d => d.Id == world.Dish["bunRieu"]).Description.Should().BeNull();
+
+        using var response = await client.GetAsync("/api/v1/restaurants?q=Bà Diệu");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var restaurants = (await response.Content.ReadFromJsonAsync<ApiResponse<Paged<RestaurantCardDto>>>())!.Data!.Items;
+        restaurants.Should().ContainSingle().Which.Description.Should().Be("Quán bún bò gia truyền 30 năm");
+    }
+
     private async Task<World> SeedAsync()
     {
         await _factory.ResetDatabaseAsync();

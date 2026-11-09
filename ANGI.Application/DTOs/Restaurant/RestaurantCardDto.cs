@@ -6,6 +6,8 @@ public class RestaurantCardDto
     public long Id { get; init; }
     public string Name { get; init; } = string.Empty;
     public string Slug { get; init; } = string.Empty;
+    /// <summary>restaurants.description, so a list shows it without one REST-02 per card.</summary>
+    public string? Description { get; init; }
     public string? CoverUrl { get; init; }
     public string AddressLine { get; init; } = string.Empty;
     public string? Ward { get; init; }

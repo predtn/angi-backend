@@ -31,7 +31,8 @@ internal static class ModerationMapper
     /// <summary>Maps a reported restaurant to RestaurantCard, including its current Vietnam business hours.</summary>
     internal static RestaurantCardDto ReportRestaurant(Domain.Entities.Restaurant restaurant, TimeProvider clock) => new()
     {
-        Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, CoverUrl = restaurant.CoverMedia?.Url,
+        Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, Description = restaurant.Description,
+        CoverUrl = restaurant.CoverMedia?.Url,
         AddressLine = restaurant.AddressLine, Ward = restaurant.Ward, ProvinceName = restaurant.ProvinceName,
         Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
         RatingAvg = restaurant.RatingAvg, RatingCount = restaurant.RatingCount, OperatingStatus = Api(restaurant.OperatingStatus),
@@ -94,7 +95,7 @@ internal static class ModerationMapper
         var restaurant = item.Restaurant;
         return new ModRestaurantCardDto
         {
-            Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug,
+            Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, Description = restaurant.Description,
             CoverUrl = restaurant.CoverMedia?.Url, AddressLine = restaurant.AddressLine,
             Ward = restaurant.Ward, ProvinceName = restaurant.ProvinceName,
             Latitude = restaurant.Latitude, Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel,
