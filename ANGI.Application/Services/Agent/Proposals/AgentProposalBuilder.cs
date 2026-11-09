@@ -15,6 +15,11 @@ public sealed class AgentProposalBuilder
     {
         // STEP-01: Run ValidateScope.
         ValidateScope(context, output.Scope);
+        // Model đôi khi gửi các thay đổi rời (changes) mà vẫn gắn nhãn create_proposal với items rỗng (hội thoại 236): đó đúng là hình dạng patch_proposal.
+        if (output.Action == "create_proposal" && output.Items is not { Length: > 0 } && output.Changes is { Length: > 0 })
+            output = output with { Action = "patch_proposal", Items = [] };
+        // Bữa được phép đổi: các bữa model khai báo trong editMeals, nếu có; nếu không thì cả scope của output.
+        var edits = output.EditMeals is { Length: > 0 } named && !named.Any(edit => edit == new AgentScope()) ? named : null;
         // STEP-02: Prepare source, original, items through original.ToList and retainedKeys through original.Select(filtered).ToHashSet.
         var source = context.Source;
         var original = source?.Items ?? [];
@@ -30,8 +35,9 @@ public sealed class AgentProposalBuilder
             // STEP-05: Throw the error from Invalid when context.AlternativeScopes.Count > 0, context.Request.Command is not "alternative" and more.
             // A complete scoped selection is a payload shape, not permission to discard the current trip.
             // The backend merges it into the owned source and derives the actual delta below.
+            // Khi có editMeals, đó mới là phạm vi được đổi; ứng viên lấy riêng từng bữa (scope=slot) vẫn đủ cho một output scope full.
             if (context.AlternativeScopes.Count > 0 && context.Request.Command != "alternative" &&
-                !context.AlternativeScopes.Any(scope => scope.Covers(output.Scope)))
+                !(edits ?? [output.Scope]).All(bound => context.AlternativeScopes.Any(scope => scope.Covers(bound))))
                 throw Invalid("Phạm vi đề xuất rộng hơn phạm vi tìm phương án thay thế.");
             // STEP-06: When output.Items exists, prepare supplied, set output and 1 more action(s).
             // Model đôi khi gửi phạm vi hẹp (ví dụ ngày 4) nhưng chép kèm các món ngày khác y nguyên. Bản sao không đổi đó vô hại:
@@ -46,16 +52,30 @@ public sealed class AgentProposalBuilder
                     throw Invalid($"Đề xuất chỉ gồm các món ngoài phạm vi {(output.Scope.DayNumber is { } day ? $"ngày {day}" : "đã chọn")}{(output.Scope.MealSlot is { } slot ? $", bữa {slot}" : "")}. Chỉ gửi món thay thế thuộc đúng phạm vi đó.");
             }
             // STEP-07: Throw the error from Invalid when output.Items is missing, output.Items.Length is 0, output.Changes is missing or 1 more condition(s).
-            if (output.Items is null || output.Items.Length == 0 || output.Changes is null || output.Changes.Length != 0) throw Invalid("Lịch đề xuất không hợp lệ.");
+            // Lý do này là phản hồi cho lần sửa của model (hội thoại 240, 241, 244: model gửi đề xuất không có món nào và lặp lại khi chỉ được báo "không hợp lệ").
+            if (output.Items is null || output.Items.Length == 0)
+                throw Invalid("create_proposal không có món nào. Gửi món mới cho từng bữa cần đổi trong items (dishId từ ứng viên đã được cấp), hoặc dùng patch_proposal với changes replace.");
+            if (output.Changes is null || output.Changes.Length != 0) throw Invalid("create_proposal phải có changes=[]; món mới nằm trong items.");
             // STEP-08: Throw the error from Invalid when Select(filtered).Distinct().ToArray() has the expected shape.
             if (output.Items.Where(item => !output.Scope.Contains(item)).Select(item => $"ngày {item.DayNumber} {AgentReplyBuilder.Meal(item.MealSlot)}")
                 .Distinct().ToArray() is { Length: > 0 } outOfScope)
                 // Phản hồi cụ thể để lần sửa của model biết bỏ món nào, thay vì trả về đề xuất rỗng.
                 throw Invalid($"Món nằm ngoài phạm vi yêu cầu ({string.Join(", ", outOfScope)}). Chỉ gửi các món thuộc phạm vi đã chọn; " +
                     "món ngoài phạm vi được giữ nguyên.");
-            // STEP-09: Throw the error from Invalid when Select(filtered).Distinct().Count() is not output.Items.Length.
+            // STEP-09: Give a fresh key to every repeated item key.
+            // Khóa món chỉ là định danh kỹ thuật: model đôi khi lặp lại một khóa cho hai bữa (hội thoại 238), nên backend đặt khóa mới cho lần lặp
+            // thay vì bỏ cả lịch. Lần xuất hiện đầu giữ khóa cũ để vẫn khớp món nguồn.
             if (output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
-                throw Invalid("Khóa món bị trùng trong đề xuất.");
+            {
+                var taken = output.Items.Select(item => item.ItemKey).Concat(original.Select(item => item.ItemKey)).ToHashSet(StringComparer.Ordinal);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                output = output with { Items = output.Items.Select(item =>
+                {
+                    if (seen.Add(item.ItemKey)) return item;
+                    var fresh = Enumerable.Range(2, int.MaxValue - 2).Select(n => $"{item.DayNumber}-{item.MealSlot}-{n}").First(taken.Add);
+                    return item with { ItemKey = fresh };
+                }).ToArray() };
+            }
             // STEP-10: Prepare replaced through original.Where().ToArray.
             var replaced = original.Where(output.Scope.Contains).ToArray();
             // STEP-11: When context.Request.SelectedItemKey exists, set replaced and throw the error from Invalid when output.Items.Length is not 1 and more.
@@ -99,7 +119,12 @@ public sealed class AgentProposalBuilder
                     continue;
                 }
                 // STEP-20: Add the built entries to items.
-                items.Add(Clean(previous is null ? item : item with { ItemKey = previous.ItemKey }, previous));
+                // Một món mới không khớp khóa nào có thể nhận khóa của món nguồn cùng bữa, trùng với khóa model đặt cho món khác (hội thoại 241): đặt khóa mới.
+                var built = Clean(previous is null ? item : item with { ItemKey = previous.ItemKey }, previous);
+                if (items.Any(existing => existing.ItemKey == built.ItemKey))
+                    built = built with { ItemKey = Enumerable.Range(2, int.MaxValue - 2).Select(n => $"{built.DayNumber}-{built.MealSlot}-{n}")
+                        .First(key => items.All(existing => existing.ItemKey != key) && output.Items.All(other => other.ItemKey != key)) };
+                items.Add(built);
             }
         }
         else if (output.Action == "patch_proposal")
@@ -136,6 +161,22 @@ public sealed class AgentProposalBuilder
             }
         }
         else throw Invalid("Kiểu đề xuất không hợp lệ.");
+
+        // Sửa lịch đã có: model khai báo các bữa nó đọc được là cần đổi (editMeals). Mọi bữa khác lấy lại từ nguồn, kể cả khi model gửi scope full
+        // rồi đổi thêm bữa người dùng không nhắc (hội thoại 214: nhờ đổi tối ngày 1 và trưa ngày 2, bữa sáng ngày 1 cũng bị đổi theo gợi ý cả ngày).
+        // Backend không từ chối: người dùng vẫn nhận bản nháp, chỉ là bữa ngoài danh sách được giữ nguyên.
+        if (original.Length > 0 && edits is not null)
+        {
+            bool Named(AgentItem item) => edits.Any(edit => edit.Contains(item));
+            var kept = original.Where(item => !Named(item)).OrderBy(x => x.ItemKey).ToArray();
+            if (!kept.SequenceEqual(items.Where(item => !Named(item)).OrderBy(x => x.ItemKey)))
+            {
+                context.RestoredMeals = items.Where(item => !Named(item)).Except(kept).Concat(kept.Except(items))
+                    .Select(item => new AgentScope(item.DayNumber, item.MealSlot)).Distinct().ToArray();
+                items = items.Where(Named).Concat(kept).ToList();
+                retainedKeys.UnionWith(kept.Select(item => item.ItemKey));
+            }
+        }
 
         // STEP-21: Prepare outside through Where(filtered).OrderBy(filtered).ToArray.
         var outside = original.Where(item => !output.Scope.Contains(item)).OrderBy(x => x.ItemKey).ToArray();

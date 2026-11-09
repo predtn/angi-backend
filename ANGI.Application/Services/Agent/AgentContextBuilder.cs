@@ -1,4 +1,3 @@
-using ANGI.Application.Common.Exceptions;
 using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
 using ANGI.Application.Common.Interfaces.Repositories.Discovery;
@@ -20,23 +19,24 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         // STEP-01: Prepare stored through AgentJson.Read, state, roadmap from RoadmapMissing, proposal from repository.GetProposalSnapshotAsync and 1 more.
         var stored = AgentJson.Read<AgentState>(conversation.State);
         var state = request.ConfirmedState is { } confirmed
-            ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence,
+            ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence, TranscriptStartSequence = stored.TranscriptStartSequence,
                 Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
                 DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
             : stored;
-        var roadmap = conversation.RoadmapId is { } id
-            ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) ?? throw RoadmapMissing()
-            : null;
+        // Roadmap đã gắn có thể bị xóa hay sửa tay ở trang lịch trong lúc chat còn bản nháp. Lượt này vẫn đi qua model thay vì trả 404/409
+        // (UI không có nút bỏ nháp, nên lỗi sẽ khóa chat tới khi bản nháp hết hạn). Bản nháp dựng trên bản lịch cũ không còn lưu được:
+        // nó bị bỏ khỏi context, FinishAsync đánh dấu Discarded, và model được báo attachedRoadmapDeleted hoặc roadmapChangedOutsideChat.
+        var roadmap = conversation.RoadmapId is { } id ? await roadmaps.GetOwnedDetailAsync(id, conversation.UserId, ct) : null;
+        var roadmapDeleted = conversation.RoadmapId is not null && roadmap is null;
         var proposal = conversation.CurrentProposalId is { } proposalId
             ? await repository.GetProposalSnapshotAsync(conversation.Id, proposalId, ct) : null;
+        var outdated = proposal?.Status == AgentProposalStatus.Ready && AgentJson.Read<AgentSnapshot>(proposal.Payload) is { BaseRoadmapId: not null } based
+            && (roadmap is null || based.BaseRoadmapUpdatedAt != roadmap.UpdatedAt);
+        if (outdated) proposal = null;
         AgentSnapshot? source = null;
         // STEP-02: When proposal.Status is AgentProposalStatus.Ready and proposal.ExpiresAt > clock.GetUtcNow().UtcDateTime, set source and more.
         if (proposal?.Status == AgentProposalStatus.Ready && proposal.ExpiresAt > clock.GetUtcNow().UtcDateTime)
-        {
             source = AgentJson.Read<AgentSnapshot>(proposal.Payload);
-            if (source.BaseRoadmapUpdatedAt.HasValue && source.BaseRoadmapUpdatedAt != roadmap?.UpdatedAt)
-                throw new ConflictException("ROADMAP_UPDATED_AT_CONFLICT", "Lịch vừa thay đổi. Bạn bỏ bản nháp cũ để mình lập lại nhé.");
-        }
         else if (roadmap is not null)
         {
             if (request.ConfirmedState is null && state.SourceRoadmapUpdatedAt != roadmap.UpdatedAt) state = RefreshRoadmapMetadata(state, roadmap);
@@ -56,7 +56,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
             ConversationId = conversation.Id, UserId = conversation.UserId, State = state, Source = source,
             ProposalVersion = proposal?.Status == AgentProposalStatus.Ready ? proposal.ProposalVersion : null,
             CurrentProposal = proposal is null ? null : MapProposal(proposal),
-            Roadmap = roadmap, Request = request,
+            Roadmap = roadmap, AttachedRoadmapDeleted = roadmapDeleted, OutdatedProposalDropped = outdated, Request = request,
             CatalogTags = catalogTags.Select(tag => (object)new { tag.Id, tag.Code, tag.Name, type = AgentJson.Name(tag.TagType) }).ToArray(),
             CatalogTagNames = catalogTags.ToDictionary(tag => tag.Id, tag => tag.Name),
             History = history.Where(x => x.Role != AgentMessageRole.Tool && x.SequenceNo >= (state.HistoryStartSequence ?? 0)).Select(x => new AgentTranscript(
@@ -129,9 +129,6 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var snapshot = AgentJson.Read<AgentSnapshot>(payload);
         return snapshot with { Items = AgentJson.OrderItems(snapshot.Items) };
     }
-
-    /// <summary>Returns the existing ownership-safe roadmap error.</summary>
-    private static NotFoundException RoadmapMissing() => new("ROADMAP_NOT_FOUND", "Lịch của cuộc trò chuyện này không còn nữa. Bạn nhắn ‘làm lại từ đầu’ để lập lịch mới nhé.");
 }
 
 /// <summary>Safe stored message content and per-attempt admission timestamps used by persistent quotas.</summary>

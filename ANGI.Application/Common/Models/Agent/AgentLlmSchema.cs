@@ -59,7 +59,7 @@ public static class AgentLlmSchema
         ["suggestedDish"] = Nullable(Scalar("string")),
         ["clarification"] = Nullable(Choice("trip_details", "place_scope", "preferences", "taste_scope", "taste_intensity", "edit_scope", "novelty", "catalog_choice", "coverage", "catalog_support", "budget", "general")),
         ["state"] = Nullable(State), ["constraintsChangeConfirmed"] = Scalar("boolean"),
-        ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope,
+        ["baseProposalVersion"] = Nullable(Scalar("integer")), ["scope"] = Scope, ["editMeals"] = ArrayOf(Scope),
         ["items"] = ArrayOf(Item), ["changes"] = ArrayOf(Obj(new()
         {
             ["type"] = Choice("add", "replace", "remove", "move"), ["targetItemKey"] = Nullable(Scalar("string")), ["item"] = Nullable(Item)

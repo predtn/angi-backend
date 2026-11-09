@@ -75,17 +75,6 @@ public sealed class AgentChatPolicyTests
         else reply.Should().Be("Bạn cần trả lời câu hỏi hoặc xác nhận thay đổi điều kiện đang chờ trước khi lưu lịch.");
     }
 
-    // TEST-05: Only the whole reset sentence matches, with or without accents, case or a final mark; a longer message, a discard sentence or blank text does not.
-    /// <summary>Keeps the reset sentence of the deleted-roadmap error recognizable without reading any other wording.</summary>
-    [Theory]
-    [InlineData("làm lại từ đầu", true)][InlineData("  Làm lại từ đầu!  ", true)][InlineData("lam lai tu dau.", true)][InlineData("Bắt đầu kế hoạch mới", true)]
-    [InlineData("start over", true)][InlineData("làm lại từ đầu giúp mình đi", false)][InlineData("bỏ bản nháp", false)][InlineData("", false)][InlineData("   ", false)]
-    public void IsResetPhrase_MatchesOnlyTheWholeResetSentence(string content, bool expected)
-    {
-        // STEP-01: Assert AgentConfirmationPolicy.IsResetPhrase(content) equals expected.
-        AgentConfirmationPolicy.IsResetPhrase(content).Should().Be(expected);
-    }
-
     // TEST-06: A ready plan matches the trip it was made for, also with only a clarification open or a different start date; a changed budget, a staged change,
     // a planning request, a plan that is not ready or no plan does not.
     /// <summary>Decides when a chat save may write, and what the model is told before it answers a save wish.</summary>

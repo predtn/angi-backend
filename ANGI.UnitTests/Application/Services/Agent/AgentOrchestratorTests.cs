@@ -1218,6 +1218,77 @@ public sealed class AgentOrchestratorTests
         telemetry.Verify(x => x.Record("reply_replaced", context.ConversationId, context.TurnId, context.AttemptId, It.IsAny<object>()), shown ? Times.Never : Times.Once);
     }
 
+    // TEST-53: A draft the builder cannot use gets one repair call with the reason; a usable repair is shown, a second unusable draft fails with the
+    // controlled error, and the unfilled template reply is never returned (conversations 236 and 238).
+    /// <summary>Keeps "{total}" and "{changes}" from reaching the user when a draft is rejected.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_UnusableDraft_RepairsOnceThenFailsControlled(bool recover)
+    {
+        // STEP-01: A one-meal trip with no source; the first output patches a source that does not exist.
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"], BudgetAmount = 500000 };
+        var context = IntakeContext("lập lịch đi", state);
+        var unusable = new AgentOutput { Action = "patch_proposal", Reply = "Mình đổi {changes} nhé, tổng giờ khoảng {total}.", State = context.State, Scope = new(),
+            Changes = [new("replace", "a", AgentTestData.Item(1, "a"))] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], unusable));
+        llm.Setup(x => x.RunAsync(context, true, It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            context.Grants.Clear();
+            context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), context.State));
+            return Task.FromResult<AgentLlmStep?>(new AgentLlmStep([], recover
+                ? new AgentOutput { Action = "create_proposal", Reply = "Lịch xong rồi nè, tổng khoảng {total}.", State = context.State, Scope = new(), Items = [AgentTestData.Item(1, "a")] }
+                : unusable))!;
+        });
+        var run = () => Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        // STEP-02: Assert a usable repair is shown filled, and a second unusable draft throws ServiceUnavailableException.
+        if (recover) (await run()).Reply.Should().NotContain("{total}").And.NotContain("{changes}");
+        else await run.Should().ThrowAsync<ServiceUnavailableException>();
+        // STEP-03: Verify exactly one repair call carried the rejection reason.
+        llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
+        context.RepairFeedback.Should().NotBeNullOrEmpty();
+    }
+
+    // TEST-54: A new plan whose model output repeats an item key keeps every meal, giving the repeat a fresh key (conversation 238).
+    /// <summary>An item key is only a technical identity, so a repeated one never discards the whole plan.</summary>
+    [Fact]
+    public void Build_RepeatedItemKey_GetsFreshKey()
+    {
+        // STEP-01: A new two-meal plan whose lunch and dinner share the key "a".
+        var context = AgentTestData.Context();
+        var result = new ANGI.Application.Services.Agent.Proposals.AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "x", Scope = new(),
+            Items = [AgentTestData.Item(1, "a", 1, "lunch"), AgentTestData.Item(2, "a", 1, "dinner")] });
+
+        // STEP-02: Assert both meals are kept with distinct keys and the first keeps its key.
+        result.Items.Should().HaveCount(2);
+        result.Items.Select(item => item.ItemKey).Should().OnlyHaveUniqueItems().And.Contain("a");
+    }
+
+    // TEST-55: An empty reply is sent back once for the model to write; a written repair is shown as the model wrote it, a second empty reply fails
+    // with the controlled error, and the backend never puts its own sentence in its place (conversation 239).
+    /// <summary>Keeps every chat reply in the model's words without ever showing an empty message.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_EmptyReply_RepairsOnceThenFailsControlled(bool recover)
+    {
+        // STEP-01: The model answers a chat message with an empty reply, then with a written one only if recover.
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "chat", Reply = "" }));
+        llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "chat", Reply = recover ? "Chào bạn nhé!" : " " }));
+        var context = AgentTestData.Context();
+        var run = () => Create(llm.Object).RunAsync(context, default);
+
+        // STEP-02: Assert the written repair is shown as written, and a second empty reply throws ServiceUnavailableException.
+        if (recover) (await run()).Reply.Should().Be("Chào bạn nhé!");
+        else await run.Should().ThrowAsync<ServiceUnavailableException>();
+        // STEP-03: Verify exactly one repair call.
+        llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     /// <summary>Returns an orchestrator over a catalog of dishes and no ranking, for suggestion turns.</summary>
     private static AgentOrchestrator Suggesting(IAgentLlmService llm, bool intake = false, AgentLimits? limits = null, IAgentTelemetry? telemetry = null, string[]? dishNames = null, bool empty = false)
     {

@@ -216,7 +216,7 @@ public static class AgentConfirmationPolicy
             (hasPlan ? " Bản lịch hiện tại chưa thay đổi." : "");
         var pending = proposed with { PendingStateChange = null, PendingQuestion = null, PendingPlanningRequest = null,
             FocusDay = current.FocusDay, FocusMeal = current.FocusMeal,
-            SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence };
+            SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt, HistoryStartSequence = current.HistoryStartSequence, TranscriptStartSequence = current.TranscriptStartSequence };
         // STEP-10: Return the new result.
         return new(reply, current with { PendingQuestion = reply, PendingStateChange = pending, PendingPlanningRequest = null }, null, null);
     }
@@ -236,12 +236,6 @@ public static class AgentConfirmationPolicy
             else if (AgentJson.Write(before[key]) != AgentJson.Write(after[key])) yield return $"đổi yêu cầu món/quán cho {scope}";
         }
     }
-
-    /// <summary>
-    /// Matches the whole message against the reset sentence the ROADMAP_NOT_FOUND error tells the user to send.
-    /// Read only after the attached roadmap was deleted: no context can be built for the model then, so this is the conversation's only way out.
-    /// </summary>
-    public static bool IsResetPhrase(string content) => Normalize(content) is "lam lai tu dau" or "bat dau lai tu dau" or "bat dau ke hoach moi" or "reset" or "start over";
 
     /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>
     private static string Normalize(string content)

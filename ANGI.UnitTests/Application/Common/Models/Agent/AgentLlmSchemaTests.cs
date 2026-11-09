@@ -129,7 +129,7 @@ public sealed class AgentLlmSchemaTests
     {
         ["action"] = "answer", ["reply"] = "Explanation", ["tool"] = null, ["pendingAnswer"] = null, ["answerStartDate"] = null, ["answerEndDate"] = null, ["suggestedDish"] = null, ["clarification"] = null, ["state"] = null,
         ["constraintsChangeConfirmed"] = false, ["baseProposalVersion"] = null,
-        ["scope"] = new JsonObject { ["dayNumber"] = null, ["mealSlot"] = null },
+        ["scope"] = new JsonObject { ["dayNumber"] = null, ["mealSlot"] = null }, ["editMeals"] = new JsonArray(),
         ["items"] = new JsonArray(), ["changes"] = new JsonArray(), ["dishNotes"] = new JsonArray(), ["daySummaries"] = new JsonArray()
     };
 

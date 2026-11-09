@@ -83,6 +83,9 @@ public sealed record AgentState
     /// <summary>First transcript sequence eligible for context after a fresh planning reset.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? HistoryStartSequence { get; init; }
+    /// <summary>First transcript sequence shown to the user; set only when an expired conversation is reopened, so a reset hides old messages from the model but not from the chat.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TranscriptStartSequence { get; init; }
 }
 
 /// <summary>Where the traveler is on one day; that day's dishes are searched within the radius around this point.</summary>
@@ -152,6 +155,12 @@ public sealed class AgentContext
     public DTOs.Agent.AgentProposalDto? CurrentProposal { get; init; }
     public List<AgentScope> AlternativeScopes { get; } = [];
     public Domain.Entities.Roadmap? Roadmap { get; init; }
+    /// <summary>Set when the roadmap this conversation was attached to has since been deleted; the model is told so and the turn goes on without it.</summary>
+    public bool AttachedRoadmapDeleted { get; init; }
+    /// <summary>Set when the ready draft was built on a roadmap revision that has since been edited or deleted; it was left out and is discarded at the end of the turn.</summary>
+    public bool OutdatedProposalDropped { get; init; }
+    /// <summary>Meals outside the model's editMeals that its output changed and the backend put back from the source this turn.</summary>
+    public AgentScope[] RestoredMeals { get; set; } = [];
     public required DTOs.Agent.SendAgentMessageRequestDto Request { get; init; }
     public List<AgentTranscript> History { get; init; } = [];
     /// <summary>Oldest history messages left out of the prompt when the turn would exceed the context limit; History itself stays whole for evidence checks.</summary>
@@ -262,6 +271,8 @@ public sealed record AgentOutput
     public bool ConstraintsChangeConfirmed { get; init; }
     public int? BaseProposalVersion { get; init; }
     public AgentScope Scope { get; init; } = new();
+    /// <summary>The days and meals the model read as the ones to change when editing an existing plan; the backend keeps every other meal from the source.</summary>
+    public AgentScope[]? EditMeals { get; init; } = [];
     public AgentItem[] Items { get; init; } = [];
     public AgentChange[] Changes { get; init; } = [];
     public AgentDishNote[]? DishNotes { get; init; } = [];

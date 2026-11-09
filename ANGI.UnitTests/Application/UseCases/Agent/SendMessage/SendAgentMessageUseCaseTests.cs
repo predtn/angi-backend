@@ -70,7 +70,7 @@ public sealed class SendAgentMessageUseCaseTests
     }
 
     /// <summary>A model turn that only reports how it read the reply to the open question.</summary>
-    private static AgentLlmStep Answered(string reading) => new([], new AgentOutput { Action = "answer", Reply = "", PendingAnswer = reading });
+    private static AgentLlmStep Answered(string reading) => new([], new AgentOutput { Action = "answer", Reply = "Ừ, mình làm theo nhé.", PendingAnswer = reading });
 
     /// <summary>Creates a ready, unexpired proposal entity for conversation 7 that wraps the given snapshot.</summary>
     private static ANGI.Domain.Entities.AgentProposal ReadyProposal(long id, AgentSnapshot snapshot) => new()
@@ -411,31 +411,29 @@ public sealed class SendAgentMessageUseCaseTests
         AgentJson.Read<AgentState>(fixture.Conversation.State).DishOffered.Should().Be(kept ? true : null);
     }
 
-    // TEST-17: With the attached roadmap deleted, the exact reset sentence resets with no model call and detaches the roadmap, while any other message still answers 404 ROADMAP_NOT_FOUND.
-    /// <summary>Keeps the deleted-roadmap error's own way out working now that draft sentences are otherwise read by the model.</summary>
+    // TEST-17: With the attached roadmap deleted, every message still reaches the model, which is told so; only a reset it reads detaches the roadmap.
+    /// <summary>No sentence is matched by the backend: the model reads "làm lại từ đầu" like any other wording.</summary>
     [Theory]
-    [InlineData("Làm lại từ đầu", true)]
-    [InlineData("đổi bữa trưa ngày 1", false)]
-    public async Task ExecuteAsync_AttachedRoadmapDeleted_OnlyResetSentenceEscapes(string content, bool escapes)
+    [InlineData("Làm lại từ đầu", "reset_conversation")]
+    [InlineData("đổi bữa trưa ngày 1", "chat")]
+    public async Task ExecuteAsync_AttachedRoadmapDeleted_ModelReadsEveryMessage(string content, string action)
     {
-        // STEP-01: Attach roadmap 41 to the conversation and make GetOwnedDetailAsync report it as missing.
+        // STEP-01: Attach roadmap 41, make GetOwnedDetailAsync report it as missing and keep what the model is told.
         var fixture = new AgentUseCaseFixture(); fixture.Conversation.RoadmapId = 41;
         fixture.Roadmaps.Setup(x => x.GetOwnedDetailAsync(41, 3, It.IsAny<CancellationToken>())).ReturnsAsync((ANGI.Domain.Entities.Roadmap?)null);
+        var told = new List<bool>();
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((context, _, _) => told.Add(context.AttachedRoadmapDeleted))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "Lịch cũ đã bị xóa, mình làm lại từ đầu nhé." }));
         var request = Request(); request.Content = content;
 
-        // STEP-02: Wrap Create().ExecuteAsync in act so its outcome can be asserted.
-        var act = () => Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-02: Run Create().ExecuteAsync with request.
+        var turn = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
 
-        // STEP-03: Assert the reset sentence returns the reset reply and detaches the roadmap, and other text throws ROADMAP_NOT_FOUND.
-        if (escapes)
-        {
-            (await act()).Reply.Should().StartWith("Đã bắt đầu kế hoạch mới.");
-            fixture.Conversation.RoadmapId.Should().BeNull();
-        }
-        else (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
-
-        // STEP-04: Verify the model is never called.
-        fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        // STEP-03: Assert the model was told the roadmap is gone, its reply is shown, and only its reset detaches the roadmap.
+        told.Should().Equal(true);
+        turn.Reply.Should().Be("Lịch cũ đã bị xóa, mình làm lại từ đầu nhé.");
+        fixture.Conversation.RoadmapId.Should().Be(action == "reset_conversation" ? null : 41);
     }
 
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),

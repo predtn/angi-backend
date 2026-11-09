@@ -1286,7 +1286,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
     }
 
-    // TEST-40: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context.
+    // TEST-40: Discard and reset operate through text alone, preserve the official roadmap and fence old chat context from the model but not from the chat.
     /// <summary>Verifies reset preserves its roadmap and excludes pre-reset user messages.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_DiscardAndReset_PreserveSavedRoadmap()
@@ -1305,8 +1305,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-04: Obtain restored through GetAsync; assert reset.Proposal is null.
         reset.Proposal.Should().BeNull();
         var restored = await GetAsync(client, conversation.ConversationId);
-        // STEP-05: Assert restored.State.Province is "Ho Chi Minh City" and restored.State.HistoryStartSequence is greater than 0.
+        // STEP-05: Assert restored.State.Province is "Ho Chi Minh City", restored.State.HistoryStartSequence is greater than 0,
+        // and the chat still shows the pre-reset messages (conversation 232 lost every message after a reset).
         restored.State.Province.Should().Be("Ho Chi Minh City"); restored.State.HistoryStartSequence.Should().BeGreaterThan(0);
+        restored.Messages.Should().Contain(message => message.Content == "Original old planning text");
         // STEP-06: Assert context.Roadmap is not null, context.Source is not null, context.History holds no matching item and SendChatAsync succeeds.
         scenario.Llm.Override = context =>
         {
@@ -1489,10 +1491,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         alternative.Proposal.Validation.Errors.Should().BeEmpty();
     }
 
-    // TEST-47: A manual roadmap edit after a preview prevents a later chat save from overwriting that edit.
-    /// <summary>Checks source-revision fencing for the chat confirmation transport.</summary>
+    // TEST-47: A manual roadmap edit after a preview drops that preview: the next message still reaches the model, which is told so,
+    // the stale draft is discarded and a save wish writes nothing over the manual edit.
+    /// <summary>Checks source-revision fencing for the chat save without locking the chat, since the UI has no discard button.</summary>
     [PostgresEndToEndFact]
-    public async Task ChatOnly_ManualRoadmapEdit_BlocksStaleSave()
+    public async Task ChatOnly_ManualRoadmapEdit_DropsStaleDraft()
     {
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host, derive client from scenario.Client and call EnableChatPlanning.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
@@ -1509,11 +1512,15 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         using var manual = await client.PatchAsJsonAsync($"/api/v1/roadmaps/{saved.Commit!.RoadmapId}", new { title = "Keep manual title" });
         // STEP-06: Ensure manual succeeded.
         manual.EnsureSuccessStatusCode();
-        // STEP-07: Send POST {Path}/{conversation.ConversationId}/messages with a body of clientMessageId, expectedConversationVersion and content and keep failed.
-        using var failed = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new
-            { clientMessageId = 9001, expectedConversationVersion = edit.ConversationVersion, content = "lưu lịch trình này" });
-        // STEP-08: Assert ErrorAsync confirms ROADMAP_UPDATED_AT_CONFLICT.
-        await ErrorAsync(failed, HttpStatusCode.Conflict, "ROADMAP_UPDATED_AT_CONFLICT");
+        // STEP-07: Keep what the model is told, then obtain save through SendChatAsync.
+        var told = new List<bool>();
+        scenario.Llm.Before = (context, _) => { told.Add(context.OutdatedProposalDropped); return Task.CompletedTask; };
+        var save = await SendChatAsync(client, conversation.ConversationId, edit.ConversationVersion, "lưu lịch trình này");
+        // STEP-08: Assert the model was told, nothing was committed or shown, and the stale draft is discarded and detached.
+        told.Should().Equal(true);
+        edit.Proposal.Should().NotBeNull(); save.Commit.Should().BeNull(); save.Proposal.Should().BeNull();
+        (await factory.ExecuteDbAsync(db => db.AgentProposals.SingleAsync(p => p.Id == edit.Proposal!.ProposalId))).Status.Should().Be(AgentProposalStatus.Discarded);
+        (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).CurrentProposalId.Should().BeNull();
         // STEP-09: Assert in the database factory.ExecuteDbAsync(filtered).Title is "Keep manual title".
         (await factory.ExecuteDbAsync(db => db.Roadmaps.SingleAsync())).Title.Should().Be("Keep manual title");
     }
@@ -1992,7 +1999,7 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(1);
     }
 
-    // TEST-59: After the attached roadmap is deleted, a message answers 404 naming the way forward, and a reset detaches it and starts empty.
+    // TEST-59: After the attached roadmap is deleted, messages still reach the model, which is told so, and a reset it reads detaches the roadmap and starts empty.
     /// <summary>Verifies through HTTP and PostgreSQL that a conversation whose roadmap was deleted is not left permanently failing.</summary>
     [PostgresEndToEndFact]
     public async Task ChatOnly_RoadmapDeleted_ResetDetachesConversation()
@@ -2009,15 +2016,17 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-04: Ensure deleted succeeded.
         deleted.EnsureSuccessStatusCode();
 
-        // STEP-05: Send POST {Path}/{conversation.ConversationId}/messages with a body of content and keep missing.
-        using var missing = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", new { content = "đổi bữa trưa ngày 1" });
-        // STEP-06: Obtain reset through SendPromptAsync and current through GetAsync; assert ErrorAsync confirms ROADMAP_NOT_FOUND.
+        // STEP-05: Keep what the model is told, then send an edit and the reset sentence through SendPromptAsync and read current through GetAsync.
+        var told = new List<bool>();
+        scenario.Llm.Before = (context, _) => { told.Add(context.AttachedRoadmapDeleted); return Task.CompletedTask; };
+        await SendPromptAsync(client, conversation.ConversationId, "đổi bữa trưa ngày 1");
         var reset = await SendPromptAsync(client, conversation.ConversationId, "làm lại từ đầu");
         var current = await GetAsync(client, conversation.ConversationId);
 
-        await ErrorAsync(missing, HttpStatusCode.NotFound, "ROADMAP_NOT_FOUND");
-        // STEP-07: Assert reset.Reply starts with the expected text, current.State.Province is null and current.CurrentProposal is null.
-        reset.Reply.Should().StartWith("Đã bắt đầu kế hoạch mới.");
+        // STEP-06: Assert both messages reached the model with attachedRoadmapDeleted set.
+        told.Should().NotBeEmpty().And.OnlyContain(deletedFlag => deletedFlag);
+        // STEP-07: Assert reset.Reply is the model's reply, current.State.Province is null and current.CurrentProposal is null.
+        reset.Reply.Should().Be("Mình làm lại từ đầu nhé.");
         current.State.Province.Should().BeNull(); current.CurrentProposal.Should().BeNull();
         // STEP-08: Assert in the database factory.ExecuteDbAsync(filtered).RoadmapId is null.
         (await factory.ExecuteDbAsync(db => db.AgentConversations.SingleAsync(x => x.Id == conversation.ConversationId))).RoadmapId.Should().BeNull();

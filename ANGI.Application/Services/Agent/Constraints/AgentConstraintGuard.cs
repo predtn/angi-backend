@@ -109,10 +109,10 @@ public sealed class AgentConstraintGuard
         if (relaxed) throw new AgentStateChangeRequiredException(proposed);
         // STEP-17: Return proposed early when proposed.PendingStateChange is current.PendingStateChange and more.
         if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapUpdatedAt == current.SourceRoadmapUpdatedAt &&
-            proposed.HistoryStartSequence == current.HistoryStartSequence) return proposed;
+            proposed.HistoryStartSequence == current.HistoryStartSequence && proposed.TranscriptStartSequence == current.TranscriptStartSequence) return proposed;
         // STEP-18: Return a copy of proposed with updated fields.
         return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt,
-            HistoryStartSequence = current.HistoryStartSequence };
+            HistoryStartSequence = current.HistoryStartSequence, TranscriptStartSequence = current.TranscriptStartSequence };
     }
 
     // Taste evidence
