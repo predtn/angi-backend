@@ -17,6 +17,7 @@ public sealed class AgentNamedRequestPolicyTests
     [InlineData("nhất định phải có món Bún Chả")]
     [InlineData("Lập lịch 3 ngày")]
     [InlineData("ngày 2 có món Bún Chả nhé")]
+    [InlineData("Đi Hà Nội 2 ngày, 1 triệu cả chuyến, phải có món Bún Chả")]
     public void Placeable_NoEveryMealWording_ReturnsRequest(string message)
     {
         // STEP-01: Create request as AgentMealRequest.

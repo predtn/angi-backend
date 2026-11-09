@@ -255,7 +255,8 @@ public sealed class AgentConstraintGuard
     /// <summary>The dish/restaurant requests wider than a meal whose wording does not ask for every meal.</summary>
     public static AgentMealRequest[] PlaceableRequests(AgentState state, IEnumerable<string> messages)
     {
-        var texts = messages.Select(Normalize).ToArray();
+        // Each clause is read on its own: in "1 triệu cả chuyến, phải có món Bún chả" the "cả chuyến" belongs to the budget, not to the dish.
+        var texts = messages.SelectMany(message => Regex.Split(message, @"[,.;!?\n]+")).Select(Normalize).ToArray();
         return state.MealRequests.Where(request => request.MealSlot is null && (request.DishName ?? request.RestaurantName) is { } name &&
             !texts.Any(text => text.Contains(Normalize(name), StringComparison.Ordinal) && Regex.IsMatch(text, EveryMeal, RegexOptions.CultureInvariant))).ToArray();
     }
