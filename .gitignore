@@ -83,5 +83,8 @@ coverage*.json
 /artifacts/
 
 # Scraped source data: never commit (local seed input only)
-.docs/shopeefood_clean.xlsx
+docs/shopeefood_clean.xlsx
 *shopeefood*.xlsx
+
+# macOS/IDE per-user data written into the repo (device id)
+/Library/
