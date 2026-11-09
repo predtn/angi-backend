@@ -190,7 +190,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.Grants.AddRange(context.ReserveGrants);
                     context.ReserveGrants.Clear();
                     telemetry.Record("long_trip_assembled", context.ConversationId, context.TurnId, context.AttemptId, new { days = context.State.NumDays, items = longPlan.Items.Length });
-                    step = new([], longPlan, step.Tokens);
+                    // No model call writes this turn's words, so it gets the prompt's own new-plan template; the backend fills its slots as for any draft.
+                    step = new([], longPlan with { Reply = LongTripReply }, step.Tokens);
                     assembled = true;
                 }
                 // STEP-24: Prepare output.
@@ -537,6 +538,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         context.IntakeComplete = context.State.PlanningIntake == AgentIntakePolicy.Preferences;
         return null;
     }
+
+    /// <summary>Same wording as the new-plan template in the system prompt; slots are filled after validation.</summary>
+    internal const string LongTripReply = "Lịch {numDays} ngày ở {place} xong rồi nè, tổng khoảng {total}. Bạn xem thử, ưng thì bảo mình chốt nhé!";
 
     // THÍ NGHIỆM: người dùng chỉ thấy câu model viết, kể cả khi nó rỗng; backend không có câu nào của riêng nó.
     private static string Raw(string? reply) => (reply ?? "").Trim();
