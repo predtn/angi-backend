@@ -90,7 +90,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-01: Return the result of ArgumentError early when AgentConstraintGuard.UnbackedTastes() has items, otherwise when context.ReplanAfterConfirmation is false, set context.State.
         // Mức khẩu vị người dùng chưa nói thì chưa được xếp hạng: model phải hỏi lại, không được tự chọn một con số.
         if (AgentConstraintGuard.UnbackedTastes(context, input.State) is { Length: > 0 } unbacked)
-            return ArgumentError(context, $"Mức của {string.Join(", ", unbacked)} chưa có nguyên văn người dùng trong levelQuote. Nếu họ chưa nêu mức, hãy hỏi lại (clarification=taste_intensity), không xếp hạng.");
+            return ArgumentError(context, $"Mức của {string.Join(", ", unbacked)} chưa có nguyên văn người dùng trong levelQuote. Nếu họ chưa nêu mức, hãy hỏi lại mức (clarification=taste_intensity), hỏi luôn cả phạm vi (cả chuyến, một ngày hay một bữa) nếu họ cũng chưa nêu, không xếp hạng.");
         // Ngân sách mới chưa có nguyên văn người dùng thì chưa được dùng để chọn món.
         if (AgentConstraintGuard.HasUnbackedBudget(context, input.State))
             return ArgumentError(context, "budgetAmount cần budgetQuote là nguyên văn người dùng đã viết và đúng cỡ số tiền họ nêu. Nếu họ chưa nêu ngân sách, giữ nguyên giá trị cũ.");
