@@ -6,6 +6,14 @@ namespace ANGI.WebApi.Configs
 
         public int GeneralPermitLimit { get; set; } = 100;
         public int GeneralWindowSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// GET and HEAD requests have their own, larger budget: lists, searches and filters are reads, and a page
+        /// refreshed or filtered several times must not use up the budget of the writes (or, behind one shared IP,
+        /// of every guest on that network).
+        /// </summary>
+        public int ReadPermitLimit { get; set; } = 300;
+        public int ReadWindowSeconds { get; set; } = 60;
         public int LoginPermitLimit { get; set; } = 5;
         public int LoginWindowMinutes { get; set; } = 15;
         public int SensitiveAuthPermitLimit { get; set; } = 1;

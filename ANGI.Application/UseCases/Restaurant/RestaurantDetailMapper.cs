@@ -66,6 +66,7 @@ internal static class RestaurantDetailMapper
         {
             Id = dish.Id,
             Name = dish.Name,
+            Description = dish.Description,
             Price = dish.Price,
             CoverUrl = dish.CoverMedia?.Url,
             DishForm = ToApiValue(dish.DishForm),

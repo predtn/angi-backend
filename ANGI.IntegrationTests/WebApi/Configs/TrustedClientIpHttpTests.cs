@@ -101,6 +101,62 @@ public sealed class TrustedClientIpHttpTests
         otherVisitor.Should().NotBe(HttpStatusCode.TooManyRequests);
     }
 
+    // TEST-06: Reads and writes have separate budgets: a visitor who used up the reads (a list refreshed or filtered
+    // many times) can still write, and the other way round.
+    /// <summary>Verifies GET requests use the read budget and other methods the general one.</summary>
+    [Fact]
+    public async Task ReadsAndWrites_ShouldHaveSeparateBudgets()
+    {
+        await using var factory = new TrustedClientIpApiFactory(ProxyKey);
+        using var client = factory.CreateClient();
+
+        var reads = await StatusesAsync(client, ProxyKey, "198.51.100.1", 3);
+        var writes = new List<HttpStatusCode>();
+        for (var index = 0; index < 3; index++)
+        {
+            writes.Add(await InvalidLoginAsync(client, "198.51.100.1"));
+        }
+
+        var readsOfAnotherVisitor = await StatusesAsync(client, ProxyKey, "198.51.100.2", 1);
+
+        reads.Take(2).Should().NotContain(HttpStatusCode.TooManyRequests);
+        reads[2].Should().Be(HttpStatusCode.TooManyRequests);
+        writes.Take(2).Should().NotContain(HttpStatusCode.TooManyRequests);
+        writes[2].Should().Be(HttpStatusCode.TooManyRequests);
+        readsOfAnotherVisitor[0].Should().NotBe(HttpStatusCode.TooManyRequests);
+    }
+
+    // TEST-07: Using up the writes leaves the reads untouched.
+    /// <summary>Verifies the read budget is not spent by writes.</summary>
+    [Fact]
+    public async Task Writes_ShouldNotSpendTheReadBudget()
+    {
+        await using var factory = new TrustedClientIpApiFactory(ProxyKey);
+        using var client = factory.CreateClient();
+
+        for (var index = 0; index < 3; index++)
+        {
+            await InvalidLoginAsync(client, "198.51.100.3");
+        }
+
+        var reads = await StatusesAsync(client, ProxyKey, "198.51.100.3", 2);
+
+        reads.Should().NotContain(HttpStatusCode.TooManyRequests);
+    }
+
+    /// <summary>Posts a login that fails validation (no database needed) as the given visitor IP.</summary>
+    private static async Task<HttpStatusCode> InvalidLoginAsync(HttpClient client, string clientIp)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/login")
+        {
+            Content = JsonContent.Create(new { email = "not-an-email", password = "" })
+        };
+        request.Headers.Add("X-Angi-Proxy-Key", ProxyKey);
+        request.Headers.Add("X-Angi-Client-Ip", clientIp);
+        using var response = await client.SendAsync(request);
+        return response.StatusCode;
+    }
+
     /// <summary>Posts forgot-password for the email as the given visitor IP and returns the status.</summary>
     private static async Task<HttpStatusCode> ForgotPasswordAsync(HttpClient client, string email, string clientIp)
     {
@@ -130,7 +186,7 @@ public sealed class TrustedClientIpHttpTests
         return statuses;
     }
 
-    /// <summary>A host whose anonymous limit is 2 requests a minute; the database is unreachable.</summary>
+    /// <summary>A host whose anonymous limits are 2 reads and 2 writes a minute; the database is unreachable.</summary>
     private sealed class TrustedClientIpApiFactory(string proxyKey) : WebApplicationFactory<Program>
     {
         /// <summary>Sets the environment variables Program reads during service registration, then builds the host.</summary>
@@ -145,6 +201,8 @@ public sealed class TrustedClientIpHttpTests
                 ["ConnectionStrings__Default"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1",
                 ["RateLimit__GeneralPermitLimit"] = "2",
                 ["RateLimit__GeneralWindowSeconds"] = "60",
+                ["RateLimit__ReadPermitLimit"] = "2",
+                ["RateLimit__ReadWindowSeconds"] = "60",
                 ["RateLimit__SensitiveAuthIpPermitLimit"] = "3",
                 ["TrustedClientIp__ProxyKey"] = proxyKey.Length == 0 ? null : proxyKey
             };
