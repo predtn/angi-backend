@@ -595,10 +595,10 @@ public sealed class OpenAiAgentLlmServiceTests
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
-            messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("only when the user gave nothing but a province").And.Contain("clarification=place_scope").And.Contain("clarification=preferences")
+            messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("A province alone means the whole province").And.Contain("ask only whether they want a taste prioritized").And.Contain("clarification=preferences")
                 .And.Contain("When budgetAmount=null, say plainly that the plan has no budget").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
                 .And.Contain("gợi ý code giúp tôi trang giao diện").And.Contain("tôi muốn ăn ngọt").And.Contain("nhà tôi ở Cầu Giấy").And.Contain("Mention a plan only when hasPlan=true")
-                .And.Contain("A starting point is never required").And.Contain("'toàn thành phố'").And.Contain("whether it is per day or for the whole trip")
+                .And.NotContain("clarification=place_scope").And.Contain("budgetFits=false").And.Contain("whether it is per day or for the whole trip")
                 .And.NotContain("because the backend asks for them when the user saves");
             using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
