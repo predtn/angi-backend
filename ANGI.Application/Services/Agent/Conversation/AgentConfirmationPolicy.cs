@@ -167,6 +167,23 @@ public static class AgentConfirmationPolicy
     /// <summary>Today's calendar date for a Vietnam-based traveler; stored instants remain UTC.</summary>
     public static DateOnly Today(TimeProvider clock) => DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(7)).DateTime);
 
+    private static readonly string[] Weekdays = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
+
+    /// <summary>
+    /// Every date from today to the Sunday of next week with its Vietnamese weekday and week (weeks run Monday to Sunday), so the model
+    /// looks up 'thứ 7 tuần sau' instead of working out weekdays itself (Round 2, AG-48: it saved this week's Saturday).
+    /// </summary>
+    public static object[] Calendar(DateOnly today)
+    {
+        // STEP-01: Find the Sunday that ends next week, counting Monday as the first day of a week.
+        var sinceMonday = ((int)today.DayOfWeek + 6) % 7;
+        var endOfNextWeek = today.AddDays(13 - sinceMonday);
+        // STEP-02: Return each date with its weekday and week.
+        return Enumerable.Range(0, endOfNextWeek.DayNumber - today.DayNumber + 1).Select(offset => today.AddDays(offset))
+            .Select(date => (object)new { date = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), weekday = Weekdays[(int)date.DayOfWeek],
+                week = date == today ? "hôm nay" : date.DayNumber - today.DayNumber <= 6 - sinceMonday ? "tuần này" : "tuần sau" }).ToArray();
+    }
+
     private static DateOnly? Date(Match match, string day, string month, string year, DateOnly notBefore)
     {
         // STEP-01: Prepare d through int.Parse, m through int.Parse, stated from int.Parse and y.

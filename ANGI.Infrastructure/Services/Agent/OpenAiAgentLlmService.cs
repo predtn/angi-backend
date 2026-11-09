@@ -83,7 +83,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         - A bare 'ok' with awaitedAnswer=null changes nothing: use clarification=general to ask what they want next, and mention saving only when a plan exists.
         - Ask about vague tastes and ambiguous references rather than guessing.
         awaitedAnswer names the question the backend just asked and is waiting on: save (whether to save this plan), save_date (which day the trip starts), state_change (a change of trip conditions), question (another open question over a ready plan). Read the whole message against that question and the history, whatever slang, dialect, spelling or missing accents it uses, and set pendingAnswer:
-        - accept: it clearly agrees ('ừ', 'chốt đơn', 'quất luôn', 'oke la'). With save_date, a named day also goes in answerStartDate and a range's end in answerEndDate, as yyyy-MM-dd worked out from currentDate ('mai', 'thứ 7 tuần sau'); agreeing without naming a day leaves them null. Never use accept with question.
+        - accept: it clearly agrees ('ừ', 'chốt đơn', 'quất luôn', 'oke la'). With save_date, a named day also goes in answerStartDate and a range's end in answerEndDate, as yyyy-MM-dd taken from calendar, which lists each coming date with its weekday and week ('mai', 'thứ 7 tuần sau' is the Thứ Bảy marked tuần sau); agreeing without naming a day leaves them null. Never use accept with question.
         - decline: it clearly refuses or holds off ('đừng', 'thôi dẹp', 'khoan đã', 'để xem lại').
         - defer: only with save_date, saving with the date left open ('để sau', 'chưa biết ngày', 'cứ lưu đi').
         - unclear: anything else, such as an interjection ('ơ', 'hả'), a question, or a message that also asks for something ('ok nhưng đổi bữa trưa'). Then handle the message as usual.
@@ -217,7 +217,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
 
         # A question waiting for an answer
         awaitedAnswer is what the backend just asked: save (save this plan?), save_date (which start day?), state_change (accept new trip conditions?), question (another open question over a plan). Read the whole message against it, whatever slang or missing accents, and set pendingAnswer:
-        - accept: clearly agrees ('ừ', 'chốt đơn', 'oke la'). With save_date, a named day also goes in answerStartDate (and a range's end in answerEndDate) as yyyy-MM-dd from currentDate. Never accept with question.
+        - accept: clearly agrees ('ừ', 'chốt đơn', 'oke la'). With save_date, a named day also goes in answerStartDate (and a range's end in answerEndDate) as yyyy-MM-dd taken from calendar, which lists each coming date with its weekday and week ('thứ 7 tuần sau' is the Thứ Bảy marked tuần sau). Never accept with question.
         - decline: refuses or holds off ('đừng', 'thôi dẹp', 'khoan đã'); with question, keeping things as they are ('giữ nguyên') declines.
         - defer: only with save_date, saving with the date left open ('để sau', 'chưa biết ngày').
         - unclear: anything else ('ơ', a question, 'ok nhưng đổi bữa trưa'); then handle the message as usual.
@@ -506,7 +506,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             proposalMode = context.Source is null ? "create" : "update",
             sourceIsPartial = context.PromptSource is not null, sourceItemCount = context.Source?.Items.Length,
             // Cùng múi giờ Việt Nam với backend: từ 0h đến 7h sáng, ngày UTC vẫn là hôm trước.
-            currentDate = AgentConfirmationPolicy.Today(clock) }, PromptJson);
+            currentDate = AgentConfirmationPolicy.Today(clock), calendar = AgentConfirmationPolicy.Calendar(AgentConfirmationPolicy.Today(clock)) }, PromptJson);
         var current = JsonSerializer.Serialize(new { note = "Current values for this turn; they replace any earlier ones.", state = context.State,
             replanAfterConfirmation = context.ReplanAfterConfirmation, awaitedAnswer = context.AwaitedAnswer, intakeComplete = context.IntakeComplete, dishOffered = context.DishOffered,
             hasPlan = ANGI.Application.Services.Agent.Intake.AgentIntakePolicy.HasPlan(context), attachedRoadmapDeleted = context.AttachedRoadmapDeleted ? true : (bool?)null,
