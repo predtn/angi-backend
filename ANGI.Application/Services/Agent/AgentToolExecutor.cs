@@ -909,8 +909,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var matches = await catalogSearch.SearchAsync(input.Kind, input.Name, input.Province, 21, ct);
         // STEP-04: Prepare exact through matches.Where(filtered).ToArray.
         var exact = matches.Where(x => AgentScopedPlanning.Normalize(x.Name) == AgentScopedPlanning.Normalize(input.Name)).ToArray();
-        // STEP-05: When input.SelectedId has a value, set exact.
-        if (input.SelectedId.HasValue) exact = exact.Where(x => x.Id == input.SelectedId).ToArray();
+        // STEP-05: When input.SelectedId has a value, keep only that result of this search.
+        // A branch is usually named longer than the name the user gave ("Cháo Súp Linh Hoa - Trần Khát Chân" for "Cháo Súp Linh Hoa"),
+        // so the chosen ID is checked against every result of the search, not only the exact-name ones; it must still be a real result.
+        if (input.SelectedId.HasValue) exact = matches.Where(x => x.Id == input.SelectedId).ToArray();
         // STEP-06: Return the new result early when input.SelectedId has a value and exact.Length is 0.
         if (input.SelectedId.HasValue && exact.Length == 0)
             return new("ambiguous", "Lựa chọn chưa khớp kết quả tra cứu đúng tên. Bạn muốn chọn kết quả nào trong danh sách?", matches.Take(20).ToArray());

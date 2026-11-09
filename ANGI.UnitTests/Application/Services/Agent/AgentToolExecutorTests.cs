@@ -653,6 +653,33 @@ public sealed class AgentToolExecutorTests
         }
     }
 
+    // TEST-21b: A branch whose name is longer than the name the user gave resolves once its ID is chosen; covers no ID, a listed ID and an unlisted ID.
+    /// <summary>Fixes the loop where "Cháo Súp Linh Hoa" kept asking which branch after the user picked one (Round 2, AG-22).</summary>
+    [Theory]
+    [InlineData(null, "ambiguous")]
+    [InlineData(576L, "found")]
+    [InlineData(999L, "ambiguous")]
+    public async Task ExecuteAsync_SearchCatalog_ChosenBranchResolves(long? selectedId, string status)
+    {
+        // STEP-01: Stub catalog.SearchAsync with two branches named longer than the searched name.
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("restaurant", "Cháo Linh", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync(
+            [new(575, "Cháo Linh - Hoàng Văn Thái", 575, "Cháo Linh - Hoàng Văn Thái", "Da Nang", "4 Hoàng Văn Thái", true),
+             new(576, "Cháo Linh - Trần Khát Chân", 576, "Cháo Linh - Trần Khát Chân", "Da Nang", "530 Trần Khát Chân", true)]);
+        catalog.Setup(x => x.SearchAsync("restaurant", "Cháo Linh", null, 21, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "Cháo Linh", "Da Nang", selectedId), AgentJson.Options));
+
+        // STEP-02: Run tools.ExecuteAsync and keep result.
+        var result = await tools.ExecuteAsync(AgentTestData.Context(), call, CancellationToken.None);
+
+        // STEP-03: Assert the status, and that a found branch is the chosen one.
+        result.GetProperty("status").GetString().Should().Be(status);
+        if (status == "found") result.GetProperty("matches").EnumerateArray().Single().GetProperty("id").GetInt64().Should().Be(576);
+    }
+
     // TEST-22: A named dish without a meal is placed on one fitting meal before ranking, so other meals keep their own candidates.
     /// <summary>Fixes "phải có món X" filtering every meal to X and ending in "no candidates for breakfast".</summary>
     [Fact]
