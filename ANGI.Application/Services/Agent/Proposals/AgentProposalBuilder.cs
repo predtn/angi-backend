@@ -325,7 +325,10 @@ public sealed class AgentProposalBuilder
         if (context.Request.SelectedItemKey is { } selected)
         {
             var item = context.Source?.Items.SingleOrDefault(x => x.ItemKey == selected);
-            if (item is null || !scope.Contains(item)) throw Invalid("Không tìm thấy món đã chọn trong phạm vi.");
+            if (item is null) throw Invalid("Không tìm thấy món đã chọn trong phạm vi.");
+            // Name where the selected dish is, so the next call can target it instead of repeating the meal it edited last (Round 2, AG-27).
+            if (!scope.Contains(item))
+                throw Invalid($"Món đã chọn là {AgentReplyBuilder.Safe(item.DishName)} ở {AgentReplyBuilder.Meal(item.MealSlot)} ngày {item.DayNumber}: dùng phạm vi dayNumber={item.DayNumber}, mealSlot={item.MealSlot}.");
         }
     }
 
