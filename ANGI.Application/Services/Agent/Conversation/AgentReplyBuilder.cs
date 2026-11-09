@@ -20,7 +20,9 @@ public static class AgentReplyBuilder
     private const int MaxNamedChanges = 3;
     // Các ô model được đặt trong câu về bản nháp; backend điền sau khi đã kiểm tra xong món.
     private static readonly Regex ProposalSlot = new(@"\{(?<slot>total|numDays|place|changes)\}", RegexOptions.CultureInvariant);
-    public const string RatingFallbackNote = "Một số món được xếp theo điểm đánh giá vì mình chưa đủ dữ liệu về khẩu vị của bạn.";
+    // The same note covers a user with too little taste data and an unreachable recommendation service, so it names no cause.
+    public const string OutsideEditNote = "Lịch đã được sửa ở nơi khác nên bản nháp trước đã được bỏ; bản này dựa trên lịch mới nhất.";
+    public const string RatingFallbackNote = "Một số món được xếp theo điểm đánh giá, chưa theo khẩu vị của bạn.";
     public const string TasteNote = "nhưng chưa thể bảo đảm từng món đúng mức vị đó";
     public const string NoBudgetNote = "Lịch này chưa áp ngân sách. Khi chốt được mức nào, bạn nhắn mình để lập lại nhé.";
     public const string NothingToSave = "Hiện chưa có lịch nào để lưu. Bạn cho mình biết muốn ăn ở đâu, mấy ngày để mình lập lịch nhé.";
@@ -57,9 +59,12 @@ public static class AgentReplyBuilder
         notes.AddRange(AgentPlaceResolver.WidenedNotes(snapshot));
         // STEP-06: When snapshot.State has the expected shape, call notes.Add.
         // Không có mức nào chặn tổng tiền: nói rõ để người dùng không tưởng lịch đã theo một ngân sách.
-        if (snapshot.State is { BudgetUnrestricted: true, BudgetAmount: null }) notes.Add(NoBudgetNote);
+        // A new plan whose budget was never discussed has budgetUnrestricted=false too, and is just as unlimited.
+        if (snapshot.State.BudgetAmount is null && (snapshot.State.BudgetUnrestricted || snapshot.BaseRoadmapId is null)) notes.Add(NoBudgetNote);
         // STEP-07: When snapshot.Items.Any matches the filter, call notes.Add.
-        if (snapshot.Items.Any(item => !item.RequestId.HasValue)) notes.Add(RatingFallbackNote);
+        // Only dishes this draft added count: a dish kept from the saved roadmap (the user's own choice) was never ranked at all.
+        // This note is the one place the fallback is shown; the validator no longer repeats it as a warning on the same card.
+        if (snapshot.Items.Any(item => !item.RequestId.HasValue && item.SourceItemId is null)) notes.Add(RatingFallbackNote);
         // STEP-08: When TasteScopes() exists, call notes.Add.
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) notes.Add($"Mình ưu tiên khẩu vị {tastes}, {TasteNote}.");
@@ -104,6 +109,8 @@ public static class AgentReplyBuilder
                 dishNotes[note.DishId] = new(note.DishId, intro, reason);
         return snapshot with
         {
+            // The model's draft reply is a template and was seen to skip this (Round 2, AG-57), so the card states it from the flag.
+            Notes = context.OutdatedProposalDropped && !context.AttachedRoadmapDeleted ? [OutsideEditNote, .. snapshot.Notes ?? []] : snapshot.Notes,
             DishNotes = [.. dishNotes.Values.Where(note => present.Contains(note.DishId)).OrderBy(note => note.DishId)],
             DaySummaries = [.. snapshot.Items.Select(item => item.DayNumber).Distinct().Order().SelectMany(day => DaySummary(day, snapshot, context))]
         };

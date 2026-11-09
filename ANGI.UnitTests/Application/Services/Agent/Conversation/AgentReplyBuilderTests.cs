@@ -126,6 +126,53 @@ public sealed class AgentReplyBuilderTests
         AgentReplyBuilder.PlanNotes(snapshot).Should().Contain(AgentReplyBuilder.RatingFallbackNote);
     }
 
+    // TEST-06b: A dish kept from the saved roadmap was never ranked, so it does not count as a rating fallback.
+    /// <summary>Stops every edit of a hand-made roadmap from claiming its dishes were ordered by rating (Round 2, AG-86).</summary>
+    [Fact]
+    public void KeptRoadmapItem_IsNotRatingFallback()
+    {
+        // STEP-01: Get snapshot holding one item kept from the roadmap.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { SourceItemId = 41 });
+        // STEP-02: Assert AgentReplyBuilder.PlanNotes() does not contain AgentReplyBuilder.RatingFallbackNote.
+        AgentReplyBuilder.PlanNotes(snapshot).Should().NotContain(AgentReplyBuilder.RatingFallbackNote);
+    }
+
+    // TEST-06c: A new plan says no budget applies when no budget was set, whether or not the user said so; an edit of a saved roadmap only when they did.
+    /// <summary>Covers a budget never discussed (Round 2, AG-10), an explicit "chưa chốt" and an edit of a roadmap that never had a budget.</summary>
+    [Theory]
+    [InlineData(false, null, true)]
+    [InlineData(true, null, true)]
+    [InlineData(false, 7L, false)]
+    [InlineData(true, 7L, true)]
+    public void NoBudget_IsNotedForNewPlansAndUndecidedBudgets(bool unrestricted, long? baseRoadmapId, bool noted)
+    {
+        // STEP-01: Get snapshot with no budget.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item()) with
+            { State = AgentTestData.State() with { BudgetAmount = null, BudgetUnrestricted = unrestricted }, BaseRoadmapId = baseRoadmapId };
+        // STEP-02: Assert whether AgentReplyBuilder.PlanNotes() contains AgentReplyBuilder.NoBudgetNote.
+        AgentReplyBuilder.PlanNotes(snapshot).Contains(AgentReplyBuilder.NoBudgetNote).Should().Be(noted);
+    }
+
+    // TEST-06d: A draft made after the old one was dropped for an outside edit says so on the card; a deleted roadmap or a normal turn does not.
+    /// <summary>The card states the outside edit even when the model's reply skips it (Round 2, AG-57).</summary>
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public void AttachNotes_OutsideEdit_IsStatedOnTheCard(bool dropped, bool deleted, bool noted)
+    {
+        // STEP-01: Create context with the flags.
+        var context = new AgentContext
+        {
+            ConversationId = 7, UserId = 3, State = AgentTestData.State(), OutdatedProposalDropped = dropped, AttachedRoadmapDeleted = deleted,
+            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { Content = "Đổi bữa trưa ngày 1" }
+        };
+        // STEP-02: Attach notes to a snapshot and assert whether the first note is AgentReplyBuilder.OutsideEditNote.
+        var notes = AgentReplyBuilder.AttachNotes(AgentTestData.Snapshot(AgentTestData.Item()) with { Notes = ["x"] }, context).Notes!;
+        notes.Contains(AgentReplyBuilder.OutsideEditNote).Should().Be(noted);
+        notes.Should().Contain("x");
+    }
+
     // TEST-07: A meal-level taste override also states that taste is a soft, unguaranteed preference.
     /// <summary>Applies the taste disclaimer to scoped overrides, not only trip targets.</summary>
     [Fact]
