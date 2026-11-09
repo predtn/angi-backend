@@ -64,7 +64,7 @@ public sealed class ForwardedHeadersConfigHttpTests
         return statuses;
     }
 
-    /// <summary>A host whose anonymous limit is 2 requests a minute; the database is unreachable, which these checks ignore.</summary>
+    /// <summary>A host whose anonymous limits are 2 reads and 2 writes a minute; the database is unreachable, which these checks ignore.</summary>
     private sealed class ForwardedHeadersApiFactory(bool enabled) : WebApplicationFactory<Program>
     {
         /// <summary>Sets the environment variables Program reads during service registration, then builds the host.</summary>
@@ -79,6 +79,8 @@ public sealed class ForwardedHeadersConfigHttpTests
                 ["ConnectionStrings__Default"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused",
                 ["RateLimit__GeneralPermitLimit"] = "2",
                 ["RateLimit__GeneralWindowSeconds"] = "60",
+                ["RateLimit__ReadPermitLimit"] = "2",
+                ["RateLimit__ReadWindowSeconds"] = "60",
                 ["ForwardedHeaders__Enabled"] = enabled ? "true" : "false"
             };
             var previous = values.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);

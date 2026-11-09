@@ -74,7 +74,7 @@ CORS (policy "Frontend")
 RateLimitPartitionMiddleware     reads the email of login / resend / forgot-password for the rate-limit key
 LoginFailureLimitMiddleware      5 INVALID_CREDENTIALS per email + IP in 15 min → 429 until the window ends; a success clears the count
 Authentication (JWT)             401 UNAUTHORIZED as ApiResponse
-Rate limiter                     resend / forgot-password and general limits → 429 TOO_MANY_REQUESTS + Retry-After
+Rate limiter                     resend / forgot-password, read (GET/HEAD) and general limits → 429 TOO_MANY_REQUESTS + Retry-After
 Authorization                    403 FORBIDDEN as ApiResponse
 AccountStatusMiddleware          endpoints that need a token: account not active → 403 with the AUTH-04 error codes
 Controllers → use case → repositories → ANGIContext → PostgreSQL (schema core)
@@ -93,7 +93,7 @@ These apply to every endpoint unless its row in the API Design says otherwise.
 | Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId`: reco ranks once, the ranked ids stay 30 min in `IRankedDishListCache` (process memory, one instance) under reco's `request_id`, or a backend key when it is null, with the caller's user id; the cursor is base64url `{k, o}` (key, offset). Malformed, expired or another user's cursor → 400 `INVALID_CURSOR` |
 | Time, money, ids | ISO 8601 UTC; dates `yyyy-MM-dd`; business hours `HH:mm` Vietnam time; integer VND; `int` / `long` ids, `uuid` only for `requestId` and `eventUuid` |
 | Delete | Soft delete for users, restaurants, roadmaps, blogs, comments; 200 with `data: null` |
-| Rate limit | Login 5 failures / 15 min per email + IP; resend and forgot-password 1 / 60 s; everything else 100 / min per user (per IP when anonymous) |
+| Rate limit | Login 5 failures / 15 min per email + IP; resend and forgot-password 1 / 60 s per email and 5 / 15 min per IP; everything else per user (per IP when anonymous): GET and HEAD 300 / min (`RateLimit:ReadPermitLimit`), other methods 100 / min (`RateLimit:GeneralPermitLimit`), as two separate budgets |
 
 ## 6. Database
 
