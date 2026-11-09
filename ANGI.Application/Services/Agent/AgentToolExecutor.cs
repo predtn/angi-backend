@@ -190,7 +190,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return Notice(context, rankings.Any(x => x.Coverage.Length > 0) ? AgentReplyBuilder.Coverage(context)
                 : "Chưa tìm thấy món khả dụng đáp ứng các điều kiện hiện tại. Bạn có muốn điều chỉnh điều kiện hoặc chọn bữa khác không?", "no_candidates");
         // STEP-19b: Keep each day's meals close together, picking deeper in the same reco lists when needed.
-        var (suggestedDays, legWarnings) = ArrangeDays(context, state, scope, input, rankings);
+        var (suggestedDays, legWarnings, suggestedTotal) = ArrangeDays(context, state, scope, input, rankings);
         // STEP-20: Prepare coverage through rankings.SelectMany(filtered).ToArray and returned through DistinctBy(filtered).Count.
         var coverage = rankings.SelectMany(x => x.Coverage).ToArray();
         var returned = rankings.SelectMany(x => x.Picked).DistinctBy(x => x.Id).Count();
@@ -210,6 +210,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var mealCoverage = coverage.Select(x => new { x.DayNumber, x.MealSlot, x.AvailableCount, x.RequiredTags });
         // Ngân sách chia đều cho các bữa: mốc giá để model chọn món vừa túi tiền, không phải bộ lọc (một bữa có thể đắt hơn nếu bữa khác rẻ hơn).
         var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
+        // suggestedDays already prefers dishes within budgetPerMeal; budgetFits=false means even those picks cost more than the budget, so the model asks about it.
+        bool? budgetFits = state.BudgetAmount is { } budget && suggestedTotal is { } suggestedSum ? suggestedSum <= budget : null;
         // STEP-23: Return the anonymous result early when rankings.Count is 1.
         // Payload gọn cho LLM: tọa độ do backend tự tra khi tính tuyến, bữa ăn nằm ở allowedMealSlots nên tags chỉ giữ mã loại món.
         // Giữ thông báo fallback để model không mô tả thứ tự theo đánh giá là ranking cá nhân hóa.
@@ -218,7 +220,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             {
                 rankingMode = personalized ? "personalized" : "rating_fallback",
                 selectionScope = new { scope.DayNumber, scope.MealSlot },
-                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
+                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits,
                 suggestedDays, items = Items(rankings[0])
             };
         // STEP-24: Return the anonymous result.
@@ -227,7 +229,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             rankingMode = personalized ? "personalized" : "rating_fallback",
             selectionScope = new { scope.DayNumber, scope.MealSlot },
-            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
+            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits,
             suggestedDays, scopedResults = rankings.Select(x => new { selectionScope = new { x.Scope.DayNumber, x.Scope.MealSlot }, items = Items(x) })
         };
     }
@@ -237,7 +239,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// meal per day for the model to take; an edit of one meal puts the dishes near the day's other meals first. Dishes picked from deeper
     /// in a reco list get the grant of that same list, so nothing outside the ranked, filtered candidates is ever offered.
     /// </summary>
-    private static (object[] Days, string[] Warnings) ArrangeDays(AgentContext context, AgentState state, AgentScope scope,
+    private static (object[] Days, string[] Warnings, decimal? Total) ArrangeDays(AgentContext context, AgentState state, AgentScope scope,
         AgentRecommendationInput input, List<ScopedRanking> rankings)
     {
         var legKm = input.MaxLegKm is { } stated ? Math.Clamp((double)stated, AgentDayClustering.MinLegKm, AgentDayClustering.MaxLegKm) : AgentDayClustering.DefaultLegKm;
@@ -256,18 +258,19 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 ranking.Picked.AddRange(keep);
                 ranking.ChosenByMeal[slotMeal] = keep;
             }
-            return ([], []);
+            return ([], [], null);
         }
         var meals = AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray();
-        if (meals.Length < 2) return ([], []);
+        if (meals.Length < 2) return ([], [], null);
         var days = AgentScopedPlanning.Slots(state, scope).Select(slot => slot.Day).Distinct().Order().ToArray();
         var dishes = new Dictionary<int, ANGI.Domain.Entities.Dish>();
         var options = new Dictionary<(short, string), IReadOnlyList<AgentDayClustering.Option>>();
+        var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
         ScopedRanking? Owner(short day, string meal) => rankings.FirstOrDefault(ranking => ranking.Scope.Covers(new AgentScope(day, meal)) && ranking.Pools?.ContainsKey(meal) == true);
         IReadOnlyList<AgentDayClustering.Option> Candidates(short day, string meal)
         {
             if (options.TryGetValue((day, meal), out var known)) return known;
-            var list = (Owner(day, meal)?.Pools![meal] ?? []).Where(dish => Position(dish) is not null).Select(dish =>
+            var list = Affordable((Owner(day, meal)?.Pools![meal] ?? []).Where(dish => Position(dish) is not null), budgetPerMeal).Select(dish =>
             {
                 dishes[dish.Id] = dish;
                 var (latitude, longitude) = Position(dish)!.Value;
@@ -295,7 +298,22 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             plan.DayNumber, meals = plan.Meals.Select(pick => new { pick.MealSlot, pick.Dish.DishId, dishes[pick.Dish.DishId].Name }), plan.LegsKm, plan.StartKm
         }).ToArray();
-        return (suggested, warnings);
+        // The plan's total with these picks: the kept dishes outside this scope plus the suggested ones.
+        var kept = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Sum(item => item.Price);
+        var total = plans.Length == 0 ? (decimal?)null : kept + plans.SelectMany(plan => plan.Meals).Sum(pick => dishes[pick.Dish.DishId].Price);
+        return (suggested, warnings, total);
+    }
+
+    /// <summary>
+    /// One meal's candidates with the budget in mind: dishes within the even per-meal share keep their rank order; when none is that cheap,
+    /// all of them from cheapest up. Without a budget the rank order is unchanged. Reads prices only, never wording.
+    /// </summary>
+    private static IEnumerable<ANGI.Domain.Entities.Dish> Affordable(IEnumerable<ANGI.Domain.Entities.Dish> ranked, decimal? perMeal)
+    {
+        if (perMeal is not { } cap) return ranked;
+        var all = ranked.ToArray();
+        var within = all.Where(dish => dish.Price <= cap).ToArray();
+        return within.Length > 0 ? within : all.OrderBy(dish => dish.Price);
     }
 
     /// <summary>True when a dish of the plan on that day sits outside the day's place, beyond any radius a meal was widened to.</summary>

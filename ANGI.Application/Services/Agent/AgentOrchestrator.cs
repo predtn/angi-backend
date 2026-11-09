@@ -389,7 +389,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     var merged = snapshot with { Items = snapshot.Items.Select(item => read.TryGetValue(item.ItemKey, out var known) && known.DishId == item.DishId ? known : item).ToArray() };
                     // Validator có thể dừng trước khi đọc catalog (thiếu tỉnh, câu hỏi đang chờ...): vẫn điền tên, giá, toạ độ để lịch không hiện trống.
                     var (filled, total) = await validator.ReadCatalogAsync(merged, timeout.Token);
-                    validated = (filled, validated.Validation with { Errors = [], TotalCost = validated.Validation.TotalCost > 0 ? validated.Validation.TotalCost : total });
+                    // Draft is not blocked, but a total above the user's budget stays visible on the card instead of being presented as within budget.
+                    var shown = validated.Validation.Errors.Contains(AgentProposalValidator.BudgetExceeded)
+                        ? validated.Validation.Warnings.Append(AgentProposalValidator.BudgetExceeded).Distinct().ToArray() : validated.Validation.Warnings;
+                    validated = (filled, validated.Validation with { Errors = [], Warnings = shown, TotalCost = validated.Validation.TotalCost > 0 ? validated.Validation.TotalCost : total });
                 }
                 // STEP-48: Update context: PreviewOutput.
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
