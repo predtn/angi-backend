@@ -115,9 +115,6 @@ public static class AgentIntakePolicy
         return null;
     }
 
-    private static string Coverage(IReadOnlyCollection<string> provinces) => provinces.Count == 0 ? "Hiện ANGI chưa có dữ liệu quán ăn."
-        : $"Hiện ANGI có dữ liệu ở {string.Join(", ", provinces.Take(10).Select(AgentReplyBuilder.Safe))}.";
-
     internal static string Plain(string text)
     {
         var plain = new string(text.Normalize(NormalizationForm.FormD)

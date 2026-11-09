@@ -548,12 +548,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     /// <summary>THÍ NGHIỆM: nhận state của model như nó viết. Chỉ giữ chuẩn hóa tên tỉnh, các trường backend sở hữu và FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
+        // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
         var spelled = AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context);
-        if (context.UnknownPlace is not null)
-        {
-            spelled = spelled! with { Province = proposed!.Province };
-            context.UnknownPlace = null;
-        }
+        context.UnknownPlace = null;
         var placed = AgentConstraintGuard.RetainPlacements(spelled, context.PlacedRequests);
         try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline); }
         catch (AgentStateChangeRequiredException change)
