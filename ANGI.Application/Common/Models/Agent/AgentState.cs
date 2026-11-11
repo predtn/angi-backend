@@ -74,6 +74,15 @@ public sealed record AgentState
     /// <summary>Backend-owned mark that the last reply suggested a dish; it lives one turn so "ok" is read against that offer, and clients or the model cannot set it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? DishOffered { get; init; }
+    /// <summary>Backend-owned: the dishes the last suggestion showed, so "thêm món đó" or "3 món này" can be added later; replaced by the next suggestion.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentOfferedDish[]? OfferedDishes { get; init; }
+    /// <summary>Backend-owned: restaurant names the user was asked to pick a branch for; only these may resolve to a branch whose name is longer.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? CatalogChoices { get; init; }
+    /// <summary>Backend-owned: the total of the latest draft when it cost more than the budget, i.e. the budget the reply offered; a "có" may set exactly this amount.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? BudgetOffer { get; init; }
     /// <summary>Backend-owned stage of the questions asked before a new plan ("details", "preferences"); clients and the model cannot set it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PlanningIntake { get; init; }
@@ -201,6 +210,8 @@ public sealed class AgentContext
     public IReadOnlyCollection<string>? CatalogProvinces { get; set; }
     /// <summary>A province the model read that ANGI has no data for; the turn says so and asks again.</summary>
     public string? UnknownPlace { get; set; }
+    /// <summary>Restaurant names whose lookup this turn found several branches; they become state.CatalogChoices when the turn ends.</summary>
+    public HashSet<string> AmbiguousNames { get; } = [];
     /// <summary>Set when the previous reply suggested a dish, so a short answer is read against that offer instead of as a bare acknowledgement.</summary>
     public bool DishOffered { get; set; }
     /// <summary>Days this message moved to another place on an existing plan; they need new dishes.</summary>
@@ -226,7 +237,10 @@ public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int Ava
 
 /// <summary>One dish suggest_dish picked, with the only facts a reply may state about it.</summary>
 /// <param name="Meals">The meals the dish fits, in words; null when it fits any meal or the user already named one.</param>
-public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null);
+public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null, int DishId = 0, long RestaurantId = 0);
+
+/// <summary>A dish a suggestion showed: enough for the model to put it on a day and meal later without searching again.</summary>
+public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId, string Restaurant);
 
 /// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply shown when the model's wording fails its check.</summary>
 /// <param name="Area">The place the user named that the search stayed around.</param>

@@ -8,6 +8,38 @@ namespace ANGI.UnitTests.Application.Services.Agent.Proposals;
 /// <summary>Verifies deterministic source identity, delta operations and scope preservation.</summary>
 public sealed class AgentProposalBuilderTests
 {
+    // TEST-00b: A meal with no day is refused with a message naming the whole-trip scope to use instead.
+    /// <summary>Fixes the repair of "Bỏ bữa trưa toàn chuyến" repeating {mealSlot:lunch} until the turn failed with 503 (AG-29).</summary>
+    [Fact]
+    public void ValidateScope_MealWithoutDay_NamesWholeTripScope()
+    {
+        // STEP-01: Get context from AgentTestData.Context.
+        var context = AgentTestData.Context();
+
+        // STEP-02: Assert the meal-only scope throws with the guidance and the whole-trip scope passes.
+        FluentActions.Invoking(() => AgentProposalBuilder.ValidateScope(context, new AgentScope(null, "lunch")))
+            .Should().Throw<ConflictException>().WithMessage("*để scope trống (cả chuyến)*");
+        FluentActions.Invoking(() => AgentProposalBuilder.ValidateScope(context, new AgentScope())).Should().NotThrow();
+    }
+
+    // TEST-00: A new plan whose item keys are blank, repeated or too long still builds, each item getting its own usable key.
+    /// <summary>Stops the "Khóa món bị trùng" refusal that ended first-message plans with 503 (Round 3, AG-14/AG-20).</summary>
+    [Fact]
+    public void Build_NewPlanWithUnusableKeys_GivesEachItemItsOwnKey()
+    {
+        // STEP-01: Build a new plan whose items carry a blank, a repeated and an over-long key.
+        var context = AgentTestData.Context();
+        var output = new AgentOutput { Action = "create_proposal", Reply = "Selection", Items =
+            [AgentTestData.Item(1, "", 1, "breakfast"), AgentTestData.Item(2, "", 1, "lunch"), AgentTestData.Item(3, "k", 2, "breakfast"),
+             AgentTestData.Item(4, "k", 2, "lunch"), AgentTestData.Item(5, new string('x', 101), 2, "dinner")] };
+
+        var result = new AgentProposalBuilder().Build(context, output);
+
+        // STEP-02: Assert every item is kept with a distinct, non-blank key of at most 100 characters.
+        result.Items.Should().HaveCount(5);
+        result.Items.Select(item => item.ItemKey).Should().OnlyHaveUniqueItems().And.OnlyContain(key => !string.IsNullOrWhiteSpace(key) && key.Length <= 100);
+    }
+
     // TEST-01: A complete selection over a source roadmap merges into its scope, keeps items outside the scope and retains stable item keys.
     /// <summary>Ensures a scoped rebuild changes only its scope and keeps item identities stable for later edits.</summary>
     [Fact]

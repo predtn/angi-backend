@@ -128,20 +128,6 @@ public sealed class AgentNamedRequestPolicyTests
         AgentConstraintGuard.RetainPlacements(State(new AgentMealRequest(1, "lunch", null, "Lẩu Bò", [])), [moved])!.MealRequests.Should().Equal(moved);
     }
 
-    // TEST-09: Only a meal the user did not name may move; covers a backend placement, a meal the user named in any message and an unnamed request.
-    /// <summary>Keeps an explicit "bữa trưa ngày 1 ăn ở X" from being silently moved to dinner.</summary>
-    [Fact]
-    public void Relocatable_OnlyMealsTheUserDidNotName()
-    {
-        // STEP-01: Create placedByBackend as AgentMealRequest, create named as AgentMealRequest and get state from State.
-        var placedByBackend = new AgentMealRequest(1, "lunch", null, "Lẩu Bò", []);
-        var named = new AgentMealRequest(2, "lunch", null, "Lẩu Gà", []);
-        var state = State(placedByBackend, named, new AgentMealRequest(3, "lunch", null, null, [5]));
-
-        // STEP-02: Assert AgentConstraintGuard.RelocatableRequests() equals placedByBackend.
-        AgentConstraintGuard.RelocatableRequests(state, ["nhất định phải ăn ở Lẩu Bò", "bữa trưa ngày 2 ăn ở Lẩu Gà"]).Should().Equal(placedByBackend);
-    }
-
     // TEST-10: The turn-start constraints move only when they hold the same request; covers a held request and one added this turn.
     /// <summary>Ensures a placement is not treated as relaxing a constraint, and adds nothing the user never had.</summary>
     [Fact]

@@ -575,7 +575,7 @@ public sealed class OpenAiAgentLlmServiceTests
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
             system.Should().Contain("action=chat is only for social messages").And.Contain("action=out_of_scope is for everything else")
-                .And.Contain("hướng dẫn bóc cam").And.Contain("replaces it with fixed text").And.Contain("the start date is asked only when the user wants to save a plan without one");
+                .And.Contain("hướng dẫn bóc cam").And.Contain("replaces it with fixed text").And.Contain("it is asked when the user wants to save a plan without one");
             var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("properties");
             schema.GetProperty("action").GetProperty("enum").EnumerateArray().Select(value => value.GetString()).Should().Contain(["chat", "out_of_scope"]);
             schema.TryGetProperty("suggestedDish", out _).Should().BeTrue();
@@ -681,7 +681,7 @@ public sealed class OpenAiAgentLlmServiceTests
             body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Contain("món sở trường của tôi là gì")
                 .And.Contain("never out_of_scope").And.Contain("only when personalized=true").And.Contain("status=nothing_found")
                 .And.Contain("{name1}, {restaurant1}, {price1} and {address1}").And.Contain("means 0.75 for this call only").And.Contain("Outside suggest_dish, a bare preference")
-                .And.Contain("Set count to how many the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} whenever editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("beside that dish or replace it")
+                .And.Contain("Set count to the number the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} whenever editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("replace it and say so")
                 .And.Contain("gợi ý món theo sở thích của tôi").And.NotContain("The backend answers the user itself");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });

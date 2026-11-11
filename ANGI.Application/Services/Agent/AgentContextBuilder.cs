@@ -21,7 +21,8 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence, TranscriptStartSequence = stored.TranscriptStartSequence,
                 Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
-                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals }
+                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals,
+                OfferedDishes = stored.OfferedDishes, CatalogChoices = stored.CatalogChoices, BudgetOffer = stored.BudgetOffer }
             : stored;
         // Roadmap đã gắn có thể bị xóa hay sửa tay ở trang lịch trong lúc chat còn bản nháp. Lượt này vẫn đi qua model thay vì trả 404/409
         // (UI không có nút bỏ nháp, nên lỗi sẽ khóa chat tới khi bản nháp hết hạn). Bản nháp dựng trên bản lịch cũ không còn lưu được:

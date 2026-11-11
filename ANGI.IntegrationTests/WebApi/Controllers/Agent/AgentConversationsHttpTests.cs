@@ -2023,8 +2023,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var reset = await SendPromptAsync(client, conversation.ConversationId, "làm lại từ đầu");
         var current = await GetAsync(client, conversation.ConversationId);
 
-        // STEP-06: Assert both messages reached the model with attachedRoadmapDeleted set.
-        told.Should().NotBeEmpty().And.OnlyContain(deletedFlag => deletedFlag);
+        // STEP-06: Assert the first message reached the model with attachedRoadmapDeleted set and the reset after it did not:
+        // the turn that told the user detaches the roadmap, so the notice is not repeated on every reply (Round 3, AG-60).
+        told.Should().NotBeEmpty();
+        told.First().Should().BeTrue(); told.Last().Should().BeFalse();
         // STEP-07: Assert reset.Reply is the model's reply, current.State.Province is null and current.CurrentProposal is null.
         reset.Reply.Should().Be("Mình làm lại từ đầu nhé.");
         current.State.Province.Should().BeNull(); current.CurrentProposal.Should().BeNull();

@@ -316,6 +316,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         return new(Raw(output.Reply),
                             future.State, checkedFuture.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedFuture.Snapshot with { State = future.State }) }, checkedFuture.Validation);
                     }
+                    // The user took the budget the reply offered but kept the dishes ("không cần chọn lại"): the same plan is saved with the new budget,
+                    // so the draft and the conversation agree and saving is not refused as "lịch chưa theo ngân sách mới" (S1).
+                    if (output.Action == "answer" && context.Source is { } keptSource && confirmedState.BudgetOffer is { } offer &&
+                        context.State.BudgetAmount == offer && keptSource.State.BudgetAmount != offer)
+                    {
+                        var kept = keptSource with { State = context.State with { PendingQuestion = null, PendingPlanningRequest = null, BudgetOffer = null }, Changes = [],
+                            RetainedItems = keptSource.Items, Scope = new() };
+                        var checkedKept = await validator.ValidateAsync(kept, keptSource, false, Routes(context), timeout.Token, context.Grants);
+                        telemetry.Record("budget_kept_plan", context.ConversationId, context.TurnId, context.AttemptId, new { offer, checkedKept.Validation.Errors });
+                        if (checkedKept.Validation.Errors.Length == 0)
+                            return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, checkedKept.Snapshot, keptSource)), kept.State,
+                                checkedKept.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedKept.Snapshot with { State = kept.State }) }, checkedKept.Validation);
+                    }
                     // Các câu hỏi trước khi lập lịch đi theo thứ tự: chưa rõ địa điểm, số ngày, ngân sách thì chưa hỏi phạm vi hay khẩu vị.
                     // THÍ NGHIỆM: không ép thứ tự hỏi, không kiểm câu; chỉ điền ô {plan} bằng lịch thật.
                     var reply = Raw(output.Action == "answer" && context.Source is not null
@@ -400,13 +413,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
                 context.PreviewOutput = output;
                 // STEP-49: Prepare reviewedState from AgentConstraintGuard.Uncovered.
+                // The total of an over-budget draft is the budget the reply offers; a "có" may set exactly this amount without quoting it.
+                var draftTotal = validated.Snapshot.Items.Sum(item => item.Price);
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null, PlanningIntake = null,
+                    BudgetOffer = context.State.BudgetAmount is { } limit && draftTotal > limit ? draftTotal : null,
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentConstraintGuard.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
                 // STEP-50: Return the new result.
                 // THÍ NGHIỆM: chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
                 var reviewed = validated.Snapshot with { State = reviewedState };
-                return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source)), reviewedState,
+                return new(Raw(AgentReplyBuilder.WithBudgetNote(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source),
+                        validated.Snapshot, reviewedState.BudgetAmount, context.Source)), reviewedState,
                     reviewed with { Notes = AgentReplyBuilder.PlanNotes(reviewed) }, validated.Validation);
             }
             // STEP-51: Throw the error from Unavailable.
@@ -570,7 +587,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
         // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.
         // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
-        return new(reply, turnState with { DishOffered = true, PendingQuestion = null }, null, null, "chat");
+        // The shown dishes are remembered past this turn, so a later "thêm món đó vào bữa tối ngày 2" or "3 món này vào bữa sáng" knows which dishes are meant.
+        var offered = suggestion.Dishes.Where(dish => dish.DishId > 0).Select(dish => new AgentOfferedDish(dish.DishId, dish.Name, dish.RestaurantId, dish.Restaurant)).ToArray();
+        return new(reply, turnState with { DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes }, null, null, "chat");
     }
 
     /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>

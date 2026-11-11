@@ -500,6 +500,38 @@ public sealed class AgentOrchestratorTests
         if (!listed) result.Reply.Should().Be(reply);
     }
 
+    // TEST-22b: Keeping the plan after the budget offer saves the same dishes under the offered budget; any other new amount changes no draft.
+    /// <summary>Fixes "Chốt đi" being refused as "lịch chưa theo ngân sách mới" after the user took the raise but kept the dishes (S1).</summary>
+    [Theory]
+    [InlineData(370000, true)]
+    [InlineData(400000, false)]
+    public async Task RunAsync_BudgetOfferKeptPlan_KeepsDishesUnderNewBudget(int budget, bool kept)
+    {
+        // STEP-01: Prepare a draft on a 300k budget whose last reply offered 370k.
+        var source = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1));
+        source = source with { State = source.State with { BudgetAmount = 300000 } };
+        var context = AgentTestData.Context(source);
+        context.Request.Content = "không, giữ lịch này";
+        context.State = source.State with { BudgetOffer = 370000 };
+        // STEP-02: Mock IAgentLlmService; the model answers with the new budget.
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Mình giữ nguyên lịch nhé.") with { State = context.State with { BudgetAmount = budget, BudgetOffer = null } }));
+
+        // STEP-03: Get result from Create().RunAsync.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        // STEP-04: Assert only the offered amount yields a draft with the same dish and the offer cleared.
+        if (kept)
+        {
+            result.Snapshot.Should().NotBeNull();
+            result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(1);
+            result.Snapshot.State.BudgetAmount.Should().Be(370000);
+            result.State.BudgetOffer.Should().BeNull();
+        }
+        else result.Snapshot.Should().BeNull();
+    }
+
     // TEST-23: Items attached to a question are dropped rather than failing the turn, and never reach a proposal.
     /// <summary>A clarify or answer can never edit a plan, so its stray items are simply ignored.</summary>
     [Fact]

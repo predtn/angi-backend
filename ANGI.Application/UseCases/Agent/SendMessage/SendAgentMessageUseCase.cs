@@ -204,6 +204,10 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             // STEP-32: When context exists and prepared.Snapshot exists, set prepared.
             // Mọi đường tạo bản nháp, kể cả không qua model, đều đi qua đây nên phần giới thiệu luôn khớp với món cuối cùng.
             if (context is not null && prepared.Snapshot is { } drafted) prepared = prepared with { Snapshot = AgentReplyBuilder.AttachNotes(drafted, context) };
+            // A restaurant name that found several branches this turn is one the user is now asked to choose for; only then may a later
+            // turn resolve it to a branch with a longer name (Round 3, AG-22: a branch was picked on the first turn without asking).
+            if (context is { AmbiguousNames.Count: > 0 })
+                prepared = prepared with { State = prepared.State with { CatalogChoices = [.. (prepared.State.CatalogChoices ?? []).Concat(context.AmbiguousNames).Distinct().TakeLast(10)] } };
             // STEP-33: Return the result of FinishAsync.
             // Giai đoạn 3: nhận lại khóa và kiểm tra quyền ghi trước khi lưu trọn kết quả một lượt.
             return await FinishAsync(conversation.Id, userId, message, attemptId, claimedVersion, request, context, prepared, ct);
@@ -310,6 +314,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             conversation.CurrentProposal = null;
             previous = null;
         }
+        // The turn that met a deleted roadmap has told the user; unlinking it makes the next turns an ordinary new chat instead of
+        // repeating the notice on every reply (Round 3, AG-60).
+        if (context?.AttachedRoadmapDeleted == true) conversation.RoadmapId = null;
         AgentProposal? created = null;
         AgentCommitDto? commitResult = null;
         // STEP-07: When prepared.Commit exists, prepare committed through committer.CommitLockedAsync, set commitResult and 1 more action(s).

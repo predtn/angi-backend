@@ -11,7 +11,10 @@ namespace ANGI.Application.Services.Agent.Conversation;
 public static class AgentDishSuggestionPolicy
 {
     public const string NothingFound = "Mình chưa tìm thấy món nào phù hợp trên ANGI. Bạn thử bỏ bớt điều kiện hoặc chọn nơi khác nhé.";
-    public const int MaxCount = 5;
+    // A list asked for with no number shows 10 dishes; a stated number is followed up to this cap.
+    public const int MaxCount = 20;
+    // At most this many dishes of one restaurant in one list, so ten ideas are not four dishes of the same shop (Round 3 bug report).
+    public const int MaxPerRestaurant = 2;
     private static readonly string[] MainMeals = ["breakfast", "lunch", "dinner"];
 
     private static readonly HashSet<string> GenericNameWords =
@@ -52,11 +55,11 @@ public static class AgentDishSuggestionPolicy
     /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply to fall back on.</summary>
     public static AgentDishSuggestion Suggestion(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false) => new(
         dishes.Select(dish => new AgentSuggestedDish(AgentReplyBuilder.Safe(dish.Name), AgentReplyBuilder.Safe(dish.Restaurant.Name), dish.Price,
-            string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine), mealAsked ? null : Meals(dish))).ToArray(),
+            string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine), mealAsked ? null : Meals(dish), dish.Id, dish.RestaurantId)).ToArray(),
         personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked), hasPlan, area, areaNotFound);
 
     /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
-    public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(Template(reply), slot =>
+    public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(WithAddresses(Template(reply), suggestion), slot =>
     {
         var index = int.Parse(slot.Groups["dish"].Value) - 1;
         if (index < 0 || index >= suggestion.Dishes.Length) return slot.Value;
@@ -67,6 +70,23 @@ public static class AgentDishSuggestionPolicy
             "meals" => dish.Meals ?? slot.Value, _ => dish.Address ?? slot.Value
         };
     });
+
+    /// <summary>
+    /// The prompt promises that a dish's address is added when the model leaves out {addressN}, because the user must know where to go
+    /// (Round 3, AG-62 showed a suggestion with no address). It goes right after that dish's restaurant slot.
+    /// </summary>
+    private static string WithAddresses(string template, AgentDishSuggestion suggestion)
+    {
+        for (var index = 0; index < suggestion.Dishes.Length; index++)
+        {
+            var number = index + 1;
+            if (suggestion.Dishes[index].Address is null || template.Contains($"{{address{number}}}", StringComparison.Ordinal)) continue;
+            var restaurant = $"{{restaurant{number}}}";
+            var at = template.IndexOf(restaurant, StringComparison.Ordinal);
+            if (at >= 0) template = template.Insert(at + restaurant.Length, $" ({{address{number}}})");
+        }
+        return template;
+    }
 
     // Backend điền giá kèm đơn vị, nên bỏ đơn vị model viết thêm để không thành "45.000 đồng đồng".
     private static string Template(string? reply) => PriceUnit.Replace((reply ?? "").Trim(), "$1");

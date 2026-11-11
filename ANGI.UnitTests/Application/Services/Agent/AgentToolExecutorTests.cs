@@ -653,13 +653,15 @@ public sealed class AgentToolExecutorTests
         }
     }
 
-    // TEST-21b: A branch whose name is longer than the name the user gave resolves once its ID is chosen; covers no ID, a listed ID and an unlisted ID.
-    /// <summary>Fixes the loop where "Cháo Súp Linh Hoa" kept asking which branch after the user picked one (Round 2, AG-22).</summary>
+    // TEST-21b: A branch whose name is longer than the name the user gave resolves once the user was asked to choose for that name;
+    // covers no ID, a listed ID after the question, a listed ID the model picked before any question, and an unlisted ID.
+    /// <summary>Fixes the loop where "Cháo Súp Linh Hoa" kept asking which branch (Round 2) without letting the model pick a branch unasked (Round 3, AG-22).</summary>
     [Theory]
-    [InlineData(null, "ambiguous")]
-    [InlineData(576L, "found")]
-    [InlineData(999L, "ambiguous")]
-    public async Task ExecuteAsync_SearchCatalog_ChosenBranchResolves(long? selectedId, string status)
+    [InlineData(null, true, "ambiguous")]
+    [InlineData(576L, true, "found")]
+    [InlineData(576L, false, "ambiguous")]
+    [InlineData(999L, true, "ambiguous")]
+    public async Task ExecuteAsync_SearchCatalog_ChosenBranchResolves(long? selectedId, bool asked, string status)
     {
         // STEP-01: Stub catalog.SearchAsync with two branches named longer than the searched name.
         var fixture = AgentTestData.Validator();
@@ -672,12 +674,15 @@ public sealed class AgentToolExecutorTests
             new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
         var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "Cháo Linh", "Da Nang", selectedId), AgentJson.Options));
 
-        // STEP-02: Run tools.ExecuteAsync and keep result.
-        var result = await tools.ExecuteAsync(AgentTestData.Context(), call, CancellationToken.None);
+        // STEP-02: Run tools.ExecuteAsync and keep result, with or without the name recorded as asked.
+        var context = AgentTestData.Context();
+        if (asked) context.State = context.State with { CatalogChoices = [AgentScopedPlanning.Normalize("Cháo Linh")!] };
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
 
-        // STEP-03: Assert the status, and that a found branch is the chosen one.
+        // STEP-03: Assert the status, that a found branch is the chosen one, and that an ambiguous name is remembered for the question.
         result.GetProperty("status").GetString().Should().Be(status);
         if (status == "found") result.GetProperty("matches").EnumerateArray().Single().GetProperty("id").GetInt64().Should().Be(576);
+        else context.AmbiguousNames.Should().Contain(AgentScopedPlanning.Normalize("Cháo Linh")!);
     }
 
     // TEST-22: A named dish without a meal is placed on one fitting meal before ranking, so other meals keep their own candidates.
@@ -707,12 +712,12 @@ public sealed class AgentToolExecutorTests
         context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
     }
 
-    // TEST-23: A restaurant serving only dinner moves off a meal the backend chose; a meal the user named stays and reports no candidates.
-    /// <summary>Fixes a replacement restaurant getting stuck on the lunch position its predecessor was placed on.</summary>
+    // TEST-23: A request already on a meal stays on it, whatever the wording and whatever meal the restaurant usually serves.
+    /// <summary>The backend no longer moves a placed request by reading the user's wording (user decision 2026-11-11: a named dish goes on the meal it was put on).</summary>
     [Theory]
-    [InlineData("đổi sang quán Lẩu Bò", "dinner")]
+    [InlineData("đổi sang quán Lẩu Bò", "lunch")]
     [InlineData("bữa trưa ngày 1 ăn ở quán Lẩu Bò", "lunch")]
-    public async Task ExecuteAsync_RestaurantCannotServeMeal_MovesOnlyBackendPlacement(string content, string expected)
+    public async Task ExecuteAsync_RequestOnAMeal_StaysOnIt(string content, string expected)
     {
         // STEP-01: Create fixture through AgentTestData.Validator.
         var fixture = AgentTestData.Validator(Named(1, "Lẩu"));
@@ -1062,7 +1067,7 @@ public sealed class AgentToolExecutorTests
         await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
 
         // STEP-05: Assert filters.Where(filtered).Select(filtered) equals 3m and context.State.WidenedMeals ?? [] holds no matching item.
-        filters.Where(filter => filter.Area is not null && filter.CompatibleMealTimeCode == "lunch").Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
+        filters.Where(filter => filter.Area is not null && filter.DishIds.Contains(1)).Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
         (context.State.WidenedMeals ?? []).Should().NotContain(meal => meal.MealSlot == "lunch");
     }
 

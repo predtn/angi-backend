@@ -173,6 +173,44 @@ public sealed class AgentReplyBuilderTests
         notes.Should().Contain("x");
     }
 
+    // TEST-06f: A plan this turn made cost more than the budget gets the fixed over-budget question; covers a fitting plan, a reply that already
+    // speaks of the budget, a plan already over the same budget, and a plan that went over because the budget was lowered.
+    /// <summary>Fixes an over-budget plan being presented as fine when the model skipped the budget question (S1, AG-19).</summary>
+    [Fact]
+    public void WithBudgetNote_NewlyOverBudget_AddsQuestionOnce()
+    {
+        // STEP-01: Build a 370k plan, a source already over 300k and one that fit the older 500k budget.
+        var plan = AgentTestData.Snapshot(AgentTestData.Item(1, "a") with { Price = 200000 }, AgentTestData.Item(2, "b", 1, "dinner") with { Price = 170000 });
+        var overBefore = plan with { State = plan.State with { BudgetAmount = 300000 } };
+        var fitBefore = plan with { State = plan.State with { BudgetAmount = 500000 } };
+        const string reply = "Lịch xong rồi nè.";
+
+        // STEP-02: Assert the note appears only when the plan newly went over.
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 400000, null).Should().Be(reply);
+        AgentReplyBuilder.WithBudgetNote("Lịch vượt ngân sách nhé.", plan, 300000, null).Should().Be("Lịch vượt ngân sách nhé.");
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 300000, overBefore).Should().Be(reply);
+        AgentReplyBuilder.WithBudgetNote("Mình cập nhật theo ngân sách mới nhé.", plan, 300000, null).Should().EndWith("hay giữ nguyên lịch này?");
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 300000, fitBefore).Should()
+            .Be("Lịch xong rồi nè. Lịch này tổng khoảng 370.000 đồng/người, vượt ngân sách 300.000 đồng bạn đặt. Mình nâng ngân sách lên 370.000 đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?");
+    }
+
+    // TEST-06e: A template that already names the meal before {changes} does not say it twice; a plain template is unchanged.
+    /// <summary>Fixes "đổi bữa tối ngày 2 sang bữa tối ngày 2 sang …" (Round 3, AG-35/AG-57).</summary>
+    [Theory]
+    [InlineData("Mình đổi bữa tối ngày 2 sang {changes} nhé.")]
+    [InlineData("Mình đổi {changes} nhé.")]
+    public void FillSlots_MealBeforeChanges_IsNotRepeated(string template)
+    {
+        // STEP-01: Build a source and a snapshot where only day 2 dinner changed.
+        var kept = AgentTestData.Item(1, "a", 1, "lunch") with { DishName = "Phở" };
+        var before = AgentTestData.Item(2, "b", 2, "dinner") with { DishName = "Bún Chả" };
+        var source = AgentTestData.Snapshot(kept, before);
+        var snapshot = AgentTestData.Snapshot(kept, before with { DishId = 3, DishName = "Bánh Pie Gà Nấm" });
+
+        // STEP-02: Assert the meal is named once.
+        AgentReplyBuilder.FillSlots(template, snapshot, source).Should().Be("Mình đổi bữa tối ngày 2 sang Bánh Pie Gà Nấm nhé.");
+    }
+
     // TEST-07: A meal-level taste override also states that taste is a soft, unguaranteed preference.
     /// <summary>Applies the taste disclaimer to scoped overrides, not only trip targets.</summary>
     [Fact]

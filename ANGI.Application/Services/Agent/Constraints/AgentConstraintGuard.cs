@@ -54,8 +54,10 @@ public sealed class AgentConstraintGuard
         proposed = WithoutQuotes(proposed ?? current);
         if (proposed.BudgetQuote is not null) proposed = proposed with { BudgetQuote = null };
         // STEP-03: When proposed.PendingPlanningRequest is not current.PendingPlanningRequest and more.
-        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake || proposed.DishOffered != current.DishOffered)
-            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered };
+        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake || proposed.DishOffered != current.DishOffered ||
+            proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer)
+            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered,
+                OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer };
         // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
@@ -172,11 +174,14 @@ public sealed class AgentConstraintGuard
     // Cho phép chia theo người, nhân theo ngày và phần lẻ chưa đọc được ("1 triệu rưỡi"); chỉ bắt chênh lệch cỡ đơn vị.
     private const decimal Tolerance = 10m;
 
-    /// <summary>True when the proposed state sets a budget with no quote of the user's words, or one whose size does not fit the figure quoted.</summary>
+    /// <summary>
+    /// True when the proposed state sets a budget with no quote of the user's words, or one whose size does not fit the figure quoted.
+    /// Exactly the backend's own offer (state.budgetOffer, the over-budget draft's total) needs no quote, so "có" to raising the budget can be applied.
+    /// </summary>
     public static bool HasUnbackedBudget(AgentContext context, AgentState? proposed)
     {
-        // STEP-01: Return false early when no new budget is proposed or the user already confirmed it.
-        if (proposed?.BudgetAmount is not { } budget || budget == context.State.BudgetAmount || context.ReplanAfterConfirmation) return false;
+        // STEP-01: Return false early when no new budget is proposed, it is the backend's offer, or the user already confirmed it.
+        if (proposed?.BudgetAmount is not { } budget || budget == context.State.BudgetAmount || budget == context.State.BudgetOffer || context.ReplanAfterConfirmation) return false;
         // STEP-02: Prepare quote and written, then return true early when the user never wrote the quote.
         var quote = AgentIntakePolicy.Plain(proposed.BudgetQuote ?? "");
         var written = AgentIntakePolicy.Plain(string.Join(' ', context.History.Where(turn => turn.Role == "user").Select(turn => turn.Content)
@@ -278,17 +283,6 @@ public sealed class AgentConstraintGuard
                     return (day, meal);
         // STEP-03: Return null.
         return null;
-    }
-
-    /// <summary>
-    /// Named meal requests the user did not place themselves: a backend placement may move when the name cannot serve that meal
-    /// (a dinner-only restaurant replacing a lunch request), but "bữa trưa ngày 1 ăn ở X" stays and gets an honest question.
-    /// </summary>
-    public static AgentMealRequest[] RelocatableRequests(AgentState state, IEnumerable<string> messages)
-    {
-        var named = messages.SelectMany(message => AgentMealScopePolicy.Read(message, state).Meals).ToHashSet();
-        return state.MealRequests.Where(request => request.MealSlot is not null && (request.DishName ?? request.RestaurantName) is not null &&
-            !named.Contains(new AgentScope(request.DayNumber, request.MealSlot))).ToArray();
     }
 
     /// <summary>Replaces a wide request with its placed meal; tags and differentFromPlan keep their wide scope without the name.</summary>

@@ -68,4 +68,17 @@ public sealed class AgentBudgetEvidencePolicyTests
         AgentConstraintGuard.HasUnbackedBudget(Context("ok", state, replan: true), state with { BudgetAmount = 2000000 }).Should().BeFalse();
         AgentConstraintGuard.HasUnbackedBudget(earlier, new AgentState { BudgetAmount = 2000000, BudgetQuote = "tầm 2 triệu" }).Should().BeFalse();
     }
+
+    // TEST-04: Exactly the backend's offered budget needs no quote; any other unquoted amount, such as the offer multiplied by the days, is still refused.
+    /// <summary>Fixes "có" to "Mình nâng ngân sách lên 370.000 đồng nhé?" being refused because the user never typed the figure (S1).</summary>
+    [Fact]
+    public void Unbacked_BackendOffer_IsFalseOnlyForThatAmount()
+    {
+        // STEP-01: Prepare a state holding the offer.
+        var state = new AgentState { NumDays = 3, BudgetAmount = 300000, BudgetOffer = 370000 };
+
+        // STEP-02: Assert the offer passes and a misread multiple does not.
+        AgentConstraintGuard.HasUnbackedBudget(Context("có", state), state with { BudgetAmount = 370000 }).Should().BeFalse();
+        AgentConstraintGuard.HasUnbackedBudget(Context("có", state), state with { BudgetAmount = 1110000, BudgetQuote = "370000" }).Should().BeTrue();
+    }
 }

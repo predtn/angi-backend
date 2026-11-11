@@ -81,6 +81,23 @@ public static class AgentReplyBuilder
         return [.. notes];
     }
 
+    /// <summary>
+    /// Ends the reply with the over-budget fact when this turn made the plan cost more than the budget and the reply never mentions the budget.
+    /// The model was told to say it but skipped it in 2 of 3 live runs (S1, AG-19), so the user saw a plan presented as fine. A plan already over
+    /// the same budget before this turn, or a reply already saying it is over ("vượt"), gets no repeat; "ngân sách mới" alone does not count (S1). The question names the total, so a "có" can set it as the new budget.
+    /// </summary>
+    public static string WithBudgetNote(string reply, AgentSnapshot snapshot, decimal? budget, AgentSnapshot? source)
+    {
+        // STEP-01: Return reply early when there is no budget or the plan fits it.
+        var total = snapshot.Items.Sum(item => item.Price);
+        if (budget is not { } limit || total <= limit) return reply;
+        // STEP-02: Return reply early when the plan was already over the same budget or the reply already speaks of the budget.
+        if (source is not null && source.State.BudgetAmount == limit && source.Items.Sum(item => item.Price) > limit) return reply;
+        if (AgentIntakePolicy.Plain(reply).Contains("vuot", StringComparison.Ordinal)) return reply;
+        // STEP-03: Return reply with the fixed note.
+        return $"{reply.TrimEnd()} Lịch này tổng khoảng {Money(total)} đồng/người, vượt ngân sách {Money(limit)} đồng bạn đặt. Mình nâng ngân sách lên {Money(total)} đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?".Trim();
+    }
+
     /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
     public static string FillSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
     {
@@ -88,6 +105,10 @@ public static class AgentReplyBuilder
         var total = $"{Money(snapshot.Items.Sum(item => item.Price))} đồng/người";
         var template = (reply ?? "").Trim();
         if (changes?.Split(' ')[0] is { Length: > 0 } verb) template = Regex.Replace(template, $@"(?<!\p{{L}}){Regex.Escape(verb)}\s+(?=\{{changes\}})", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // The filled changes already read "bữa tối ngày 2 sang <món>", so a template written as "đổi bữa tối ngày 2 sang {changes}" would say the meal twice
+        // (Round 3, AG-35/AG-57). This reads only the model's own template, never the user's words.
+        if (changes?.IndexOf(" sang ", StringComparison.Ordinal) is > 0 and var cut)
+            template = Regex.Replace(template, $@"{Regex.Escape(changes[..cut])}\s+sang\s+(?=\{{changes\}})", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         var filled = ProposalSlot.Replace(template, match => match.Groups["slot"].Value switch
         {
             "total" => total,
@@ -140,7 +161,11 @@ public static class AgentReplyBuilder
         var changed = AgentJson.OrderItems(snapshot.Items).Where(item => !sourceItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId &&
             old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot)).ToArray();
         var removed = sourceItems.Where(old => snapshot.Items.All(item => item.ItemKey != old.ItemKey)).ToArray();
-        // STEP-02: Return null early when nothing is kept and nothing removed, or there was no plan before.
+        // STEP-02: A roadmap that had no dishes yet: name what was added, so "Mình thêm {changes} nhé" never reads "Mình thêm  nhé" (Round 3 bug report).
+        if (source is not null && sourceItems.Length == 0 && changed.Length > 0)
+            return string.Join("; ", changed.Take(MaxNamedChanges).Select(item => $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}")) +
+                (changed.Length > MaxNamedChanges ? $"; {changed.Length - MaxNamedChanges} món khác" : "");
+        // STEP-02b: Return null early when nothing is kept and nothing removed, or there was no plan before.
         if (snapshot.Items.Length == changed.Length && removed.Length == 0 || sourceItems.Length == 0) return null;
         // STEP-03: Prepare parts from the changed and removed items.
         var parts = changed.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}").ToList();

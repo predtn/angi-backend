@@ -113,4 +113,18 @@ public sealed class AgentDishSuggestionPolicyTests
         context.DishSuggestion = suggestion;
         return context;
     }
+
+    // TEST-ADDR: A reply that leaves out {addressN} gets the address after that dish's restaurant; a dish without an address and a reply that has the slot stay as written.
+    /// <summary>Keeps the prompt's promise that the user always learns where to go (Round 3, AG-62).</summary>
+    [Fact]
+    public void FillSlots_MissingAddress_IsAddedAfterRestaurant()
+    {
+        // STEP-01: Pack two dishes, one with an address and one without.
+        var suggestion = new AgentDishSuggestion([new("Phở Bò", "Phở Hùng", 65000, "12 Lĩnh Nam"), new("Bún Chả", "Quán B", 45000, null)], false, false, "");
+
+        // STEP-02: Assert the address is added only where it is missing and known.
+        AgentDishSuggestionPolicy.FillSlots("Bạn thử {name1} ở {restaurant1}, khoảng {price1}; hoặc {name2} ở {restaurant2}.", suggestion)
+            .Should().Be("Bạn thử Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng; hoặc Bún Chả ở Quán B.");
+        AgentDishSuggestionPolicy.FillSlots("{name1} ở {restaurant1}, {address1}.", suggestion).Should().Be("Phở Bò ở Phở Hùng, 12 Lĩnh Nam.");
+    }
 }
