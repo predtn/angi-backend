@@ -1,6 +1,7 @@
 using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.Common.Models.Discovery;
 using ANGI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,7 +19,13 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
         var restaurants = context.Restaurants.AsNoTracking().Where(x =>
             x.VerificationStatus == RestaurantVerificationStatus.Verified && x.ModerationStatus == RestaurantModerationStatus.Visible);
         // STEP-02: When province exists, set restaurants.
-        if (province is not null) restaurants = restaurants.Where(x => x.ProvinceName != null && x.ProvinceName.ToUpper() == province.Trim().ToUpper());
+        // Same match as ranking and suggestions: "Thành phố Hà Nội" and "Hà Nội" are one province. An exact comparison sent every dish of a
+        // suggestion made with the full spelling to "outside_province", so it could never be added to the plan (conversation 530).
+        if (province is not null)
+        {
+            var provincePattern = ProvinceSearch.Pattern(province);
+            restaurants = restaurants.Where(x => x.ProvinceName != null && EF.Functions.ILike(x.ProvinceName, provincePattern, LikePattern.Escape));
+        }
         // STEP-03: Return the result of Take().Select(filtered).ToArrayAsync early when kind is "restaurant".
         if (kind == "restaurant")
             return await restaurants.Where(x => EF.Functions.ILike(x.Name, pattern, "\\"))
