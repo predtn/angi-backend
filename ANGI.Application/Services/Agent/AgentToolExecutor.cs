@@ -282,6 +282,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var used = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Select(item => AgentScopedPlanning.Normalize(item.DishName))
             .OfType<string>().ToHashSet(StringComparer.Ordinal);
         var plans = AgentDayClustering.Arrange(days, meals, Candidates, legKm, used, day => StartPoint(state, day));
+        // The even per-meal share alone can leave the total a little over a budget the trip can meet; cheaper dishes of the same meal close the gap.
+        var keptOutside = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Sum(item => item.Price);
+        if (state.BudgetAmount is { } tripBudget)
+            plans = AgentDayClustering.FitBudget(plans, Candidates, id => dishes[id].Price, tripBudget - keptOutside, legKm);
         foreach (var plan in plans)
             foreach (var pick in plan.Meals)
             {
