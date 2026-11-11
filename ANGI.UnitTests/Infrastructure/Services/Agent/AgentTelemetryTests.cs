@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using ANGI.Infrastructure.Services.Agent;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace ANGI.UnitTests.Infrastructure.Services.Agent;
@@ -28,6 +29,76 @@ public sealed class AgentTelemetryTests
         }
         // STEP-03: Clean up: set Activity.Current to previous.
         finally { Activity.Current = previous; }
+    }
+
+    // TEST-02: In Development with the trace on, one finished turn is written with its content, and the content never reaches the normal log.
+    /// <summary>Checks the local trace file holds the user text and reply, grouped under the turn header.</summary>
+    [Fact]
+    public void Dispose_InDevelopment_WritesTurnTraceOnly()
+    {
+        var root = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            var logger = new CapturingLogger();
+            using (var telemetry = new AgentTelemetry(logger, Writer(root, "Development")))
+            {
+                telemetry.Record("claimed", 7, 3, 4);
+                telemetry.Trace("user_message", 7, 3, 4, new { content = "đổi bữa tối ngày 2" });
+                telemetry.Record("completed", 7, 3, 4);
+            }
+            var file = Directory.GetFiles(Path.Combine(root, "logs"), "agent-trace-*.log").Should().ContainSingle().Subject;
+            var text = File.ReadAllText(file);
+            text.Should().Contain("conversation=7 turn=3 completed").And.Contain("đổi bữa tối ngày 2").And.Contain("\"user_message\"");
+            logger.Messages.Should().NotContain(line => line.Contains("đổi bữa tối"));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    // TEST-03: Outside Development nothing is written even when the setting is on.
+    /// <summary>Checks a server never stores chat content.</summary>
+    [Fact]
+    public void Dispose_InProduction_WritesNothing()
+    {
+        var root = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            using (var telemetry = new AgentTelemetry(new CapturingLogger(), Writer(root, "Production")))
+            {
+                telemetry.Trace("user_message", 7, 3, 4, new { content = "xin chào" });
+                telemetry.Record("completed", 7, 3, 4);
+            }
+            Directory.Exists(Path.Combine(root, "logs")).Should().BeFalse();
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    // TEST-04: Files older than the retention window are deleted; recent ones and other files stay.
+    /// <summary>Checks the 7-day cleanup.</summary>
+    [Fact]
+    public void Purge_RemovesOnlyFilesOlderThanRetention()
+    {
+        var root = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            var today = new DateTime(2026, 11, 11);
+            foreach (var name in new[] { "agent-trace-20261104.log", "agent-trace-20261105.log", "agent-trace-20261111.log", "app-20261101.log" })
+                File.WriteAllText(Path.Combine(root, name), "x");
+            ANGI.Infrastructure.Services.Logging.LogFileRetention.Purge(root, "agent-trace", 7, today);
+            Directory.GetFiles(root).Select(Path.GetFileName).Should().BeEquivalentTo("agent-trace-20261105.log", "agent-trace-20261111.log", "app-20261101.log");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private static AgentTraceWriter Writer(string root, string environment) =>
+        new(new FakeEnvironment(environment, root), new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AgentTrace:Enabled"] = "true" }).Build());
+
+    private sealed class FakeEnvironment(string name, string root) : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = name;
+        public string ApplicationName { get; set; } = "ANGI.WebApi";
+        public string ContentRootPath { get; set; } = root;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 
     /// <summary>Captures formatted diagnostic messages without writing external logs.</summary>

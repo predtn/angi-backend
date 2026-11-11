@@ -134,6 +134,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         // Giai đoạn 2: đã thả khóa DB; các lời gọi LLM, Recommendation, Map chạy bên ngoài transaction.
         var claimedVersion = conversation.Version;
         telemetry.Record("claimed", id, message.TurnId, attemptId);
+        // Chỉ vào trace Development: nguyên văn người dùng gửi.
+        telemetry.Trace("user_message", id, message.TurnId, attemptId,
+            new { request.Content, request.Command, request.SelectedItemKey, request.ConfirmedState });
         try
         {
             // STEP-30: Prepare prepared, context and control from the button command.
@@ -217,6 +220,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             // STEP-34: On Exception, call telemetry.Record, call FailAsync and 1 more action(s).
             telemetry.Record("turn_failed", id, message.TurnId, attemptId, new
                 { errorCode = (error as AppException)?.ErrorCode, errorType = error.GetType().Name });
+            telemetry.Trace("error", id, message.TurnId, attemptId, new { error.Message, detail = error.ToString() });
             await FailAsync(id, userId, message, attemptId);
             throw;
         }
@@ -406,6 +410,8 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         await transaction.CommitAsync(ct);
         // STEP-24: Call telemetry.Record.
         telemetry.Record("completed", id, message.TurnId, attemptId, new { proposalVersion = created?.ProposalVersion });
+        // Chỉ vào trace Development: câu trả lời, bản đề xuất và state cuối mà người dùng nhận được.
+        telemetry.Trace("final_reply", id, message.TurnId, attemptId, new { prepared.Action, result.Reply, result.Proposal, result.Validation, state = prepared.State });
         // STEP-25: When commitResult exists, call telemetry.Record.
         if (commitResult is not null) telemetry.Record("committed", id, message.TurnId, attemptId,
             new { commitResult.RoadmapId, commitResult.RoadmapUpdatedAt, commitResult.CommittedProposalId });

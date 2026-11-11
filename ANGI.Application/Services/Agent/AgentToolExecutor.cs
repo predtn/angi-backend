@@ -58,7 +58,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 _ => throw Invalid("Agent yêu cầu công cụ không được phép.")
             };
             // Kết quả có cấu trúc được Orchestrator đưa lại cho LLM trong tool exchange kế tiếp.
-            return JsonSerializer.SerializeToElement(result, AgentJson.Options);
+            var element = JsonSerializer.SerializeToElement(result, AgentJson.Options);
+            // Chỉ vào trace Development: tham số và kết quả tool đúng như model sẽ đọc.
+            telemetry.Trace("tool_result", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, call.Arguments, result = element });
+            return element;
         }
         catch (JsonException) { throw Invalid("Tham số công cụ không hợp lệ."); }
         finally

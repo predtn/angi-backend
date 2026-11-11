@@ -423,10 +423,10 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             // STEP-33: Return the result of InvalidSchema early when output is missing.
             // Kiểm tra lại strict schema ở backend trước khi deserialize action.
             // Schema hợp lệ chỉ chứng minh đúng cấu trúc, không chứng minh model hiểu đúng ý người dùng.
-            if (output is null) return InvalidSchema(tokens, "output_json");
+            if (output is null) return InvalidSchema(tokens, "output_json") with { RawContent = content };
             // STEP-34: Return the result of InvalidSchema early when AgentLlmSchema.FindMismatch() exists.
             if (AgentLlmSchema.FindMismatch(output.RootElement, AgentLlmSchema.Output) is { } outputPath)
-                return InvalidSchema(tokens, $"output:{outputPath}");
+                return InvalidSchema(tokens, $"output:{outputPath}") with { RawContent = content };
             // STEP-35: Return the new result.
             return new([], AgentJson.Read<AgentOutput>(content), tokens);
         }

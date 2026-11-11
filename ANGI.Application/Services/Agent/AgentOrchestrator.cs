@@ -106,6 +106,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
                     step.Failure?.ProviderCode, step.Failure?.Reason
                 });
+                // Chỉ vào trace Development: model đã trả gì ở lần gọi này (tool nó gọi, output đã đọc, hoặc chuỗi thô khi sai schema).
+                telemetry.Trace("llm_output", context.ConversationId, context.TurnId, context.AttemptId, new
+                {
+                    callNumber = calls + 1, repair = repaired, context.RepairFeedback,
+                    tools = step.Tools.Select(tool => new { tool.Name, tool.Arguments }), step.Output, rawContent = step.RawContent
+                });
                 // STEP-21: Return the result of SuggestionTurnAsync early when context.DishSuggestion exists.
                 // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng đều dùng câu cố định, không gọi thêm và không báo lỗi cho người dùng.
                 if (context.DishSuggestion is { } suggestion) return await SuggestionTurnAsync(context, suggestion, step.Output, turnState, timeout.Token);
