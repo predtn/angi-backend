@@ -1,0 +1,182 @@
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
+using System.Threading.RateLimiting;
+using ANGI.WebApi.Common.Models;
+using ANGI.WebApi.Middlewares;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace ANGI.WebApi.Configs
+{
+    public static class RateLimitConfig
+    {
+        private const string TooManyRequestsCode = "TOO_MANY_REQUESTS";
+        private const string TooManyRequestsMessage = "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.";
+        private const string ResendVerificationPath = "/api/v1/auth/verify-email/resend";
+        private const string ForgotPasswordPath = "/api/v1/auth/forgot-password";
+
+        /// <summary>Registers global API and sensitive-auth fixed-window rate limiters.</summary>
+        public static IServiceCollection AddRateLimitConfiguration(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            // STEP-01: Prepare section through configuration.GetSection and settings from section.Get.
+            var section = configuration.GetSection(RateLimitSettings.SectionName);
+            var settings = section.Get<RateLimitSettings>() ?? new RateLimitSettings();
+
+            // STEP-02: Run AddOptions().Bind().Validate().ValidateOnStart.
+            services.AddOptions<RateLimitSettings>()
+                .Bind(section)
+                .Validate(AreValid, "All rate-limit values must be greater than zero.")
+                .ValidateOnStart();
+
+            // STEP-03: Register AddMemoryCache.
+            // Login counts failed attempts only, which the rate limiter cannot see before the request runs
+            services.AddMemoryCache();
+            // STEP-04: Call services.TryAddSingleton.
+            services.TryAddSingleton(TimeProvider.System);
+            // STEP-05: Register AddScoped and register AddRateLimiter.
+            services.AddScoped<LoginFailureLimitMiddleware>();
+
+            services.AddRateLimiter(options =>
+            {
+                // A request must pass both: the general / per-email limit and, on the sensitive auth paths, the per-IP cap.
+                options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreatePartition(context, settings)),
+                    PartitionedRateLimiter.Create<HttpContext, string>(context => CreateSensitiveIpPartition(context, settings)));
+
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var duration)
+                        ? Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds))
+                        : settings.GeneralWindowSeconds;
+
+                    await WriteTooManyRequestsAsync(context.HttpContext, retryAfter, cancellationToken);
+                };
+            });
+
+            // STEP-06: Return services.
+            return services;
+        }
+
+        /// <summary>Writes the canonical 429 API response and Retry-After header.</summary>
+        public static async Task WriteTooManyRequestsAsync(HttpContext context, int retryAfterSeconds, CancellationToken cancellationToken)
+        {
+            // STEP-01: Set context.Response.StatusCode and Response.Headers.RetryAfter.
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            // STEP-02: Call context.Response.WriteAsJsonAsync.
+            await context.Response.WriteAsJsonAsync(new ApiResponse<object>
+            {
+                Success = false,
+                Message = TooManyRequestsMessage,
+                ErrorCode = TooManyRequestsCode,
+                Data = null
+            }, cancellationToken);
+        }
+
+        /// <summary>Selects the applicable limiter and partition key for an incoming request.</summary>
+        private static RateLimitPartition<string> CreatePartition(
+            HttpContext context,
+            RateLimitSettings settings)
+        {
+            // STEP-01: Return the result of RateLimitPartition.GetNoLimiter early when context.Request.Path.StartsWithSegments(...) does not hold.
+            if (!context.Request.Path.StartsWithSegments("/api"))
+            {
+                return RateLimitPartition.GetNoLimiter("non-api");
+            }
+
+            // STEP-02: Return the result of CreateFixedWindowPartition early when IsSensitiveAuthPath (forgot-password, resend) holds.
+            if (IsSensitiveAuthPath(context))
+            {
+                return CreateFixedWindowPartition(
+                    $"sensitive-auth:{GetEmailKey(context)}",
+                    settings.SensitiveAuthPermitLimit,
+                    TimeSpan.FromSeconds(settings.SensitiveAuthWindowSeconds));
+            }
+
+            // STEP-03: Prepare userId from context.User.FindFirst and clientKey from GetIpAddress.
+            var userId = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            var clientKey = string.IsNullOrWhiteSpace(userId)
+                ? $"ip:{GetIpAddress(context)}"
+                : $"user:{userId}";
+
+            // STEP-04: Return the read partition for GET and HEAD, which have their own budget.
+            if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+            {
+                return CreateFixedWindowPartition(
+                    $"read:{clientKey}",
+                    settings.ReadPermitLimit,
+                    TimeSpan.FromSeconds(settings.ReadWindowSeconds));
+            }
+
+            // STEP-05: Return the result of CreateFixedWindowPartition.
+            return CreateFixedWindowPartition(
+                $"general:{clientKey}",
+                settings.GeneralPermitLimit,
+                TimeSpan.FromSeconds(settings.GeneralWindowSeconds));
+        }
+
+        /// <summary>Per-IP partition for forgot-password and resend; no limit on other paths.</summary>
+        private static RateLimitPartition<string> CreateSensitiveIpPartition(HttpContext context, RateLimitSettings settings)
+        {
+            return IsSensitiveAuthPath(context)
+                ? CreateFixedWindowPartition(
+                    $"sensitive-auth-ip:{GetIpAddress(context)}",
+                    settings.SensitiveAuthIpPermitLimit,
+                    TimeSpan.FromMinutes(settings.SensitiveAuthIpWindowMinutes))
+                : RateLimitPartition.GetNoLimiter("not-sensitive");
+        }
+
+        /// <summary>True for the endpoints that send an email to the address in the body.</summary>
+        private static bool IsSensitiveAuthPath(HttpContext context)
+        {
+            var path = context.Request.Path;
+            return path.Equals(ResendVerificationPath, StringComparison.OrdinalIgnoreCase) ||
+                   path.Equals(ForgotPasswordPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Creates a fixed-window rate-limit partition with no request queue.</summary>
+        private static RateLimitPartition<string> CreateFixedWindowPartition(
+            string partitionKey,
+            int permitLimit,
+            TimeSpan window)
+        {
+            return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permitLimit,
+                Window = window,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+        }
+
+        /// <summary>Builds the sensitive-auth partition from normalized email, falling back to IP for unreadable bodies.</summary>
+        private static string GetEmailKey(HttpContext context)
+        {
+            var email = context.Items[RateLimitPartitionMiddleware.EmailItemKey] as string;
+            return email ?? $"unknown-email|ip:{GetIpAddress(context)}";
+        }
+
+        /// <summary>Returns the remote IP address or a stable fallback when it is unavailable.</summary>
+        private static string GetIpAddress(HttpContext context)
+        {
+            return context.Connection.RemoteIpAddress?.ToString() ?? "unknown-ip";
+        }
+
+        /// <summary>Checks that every configured rate-limit threshold and window is positive.</summary>
+        private static bool AreValid(RateLimitSettings settings)
+        {
+            return settings.GeneralPermitLimit > 0 &&
+                   settings.ReadPermitLimit > 0 &&
+                   settings.ReadWindowSeconds > 0 &&
+                   settings.GeneralWindowSeconds > 0 &&
+                   settings.LoginPermitLimit > 0 &&
+                   settings.LoginWindowMinutes > 0 &&
+                   settings.SensitiveAuthPermitLimit > 0 &&
+                   settings.SensitiveAuthWindowSeconds > 0 &&
+                   settings.SensitiveAuthIpPermitLimit > 0 &&
+                   settings.SensitiveAuthIpWindowMinutes > 0;
+        }
+    }
+}

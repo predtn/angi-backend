@@ -1,0 +1,32 @@
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace ANGI.Infrastructure.Persistences.Configs
+{
+    /// <summary>Configures approved dishes displayed in the active restaurant menu.</summary>
+    public class DishConfiguration : IEntityTypeConfiguration<Dish>
+    {
+        /// <summary>Maps dish fields, defaults, constraints, and restaurant/media relationships.</summary>
+        public void Configure(EntityTypeBuilder<Dish> builder)
+        {
+            builder.ToTable("dishes", table =>
+                table.HasCheckConstraint("ck_dishes_price", "price >= 0"));
+
+            builder.Property(x => x.Name).HasMaxLength(200);
+            // DISH-01 q searches ILIKE '%term%', which a b-tree cannot serve.
+            builder.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops").HasDatabaseName("ix_dishes_name_trgm");
+            builder.Property(x => x.DishForm).HasMaxLength(10).HasDefaultValue(DishForm.Other);
+            builder.Property(x => x.LikeCount).HasDefaultValue(0);
+            builder.Property(x => x.DislikeCount).HasDefaultValue(0);
+            builder.Property(x => x.Price).HasPrecision(12, 0);
+            builder.Property(x => x.IsAvailable).HasDefaultValue(true);
+            builder.Property(x => x.Status).HasMaxLength(10).HasDefaultValue(DishStatus.Active);
+            builder.Property(x => x.SortOrder).HasDefaultValue((short)0);
+
+            builder.HasOne(x => x.Restaurant).WithMany(x => x.Dishes).HasForeignKey(x => x.RestaurantId);
+            builder.HasOne(x => x.CoverMedia).WithMany().HasForeignKey(x => x.CoverMediaId);
+        }
+    }
+}

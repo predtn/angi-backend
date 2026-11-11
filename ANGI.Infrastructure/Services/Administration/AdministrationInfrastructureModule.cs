@@ -1,0 +1,20 @@
+using ANGI.Application.Common.Interfaces.Repositories.Administration;
+using ANGI.Infrastructure.Persistences.Repositories.Administration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace ANGI.Infrastructure.Services.Administration;
+
+/// <summary>Centralizes Infrastructure-layer registration for the Administration module.</summary>
+public static class AdministrationInfrastructureModule
+{
+    /// <summary>Registers MOD account and permission persistence for the lifetime of an HTTP request.</summary>
+    public static IServiceCollection AddAdministrationInfrastructure(this IServiceCollection services)
+    {
+        services.AddScoped<IAdministrationModRepository, AdministrationModRepository>();
+        services.AddScoped<IAdministrationPermissionRepository, AdministrationPermissionRepository>();
+        services.AddScoped<IAdministrationDashboardRepository, AdministrationDashboardRepository>();
+        services.AddScoped<IAdministrationOutboxRepository, AdministrationOutboxRepository>();
+        services.AddScoped<IAdministrationAuditLogRepository, AdministrationAuditLogRepository>();
+        return services;
+    }
+}

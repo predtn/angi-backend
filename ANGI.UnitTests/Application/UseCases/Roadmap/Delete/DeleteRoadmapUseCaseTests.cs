@@ -1,0 +1,112 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
+using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.UseCases.Roadmap.Delete;
+using FluentAssertions;
+using Moq;
+
+namespace ANGI.UnitTests.Application.UseCases.Roadmap.Delete;
+
+/// <summary>Verifies DeleteRoadmapUseCase soft-deletes only the caller's roadmap and hides every other target.</summary>
+public sealed class DeleteRoadmapUseCaseTests
+{
+    // TEST-01: Soft-delete an owned roadmap at the injected UTC time and commit exactly once.
+    /// <summary>Verifies the complete successful RM-05 transaction and persistence path.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithOwnedRoadmap_ShouldSetDeletedAtAndCommit()
+    {
+        // STEP-01: Create now as DateTimeOffset, create roadmap as Domain.Entities.Roadmap, create fixture through CreateFixture and 1 more.
+        var now = new DateTimeOffset(2026, 10, 17, 9, 30, 0, TimeSpan.Zero);
+        var roadmap = new Domain.Entities.Roadmap { Id = 88, UserId = 12, Title = "Trip", NumDays = 1 };
+        var fixture = CreateFixture(roadmap, now, 12);
+        using var cancellationSource = new CancellationTokenSource();
+
+        // STEP-02: Run fixture.UseCase.ExecuteAsync.
+        await fixture.UseCase.ExecuteAsync(88, cancellationSource.Token);
+
+        // STEP-03: Assert roadmap.DeletedAt is now.UtcDateTime.
+        roadmap.DeletedAt.Should().Be(now.UtcDateTime);
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is called once, SaveChangesAsync is called once and CommitAsync is called once.
+        fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
+            88, 12, cancellationSource.Token), Times.Once);
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(cancellationSource.Token), Times.Once);
+        fixture.Transaction.Verify(item => item.CommitAsync(cancellationSource.Token), Times.Once);
+    }
+
+    // TEST-02: Reject an unauthenticated caller before opening a transaction or reading persistence.
+    /// <summary>Verifies Application authorization remains enforced independently of the controller.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithoutCurrentUser_ShouldThrowUnauthorizedWithoutPersistence()
+    {
+        // STEP-01: Create fixture through CreateFixture.
+        var fixture = CreateFixture(new Domain.Entities.Roadmap(), DateTimeOffset.UtcNow, null);
+
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync in act so its outcome can be asserted.
+        var act = () => fixture.UseCase.ExecuteAsync(88, CancellationToken.None);
+
+        // STEP-03: Assert act throws UnauthorizedException and the thrown exception.ErrorCode is "UNAUTHORIZED".
+        (await act.Should().ThrowAsync<UnauthorizedException>()).Which.ErrorCode.Should().Be("UNAUTHORIZED");
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is never called, BeginTransactionAsync is never called and SaveChangesAsync is never called.
+        fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
+            It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-03: Hide a missing, already-deleted, or foreign roadmap behind ROADMAP_NOT_FOUND.
+    /// <summary>Verifies the ownership-filtered absence path rolls back without saving or committing.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithoutOwnedVisibleRoadmap_ShouldThrowNotFoundWithoutSaving()
+    {
+        // STEP-01: Create fixture through CreateFixture.
+        var fixture = CreateFixture(null, DateTimeOffset.UtcNow, 12);
+
+        // STEP-02: Wrap fixture.UseCase.ExecuteAsync in act so its outcome can be asserted.
+        var act = () => fixture.UseCase.ExecuteAsync(404, CancellationToken.None);
+
+        // STEP-03: Assert act throws NotFoundException and the thrown exception.ErrorCode is "ROADMAP_NOT_FOUND".
+        (await act.Should().ThrowAsync<NotFoundException>()).Which.ErrorCode.Should().Be("ROADMAP_NOT_FOUND");
+        // STEP-04: Verify LockAndGetTrackedForDeleteAsync is called once, SaveChangesAsync is never called and CommitAsync is never called.
+        fixture.Repository.Verify(item => item.LockAndGetTrackedForDeleteAsync(
+            404, 12, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Transaction.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Creates RM-05 with deterministic identity, time, transaction, and repository behavior.</summary>
+    private static Fixture CreateFixture(
+        Domain.Entities.Roadmap? roadmap,
+        DateTimeOffset now,
+        int? userId)
+    {
+        var repository = new Mock<IRoadmapRepository>();
+        repository.Setup(item => item.LockAndGetTrackedForDeleteAsync(
+                It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(roadmap);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.UserId).Returns(userId);
+        var transaction = new Mock<IUnitOfWorkTransaction>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction.Object);
+        var timeProvider = new Mock<TimeProvider>();
+        timeProvider.Setup(item => item.GetUtcNow()).Returns(now);
+        return new Fixture(
+            new DeleteRoadmapUseCase(
+                repository.Object,
+                currentUser.Object,
+                unitOfWork.Object,
+                timeProvider.Object),
+            repository,
+            unitOfWork,
+            transaction);
+    }
+
+    /// <summary>Groups the use case under test with the mocks each scenario configures and verifies.</summary>
+    private sealed record Fixture(
+        DeleteRoadmapUseCase UseCase,
+        Mock<IRoadmapRepository> Repository,
+        Mock<IUnitOfWork> UnitOfWork,
+        Mock<IUnitOfWorkTransaction> Transaction);
+}

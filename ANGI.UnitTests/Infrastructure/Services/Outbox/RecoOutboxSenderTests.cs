@@ -1,0 +1,163 @@
+using System.Net;
+using System.Text;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
+using ANGI.Infrastructure.Services.Outbox;
+using ANGI.Infrastructure.Services.Recommendation;
+using FluentAssertions;
+using Microsoft.Extensions.Options;
+
+namespace ANGI.UnitTests.Infrastructure.Services.Outbox;
+
+/// <summary>Verifies RecoOutboxSender calls the documented reco endpoints and classifies each failure as retry or dead.</summary>
+public sealed class RecoOutboxSenderTests
+{
+    private static readonly Guid EventUuid = Guid.Parse("6f0c2b1e-8d7a-4c1e-9b3f-2a5d7e9c1f00");
+
+    /// <summary>Creates the sender over a stub handler that answers with the given function.</summary>
+    private static (RecoOutboxSender Sender, StubHandler Handler) Create(Func<HttpRequestMessage, HttpResponseMessage> respond)
+    {
+        var handler = new StubHandler(respond);
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://reco.test/") };
+        var settings = Options.Create(new RecommendationSettings { BaseUrl = "http://reco.test/", ApiKey = "test-key" });
+        return (new RecoOutboxSender(client, settings), handler);
+    }
+
+    /// <summary>Creates an outbox message of the given type and payload.</summary>
+    private static OutboxMessage Message(OutboxEventType type, string payload) => new()
+    {
+        Id = 1,
+        EventUuid = EventUuid,
+        EventType = type,
+        AggregateKey = "dish:105",
+        Payload = payload
+    };
+
+    /// <summary>Creates a response with the given status and JSON body.</summary>
+    private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+        new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+    // TEST-01: Each event type goes to its RECO endpoint with the payload as body and both headers.
+    /// <summary>Ensures each event type reaches its documented endpoint with the idempotency headers.</summary>
+    [Theory]
+    [InlineData(OutboxEventType.DishUpserted, """{"dish_id":105,"name":"Bún bò"}""", "POST", "http://reco.test/dishes/upsert", true)]
+    [InlineData(OutboxEventType.FeedbackCreated, """{"event_uuid":"x","dish_id":105}""", "POST", "http://reco.test/feedback", true)]
+    [InlineData(OutboxEventType.DishDeactivated, """{"dish_id":105,"occurred_at":"2026-10-02T02:30:00.000000Z"}""", "DELETE",
+        "http://reco.test/dishes/105?occurred_at=2026-10-02T02%3A30%3A00.000000Z", false)]
+    public async Task SendAsync_ShouldCallTheDocumentedEndpoint(
+        OutboxEventType type, string payload, string method, string url, bool hasBody)
+    {
+        var (sender, handler) = Create(_ => Json(HttpStatusCode.OK, "{}"));
+
+        var result = await sender.SendAsync(Message(type, payload), CancellationToken.None);
+
+        result.Outcome.Should().Be(OutboxDeliveryOutcome.Delivered);
+        handler.Method.Should().Be(method);
+        handler.Url.Should().Be(url);
+        handler.Headers["X-Api-Key"].Should().Be("test-key");
+        handler.Headers["Idempotency-Key"].Should().Be(EventUuid.ToString());
+        if (hasBody)
+        {
+            handler.Body.Should().Be(payload);
+        }
+    }
+
+    // TEST-02: 4xx is dead with the reco error code; 5xx is retried, with Retry-After when reco sends it.
+    /// <summary>Ensures permanent errors stop retrying while temporary ones are retried as reco asks.</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.UnprocessableEntity, """{"error_code":"VALIDATION_FAILED"}""", OutboxDeliveryOutcome.Dead, "HTTP 422 VALIDATION_FAILED")]
+    [InlineData(HttpStatusCode.NotFound, """{"error_code":"DISH_NOT_FOUND"}""", OutboxDeliveryOutcome.Dead, "HTTP 404 DISH_NOT_FOUND")]
+    [InlineData(HttpStatusCode.Unauthorized, "not json", OutboxDeliveryOutcome.Dead, "HTTP 401")]
+    [InlineData(HttpStatusCode.InternalServerError, "{}", OutboxDeliveryOutcome.Retry, "HTTP 500")]
+    public async Task SendAsync_ShouldClassifyErrorResponses(
+        HttpStatusCode status, string body, OutboxDeliveryOutcome outcome, string error)
+    {
+        var (sender, _) = Create(_ => Json(status, body));
+
+        var result = await sender.SendAsync(Message(OutboxEventType.DishUpserted, "{}"), CancellationToken.None);
+
+        result.Outcome.Should().Be(outcome);
+        result.Error.Should().Be(error);
+    }
+
+    // TEST-03: Verify SendAsync with503 retry after; should retry after that delay.
+    /// <summary>Verify SendAsync with503 retry after; should retry after that delay.</summary>
+    [Fact]
+    public async Task SendAsync_With503RetryAfter_ShouldRetryAfterThatDelay()
+    {
+        var (sender, _) = Create(_ =>
+        {
+            var response = Json(HttpStatusCode.ServiceUnavailable, """{"error_code":"DISH_VECTOR_NOT_READY"}""");
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
+            return response;
+        });
+
+        var result = await sender.SendAsync(Message(OutboxEventType.FeedbackCreated, "{}"), CancellationToken.None);
+
+        result.Should().Be(new OutboxDeliveryResult(OutboxDeliveryOutcome.Retry, "HTTP 503 DISH_VECTOR_NOT_READY", TimeSpan.FromSeconds(30)));
+    }
+
+    // TEST-04: Timeouts and network errors are retried; an unreadable payload is dead without any call.
+    /// <summary>Ensures transient transport failures are retried rather than dropped.</summary>
+    [Fact]
+    public async Task SendAsync_WithTimeoutOrNetworkError_ShouldRetry()
+    {
+        var (timeout, _) = Create(_ => throw new TaskCanceledException("timeout"));
+        var (network, _) = Create(_ => throw new HttpRequestException("connection refused"));
+
+        (await timeout.SendAsync(Message(OutboxEventType.DishUpserted, "{}"), CancellationToken.None))
+            .Should().Be(new OutboxDeliveryResult(OutboxDeliveryOutcome.Retry, "Timeout"));
+        (await network.SendAsync(Message(OutboxEventType.DishUpserted, "{}"), CancellationToken.None))
+            .Outcome.Should().Be(OutboxDeliveryOutcome.Retry);
+    }
+
+    // TEST-05: Verify SendAsync with unreadable payload; should be dead without calling.
+    /// <summary>Verify SendAsync with unreadable payload; should be dead without calling.</summary>
+    [Theory]
+    [InlineData(OutboxEventType.DishUpserted, "{not json")]
+    [InlineData(OutboxEventType.DishDeactivated, """{"occurred_at":"x"}""")]
+    public async Task SendAsync_WithUnreadablePayload_ShouldBeDeadWithoutCalling(OutboxEventType type, string payload)
+    {
+        var (sender, handler) = Create(_ => Json(HttpStatusCode.OK, "{}"));
+
+        var result = await sender.SendAsync(Message(type, payload), CancellationToken.None);
+
+        result.Outcome.Should().Be(OutboxDeliveryOutcome.Dead);
+        handler.Method.Should().BeNull();
+    }
+
+    // TEST-06: Backoff doubles from 5 s and stops at 15 min.
+    /// <summary>Ensures retries back off exponentially but never wait longer than 15 minutes.</summary>
+    [Theory]
+    [InlineData(1, 5)]
+    [InlineData(2, 10)]
+    [InlineData(5, 80)]
+    [InlineData(9, 900)]
+    public void Backoff_ShouldDoubleUpToFifteenMinutes(int attempts, int seconds)
+    {
+        OutboxDispatcher.Backoff(attempts).Should().Be(TimeSpan.FromSeconds(seconds));
+    }
+
+    /// <summary>Handler that records the method, URL, body and headers of the request it receives.</summary>
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public string? Method { get; private set; }
+        public string? Url { get; private set; }
+        public string? Body { get; private set; }
+        public Dictionary<string, string> Headers { get; } = [];
+
+        /// <summary>Captures the request details, then returns the configured response.</summary>
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Method = request.Method.Method;
+            Url = request.RequestUri!.AbsoluteUri;
+            Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
+            foreach (var header in request.Headers)
+            {
+                Headers[header.Key] = string.Join(",", header.Value);
+            }
+
+            return respond(request);
+        }
+    }
+}

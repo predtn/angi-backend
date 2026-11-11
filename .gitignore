@@ -64,6 +64,7 @@ nunit-*.xml
 # Secrets and local config
 .env
 .env.*
+!.env.example
 appsettings.*.local.json
 appsettings.Local.json
 secrets.json
@@ -76,3 +77,14 @@ coverage*.json
 
 # Claude Code local files
 .claude/
+
+# Local development and data import tools
+/tools/
+/artifacts/
+
+# Scraped source data: never commit (local seed input only)
+docs/shopeefood_clean.xlsx
+*shopeefood*.xlsx
+
+# macOS/IDE per-user data written into the repo (device id)
+/Library/

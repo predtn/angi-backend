@@ -1,0 +1,444 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.DTOs.Agent;
+using ANGI.Application.Services.Agent;
+using ANGI.Application.Services.Agent.Conversation;
+using ANGI.Application.Services.Agent.Proposals;
+using ANGI.Application.UseCases.Agent.SendMessage;
+using ANGI.Application.UseCases.Validators.Agent;
+using ANGI.UnitTests.Application.Services.Agent;
+using FluentAssertions;
+using Moq;
+
+namespace ANGI.UnitTests.Application.UseCases.Agent.SendMessage;
+
+/// <summary>Verifies idempotent turn admission and isolated failure recovery.</summary>
+public sealed class SendAgentMessageUseCaseTests
+{
+    // TEST-01: Incomplete planning does not return the old fallback proposal as the current result.
+    /// <summary>A question already shows nothing changed and the card stays on screen, so the extra line only makes the reply read like a system notice.</summary>
+    [Fact]
+    public async Task ExecuteAsync_ClarifyingQuestion_AddsNoKeptDraftLine()
+    {
+        // STEP-01: Create fixture with a ready proposal and a model question.
+        var fixture = new AgentUseCaseFixture();
+        fixture.Conversation.CurrentProposalId = 9;
+        var proposal = ReadyProposal(9, AgentTestData.Snapshot(AgentTestData.Item()));
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "clarify", Clarification = "edit_scope", Reply = "Bạn muốn đổi món của ngày nào nhỉ?" }));
+        var request = Request();
+        request.Content = "đổi cái đó đi";
+
+        // STEP-02: Run useCase.ExecuteAsync with request and keep result.
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-03: Assert the reply is the question alone.
+        result.Reply.Should().Be("Bạn muốn đổi món của ngày nào nhỉ?");
+    }
+
+    // TEST-02: Accepting a pending constraint change generates and persists a fresh complete preview.
+    /// <summary>Ensures an accepted constraint change produces a new full preview instead of reusing the old one.</summary>
+    [Fact]
+    public async Task ExecuteAsync_AcceptConstraintChange_GeneratesAndPersistsFreshCompletePreview()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get previousState from AgentTestData.State, set fixture.Conversation.CurrentProposalId to 9 and 1 more.
+        var fixture = new AgentUseCaseFixture(); var previousState = AgentTestData.State();
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(previousState with { PendingQuestion = "Tăng ngân sách?",
+            PendingStateChange = previousState with { BudgetAmount = 700000 } });
+        // STEP-02: Read proposal through ReadyProposal.
+        var proposal = ReadyProposal(9, AgentTestData.Snapshot(AgentTestData.Item(), AgentTestData.Item(1, "b", 2)));
+        // STEP-03: Stub fixture.GetProposalSnapshotAsync, fixture.GetProposalAsync, fixture.ReserveProposalIdAsync, fixture.NextProposalVersionAsync and 1 more.
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.ReserveProposalIdAsync(It.IsAny<CancellationToken>())).ReturnsAsync(10);
+        fixture.Repository.Setup(repo => repo.NextProposalVersionAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(2);
+        fixture.Llm.SetupSequence(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(Answered("accept")).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "patch_proposal", Reply = "Updated", BaseProposalVersion = 1, State = previousState,
+                Changes = [new("move", "a", AgentTestData.Item() with { MealSlot = "breakfast" })] }));
+        // STEP-04: Get request from Request and set request.Content to a test text.
+        var request = Request(); request.Content = "quất luôn bạn ơi";
+        // STEP-05: Run Create().ExecuteAsync with request and keep result.
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-06: Assert result.Proposal.ProposalId is 10, result.Proposal.Snapshot.Items has 2 item(s) and 3 more.
+        result.Proposal!.ProposalId.Should().Be(10); result.Proposal.Snapshot.Items.Should().HaveCount(2);
+        result.Proposal.Snapshot.State.BudgetAmount.Should().Be(700000);
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Superseded);
+        result.Commit.Should().BeNull();
+    }
+
+    /// <summary>A model turn that only reports how it read the reply to the open question.</summary>
+    private static AgentLlmStep Answered(string reading) => new([], new AgentOutput { Action = "answer", Reply = "Ừ, mình làm theo nhé.", PendingAnswer = reading });
+
+    /// <summary>Creates a ready, unexpired proposal entity for conversation 7 that wraps the given snapshot.</summary>
+    private static ANGI.Domain.Entities.AgentProposal ReadyProposal(long id, AgentSnapshot snapshot) => new()
+    {
+        Id = id, ConversationId = 7, ProposalVersion = 1, Status = ANGI.Domain.Enums.AgentProposalStatus.Ready,
+        ExpiresAt = AgentUseCaseFixture.Now.AddDays(1), Payload = AgentJson.Write(snapshot),
+        ValidationResult = AgentJson.Write(new AgentValidation([], [], 50000, []))
+    };
+
+    // TEST-03: A completed stale-version retry replays its stored response without provider calls or extra saves.
+    /// <summary>Checks replay-before-version validation using the real request hash implementation.</summary>
+    [Fact]
+    public async Task ExecuteAsync_CompletedRetry_ReplaysWithoutProviderOrSave()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and get request from Request.
+        // STEP-02: Build useCase under test through Create.
+        var fixture = new AgentUseCaseFixture(); var request = Request(); var useCase = Create(fixture);
+        // STEP-03: Run useCase.ExecuteAsync with request and keep first.
+        var first = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-04: Run useCase.ExecuteAsync with request and keep replay.
+        var replay = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-05: Assert replay.Replayed is true and replay.ConversationVersion is first.ConversationVersion.
+        replay.Replayed.Should().BeTrue(); replay.ConversationVersion.Should().Be(first.ConversationVersion);
+        // STEP-06: Verify RunAsync is called once and SaveChangesAsync is called 2 times.
+        fixture.Llm.Verify(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
+        // STEP-07: Set request.SelectedItemKey to "different-business-choice".
+        request.SelectedItemKey = "different-business-choice";
+        // STEP-08: Assert useCase.ExecuteAsync() throws ConflictException and the thrown exception.ErrorCode is "MESSAGE_ID_REUSED".
+        (await ((Func<Task>)(async () => await useCase.ExecuteAsync(7, request, CancellationToken.None))).Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("MESSAGE_ID_REUSED");
+    }
+
+    // TEST-04: Busy, stale and expired conversations reject admission before the LLM.
+    /// <summary>Checks all pre-execution conversation guards at their boundary.</summary>
+    [Theory]
+    [InlineData("busy", "CONVERSATION_BUSY")][InlineData("version", "CONVERSATION_VERSION_CONFLICT")][InlineData("expired", "CONVERSATION_EXPIRED")]
+    public async Task ExecuteAsync_ConversationGuard_RejectsBeforeLlm(string area, string code)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and 3 more.
+        var fixture = new AgentUseCaseFixture();
+        if (area == "busy") { fixture.Conversation.ProcessingTurnId = 1; fixture.Conversation.ProcessingAttemptId = 2; fixture.Conversation.ProcessingUntil = AgentUseCaseFixture.Now.AddSeconds(1); }
+        if (area == "version") fixture.Conversation.Version = 2;
+        if (area == "expired") fixture.Conversation.ExpiresAt = AgentUseCaseFixture.Now;
+        // STEP-02: Wrap Create().ExecuteAsync in act so its outcome can be asserted.
+        var act = () => Create(fixture).ExecuteAsync(7, Request(), CancellationToken.None);
+        // STEP-03: Assert act throws AppException and the thrown exception.ErrorCode is code.
+        (await act.Should().ThrowAsync<AppException>()).Which.ErrorCode.Should().Be(code);
+        // STEP-04: Verify fixture receives no other calls.
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-05: Persistent minute and daily quota exhaustion returns the correct retry delay without provider calls.
+    /// <summary>Verifies both independently configured per-user cost limits.</summary>
+    [Theory]
+    [InlineData(false, 60)][InlineData(true, 86400)]
+    public async Task ExecuteAsync_QuotaExceeded_RejectsBeforeLlm(bool daily, int retryAfter)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture.
+        var fixture = new AgentUseCaseFixture();
+        // STEP-02: Stub fixture.CountAttemptsAsync.
+        fixture.Repository.Setup(x => x.CountAttemptsAsync(3, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, DateTime since, CancellationToken _) => daily ? (since == AgentUseCaseFixture.Now.AddDays(-1) ? 100 : 0) : 60);
+        // STEP-03: Wrap Create().ExecuteAsync in act so its outcome can be asserted.
+        var act = () => Create(fixture).ExecuteAsync(7, Request(), CancellationToken.None);
+        // STEP-04: Assert act throws AgentRateLimitedException and the thrown exception.RetryAfterSeconds is retryAfter.
+        (await act.Should().ThrowAsync<AgentRateLimitedException>()).Which.RetryAfterSeconds.Should().Be(retryAfter);
+        // STEP-05: Verify fixture receives no other calls.
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-06: Provider failure resets rolled-back tracking before releasing only its own lease.
+    /// <summary>Prevents a recovery flush from persisting a partially prepared proposal.</summary>
+    [Fact]
+    public async Task ExecuteAsync_ProviderFailure_ReleasesLeaseWithCleanTracking()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture.
+        var fixture = new AgentUseCaseFixture();
+        // STEP-02: Stub fixture.RunAsync.
+        fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync((AgentLlmStep?)null);
+        // STEP-03: Assert Create().ExecuteAsync() throws ServiceUnavailableException.
+        await ((Func<Task>)(async () => await Create(fixture).ExecuteAsync(7, Request(), CancellationToken.None))).Should().ThrowAsync<ServiceUnavailableException>();
+        // STEP-04: Verify ResetTracking is called once.
+        fixture.Repository.Verify(x => x.ResetTracking(), Times.Once);
+        // STEP-05: Assert fixture.Conversation.ProcessingAttemptId is null and fixture.Message.ProcessingStatus is Enums.AgentProcessingStatus.Failed.
+        fixture.Conversation.ProcessingAttemptId.Should().BeNull(); fixture.Message!.ProcessingStatus.Should().Be(ANGI.Domain.Enums.AgentProcessingStatus.Failed);
+    }
+
+    // TEST-07: Equivalent decimal scales and province casing do not turn a completed business retry into a different message.
+    /// <summary>Checks canonical hashing ignores representation differences while retaining business identity.</summary>
+    [Fact]
+    public async Task ExecuteAsync_EquivalentStateRepresentation_Replays()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get request from Request and set request.ConfirmedState to a new AgentState.
+        var fixture = new AgentUseCaseFixture(); var request = Request();
+        request.ConfirmedState = new AgentState { Province = "Da Nang", NumDays = 2, BudgetAmount = 500000.0m };
+        // STEP-02: Build useCase under test through Create.
+        // STEP-03: Run useCase.ExecuteAsync with request.
+        var useCase = Create(fixture); await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-04: Set request.ConfirmedState to a copy of request.ConfirmedState.
+        request.ConfirmedState = request.ConfirmedState with { Province = "DA NANG", BudgetAmount = 500000m };
+        // STEP-05: Assert useCase.ExecuteAsync().Replayed is true.
+        (await useCase.ExecuteAsync(7, request, CancellationToken.None)).Replayed.Should().BeTrue();
+    }
+
+    // TEST-08: A short affirmative accepts only the pending constraint snapshot and never saves a roadmap.
+    /// <summary>Checks both acceptance and rejection without trusting model-generated consent.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_PendingChange_RequiresNextTurnConsent(bool accept)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get state from AgentTestData.State, set fixture.Conversation.State to AgentJson.Write() and 2 more.
+        var fixture = new AgentUseCaseFixture();
+        var state = AgentTestData.State();
+        fixture.Conversation.State = AgentJson.Write(state with { PendingQuestion = "Tăng ngân sách?", PendingStateChange = state with { BudgetAmount = 700000 } });
+        var request = Request(); request.Content = "câu trả lời nào cũng được";
+        // STEP-02: Stub the model's reading, then its answer on the replan, and record the budget and replan flag of each call, because the context object is reused.
+        var calls = new List<(bool Replan, decimal? Budget, string? Awaited)>();
+        var answers = new Queue<AgentLlmStep>([Answered(accept ? "accept" : "decline"), new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Đã xem lại nhé." })]);
+        fixture.Llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((context, _, _) => calls.Add((context.ReplanAfterConfirmation, context.State.BudgetAmount, context.AwaitedAnswer)))
+            .ReturnsAsync(() => answers.Dequeue());
+        // STEP-03: Run Create().ExecuteAsync with request and keep result.
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-04: Read saved from the response; assert saved.BudgetAmount is accept ? 700000 : 500000, saved.PendingStateChange is null and 1 more.
+        var saved = AgentJson.Read<AgentState>(fixture.Conversation.State);
+        saved.BudgetAmount.Should().Be(accept ? 700000 : 500000); saved.PendingStateChange.Should().BeNull(); saved.PendingQuestion.Should().BeNull();
+        // STEP-05: Assert result.Commit is null.
+        result.Commit.Should().BeNull();
+        // STEP-06: Assert the model read the reply against the open question, and only an accepted change planned again with the new budget.
+        calls[0].Should().Be((false, 500000m, AgentConfirmationPolicy.AwaitingStateChange));
+        if (accept) calls.Should().HaveCount(2).And.Contain((true, 700000m, null));
+        else calls.Should().HaveCount(1);
+        fixture.Roadmaps.VerifyNoOtherCalls();
+    }
+
+    // TEST-09: Whatever the model reads, a save question only commits on accept for its exact proposal version; covers a refusal, an unclear reply, and an accept with no matching question.
+    /// <summary>"Đừng nhé" once saved the plan being refused, because a word list read it as "đúng"; no reading here may write the roadmap.</summary>
+    [Theory]
+    [InlineData("unclear", 1, null)]
+    [InlineData("accept", 2, null)]
+    public async Task ExecuteAsync_SaveQuestion_OnlyAcceptForItsVersionCommits(string reading, int askedVersion, string? reply)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get snapshot from AgentTestData.Snapshot, set the question about proposal 9 and get request from Request.
+        var fixture = new AgentUseCaseFixture();
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        var dated = snapshot with { State = snapshot.State with { StartDate = new DateOnly(2026, 12, 1) } };
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(dated.State with { PendingSave = new(9, askedVersion, AgentConfirmationPolicy.StageConfirm) });
+        // STEP-02: Read proposal through ReadyProposal and stub the repository and the model's reading.
+        var proposal = ReadyProposal(9, dated);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Bạn muốn làm gì tiếp theo?", PendingAnswer = reading }));
+        var request = Request(); request.Content = "đừng nhé";
+
+        // STEP-03: Run Create().ExecuteAsync with request and keep result.
+        var result = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-04: Assert nothing was committed, the proposal stays ready, and a refusal says so.
+        result.Commit.Should().BeNull();
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        if (reply is not null) result.Reply.Should().Contain(reply);
+        fixture.Roadmaps.Verify(x => x.LockAndGetTrackedAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    // TEST-10: Ordinary or negated chat, and a wish to review before saving, is sent to the model and cannot reach the deterministic save writer.
+    /// <summary>Protects against ambiguous agreement and negative save instructions.</summary>
+    [Theory]
+    [InlineData("đồng ý")]
+    [InlineData("đừng lưu lịch trình này")]
+    [InlineData("hãy lập lịch giúp tôi để chốt lịch")]
+    public async Task ExecuteAsync_NotExplicitSave_NeverCommits(string content)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get request from Request and set request.Content to content.
+        var fixture = new AgentUseCaseFixture(); var request = Request(); request.Content = content;
+        // STEP-02: Assert Create().ExecuteAsync().Commit is null.
+        (await Create(fixture).ExecuteAsync(7, request, CancellationToken.None)).Commit.Should().BeNull();
+        // STEP-03: Verify RunAsync is called once and fixture receives no other calls.
+        fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Roadmaps.VerifyNoOtherCalls();
+    }
+
+    // TEST-11: Supplying a stale version remains an explicit conflict even without a client-selected message ID.
+    /// <summary>Checks that prompt-only defaults do not silently ignore requested concurrency protection.</summary>
+    [Fact]
+    public async Task ExecuteAsync_OptionalIdWithExplicitStaleVersion_StillConflicts()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and set fixture.Conversation.Version to 3.
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.Version = 3;
+        // STEP-02: Wrap Create().ExecuteAsync in act so its outcome can be asserted.
+        var act = () => Create(fixture).ExecuteAsync(7, new() { Content = "bỏ bản nháp", ExpectedConversationVersion = 1 }, CancellationToken.None);
+        // STEP-03: Assert act throws ConflictException and the thrown exception.ErrorCode is "CONVERSATION_VERSION_CONFLICT".
+        (await act.Should().ThrowAsync<ConflictException>()).Which.ErrorCode.Should().Be("CONVERSATION_VERSION_CONFLICT");
+        // STEP-04: Verify fixture receives no other calls.
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-12: Prompt-only admission retains the busy, expiry and quota guards before provider execution.
+    /// <summary>Checks that omission of transport metadata cannot bypass existing admission limits.</summary>
+    [Theory]
+    [InlineData("busy", "CONVERSATION_BUSY")]
+    [InlineData("expired", "CONVERSATION_EXPIRED")]
+    [InlineData("quota", "AGENT_RATE_LIMITED")]
+    public async Task ExecuteAsync_PromptOnly_StillEnforcesAdmissionGuards(string guard, string code)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and 3 more.
+        var fixture = new AgentUseCaseFixture();
+        if (guard == "busy") { fixture.Conversation.ProcessingTurnId = 1; fixture.Conversation.ProcessingAttemptId = 2; fixture.Conversation.ProcessingUntil = AgentUseCaseFixture.Now.AddSeconds(30); }
+        if (guard == "expired") fixture.Conversation.ExpiresAt = AgentUseCaseFixture.Now;
+        if (guard == "quota") fixture.Repository.Setup(x => x.CountAttemptsAsync(3, It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(100);
+        // STEP-02: Wrap Create().ExecuteAsync in act so its outcome can be asserted.
+        var act = () => Create(fixture).ExecuteAsync(7, new() { Content = "Tôi muốn ăn ở Việt Nam" }, CancellationToken.None);
+        // STEP-03: Assert act throws AppException and the thrown exception.ErrorCode is code.
+        (await act.Should().ThrowAsync<AppException>()).Which.ErrorCode.Should().Be(code);
+        // STEP-04: Verify fixture receives no other calls.
+        fixture.Llm.VerifyNoOtherCalls();
+    }
+
+    // TEST-13: Declining after an accepted change that produced no preview returns to the reviewed constraints, so the preview can be saved.
+    /// <summary>Prevents "giữ nguyên" from leaving a state that no longer matches the preview and blocks saving.</summary>
+    [Fact]
+    public async Task ExecuteAsync_DeclineAfterFailedChange_RestoresReviewedConstraints()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, get snapshot from AgentTestData.Snapshot, set fixture.Conversation.CurrentProposalId to 9 and 1 more.
+        var fixture = new AgentUseCaseFixture();
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.CurrentProposalId = 9;
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Chưa có món?", MealRequests = [new(1, "lunch", null, "Quán khác", [])] });
+        // STEP-02: Read proposal through ReadyProposal.
+        var proposal = ReadyProposal(9, snapshot);
+        // STEP-03: Stub fixture.GetProposalSnapshotAsync and fixture.GetProposalAsync.
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(Answered("decline"));
+        // STEP-04: Get request from Request and set request.Content to a test text.
+        var request = Request(); request.Content = "giữ nguyên";
+
+        // STEP-05: Run Create().ExecuteAsync with request.
+        await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-06: Assert AgentJson.Read().MealRequests is empty.
+        AgentJson.Read<AgentState>(fixture.Conversation.State).MealRequests.Should().BeEmpty();
+    }
+
+    // TEST-14: A greeting with an open question keeps the current proposal as the result, shows only the model's greeting and closes the question, with no "previous proposal kept" note.
+    /// <summary>Prevents the fixed note from being appended to a social reply and verifies the turn is still stored and replayable.</summary>
+    [Fact]
+    public async Task ExecuteAsync_GreetingWithOpenQuestion_KeepsProposalWithoutExtraNote()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture, set fixture.Conversation.CurrentProposalId to 9, get snapshot from AgentTestData.Snapshot and 1 more.
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingQuestion = "Bạn muốn đổi món nào?" });
+        // STEP-02: Read proposal through ReadyProposal.
+        var proposal = ReadyProposal(9, snapshot);
+        // STEP-03: Stub fixture.GetProposalSnapshotAsync and fixture.GetProposalAsync.
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        // STEP-04: Stub fixture.RunAsync with the model's greeting, get request from Request and set request.Content to a test text.
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "chat", Reply = "Chào bạn nha!" }));
+        var request = Request(); request.Content = "Xin chào";
+        // STEP-05: Build useCase under test through Create.
+        var useCase = Create(fixture);
+
+        // STEP-06: Run useCase.ExecuteAsync with request and keep result.
+        var result = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+        // STEP-07: Run useCase.ExecuteAsync with request and keep replay.
+        var replay = await useCase.ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-08: Assert result.Reply is only the model's greeting and the question no longer waits, as the user moved on.
+        result.Reply.Should().Be("Chào bạn nha!");
+        AgentJson.Read<AgentState>(fixture.Conversation.State).PendingQuestion.Should().BeNull();
+        // STEP-09: Assert proposal.Status is Enums.AgentProposalStatus.Ready and fixture.Conversation.CurrentProposalId is 9.
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        fixture.Conversation.CurrentProposalId.Should().Be(9);
+        // STEP-10: Assert replay.Reply is result.Reply and replay.Replayed is true.
+        replay.Reply.Should().Be(result.Reply); replay.Replayed.Should().BeTrue();
+        // STEP-11: Verify the model is called once, the replay costing nothing.
+        fixture.Llm.Verify(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-15: A dish suggestion ends an open save question so the next "ok" cannot save the plan; a greeting keeps it. Covers both.
+    /// <summary>"Lưu nhé?", then "gợi ý 1 món", then "ok" would otherwise commit the plan while the user was answering the offer.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_SuggestionDuringSaveQuestion_EndsTheQuestion(bool suggestion)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture with a ready proposal and a state holding an open save question.
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingSave = new(9, 1, "confirm") });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        // STEP-02: Stub fixture.RunAsync with a suggestion and its wording, or a greeting.
+        var call = new AgentToolCall("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: []), AgentJson.Options));
+        var greeting = new AgentLlmStep([], new AgentOutput { Action = "chat", Reply = "Mình nghe đây nè!" });
+        if (suggestion) fixture.Llm.SetupSequence(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([call], null)).ReturnsAsync(greeting);
+        else fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(greeting);
+        // STEP-03: Get request from Request and set request.Content.
+        var request = Request(); request.Content = suggestion ? "gợi ý cho tôi 1 món bất kì" : "bạn khỏe không";
+
+        // STEP-04: Run Create().ExecuteAsync with request.
+        await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-05: Assert the stored state drops the save question and marks the offer after a suggestion, and keeps the question after a greeting.
+        var state = AgentJson.Read<AgentState>(fixture.Conversation.State);
+        state.PendingSave.Should().Be(suggestion ? null : new AgentPendingSave(9, 1, "confirm"));
+        state.DishOffered.Should().Be(suggestion ? true : null);
+    }
+
+    // TEST-16: The mark of an offered dish survives a chat aside but ends when the user turns to anything else (conversation 220).
+    /// <summary>"sở thích của tôi là gì" between a suggestion and "tôi thích ăn cay" keeps the taste about the suggestion; a planning question ends it.</summary>
+    [Theory]
+    [InlineData("chat", true)]
+    [InlineData("food_info", true)]
+    [InlineData("clarify", false)]
+    public async Task ExecuteAsync_OfferedDish_SurvivesOnlyAsides(string action, bool kept)
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture with a stored offer and keep what the model is told.
+        var fixture = new AgentUseCaseFixture();
+        fixture.Conversation.State = AgentJson.Write(AgentTestData.State() with { DishOffered = true });
+        var told = new List<(bool Offered, bool? Stored)>();
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((context, _, _) => told.Add((context.DishOffered, context.State.DishOffered)))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "Mình nghe đây nè!", Clarification = action == "clarify" ? "general" : null,
+                SuggestedDish = action == "food_info" ? "Phở" : null }));
+        // STEP-02: Get request from Request and set request.Content.
+        var request = Request(); request.Content = "bạn khỏe không";
+
+        // STEP-03: Run Create().ExecuteAsync with request.
+        await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-04: Assert the model was told through the context and the stored mark stays only after an aside.
+        told.Should().Equal((true, (bool?)null));
+        AgentJson.Read<AgentState>(fixture.Conversation.State).DishOffered.Should().Be(kept ? true : null);
+    }
+
+    // TEST-17: With the attached roadmap deleted, every message still reaches the model, which is told so; only a reset it reads detaches the roadmap.
+    /// <summary>No sentence is matched by the backend: the model reads "làm lại từ đầu" like any other wording.</summary>
+    [Theory]
+    [InlineData("Làm lại từ đầu", "reset_conversation")]
+    [InlineData("đổi bữa trưa ngày 1", "chat")]
+    public async Task ExecuteAsync_AttachedRoadmapDeleted_ModelReadsEveryMessage(string content, string action)
+    {
+        // STEP-01: Attach roadmap 41, make GetOwnedDetailAsync report it as missing and keep what the model is told.
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.RoadmapId = 41;
+        fixture.Roadmaps.Setup(x => x.GetOwnedDetailAsync(41, 3, It.IsAny<CancellationToken>())).ReturnsAsync((ANGI.Domain.Entities.Roadmap?)null);
+        var told = new List<bool>();
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((context, _, _) => told.Add(context.AttachedRoadmapDeleted))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = action, Reply = "Lịch cũ đã bị xóa, mình làm lại từ đầu nhé." }));
+        var request = Request(); request.Content = content;
+
+        // STEP-02: Run Create().ExecuteAsync with request.
+        var turn = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-03: Assert the model was told the roadmap is gone, its reply is shown, and only its reset detaches the roadmap.
+        told.Should().Equal(true);
+        turn.Reply.Should().Be("Lịch cũ đã bị xóa, mình làm lại từ đầu nhé.");
+        fixture.Conversation.RoadmapId.Should().Be(action == "reset_conversation" ? null : 41);
+    }
+
+    private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),
+        fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object, fixture.Clock, fixture.Limits,
+        new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object), fixture.Orchestrator(), fixture.Telemetry, fixture.Committer());
+    /// <summary>Creates the minimal valid logical user request.</summary>
+    private static SendAgentMessageRequestDto Request() => new() { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "Explain the proposal" };
+}

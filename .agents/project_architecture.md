@@ -1,0 +1,280 @@
+# ANGI — Project Architecture
+
+What the system is and the contracts the backend must respect. How to write the code: `coding_rule.md`. Git, commits and pull requests: `commit_guide.md`.
+
+## 0. Sources of truth
+
+The design documents decide; these `.agents` files summarize them for coding. Always use the file with the highest version number.
+
+| Document | Decides |
+|---|---|
+| `docs/ANGI_API_Design_Ver*.xlsx` | Every endpoint (request, response, status, error codes), the internal Reco API, sheet "Mã lỗi" (error codes), sheet "Enum" (allowed values), sample JSON |
+| `docs/ANGI_Data_Dictionary_Ver*.xlsx` | Every table and column of schemas `core` and `recommendation`, with types, nullability, defaults and CHECKs |
+| `docs/ANGI_Jira_Plan_Ver*.xlsx` | Task keys (`ANGI-123`) for branches and commits |
+| `angi-reco` repo, `docs/Recommendation_System_Design_Ver*.docx` | Recommendation algorithm and the backend ↔ reco split |
+
+- Implement exactly what the documents say. Before coding an endpoint, read its rows in sheets "Backend API" and "Chi tiết Request-Response"; before touching a table, read it in the Data Dictionary.
+- When the documents are silent, ambiguous or contradict each other, or the work needs something they do not contain (a new error code, enum value, column, endpoint field), stop and ask. The documents are updated first, then the code, in the same pull request.
+- When these `.agents` files disagree with the documents, the documents win; fix the `.agents` file.
+
+## 1. Product
+
+**ANGI (Ăn Gì)** recommends Vietnamese regional dishes to travelers and builds a day-by-day food roadmap. This repo is the backend REST API; the frontend (Next.js) and the recommendation service (FastAPI, `angi-reco`) are separate repos.
+
+- Actors: Guest, Traveler, Restaurant Owner, Mod, Admin.
+- Out of scope, never build: payment, ordering or delivery, table booking, third-party data import, native mobile app.
+- Recommendation and existing roadmap requests answer within 3 s. Agent chat has a configured 90 s total processing timeout and a 120 s fenced lease; duplicate in-flight turns return 202.
+
+**Modules.** These names are the `<Module>` folders in the code (`coding_rule.md` §1) and, lowercase, the commit scopes: `Auth`, `Account`, `Restaurant`, `Discovery`, `Roadmap`, `Social`, `Notification`, `Moderation`, `Administration`, `Audit`, `Media`. `Media` is MEDIA-01 (module "Media" in the API Design): one upload used by every other module, which then refers to the file by `mediaId`. `Discovery` also holds PREF-02 / PREF-03 (module "Sở thích" in the API Design, F-17 in epic EP-DISC), in their own `PreferenceSurveyController` under `/api/v1/me/preference-survey`, and the home, dish, impression and tag endpoints HOME-01, DISH-01..03, IMP-01 and CAT-02 (`HomeController`, `DishesController`, `ImpressionsController`, `TagsController`).
+
+`Agent` is the additional module for AGENT-01..04 (ANGI-231), implemented from `.agents/ANGI_Agent_Implementation_Ver1.1.md` and the Agent additions in the API Design and Data Dictionary. Its services live in `Application/Services/Agent`, use cases in `Application/UseCases/Agent`, and adapters in `Infrastructure/Services/Agent`.
+
+## 2. Tech stack
+
+| Concern | Technology |
+|---|---|
+| Framework | .NET 10, ASP.NET Core Web API with controllers |
+| Database | PostgreSQL 16 + pgvector; EF Core 10 (`Npgsql.EntityFrameworkCore.PostgreSQL`, `EFCore.NamingConventions`) |
+| Validation | FluentValidation |
+| Auth | JWT Bearer, rotating refresh token, BCrypt, Google sign-in |
+| API docs | OpenAPI + Scalar at `/scalar`, Development only |
+| Tests | xUnit, Moq, FluentAssertions 7.x (never 8.x: paid for commercial use); `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) for HTTP contract tests. `ANGI.UnitTests` is isolated; `ANGI.IntegrationTests` also runs against PostgreSQL, only on a dedicated database whose name contains `test` (a service container in CI) |
+| Hosting | Render (backend, reco, PostgreSQL), Vercel (frontend) |
+
+Do not add another framework or library for a concern this table already covers.
+
+## 3. Solution structure
+
+```
+Domain  ◀──  Application  ◀──  Infrastructure
+                  ▲                  ▲
+                  └──── WebApi ──────┘   (Infrastructure: DI registration only)
+UnitTests, IntegrationTests ──▶ all projects
+```
+
+| Project | Contains |
+|---|---|
+| Domain | Entities, enums, `BaseEntity`, timestamp and soft-delete interfaces. No dependencies. |
+| Application | Use cases, DTOs, validators, exceptions, and the interfaces of repositories and services |
+| Infrastructure | `ANGIContext`, EF configurations, migrations, repositories, external service clients |
+| WebApi | `Program.cs`, controllers, middlewares, `Configs/` (JWT, CORS, rate limit), `ApiResponse<T>` |
+
+Application declares interfaces, Infrastructure implements them, controllers use only Application interfaces. Layer rules: `coding_rule.md` §1–2.
+
+## 4. Request pipeline
+
+Order in `Program.cs`. Keep it; a new middleware goes where its dependencies are already available.
+
+```
+ExceptionHandlingMiddleware      every exception → ApiResponse error
+Status code pages                empty 404 / 405 → ApiResponse ROUTE_NOT_FOUND / METHOD_NOT_ALLOWED
+[Development] migrate database, OpenAPI + Scalar (/scalar)
+HTTPS redirection
+CORS (policy "Frontend")
+RateLimitPartitionMiddleware     reads the email of login / resend / forgot-password for the rate-limit key
+LoginFailureLimitMiddleware      5 INVALID_CREDENTIALS per email + IP in 15 min → 429 until the window ends; a success clears the count
+Authentication (JWT)             401 UNAUTHORIZED as ApiResponse
+Rate limiter                     resend / forgot-password, read (GET/HEAD) and general limits → 429 TOO_MANY_REQUESTS + Retry-After
+Authorization                    403 FORBIDDEN as ApiResponse
+AccountStatusMiddleware          endpoints that need a token: account not active → 403 with the AUTH-04 error codes
+Controllers → use case → repositories → ANGIContext → PostgreSQL (schema core)
+```
+
+## 5. API conventions
+
+These apply to every endpoint unless its row in the API Design says otherwise.
+
+| Topic | Rule |
+|---|---|
+| Base URL, JSON | `/api/v1`, camelCase, every response wrapped in `ApiResponse<T>` (`coding_rule.md` §5) |
+| Tokens | Access token 15 min; refresh token 30 days, rotated on every use (`core.user_sessions`). Claims: `sub`, `email`, `role`, `email_verified`, `sid` (= `user_sessions.id` of the session that issued the token; a refresh issues a new session, so a new `sid`), `jti` |
+| Access | Column "Auth / Role" of the API Design: `Public` needs no token; `Public (token tùy chọn)` personalizes when a token is sent; a named role allows only that role (403 otherwise). An account that is not `active` is rejected on every endpoint that needs a token, even with a valid access token, with the same codes as AUTH-04 (`ACCOUNT_SUSPENDED` + `suspendedUntil`, `ACCOUNT_BANNED`, `ACCOUNT_DEACTIVATED`, `EMAIL_NOT_VERIFIED`). The status is read from the database with a 30 s cache (`IAccountStatusCache`); every use case that changes `users.status` calls `Invalidate(userId)` |
+| Mod / Admin permissions | Effective permissions = role default + allow − deny (`core.user_permissions`), read from the database with a short cache, never from the JWT. Admin has every permission |
+| Paging | `page` (from 1), `pageSize` (default 20, max 100) → `Paged<T>`. Lists ranked by reco use `cursor` + `limit` and return `requestId`: reco ranks once, the ranked ids stay 30 min in `IRankedDishListCache` (process memory, one instance) under reco's `request_id`, or a backend key when it is null, with the caller's user id; the cursor is base64url `{k, o}` (key, offset). Malformed, expired or another user's cursor → 400 `INVALID_CURSOR` |
+| Time, money, ids | ISO 8601 UTC; dates `yyyy-MM-dd`; business hours `HH:mm` Vietnam time; integer VND; `int` / `long` ids, `uuid` only for `requestId` and `eventUuid` |
+| Delete | Soft delete for users, restaurants, roadmaps, blogs, comments; 200 with `data: null` |
+| Rate limit | Login 5 failures / 15 min per email + IP; resend and forgot-password 1 / 60 s per email and 5 / 15 min per IP; everything else per user (per IP when anonymous): GET and HEAD 300 / min (`RateLimit:ReadPermitLimit`), other methods 100 / min (`RateLimit:GeneralPermitLimit`), as two separate budgets |
+
+## 6. Database
+
+### Schemas
+
+| Schema | Owner role | Changed by |
+|---|---|---|
+| `core` | `angi_backend` (this backend) | EF Core migrations in this repo |
+| `recommendation` | `angi_reco` (reco service) | Alembic in `angi-reco` |
+| `public` | none | holds the `citext` and `vector` extensions only |
+
+- Each role reads and writes only its own schema. The backend never maps or queries `recommendation.*`; it asks reco over HTTP.
+- No foreign key crosses schemas. `user_id` / `dish_id` in `recommendation` are `core.users.id` / `core.dishes.id`: never reuse or renumber those ids.
+- `core.audit_logs` is append-only: trigger `trg_audit_logs_append_only` rejects UPDATE, DELETE and TRUNCATE for every role, the owner included. How to write it: `coding_rule.md` §17.
+- Local setup (Docker, roles, connection string): `README.md` and `docs/local-database.md`; keys: `docs/configuration.md`; deploy: `docs/deploy.md`.
+
+Column, entity and migration rules: `coding_rule.md` §15–16.
+
+## 7. Outbox (backend → reco)
+
+Dish changes and likes / dislikes must reach reco even when it is down, and never twice. Database triggers (migration `InitialCreate`) write `core.outbox_messages` in the same transaction, so use cases only write `dishes` / `dish_feedbacks` and never insert outbox rows themselves.
+
+| Change | `event_type` | Reco endpoint |
+|---|---|---|
+| Dish inserted active; name, description or form changed; shown again | `DISH_UPSERTED` | `POST /dishes/upsert` |
+| Dish goes from active to hidden or removed | `DISH_DEACTIVATED` | `DELETE /dishes/{dish_id}` |
+| Like / dislike inserted (same `event_uuid` as `dish_feedbacks`) | `FEEDBACK_CREATED` | `POST /feedback` |
+
+`is_available` and `price` changes write nothing. Payloads match the Reco API request bodies.
+
+The worker is a `BackgroundService`:
+
+```
+poll pending rows → lock a batch (locked_until) → call reco with Idempotency-Key = event_uuid
+  2xx                       → done, processed_at
+  5xx / timeout             → attempt_count++, next_attempt_at = backoff
+  4xx or MaxAttempts        → dead (visible to Admin, OPS-01)
+```
+
+Rows with the same `aggregate_key` (`dish:<id>`, `user:<id>`) are sent in order; different keys may run in parallel.
+
+How `OutboxWorker` (`Infrastructure/Services/Outbox`) does it:
+
+- One `UPDATE … RETURNING` with `FOR UPDATE SKIP LOCKED` claims at most `BatchSize` due rows (pending past `next_attempt_at`, or processing with an expired `locked_until`) and sets them processing. It claims only the oldest unfinished row of each `aggregate_key`, so a row waiting for a retry holds back its key's later rows; a dead row does not.
+- The lock lasts `BatchSize × TimeoutSeconds + 30 s`, since the batch is sent one message after another. Each call to reco times out after `TimeoutSeconds` (not the 800 ms of direct calls) and carries `X-Api-Key` and `Idempotency-Key = event_uuid`.
+- Retry delay: reco's `Retry-After` when sent (e.g. 503 `DISH_VECTOR_NOT_READY`), otherwise 5 s doubling per attempt; both at most 15 min. The attempt that reaches `MaxAttempts` makes the row dead. An unreadable payload is dead at once.
+- `locked_until`, `next_attempt_at` and `processed_at` come from the database clock (`now()`), the one the claim compares with.
+- Without `Recommendation:BaseUrl` and `ApiKey` the worker does not start and rows stay pending (tests, machines without reco).
+
+## 8. Integrations
+
+Every external service is an interface in `Application/Common/Interfaces/Services/` and an implementation in `Infrastructure/Services/`. Where the table has no interface name yet, choose `I<Purpose>Service` and add it here in the same pull request.
+
+| Service | Interface | Purpose |
+|---|---|---|
+| Cloudinary | `ICloudinaryService` | Image and document upload (`core.media_files`); private files get signed URLs valid 5 min |
+| Recommendation service | `IRecommendationService` | Survey, ranking, impressions, survey status (sheet "Reco API (nội bộ)") |
+| Brevo | `IEmailService` | Email: verification, password reset |
+| Google | — | Verify Google ID tokens (`Google.Apis.Auth`) |
+| Mapbox Directions | `IRouteService` | Distance and time of each leg of a roadmap day (RM-14) |
+| OpenAI (AI provider) | `IRoadmapPlannerService` | Schedules each day of an RM-10 roadmap generation (`core.roadmap_generation_jobs`) |
+
+### Recommendation service
+
+- Typed `HttpClient`, header `X-Api-Key`, snake_case JSON. Endpoints: sheet "Reco API (nội bộ)".
+- Responses are not wrapped in `ApiResponse`: a 2xx body is the DTO itself; an error body is `{ "error_code": "...", "message": "...", "errors": { field: [messages] } }` (`errors` only for 422 `VALIDATION_FAILED`). Branch on `error_code`, never on `message`.
+- The backend filters candidates (meal, form, price, tags, distance, active dish of a verified, visible, open restaurant) and sends at most 2000; "near me" filters use `NearbyArea` (bounding box in SQL, then Haversine), shared by DISH-01, DISH-03, RM-06 and RM-10. It sends them sorted by restaurant rating, then dish `like_count`. Reco only scores them (stable sort, so ties keep that order) and returns ranked ids, scores and `request_id`; the backend loads the entities and builds the response.
+- Every direct call (RECO-03, 05, 06, 09) times out after `TimeoutMilliseconds` (800 ms).
+- Survey, `/recommendations`, `/impressions` and survey status are called directly from the use case. Dish changes and likes / dislikes go only through the outbox (§7).
+
+`IRecommendationService` has one method per endpoint and turns every reco failure into the outcome the API Design gives:
+
+| Method | Endpoint | Success | 5xx, timeout, network error, unreadable body, `BaseUrl` not set | Listed 4xx | Other 4xx |
+|---|---|---|---|---|---|
+| `SubmitSurveyAsync` | RECO-03 | `SurveySubmissionResult` | 503 `SERVICE_UNAVAILABLE` | 409 `SURVEY_ALREADY_SUBMITTED`; 422 `UNKNOWN_OPTION_CODE` → 400 | 500 |
+| `RecommendAsync` | RECO-05 | ranked dish ids with their `recommend_score` (`Scores`), `requestId`, ignored ids | fallback: the candidates in the order sent, cut to `topK` (50 by default), `requestId = null`, `Scores = null`, no ignored ids | — | 500 (422 included) |
+| `RecordImpressionsAsync` | RECO-06 | — | logged only, never thrown | logged only | logged only |
+| `GetSurveyStatusAsync` | RECO-09 | `SurveyStatus` (`Completed`, `SurveyAt`, `AnswerCount`; skipped = completed with 0 answers) | `null` | `null` | `null` |
+
+- The client sends at most the first 2000 candidates and does not call reco for an empty candidate list or an empty impression list.
+- The caller's cancellation is never turned into a fallback: it is rethrown.
+
+### Email (Brevo)
+
+- Typed `HttpClient` to the Brevo transactional API: `POST {BaseUrl}smtp/email`, header `api-key`. No Brevo SDK.
+- One method per email; the use case passes the recipient, display name, raw token and how long the token is valid. The service builds the link and the Vietnamese template (HTML and plain text) in Infrastructure.
+- Links (sheet "Backend API", AUTH-01 / AUTH-03 / AUTH-08): `{Frontend:BaseUrl}/verify-email?token=<token>` (the page calls AUTH-02) and `{Frontend:BaseUrl}/reset-password?token=<token>` (the page calls AUTH-09). The token is URL-encoded; the display name is HTML-encoded.
+- Missing configuration, a non-2xx answer, a network error or a timeout → `ServiceUnavailableException` 503 `SERVICE_UNAVAILABLE`. The API still starts without Brevo keys; only sending fails. Never log the token, the link or the email body.
+
+### Mapbox Directions (RM-14)
+
+- One Directions call per day (`/directions/v5/mapbox/{profile}/{lng,lat;...}`), at most 25 points; read `routes[0].legs[].distance` (m) and `.duration` (s). Profiles `driving` (default), `walking`, `cycling`.
+- Points: origin (if any) → the day's items by meal slot, then `sortOrder`. Origin = GPS sent by the app (`originLat` and `originLng` together), else the pinned point, else none. Skip the first leg and return `originSkipped = true` when the origin is more than 30 km (straight line) from the first item. A day with fewer than 2 points returns empty `legs`.
+- Cache in `IMemoryCache` for `CacheHours`, key = profile + coordinates (origin rounded to 3 decimals ≈ 100 m). Timeout 3 s; on failure estimate straight line × 1.3 at 25 / 12 / 4 km/h and return `isEstimated = true`.
+- Travel distance and time are never stored. The secret token stays in backend config; the frontend has its own public `pk.*` token. "Open in Google Maps" is a link the frontend builds.
+
+### Roadmap generation (RM-10, RM-11)
+
+- RM-10 only validates, locks the roadmap and queues a job (`queued`), refusing a second queued / running job with 409 `GENERATION_IN_PROGRESS`. `input` stores the request, the origin it resolved (GPS sent for a `gps` roadmap, else the pinned point, else none) and `radiusKm` (10 by default when there is an origin).
+- `RoadmapGenerationWorker` (`Infrastructure/Services/Roadmap`) is a `BackgroundService` like `OutboxWorker`: every `PollSeconds` it marks the oldest queued job `running` (`FOR UPDATE SKIP LOCKED`) and runs `IProcessRoadmapGenerationJobUseCase`. At start it puts jobs left `running` by a stopped host back to `queued`. It does nothing when `ConnectionStrings:Default` is empty.
+- The job follows the steps of the RM-10 note in the API Design. One dish per meal; with `replaceExisting = false` only the empty meals of the scope are filled and dishes already in the roadmap are not suggested again. Before writing, it compares the parent revision under its lock with the snapshot used during planning; a changed source fails the job without replacing items or emitting completion side effects. An unexpected error marks the job `failed` and is logged; it never stays `running`.
+- `OpenAiRoadmapPlannerService`: `POST {BaseUrl}chat/completions`, Bearer `ApiKey`, `Model`, structured output (`json_schema`, strict) whose enums allow only the meals to fill and the dish ids of the day's cluster. Prompt version `rm10-v1` goes to `prompt_version`. Missing key, non-2xx, timeout (`TimeoutSeconds`) or unreadable answer → `null`; a plan that does not fill each meal once with distinct cluster dishes is rejected too. The job then schedules the day itself (meal-time tag, then preferred tag, then reco rank) and records `model_name = fallback`. The caller's cancellation is rethrown.
+- On success: items with `source = ai` and the reco `request_id`, `raw_output` with each day's plan and `createdItemIds` (read by RM-11), a `ROADMAP_GENERATED` notification (`data` = `{roadmap_id, job_id}`, snake_case like every `notifications.data`) in the same transaction, then RECO-06 for the dishes added.
+
+### Agent conversations (AGENT-01..04)
+
+- PostgreSQL owns short-term state in `core.agent_conversations`, ordered logical turns in `agent_messages`, and immutable snapshots/provenance in `agent_proposals`. No vector memory or long-term preference updates are inferred from chat.
+- `IAgentLlmService` uses the configured `Ai` provider with strict tool/output schemas, checked again in backend code. Only `get_recommendation`, `estimate_day_route`, and conversation-bound `get_roadmap` are allowed. Tools do not write official roadmaps or emit impressions. The UI reports actually visible preview items through IMP-01 grouped by their recommendation request ID.
+- Message claim/finalization are short transactions separated from all LLM/reco/map calls. Unique client message IDs, business hashes, optimistic versions, persistent per-user quotas and attempt/lease fencing protect retries and concurrent requests. Failed-attempt recovery clears rolled-back tracking before any new flush.
+- Agent identifiers use integer IDs. `clientMessageId` is a positive bigint unique per conversation; the frontend may use the current conversation version for a new message and retains the same ID on retry. `turnId` is the user message sequence number within that conversation; `attemptId` is the increasing conversation version allocated under its row lock. Recommendation request IDs retain their existing UUID contract.
+- Chat-only clients can send content alone. Optional clientMessageId/expectedConversationVersion use a server-allocated unused positive ID/current revision under the conversation lock when omitted or null; explicit identities retain replay/conflict semantics. AgentTurn.clientMessageId returns the admitted identity. Backend stages validated hard-constraint relaxations in pendingStateChange and applies them only after a later explicit user confirmation; legacy confirmedState remains supported. A model-generated consent flag grants no permission. Dietary notes alone do not guarantee catalog-backed constraints. Province/tag/price/radius requirements are never silently relaxed.
+- Explicit chat instructions such as "lưu lịch trình này" save the current preview through the same deterministic writer as the separate confirm endpoint; generic agreement never saves. Reset detaches the conversation without deleting an official roadmap. Confirm uses no LLM. It checks ownership, proposal version/currentness/expiry, current constraints, prices and catalog, then applies the full snapshot under conversation → roadmap → catalog locks. Route estimates run before the transaction. Committed replay returns its original roadmap revision; replacing a dish creates a fresh item and detaches prior feedback.
+- `roadmaps.version` starts at 1. Database triggers advance it once per changed aggregate per transaction for metadata, days and items, including all legacy writers and RM-10. Creation remains version 1. Every writer locks the parent before child mutations; Agent compares the source revision under that lock. EF reads the database-generated revision without an extra version predicate, since a child trigger can advance it earlier in the same SaveChanges batch. Parent-before-child locking applies to deletion and feedback as well.
+- Idle expiry is 7 days; GET does not renew it. Completed message/confirm replay remains available after expiry. Cleanup expires idle rows without changing the last business-activity timestamp and deletes unlinked children/conversations after 30 days with no live lease. Saved roadmaps survive cleanup.
+- Agent alone additionally documents 410 `CONVERSATION_EXPIRED` / `PROPOSAL_EXPIRED`, 429 `AGENT_RATE_LIMITED` for application admission, and 429/503 `AGENT_UNAVAILABLE` for provider rate limits/other failures, with `Retry-After` when available. Other modules retain their existing error contracts.
+
+### Roadmap origin
+
+`roadmaps.origin_mode`: `pinned` stores `origin_latitude / origin_longitude / origin_label`; `gps` stores nothing and the app sends coordinates on each RM-10 / RM-14 call; `none` = province only. Coordinates exist if and only if `pinned` (CHECK). Switching away from `pinned` clears the coordinates in the use case (RM-04).
+
+## 9. Configuration and secrets
+
+Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(configuration)`, `AddWebApi(configuration)` (`coding_rule.md` §12).
+
+`appsettings.json` holds one section per configured concern, with non-secret defaults. Use exactly these section and key names; a section that is not in `appsettings.json` yet is added together with the feature that needs it:
+
+| Section | Keys |
+|---|---|
+| `ConnectionStrings` | `Default` |
+| `Jwt` | `Issuer`, `Audience`, `SecretKey` (≥ 32 bytes, validated at startup), `AccessTokenMinutes`, `RefreshTokenDays` |
+| `Cors` | `AllowedOrigins` |
+| `RateLimit` | `GeneralPermitLimit`, `GeneralWindowSeconds`, `LoginPermitLimit`, `LoginWindowMinutes`, `SensitiveAuthPermitLimit`, `SensitiveAuthWindowSeconds` |
+| `ForwardedHeaders` | `Enabled` (`false`; `true` on Render), `ForwardLimit` (1) |
+| `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
+| `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
+| `Google` | `ClientId` |
+| `Brevo` | `BaseUrl` (`https://api.brevo.com/v3/`), `ApiKey`, `SenderEmail` (`angi.sep490.g71@gmail.com`, the team's verified Brevo sender), `SenderName` (`ANGI`), `TimeoutMilliseconds` (10000) |
+| `Frontend` | `BaseUrl` (`http://localhost:3000`): base of the links sent by email |
+| `Mapbox` | `BaseUrl`, `AccessToken`, `TimeoutMilliseconds` (3000), `CacheHours` (24) |
+| `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
+| `RoadmapGeneration` | `PollSeconds` (2) |
+| `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
+| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (8), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20 tin chat gửi cho model, không tính dòng tool), `MaxTranscriptMessages` (1000 tin chat trả về màn hình), `MaxCandidates` (2000), `MaxRanked` (200), `LlmTimeoutSeconds` (60), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (60), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
+
+- Never commit a secret. A secret key stays empty in `appsettings.json`.
+- Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
+- Render: environment variables with `__`, e.g. `ConnectionStrings__Default`.
+- Behind Render's proxy every connection comes from the proxy, so the per-IP limits (anonymous requests, login failures per email + IP) would count all clients as one. Set `ForwardedHeaders__Enabled=true` there: the app then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Keep it off locally, where the header would let a client choose its IP. Requests the frontend relays through its own Next.js server reach the backend with that server's IP; they count per client only if the frontend passes the browser IP in `X-Forwarded-For` and `ForwardLimit` is raised to 2, which also lets a direct caller forge one hop.
+
+Agent stabilization follows section XX of ANGI_Agent_Implementation_Ver1.1.md and the scoped-planning design: return ordered full previews, regenerate after explicit constraint consent with the exact accepted state, preserve scoped edits and explicit save authorization, allow one repair each for schema, proposal and unsupported coverage within the shared call/deadline budget, retry only temporary HTTP failures within that budget, and report provider rate/quota limits as HTTP 429 AGENT_UNAVAILABLE. Preserve safe diagnostics, Retry-After and caller cancellation; never retry daily quota exhaustion.
+
+## Conversation preferences extension (2026-10-29)
+
+This section supersedes earlier Agent lifecycle, supported-taste-as-note and preview-impression rules. The API Design
+and Data Dictionary contain the matching `Agent Preferences v1` contract sheet.
+
+- A non-null roadmap_id uniquely identifies its conversation. Open returns 201 new or 200 reused/reopened.
+  Reset keeps the attached roadmap. Reopen after 7 idle days retains ID but starts fresh context/profile.
+- AgentState.tasteTargets holds only user-declared ontology targets on 0/.25/.5/.75/1. Backend-owned
+  preferences contains the inherited profile snapshot, computed request vector, ontology version,
+  profile update/read timestamps and initialization status. Missing dimensions inherit; never infer tastes from dishes.
+- Initialize lazily outside locks; unavailable profile reads stay pending, distinct from a null profile.
+  GET /users/{id}/preferences is internal/read-only. Conversation ranking passes vector_source and
+  user_vector_override to reco. Algorithms/cold-start are unchanged; chat never increments m.
+- Agent commit writes AGENT_IMPRESSION_RECORDED outbox entries in its transaction. Send all committed
+  dishes grouped by original request_id after commit, with agent_proposal_id. Never count previews.
+  Reco rejects conversation impressions without a commit reference. No synthetic feedback is created.
+- Keep attached conversation rows when pruning 30-day payloads. Prune active histories too while
+  retaining current proposal/recent replay. Sequence/proposal high-water marks survive pruning;
+  expired client-message IDs are rejected with MESSAGE_EXPIRED. Maintenance never renews activity.
+- Deploy reco migration/service before backend migration/service. Detect duplicate roadmap conversations
+  before the unique index and stop with their IDs; never automatically delete or detach them.
+
+## Agent scoped planning extension (2026-10-30)
+
+The `Agent Scoped v2` sheets in the API Design/Data Dictionary and
+`docs/Agent_Scoped_Planning_Ver2.0.md` supersede whole-conversation-only taste rules.
+Keep the reco service/API, cold-start, save fencing and commit-only impressions unchanged.
+Baseline -> trip -> day -> meal inheritance is computed in Application from JSONB state;
+no entity/table/migration is added. Catalog meal requests are separate from taste dimensions.
+Use the read-only public catalog lookup for named dishes/restaurants; never substitute unresolved names.
+Changed tastes require fresh matching scoped grants even for retained dish IDs, unless the user
+explicitly requests future suggestions only. Backend constructs factual replies from checked data.
+Frontend integration is outside this change. Existing prompt-only clients and legacy states remain supported.

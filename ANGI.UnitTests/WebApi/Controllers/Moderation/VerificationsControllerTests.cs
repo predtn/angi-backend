@@ -1,0 +1,112 @@
+using ANGI.Application.Common.Interfaces.UseCases.Moderation;
+using ANGI.Application.Common.Models;
+using ANGI.Application.DTOs.Moderation;
+using ANGI.Application.DTOs.Restaurant;
+using ANGI.WebApi.Common.Models;
+using ANGI.WebApi.Controllers.Moderation;
+using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Moq;
+
+namespace ANGI.UnitTests.WebApi.Controllers.Moderation;
+
+/// <summary>Verifies VerificationsController is MOD-only and wraps verification results in the success envelope.</summary>
+public sealed class VerificationsControllerTests
+{
+    private readonly Mock<IListVerificationsUseCase> _list = new();
+    private readonly Mock<IGetVerificationReviewUseCase> _get = new();
+    private readonly Mock<IReviewVerificationUseCase> _review = new();
+
+    // TEST-01: Require only the MOD role at the controller boundary.
+    /// <summary>Verifies all MOD-V endpoints inherit the documented role restriction.</summary>
+    [Fact]
+    public void Controller_ShouldRequireOnlyModRole()
+    {
+        // STEP-01: Get authorize from GetCustomAttributes().Cast().Single.
+        var authorize = typeof(VerificationsController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Single();
+
+        // STEP-02: Assert authorize.Roles is "MOD".
+        authorize.Roles.Should().Be("MOD");
+    }
+
+    // TEST-02: Return the MOD-V1 page inside the standard success envelope.
+    /// <summary>Verifies the thin list action delegates once and returns HTTP 200.</summary>
+    [Fact]
+    public async Task List_ShouldReturnOkEnvelope()
+    {
+        // STEP-01: Create request as ListVerificationsRequestDto and create data as Paged<ModVerificationCardDto>.
+        var request = new ListVerificationsRequestDto();
+        var data = new Paged<ModVerificationCardDto>
+        {
+            Items = [new ModVerificationCardDto { Id = 21 }],
+            Page = 1,
+            PageSize = 20,
+            TotalItems = 1,
+            TotalPages = 1
+        };
+        // STEP-02: Stub list.ExecuteAsync.
+        _list.Setup(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(data);
+
+        // STEP-03: Get result from Controller().List.
+        var result = await Controller().List(request, CancellationToken.None);
+
+        // STEP-04: Assert result is OkObjectResult, ok.StatusCode is StatusCodes.Status200OK, ok.Value is ApiResponse<Paged<ModVerificationCardDto>> and 1 more.
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.StatusCode.Should().Be(StatusCodes.Status200OK);
+        ok.Value.Should().BeOfType<ApiResponse<Paged<ModVerificationCardDto>>>()
+            .Which.Data.Should().BeSameAs(data);
+        // STEP-05: Verify ExecuteAsync is called once.
+        _list.Verify(item => item.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-03: Return flattened MOD-V2 details inside the standard success envelope.
+    /// <summary>Verifies the thin detail action forwards the route id and returns HTTP 200.</summary>
+    [Fact]
+    public async Task Get_ShouldReturnOkEnvelope()
+    {
+        // STEP-01: Create data as VerificationReviewDetailDto.
+        var data = new VerificationReviewDetailDto { Id = 21 };
+        // STEP-02: Stub get.ExecuteAsync.
+        _get.Setup(item => item.ExecuteAsync(21, It.IsAny<CancellationToken>())).ReturnsAsync(data);
+
+        // STEP-03: Get result from Controller().Get.
+        var result = await Controller().Get(21, CancellationToken.None);
+
+        // STEP-04: Assert result is OkObjectResult, ok.Value is ApiResponse<VerificationReviewDetailDto> and ok.Value.Data is the same instance as data.
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeOfType<ApiResponse<VerificationReviewDetailDto>>()
+            .Which.Data.Should().BeSameAs(data);
+        // STEP-05: Verify ExecuteAsync is called once.
+        _get.Verify(item => item.ExecuteAsync(21, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-04: Return the MOD-V3 verification inside the standard success envelope.
+    /// <summary>Verifies the thin decision action forwards route, body, and cancellation token.</summary>
+    [Fact]
+    public async Task Decide_ShouldReturnOkEnvelope()
+    {
+        // STEP-01: Create request as ReviewVerificationRequestDto and create data as VerificationDto.
+        var request = new ReviewVerificationRequestDto { Decision = "approve" };
+        var data = new VerificationDto { Id = 21, Status = "approved" };
+        // STEP-02: Stub review.ExecuteAsync.
+        _review.Setup(item => item.ExecuteAsync(21, request, It.IsAny<CancellationToken>())).ReturnsAsync(data);
+
+        // STEP-03: Get result from Controller().Decide.
+        var result = await Controller().Decide(21, request, CancellationToken.None);
+
+        // STEP-04: Assert result is OkObjectResult, ok.Value is ApiResponse<VerificationDto> and ok.Value.Data is the same instance as data.
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeOfType<ApiResponse<VerificationDto>>()
+            .Which.Data.Should().BeSameAs(data);
+        // STEP-05: Verify ExecuteAsync is called once.
+        _review.Verify(item => item.ExecuteAsync(21, request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>Creates a controller backed by the three isolated use-case mocks.</summary>
+    private VerificationsController Controller() => new(_list.Object, _get.Object, _review.Object);
+}

@@ -1,0 +1,91 @@
+using ANGI.Application.Common.Interfaces.UseCases.Media;
+using ANGI.Application.DTOs.Media;
+using ANGI.WebApi.Common.Models;
+using ANGI.WebApi.Controllers.Media;
+using ANGI.WebApi.Models.Media;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Moq;
+
+namespace ANGI.UnitTests.WebApi.Controllers.Media;
+
+/// <summary>Verifies MediaController maps the multipart upload to the use case and returns 201.</summary>
+public sealed class MediaControllerTests
+{
+    // TEST-01: Return the MEDIA-01 payload in ApiResponse with HTTP 201.
+    /// <summary>Verifies that the media controller remains a thin successful HTTP boundary.</summary>
+    [Fact]
+    public async Task Upload_WithValidForm_ShouldReturnCreatedApiResponse()
+    {
+        // STEP-01: Create expected as MediaFileDto.
+        var expected = new MediaFileDto
+        {
+            Id = 91,
+            Url = "https://cdn.test/photo.jpg",
+            MimeType = "image/jpeg",
+            SizeBytes = 3,
+            Purpose = "restaurant"
+        };
+        // STEP-02: Mock IUploadMediaUseCase; stub useCase.ExecuteAsync.
+        var useCase = new Mock<IUploadMediaUseCase>();
+        useCase.Setup(x => x.ExecuteAsync(It.IsAny<UploadMediaRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
+        // STEP-03: Create the MediaController under test as controller.
+        var controller = new MediaController(useCase.Object);
+        // STEP-04: Build the bytes collection and create form as UploadMediaForm.
+        var bytes = new byte[] { 1, 2, 3 };
+        var form = new UploadMediaForm
+        {
+            File = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "photo.jpg")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "image/jpeg"
+            },
+            Purpose = "restaurant"
+        };
+
+        // STEP-05: Run controller.Upload with form and keep action.
+        var action = await controller.Upload(form, CancellationToken.None);
+
+        // STEP-06: Assert action is ObjectResult, result.StatusCode is StatusCodes.Status201Created, result.Value is ApiResponse<MediaFileDto> and 2 more.
+        var result = action.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        var response = result.Value.Should().BeOfType<ApiResponse<MediaFileDto>>().Subject;
+        response.Success.Should().BeTrue();
+        response.Data.Should().BeSameAs(expected);
+        // STEP-07: Verify ExecuteAsync is called once.
+        useCase.Verify(x => x.ExecuteAsync(
+            It.Is<UploadMediaRequestDto>(request =>
+                request.FileName == "photo.jpg" &&
+                request.MimeType == "image/jpeg" &&
+                request.SizeBytes == 3 &&
+                request.Purpose == "restaurant"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-02: A missing "file" field reaches the use case as null content instead of throwing in the controller.
+    /// <summary>Verifies the validator, not a NullReferenceException, reports a missing file.</summary>
+    [Fact]
+    public async Task Upload_WithoutFile_ShouldPassNullContentToUseCase()
+    {
+        // STEP-01: Mock IUploadMediaUseCase; stub useCase.ExecuteAsync.
+        var useCase = new Mock<IUploadMediaUseCase>();
+        useCase.Setup(x => x.ExecuteAsync(It.IsAny<UploadMediaRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaFileDto());
+        // STEP-02: Create the MediaController under test as controller.
+        var controller = new MediaController(useCase.Object);
+
+        // STEP-03: Run controller.Upload with UploadMediaForm { File = null, Purpose = "restaurant" }.
+        await controller.Upload(new UploadMediaForm { File = null, Purpose = "restaurant" }, CancellationToken.None);
+
+        // STEP-04: Verify ExecuteAsync is called once.
+        useCase.Verify(x => x.ExecuteAsync(
+            It.Is<UploadMediaRequestDto>(request =>
+                request.Content == null &&
+                request.FileName == string.Empty &&
+                request.SizeBytes == 0 &&
+                request.Purpose == "restaurant"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+}

@@ -1,0 +1,317 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
+using ANGI.Application.Common.Interfaces.Services;
+using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.Common.Models;
+using ANGI.Application.DTOs.Media;
+using ANGI.Application.UseCases.Media.Upload;
+using ANGI.Application.UseCases.Validators.Media;
+using ANGI.Domain.Entities;
+using FluentAssertions;
+using FluentValidation;
+using Moq;
+
+namespace ANGI.UnitTests.Application.UseCases.Media.Upload;
+
+/// <summary>Verifies UploadMediaUseCase validates file type, size and purpose before storing and persisting media.</summary>
+public sealed class UploadMediaUseCaseTests
+{
+    private static readonly DateTime CreatedAt = new(2026, 10, 7, 8, 0, 0, DateTimeKind.Utc);
+
+    // TEST-01: Upload and persist a supported image for the authenticated user.
+    /// <summary>Verifies the complete successful MEDIA-01 workflow.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithValidImage_ShouldUploadPersistAndReturnMetadata()
+    {
+        // STEP-01: Declare addedMedia to capture a call argument; mock ICloudinaryService and 2 more; stub cloudinary.UploadAsync and 2 more.
+        var cloudinary = new Mock<ICloudinaryService>();
+        cloudinary.Setup(service => service.UploadAsync(
+                It.IsAny<Stream>(),
+                "photo.jpg",
+                "image/jpeg",
+                "restaurant",
+                false,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaUploadResult("image/upload/media-key.jpg", "https://cdn.test/media-key.jpg"));
+        var repository = new Mock<IMediaRepository>();
+        MediaFile? addedMedia = null;
+        repository.Setup(repo => repo.Add(It.IsAny<MediaFile>()))
+            .Callback<MediaFile>(media => addedMedia = media);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                addedMedia!.Id = 91;
+                addedMedia.CreatedAt = CreatedAt;
+            })
+            .ReturnsAsync(1);
+        // STEP-02: Build useCase under test through CreateUseCase.
+        var useCase = CreateUseCase(cloudinary, repository, unitOfWork);
+
+        // STEP-03: Run useCase.ExecuteAsync and keep result.
+        var result = await useCase.ExecuteAsync(ValidImageRequest(), CancellationToken.None);
+
+        // STEP-04: Assert result.Id is 91, result.Url is "https://cdn.test/media-key.jpg", result.MimeType is "image/jpeg", result.SizeBytes is 1024 and 2 more.
+        result.Id.Should().Be(91);
+        result.Url.Should().Be("https://cdn.test/media-key.jpg");
+        result.MimeType.Should().Be("image/jpeg");
+        result.SizeBytes.Should().Be(1024);
+        result.Purpose.Should().Be("restaurant");
+        result.CreatedAt.Should().Be(CreatedAt);
+        // STEP-05: Assert addedMedia.UploaderId is 12.
+        addedMedia!.UploaderId.Should().Be(12);
+        // STEP-06: Verify SaveChangesAsync is called once.
+        unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-02: Reject an image larger than five megabytes before calling storage.
+    /// <summary>Verifies the documented FILE_TOO_LARGE error and prevents side effects.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithOversizedImage_ShouldThrowFileTooLarge()
+    {
+        // STEP-01: Mock ICloudinaryService, IMediaRepository and IUnitOfWork.
+        var cloudinary = new Mock<ICloudinaryService>();
+        var repository = new Mock<IMediaRepository>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
+        var useCase = CreateUseCase(cloudinary, repository, unitOfWork);
+        // STEP-03: Create request through ValidImageRequest and set request.SizeBytes to (5 * 1024 * 1024) + 1.
+        var request = ValidImageRequest();
+        request.SizeBytes = (5 * 1024 * 1024) + 1;
+
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        // STEP-05: Assert act throws BadRequestException and exception.ErrorCode is "FILE_TOO_LARGE".
+        var exception = await act.Should().ThrowAsync<BadRequestException>();
+        exception.Which.ErrorCode.Should().Be("FILE_TOO_LARGE");
+        // STEP-06: Verify UploadAsync is never called and SaveChangesAsync is never called.
+        cloudinary.Verify(service => service.UploadAsync(
+            It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-03: Allow PDF files only for verification documents.
+    /// <summary>Verifies the purpose-specific PDF restriction from MEDIA-01.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithPdfForRestaurantPurpose_ShouldThrowUnsupportedMediaType()
+    {
+        // STEP-01: Build useCase under test through CreateUseCase.
+        var useCase = CreateUseCase(
+            new Mock<ICloudinaryService>(),
+            new Mock<IMediaRepository>(),
+            new Mock<IUnitOfWork>());
+        // STEP-02: Create request through ValidImageRequest, set request.FileName to "document.pdf" and set request.MimeType to "application/pdf".
+        var request = ValidImageRequest();
+        request.FileName = "document.pdf";
+        request.MimeType = "application/pdf";
+
+        // STEP-03: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        // STEP-04: Assert act throws BadRequestException and exception.ErrorCode is "UNSUPPORTED_MEDIA_TYPE".
+        var exception = await act.Should().ThrowAsync<BadRequestException>();
+        exception.Which.ErrorCode.Should().Be("UNSUPPORTED_MEDIA_TYPE");
+    }
+
+    // TEST-04: Normalize a case-insensitive PDF media type before calling storage.
+    /// <summary>Verifies that a valid verification PDF is consistently treated as a private raw upload.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithMixedCasePdfMimeType_ShouldNormalizeBeforeUpload()
+    {
+        // STEP-01: Mock ICloudinaryService, IMediaRepository and IUnitOfWork; stub cloudinary.UploadAsync.
+        var cloudinary = new Mock<ICloudinaryService>();
+        cloudinary.Setup(service => service.UploadAsync(
+                It.IsAny<Stream>(),
+                "document.pdf",
+                "application/pdf",
+                "verification_doc",
+                true,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaUploadResult(
+                "raw/authenticated/verification_doc/document.pdf",
+                "https://cdn.test/document.pdf"));
+        var repository = new Mock<IMediaRepository>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        // STEP-02: Build useCase under test through CreateUseCase.
+        var useCase = CreateUseCase(cloudinary, repository, unitOfWork);
+        // STEP-03: Create request through ValidImageRequest, set request.FileName to "document.pdf", set request.MimeType to "Application/PDF" and 1 more.
+        var request = ValidImageRequest();
+        request.FileName = "document.pdf";
+        request.MimeType = "Application/PDF";
+        request.Purpose = "verification_doc";
+        request.Content = new MemoryStream("%PDF-1.7"u8.ToArray());
+
+        // STEP-04: Run useCase.ExecuteAsync with request and keep result.
+        var result = await useCase.ExecuteAsync(request, CancellationToken.None);
+
+        // STEP-05: Assert result.MimeType is "application/pdf".
+        result.MimeType.Should().Be("application/pdf");
+        // STEP-06: Verify every setup on cloudinary ran.
+        cloudinary.VerifyAll();
+    }
+
+    // TEST-05: Run FluentValidation before reading authentication or external storage.
+    /// <summary>Verifies that an unsupported purpose fails at the first use-case step.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithInvalidPurpose_ShouldThrowValidationExceptionFirst()
+    {
+        // STEP-01: Mock ICurrentUserService.
+        var currentUser = new Mock<ICurrentUserService>();
+        // STEP-02: Create the UploadMediaUseCase under test as useCase.
+        var useCase = new UploadMediaUseCase(
+            new UploadMediaRequestDtoValidator(),
+            new Mock<ICloudinaryService>().Object,
+            new Mock<IMediaRepository>().Object,
+            currentUser.Object,
+            new Mock<IUnitOfWork>().Object);
+        // STEP-03: Create request through ValidImageRequest and set request.Purpose to "unknown".
+        var request = ValidImageRequest();
+        request.Purpose = "unknown";
+
+        // STEP-04: Wrap useCase.ExecuteAsync with request in act so its outcome can be asserted.
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        // STEP-05: Assert act throws ValidationException.
+        await act.Should().ThrowAsync<ValidationException>();
+        // STEP-06: Verify UserId is never called.
+        currentUser.VerifyGet(service => service.UserId, Times.Never);
+    }
+
+    // TEST-06: Propagate a database failure after Cloudinary has accepted the file.
+    // Target: Cloudinary -> repository -> UnitOfWork call order and the post-upload failure boundary.
+    /// <summary>Documents the failure boundary where the Cloudinary upload succeeded but metadata persistence failed.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenSaveChangesFailsAfterUpload_ShouldPropagateDatabaseFailure()
+    {
+        // STEP-01: Mock ICloudinaryService, IMediaRepository and IUnitOfWork; stub cloudinary.UploadAsync and unitOfWork.SaveChangesAsync.
+        var cloudinary = new Mock<ICloudinaryService>();
+        cloudinary.Setup(service => service.UploadAsync(
+                It.IsAny<Stream>(),
+                "photo.jpg",
+                "image/jpeg",
+                "restaurant",
+                false,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaUploadResult(
+                "image/upload/restaurant/orphaned-media.jpg",
+                "https://cdn.test/orphaned-media.jpg"));
+        var repository = new Mock<IMediaRepository>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Database write failed."));
+        // STEP-02: Build useCase under test through CreateUseCase.
+        var useCase = CreateUseCase(cloudinary, repository, unitOfWork);
+
+        // STEP-03: Wrap useCase.ExecuteAsync in act so its outcome can be asserted.
+        var act = () => useCase.ExecuteAsync(ValidImageRequest(), CancellationToken.None);
+
+        // STEP-04: Assert act throws InvalidOperationException.
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Database write failed.");
+        // STEP-05: Verify UploadAsync is called once, Add is called once and SaveChangesAsync is called once.
+        cloudinary.Verify(service => service.UploadAsync(
+            It.IsAny<Stream>(),
+            "photo.jpg",
+            "image/jpeg",
+            "restaurant",
+            false,
+            It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.Add(It.Is<MediaFile>(media =>
+            media.StorageKey == "image/upload/restaurant/orphaned-media.jpg")), Times.Once);
+        unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>Creates a use case with an authenticated test user.</summary>
+    private static UploadMediaUseCase CreateUseCase(
+        Mock<ICloudinaryService> cloudinary,
+        Mock<IMediaRepository> repository,
+        Mock<IUnitOfWork> unitOfWork)
+    {
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.UserId).Returns(12);
+        return new UploadMediaUseCase(
+            new UploadMediaRequestDtoValidator(),
+            cloudinary.Object,
+            repository.Object,
+            currentUser.Object,
+            unitOfWork.Object);
+    }
+
+    // TEST-07: Reject a file whose bytes do not match the declared type, before calling storage.
+    /// <summary>A renamed file (here an HTML page sent as a PDF, or a PNG sent as JPEG) never reaches Cloudinary.</summary>
+    [Theory]
+    [InlineData("application/pdf", "verification_doc", new byte[] { 0x3C, 0x68, 0x74, 0x6D, 0x6C })]
+    [InlineData("image/jpeg", "restaurant", new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })]
+    [InlineData("image/png", "restaurant", new byte[0])]
+    public async Task ExecuteAsync_WithContentNotMatchingMimeType_ShouldThrowUnsupportedMediaType(
+        string mimeType,
+        string purpose,
+        byte[] content)
+    {
+        var cloudinary = new Mock<ICloudinaryService>();
+        var useCase = CreateUseCase(cloudinary, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        var request = ValidImageRequest();
+        request.MimeType = mimeType;
+        request.Purpose = purpose;
+        request.Content = new MemoryStream(content);
+
+        var act = () => useCase.ExecuteAsync(request, CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<BadRequestException>();
+        exception.Which.ErrorCode.Should().Be("UNSUPPORTED_MEDIA_TYPE");
+        cloudinary.VerifyNoOtherCalls();
+    }
+
+    // TEST-08: Accept each supported signature and hand storage the whole file from its first byte.
+    /// <summary>JPEG, PNG, WebP and PDF headers pass; the stream is rewound after the header is read.</summary>
+    [Theory]
+    [InlineData("image/jpeg", "restaurant", "FFD8FFE000104A464946")]
+    [InlineData("image/png", "restaurant", "89504E470D0A1A0A0000000D")]
+    [InlineData("image/webp", "restaurant", "524946462400000057454250")]
+    [InlineData("application/pdf", "verification_doc", "255044462D312E37")]
+    public async Task ExecuteAsync_WithMatchingSignature_ShouldUploadFromTheStart(string mimeType, string purpose, string hex)
+    {
+        var bytes = Convert.FromHexString(hex);
+        byte[]? uploaded = null;
+        var cloudinary = new Mock<ICloudinaryService>();
+        cloudinary.Setup(service => service.UploadAsync(
+                It.IsAny<Stream>(), It.IsAny<string>(), mimeType, purpose, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<Stream, string, string, string, bool, CancellationToken>((stream, _, _, _, _, _) =>
+            {
+                using var copy = new MemoryStream();
+                stream.CopyTo(copy);
+                uploaded = copy.ToArray();
+            })
+            .ReturnsAsync(new MediaUploadResult("image/upload/restaurant/file", "https://cdn.test/file"));
+        var useCase = CreateUseCase(cloudinary, new Mock<IMediaRepository>(), new Mock<IUnitOfWork>());
+        var request = ValidImageRequest();
+        request.MimeType = mimeType;
+        request.Purpose = purpose;
+        request.Content = new MemoryStream(bytes);
+
+        await useCase.ExecuteAsync(request, CancellationToken.None);
+
+        uploaded.Should().Equal(bytes);
+    }
+
+    /// <summary>A 1 KB file that starts with the given bytes.</summary>
+    private static byte[] Header(params byte[] start)
+    {
+        var bytes = new byte[1024];
+        start.CopyTo(bytes, 0);
+        return bytes;
+    }
+
+    /// <summary>Creates a minimal valid image upload request.</summary>
+    private static UploadMediaRequestDto ValidImageRequest() => new()
+    {
+        Content = new MemoryStream(Header(0xFF, 0xD8, 0xFF, 0xE0)),
+        FileName = "photo.jpg",
+        MimeType = "image/jpeg",
+        SizeBytes = 1024,
+        Purpose = "restaurant"
+    };
+}

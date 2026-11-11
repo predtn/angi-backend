@@ -1,0 +1,127 @@
+using ANGI.Application.DTOs.Restaurant;
+using ANGI.Application.UseCases.Validators.Restaurant;
+using FluentAssertions;
+
+namespace ANGI.UnitTests.Application.UseCases.Validators.Restaurant;
+
+/// <summary>Verifies UpdateMenuSubmissionItemRequestDtoValidator distinguishes omitted from null patch fields and enforces item limits.</summary>
+public sealed class UpdateMenuSubmissionItemRequestDtoValidatorTests
+{
+    // TEST-01: Accept an explicit null cover because OWN-15 uses it to remove the image.
+    /// <summary>Verifies nullable cover patch semantics remain valid.</summary>
+    [Fact]
+    public async Task ValidateAsync_WithExplicitNullCover_ShouldBeValid()
+    {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
+        var request = new UpdateMenuSubmissionItemRequestDto { CoverMediaId = null };
+
+        // STEP-02: Validate request and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
+
+        // STEP-03: Assert result.IsValid is true and request.CoverMediaIdSpecified is true.
+        result.IsValid.Should().BeTrue();
+        request.CoverMediaIdSpecified.Should().BeTrue();
+    }
+
+    // TEST-02: Reject an explicitly null price while allowing an omitted price.
+    /// <summary>Verifies required value semantics for a supplied OWN-15 price.</summary>
+    [Fact]
+    public async Task ValidateAsync_WithExplicitNullPrice_ShouldRejectPrice()
+    {
+        // STEP-01: Validate UpdateMenuSubmissionItemRequestDto { Price = null } and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(
+            new UpdateMenuSubmissionItemRequestDto { Price = null });
+
+        // STEP-02: Assert result.Errors contains a matching item.
+        result.Errors.Should().Contain(error => error.PropertyName == "Price");
+    }
+
+    // TEST-03: Accept an empty PATCH because every field is optional.
+    /// <summary>Ensures an empty PATCH is accepted since every field is optional.</summary>
+    [Fact]
+    public async Task ValidateAsync_WithEmptyPatch_ShouldBeValid()
+    {
+        // STEP-01: Validate an empty UpdateMenuSubmissionItemRequestDto and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(
+            new UpdateMenuSubmissionItemRequestDto());
+
+        // STEP-02: Assert result.IsValid is true.
+        result.IsValid.Should().BeTrue();
+    }
+
+    // TEST-04: Reject explicit null for every non-nullable patch field.
+    /// <summary>Ensures null cannot clear a field that must always have a value.</summary>
+    [Theory]
+    [InlineData("name")]
+    [InlineData("description")]
+    [InlineData("dish_form")]
+    [InlineData("price")]
+    [InlineData("tag_ids")]
+    [InlineData("sort_order")]
+    public async Task ValidateAsync_WithExplicitNullNonNullableField_ShouldRejectField(string field)
+    {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto and apply the case selected by field.
+        var request = new UpdateMenuSubmissionItemRequestDto();
+        switch (field)
+        {
+            case "name": request.Name = null; break;
+            case "description": request.Description = null; break;
+            case "dish_form": request.DishForm = null; break;
+            case "price": request.Price = null; break;
+            case "tag_ids": request.TagIds = null; break;
+            case "sort_order": request.SortOrder = null; break;
+        }
+
+        // STEP-02: Validate request and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
+
+        // STEP-03: Assert result.IsValid is false.
+        result.IsValid.Should().BeFalse();
+    }
+
+    // TEST-05: Match the numeric(12,0) price boundaries for PATCH.
+    /// <summary>Ensures patched prices always fit the numeric(12,0) column.</summary>
+    [Theory]
+    [InlineData("0", true)]
+    [InlineData("999999999999", true)]
+    [InlineData("1000000000000", false)]
+    [InlineData("0.1", false)]
+    public async Task ValidateAsync_WithPriceBoundary_ShouldMatchNumericTwelveZero(
+        string value,
+        bool expectedValid)
+    {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
+        var request = new UpdateMenuSubmissionItemRequestDto
+        {
+            Price = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture)
+        };
+
+        // STEP-02: Validate request and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
+
+        // STEP-03: Assert result.IsValid is expectedValid.
+        result.IsValid.Should().Be(expectedValid);
+    }
+
+    // TEST-06: Measure patched description length after trimming whitespace.
+    /// <summary>Ensures padding cannot satisfy the minimum description length.</summary>
+    [Theory]
+    [InlineData(29, false)]
+    [InlineData(30, true)]
+    [InlineData(2000, true)]
+    [InlineData(2001, false)]
+    public async Task ValidateAsync_ShouldMeasureDescriptionAfterTrim(int length, bool expectedValid)
+    {
+        // STEP-01: Create request as UpdateMenuSubmissionItemRequestDto.
+        var request = new UpdateMenuSubmissionItemRequestDto
+        {
+            Description = $"  {new string('a', length)}  "
+        };
+
+        // STEP-02: Validate request and keep result.
+        var result = await new UpdateMenuSubmissionItemRequestDtoValidator().ValidateAsync(request);
+
+        // STEP-03: Assert result.IsValid is expectedValid.
+        result.IsValid.Should().Be(expectedValid);
+    }
+}

@@ -1,0 +1,216 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories;
+using ANGI.Application.Common.Interfaces.Repositories.Media;
+using ANGI.Application.Common.Interfaces.Repositories.Social;
+using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.DTOs.Social;
+using ANGI.Application.UseCases.Social.ReportBlog;
+using ANGI.Application.UseCases.Validators.Social;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
+using FluentAssertions;
+using FluentValidation;
+using Moq;
+
+namespace ANGI.UnitTests.Application.UseCases.Social.ReportBlog;
+
+/// <summary>Unit tests for REP-02 ReportBlogUseCase.</summary>
+public sealed class ReportBlogUseCaseTests
+{
+    private readonly IValidator<ReportBlogRequestDto> _validator = new ReportBlogRequestDtoValidator();
+    private readonly Mock<IBlogRepository> _blogRepository = new();
+    private readonly Mock<IReportRepository> _reportRepository = new();
+    private readonly Mock<IMediaRepository> _mediaRepository = new();
+    private readonly Mock<ICurrentUserService> _currentUserService = new();
+    private readonly Mock<IUnitOfWork> _unitOfWork = new();
+
+    public ReportBlogUseCaseTests()
+    {
+        _currentUserService.Setup(s => s.UserId).Returns(12);
+        // By default every evidence id is one of the reporter's own uploads.
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int _, IReadOnlyCollection<long> ids, CancellationToken _) =>
+                ids.Select(id => new MediaFile { Id = id }).ToArray());
+    }
+
+    /// <summary>Creates the use case with the real validator and the shared repository, media and unit-of-work mocks.</summary>
+    private ReportBlogUseCase CreateUseCase() =>
+        new(_validator, _blogRepository.Object, _reportRepository.Object, _mediaRepository.Object, _currentUserService.Object, _unitOfWork.Object);
+
+    // TEST-01: Verify ExecuteAsync happy path; should create report.
+    /// <summary>Verify ExecuteAsync happy path; should create report.</summary>
+    [Fact]
+    public async Task ExecuteAsync_HappyPath_ShouldCreateReport()
+    {
+        // Arrange
+        const long blogId = 45;
+        const int userId = 12;
+        var blog = new Blog
+        {
+            Id = blogId,
+            AuthorId = 99, // different from reporter
+            Title = "Bài viết vi phạm",
+            Status = BlogStatus.Published
+        };
+        var request = new ReportBlogRequestDto
+        {
+            ReasonCode = "spam",
+            Description = "Bài viết quảng cáo",
+            EvidenceMediaIds = [9401]
+        };
+
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(blog);
+        _reportRepository.Setup(r => r.HasPendingReportAsync(userId, ReportTargetType.Blog, blogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        Report? addedReport = null;
+        _reportRepository.Setup(r => r.Add(It.IsAny<Report>()))
+            .Callback<Report>(r =>
+            {
+                r.Id = 88;
+                addedReport = r;
+            });
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var result = await useCase.ExecuteAsync(blogId, request, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.ReportId.Should().Be(88);
+        result.Status.Should().Be("pending");
+
+        addedReport.Should().NotBeNull();
+        addedReport!.ReporterId.Should().Be(userId);
+        addedReport.TargetType.Should().Be(ReportTargetType.Blog);
+        addedReport.BlogId.Should().Be(blogId);
+        addedReport.ReasonCode.Should().Be(ReportReasonCode.Spam);
+        addedReport.Status.Should().Be(ReportStatus.Pending);
+        addedReport.Evidence.Should().Contain("9401");
+
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // TEST-02: Verify ExecuteAsync when reporting own content; should throw bad request exception.
+    /// <summary>Verify ExecuteAsync when reporting own content; should throw bad request exception.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenReportingOwnContent_ShouldThrowBadRequestException()
+    {
+        // Arrange
+        const long blogId = 45;
+        const int userId = 12;
+        var blog = new Blog
+        {
+            Id = blogId,
+            AuthorId = userId, // Same as reporter
+            Title = "Bài viết của tôi",
+            Status = BlogStatus.Published
+        };
+        var request = new ReportBlogRequestDto { ReasonCode = "spam" };
+
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(blog);
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var act = () => useCase.ExecuteAsync(blogId, request, CancellationToken.None);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<BadRequestException>();
+        ex.Which.ErrorCode.Should().Be("CANNOT_REPORT_OWN_CONTENT");
+    }
+
+    // TEST-03: Verify ExecuteAsync when report already pending; should throw conflict exception.
+    /// <summary>Verify ExecuteAsync when report already pending; should throw conflict exception.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenReportAlreadyPending_ShouldThrowConflictException()
+    {
+        // Arrange
+        const long blogId = 45;
+        const int userId = 12;
+        var blog = new Blog
+        {
+            Id = blogId,
+            AuthorId = 99,
+            Title = "Bài viết",
+            Status = BlogStatus.Published
+        };
+        var request = new ReportBlogRequestDto { ReasonCode = "spam" };
+
+        _blogRepository.Setup(r => r.GetByIdAsync(blogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(blog);
+        _reportRepository.Setup(r => r.HasPendingReportAsync(userId, ReportTargetType.Blog, blogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var act = () => useCase.ExecuteAsync(blogId, request, CancellationToken.None);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<ConflictException>();
+        ex.Which.ErrorCode.Should().Be("REPORT_ALREADY_PENDING");
+    }
+
+    // TEST-04: Verify ExecuteAsync when blog does not exist; should throw not found exception.
+    /// <summary>Verify ExecuteAsync when blog does not exist; should throw not found exception.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenBlogDoesNotExist_ShouldThrowNotFoundException()
+    {
+        // Arrange
+        const long nonExistentBlogId = 9999;
+        var request = new ReportBlogRequestDto { ReasonCode = "spam" };
+
+        _blogRepository.Setup(r => r.GetByIdAsync(nonExistentBlogId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Blog?)null);
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var act = () => useCase.ExecuteAsync(nonExistentBlogId, request, CancellationToken.None);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<NotFoundException>();
+        ex.Which.ErrorCode.Should().Be("BLOG_NOT_FOUND");
+    }
+
+    // TEST-05: Verify ExecuteAsync when reason is other without description; should throw validation exception.
+    /// <summary>Verify ExecuteAsync when reason is other without description; should throw validation exception.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenReasonIsOtherWithoutDescription_ShouldThrowValidationException()
+    {
+        // Arrange
+        var request = new ReportBlogRequestDto
+        {
+            ReasonCode = "other",
+            Description = "" // missing
+        };
+        var useCase = CreateUseCase();
+
+        // Act
+        var act = () => useCase.ExecuteAsync(45, request, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    // TEST-06: Evidence media not uploaded by the reporter throws a validation error and no report is created.
+    /// <summary>Prevents attaching someone else's uploads as report evidence.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WithEvidenceNotUploadedByReporter_ShouldThrowValidationWithoutReport()
+    {
+        _blogRepository.Setup(r => r.GetByIdAsync(45, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Blog { Id = 45, AuthorId = 999, Title = "Blog", Status = BlogStatus.Published });
+        _mediaRepository.Setup(r => r.GetOwnedByIdsAsync(12, It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        var request = new ReportBlogRequestDto { ReasonCode = "spam", EvidenceMediaIds = [7777] };
+
+        var act = () => CreateUseCase().ExecuteAsync(45, request, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<BadRequestException>()).Which.ErrorCode.Should().Be("VALIDATION_FAILED");
+        _reportRepository.Verify(r => r.Add(It.IsAny<Report>()), Times.Never);
+    }
+}

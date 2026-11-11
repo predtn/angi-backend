@@ -1,0 +1,63 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories.Notification;
+using ANGI.Application.Common.Interfaces.Services.Auth;
+using ANGI.Application.UseCases.Notification.GetUnreadNotificationCount;
+using FluentAssertions;
+using Moq;
+
+namespace ANGI.UnitTests.Application.UseCases.Notification.GetUnreadNotificationCount;
+
+/// <summary>Verifies GetUnreadNotificationCountUseCase returns the caller's unread count and requires authentication.</summary>
+public sealed class GetUnreadNotificationCountUseCaseTests
+{
+    private readonly Mock<ICurrentUserService> _currentUserService = new();
+    private readonly Mock<INotificationRepository> _notificationRepository = new();
+
+    /// <summary>Creates the use case over the shared current-user and repository mocks.</summary>
+    private GetUnreadNotificationCountUseCase CreateUseCase() =>
+        new(_currentUserService.Object, _notificationRepository.Object);
+
+    // Happy Path 2: Đếm đúng số lượng thông báo chưa đọc
+    // TEST-01: Verify ExecuteAsync when authenticated; should return correct unread count.
+    /// <summary>Verify ExecuteAsync when authenticated; should return correct unread count.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenAuthenticated_ShouldReturnCorrectUnreadCount()
+    {
+        // Arrange
+        const int userId = 10;
+        const int expectedCount = 5;
+
+        _currentUserService.Setup(s => s.UserId).Returns(userId);
+        _notificationRepository
+            .Setup(r => r.GetUnreadCountAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedCount);
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var result = await useCase.ExecuteAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.UnreadCount.Should().Be(expectedCount);
+    }
+
+    // Exception Path: Chưa đăng nhập (UserId == null)
+    // TEST-02: Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.
+    /// <summary>Verify ExecuteAsync when unauthenticated; should throw unauthorized exception.</summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenUnauthenticated_ShouldThrowUnauthorizedException()
+    {
+        // Arrange
+        _currentUserService.Setup(s => s.UserId).Returns((int?)null);
+
+        var useCase = CreateUseCase();
+
+        // Act
+        var act = () => useCase.ExecuteAsync(CancellationToken.None);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<UnauthorizedException>();
+        ex.Which.ErrorCode.Should().Be("UNAUTHORIZED");
+    }
+}

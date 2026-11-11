@@ -1,0 +1,13 @@
+**/bin
+**/obj
+**/.git
+**/.env
+**/.env.*
+**/secrets.json
+**/appsettings.*.local.json
+**/appsettings.Local.json
+artifacts
+TestResults
+.vs
+.idea
+Library

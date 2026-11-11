@@ -1,0 +1,148 @@
+using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories.Agent;
+using ANGI.Application.Common.Interfaces.Repositories.Roadmap;
+using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.DTOs.Agent;
+using ANGI.Application.Services.Agent;
+using ANGI.Domain.Entities;
+using ANGI.Domain.Enums;
+using FluentAssertions;
+using Moq;
+
+namespace ANGI.UnitTests.Application.Services.Agent;
+
+/// <summary>Verifies context uses authoritative snapshots rather than stale or failed chat output.</summary>
+public sealed class AgentContextBuilderTests
+{
+    // TEST-01: A legacy proposal snapshot stored out of order is mapped back in chronological day and meal order.
+    /// <summary>Keeps proposals saved before ordering was enforced readable in the order users expect.</summary>
+    [Fact]
+    public void MapProposal_LegacyUnsortedSnapshot_ReturnsChronologicalItems()
+    {
+        // STEP-01: Get snapshot from AgentTestData.Snapshot and create proposal as AgentProposal.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item(3, "c", 2, "dinner"),
+            AgentTestData.Item(2, "b", 1, "lunch"), AgentTestData.Item(1, "a", 1, "breakfast"));
+        var proposal = new AgentProposal { Payload = AgentJson.Write(snapshot), ValidationResult = AgentJson.Write(new AgentValidation([], [], 0, [])) };
+        // STEP-02: Assert MapProposal().Snapshot.Items.Select(filtered) equals "a".
+        AgentContextBuilder.MapProposal(proposal).Snapshot.Items.Select(item => item.ItemKey).Should().Equal("a", "b", "c");
+    }
+
+    // TEST-02: After commit, context reloads the latest official roadmap revision and preserves the source item ID.
+    /// <summary>Verifies future edits start from the latest saved aggregate.</summary>
+    [Fact]
+    public async Task BuildAsync_CommittedSource_LoadsLatestRoadmap()
+    {
+        // STEP-01: Mock IAgentRepository and IRoadmapRepository.
+        var repository = new Mock<IAgentRepository>(); var roadmaps = new Mock<IRoadmapRepository>();
+        // STEP-02: Create roadmap as ANGI.Domain.Entities.Roadmap and add a RoadmapDay to roadmap.Days.
+        var roadmap = new ANGI.Domain.Entities.Roadmap { Id = 88, UserId = 3, UpdatedAt = DateTime.UnixEpoch.AddSeconds(6), Title = "Latest", NumDays = 1 };
+        roadmap.Days.Add(new RoadmapDay { DayNumber = 1, Items = [new RoadmapItem { Id = 9, DishId = 1, MealSlot = MealSlot.Lunch, Dish = AgentTestData.Dish() }] });
+        // STEP-03: Stub roadmaps.GetOwnedDetailAsync and repository.GetCompletedHistoryAsync.
+        roadmaps.Setup(x => x.GetOwnedDetailAsync(88, 3, It.IsAny<CancellationToken>())).ReturnsAsync(roadmap);
+        repository.Setup(x => x.GetCompletedHistoryAsync(7, 20, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<AgentMessage>());
+        // STEP-04: Create conversation as AgentConversation and create result through new AgentContextBuilder().BuildAsync.
+        var conversation = new AgentConversation { Id = 7, UserId = 3, RoadmapId = 88, State = AgentJson.Write(AgentTestData.State()) };
+        var result = await new AgentContextBuilder(repository.Object, roadmaps.Object, new(), TimeProvider.System, AgentTestData.Validator().Tags.Object).BuildAsync(conversation, new(), CancellationToken.None);
+        // STEP-05: Assert result.Source.BaseRoadmapUpdatedAt is DateTime.UnixEpoch.AddSeconds(), result.Source.Items.Single().SourceItemId is 9 and 3 more.
+        result.Source!.BaseRoadmapUpdatedAt.Should().Be(DateTime.UnixEpoch.AddSeconds(6)); result.Source.Items.Single().SourceItemId.Should().Be(9);
+        result.Source.Items.Single().ItemKey.Should().Be("r9");
+        result.State.Title.Should().Be("Latest"); result.State.NumDays.Should().Be(1);
+    }
+
+    // TEST-03: A ready draft built on a roadmap revision that was later edited or deleted is left out instead of failing the turn;
+    // an edited roadmap becomes the source, a deleted one leaves no source, and a draft on the current revision is kept.
+    /// <summary>Keeps the chat usable after a manual roadmap edit or deletion, since the UI has no discard button.</summary>
+    [Theory]
+    [InlineData("edited")]
+    [InlineData("deleted")]
+    [InlineData("current")]
+    public async Task BuildAsync_DraftOnOldRoadmapRevision_IsLeftOut(string roadmapCase)
+    {
+        // STEP-01: Mock IAgentRepository and IRoadmapRepository; stub the roadmap for roadmapCase, a ready draft on revision 5 and an empty history.
+        var repository = new Mock<IAgentRepository>(); var roadmaps = new Mock<IRoadmapRepository>();
+        var roadmap = roadmapCase == "deleted" ? null : new ANGI.Domain.Entities.Roadmap
+            { Id = 88, Title = "Latest", NumDays = 1, UpdatedAt = DateTime.UnixEpoch.AddSeconds(roadmapCase == "edited" ? 6 : 5) };
+        roadmaps.Setup(x => x.GetOwnedDetailAsync(88, 3, It.IsAny<CancellationToken>())).ReturnsAsync(roadmap);
+        repository.Setup(x => x.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentProposal
+        {
+            Id = 9, ConversationId = 7, Status = AgentProposalStatus.Ready, ExpiresAt = DateTime.MaxValue,
+            Payload = AgentJson.Write(AgentTestData.Snapshot(AgentTestData.Item()) with { BaseRoadmapId = 88, BaseRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(5) }),
+            ValidationResult = AgentJson.Write(new AgentValidation([], [], 0, []))
+        });
+        repository.Setup(x => x.GetCompletedHistoryAsync(7, 20, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<AgentMessage>());
+        // STEP-02: Create conversation as AgentConversation.
+        var conversation = new AgentConversation { Id = 7, UserId = 3, RoadmapId = 88, CurrentProposalId = 9, State = AgentJson.Write(AgentTestData.State()) };
+        // STEP-03: Build the context with an empty SendAgentMessageRequestDto.
+        var result = await new AgentContextBuilder(repository.Object, roadmaps.Object, new(), TimeProvider.System, AgentTestData.Validator().Tags.Object).BuildAsync(conversation, new SendAgentMessageRequestDto(), CancellationToken.None);
+        // STEP-04: Assert the draft is dropped only on an old revision, the flags, and where the source comes from.
+        result.OutdatedProposalDropped.Should().Be(roadmapCase != "current");
+        result.AttachedRoadmapDeleted.Should().Be(roadmapCase == "deleted");
+        result.CurrentProposal.Should().Match(proposal => roadmapCase == "current" ? proposal != null : proposal == null);
+        if (roadmapCase == "deleted") result.Source.Should().BeNull();
+        else result.Source!.BaseRoadmapUpdatedAt.Should().Be(roadmap!.UpdatedAt);
+    }
+
+    // TEST-04: Unchanged official revisions preserve constraints accepted in chat and reset fences remove older context.
+    /// <summary>Prevents a saved roadmap reload from reverting a confirmed chat budget or resurrecting reset history.</summary>
+    [Fact]
+    public async Task BuildAsync_UnchangedRoadmap_PreservesChatConstraintsAndHistoryFence()
+    {
+        // STEP-01: Mock IAgentRepository and IRoadmapRepository; stub roadmaps.GetOwnedDetailAsync and repository.GetCompletedHistoryAsync.
+        var repository = new Mock<IAgentRepository>(); var roadmaps = new Mock<IRoadmapRepository>();
+        roadmaps.Setup(repo => repo.GetOwnedDetailAsync(88, 3, It.IsAny<CancellationToken>())).ReturnsAsync(
+            new ANGI.Domain.Entities.Roadmap { Id = 88, UpdatedAt = DateTime.UnixEpoch.AddSeconds(4), Title = "Official", NumDays = 2, BudgetAmount = 500000 });
+        repository.Setup(repo => repo.GetCompletedHistoryAsync(7, 20, It.IsAny<CancellationToken>())).ReturnsAsync([
+            new AgentMessage { Role = AgentMessageRole.User, SequenceNo = 1, Payload = AgentJson.Write(new AgentStoredMessage("Old trip")) },
+            new AgentMessage { Role = AgentMessageRole.Assistant, SequenceNo = 9, Payload = AgentJson.Write(new AgentStoredMessage("Fresh context")) }]);
+        // STEP-02: Derive state from a copy of AgentTestData.State(), create conversation as AgentConversation and 1 more.
+        var state = AgentTestData.State() with { BudgetAmount = 700000, SourceRoadmapUpdatedAt = DateTime.UnixEpoch.AddSeconds(4), HistoryStartSequence = 8 };
+        var conversation = new AgentConversation { Id = 7, UserId = 3, RoadmapId = 88, State = AgentJson.Write(state) };
+        var result = await new AgentContextBuilder(repository.Object, roadmaps.Object, new(), TimeProvider.System, AgentTestData.Validator().Tags.Object).BuildAsync(conversation, new(), CancellationToken.None);
+        // STEP-03: Assert result.State.BudgetAmount is 700000, result.History has exactly one matching item and result.History.Content is "Fresh context".
+        result.State.BudgetAmount.Should().Be(700000); result.History.Should().ContainSingle().Which.Content.Should().Be("Fresh context");
+    }
+
+    // TEST-05: A roadmap with items from multiple provinces leaves the destination unknown instead of guessing.
+    /// <summary>Verifies initial context records only unambiguous catalog facts.</summary>
+    [Fact]
+    public void StateFromRoadmap_AmbiguousProvince_RemainsUnknown()
+    {
+        // STEP-01: Get a from AgentTestData.Dish, get b from AgentTestData.Dish, set b.Restaurant.ProvinceName to "Other" and 1 more.
+        var a = AgentTestData.Dish(); var b = AgentTestData.Dish(2); b.Restaurant.ProvinceName = "Other";
+        var roadmap = new ANGI.Domain.Entities.Roadmap { NumDays = 2, Title = "Trip", Days = [new RoadmapDay { Items =
+            [new RoadmapItem { Dish = a }, new RoadmapItem { Dish = b }] }] };
+        // STEP-02: Assert AgentContextBuilder.StateFromRoadmap().Province is null.
+        AgentContextBuilder.StateFromRoadmap(roadmap).Province.Should().BeNull();
+    }
+
+    // TEST-05b: A saved destination is the conversation's province, even when the dishes span several.
+    /// <summary>Verifies the roadmap's own destination comes before what its dishes suggest.</summary>
+    [Fact]
+    public void StateFromRoadmap_SavedDestination_IsTheProvince()
+    {
+        // STEP-01: Build a roadmap whose dishes are in two provinces and whose destination is saved.
+        var a = AgentTestData.Dish(); var b = AgentTestData.Dish(2); b.Restaurant.ProvinceName = "Other";
+        var roadmap = new ANGI.Domain.Entities.Roadmap { NumDays = 2, Title = "Trip", DestinationProvince = "Thành phố Hà Nội",
+            Days = [new RoadmapDay { Items = [new RoadmapItem { Dish = a }, new RoadmapItem { Dish = b }] }] };
+        // STEP-02: Assert the province is the saved destination.
+        AgentContextBuilder.StateFromRoadmap(roadmap).Province.Should().Be("Thành phố Hà Nội");
+    }
+
+    // TEST-06: A client's confirmed state can neither invent the mark of an offered dish nor keep one the stored state holds.
+    /// <summary>That mark changes how "ok" is read, so only the backend may set it.</summary>
+    [Fact]
+    public async Task BuildAsync_ConfirmedState_DropsOfferedDishMark()
+    {
+        // STEP-01: Create fixture as AgentUseCaseFixture and create builder as AgentContextBuilder.
+        var fixture = new ANGI.UnitTests.Application.UseCases.Agent.AgentUseCaseFixture();
+        var builder = new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object);
+        // STEP-02: Create request carrying a confirmed state with the mark.
+        var request = new SendAgentMessageRequestDto { ClientMessageId = 1, ExpectedConversationVersion = 1, Content = "ok", ConfirmedState = AgentTestData.State() with { DishOffered = true } };
+
+        // STEP-03: Run builder.BuildAsync and keep result.
+        var result = await builder.BuildAsync(fixture.Conversation, request, CancellationToken.None);
+
+        // STEP-04: Assert result.State.DishOffered is null.
+        result.State.DishOffered.Should().BeNull();
+    }
+}

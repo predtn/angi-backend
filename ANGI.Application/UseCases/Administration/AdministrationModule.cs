@@ -1,0 +1,42 @@
+using ANGI.Application.Common.Interfaces.UseCases.Administration;
+using ANGI.Application.UseCases.Administration.CreateMod;
+using ANGI.Application.UseCases.Administration.GetDashboardSummary;
+using ANGI.Application.UseCases.Administration.GetDashboardTimeSeries;
+using ANGI.Application.UseCases.Administration.GetDashboardTop;
+using ANGI.Application.UseCases.Administration.GetFailedOutboxMessages;
+using ANGI.Application.UseCases.Administration.GetModDetail;
+using ANGI.Application.UseCases.Administration.GetModPermissions;
+using ANGI.Application.UseCases.Administration.GetPermissionCatalog;
+using ANGI.Application.UseCases.Administration.GetSystemAuditLogDetail;
+using ANGI.Application.UseCases.Administration.GetSystemAuditLogs;
+using ANGI.Application.UseCases.Administration.ListMods;
+using ANGI.Application.UseCases.Administration.ReplaceModPermissions;
+using ANGI.Application.UseCases.Administration.ReplaceModRolePermissions;
+using ANGI.Application.UseCases.Administration.UpdateMod;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace ANGI.Application.UseCases.Administration;
+
+/// <summary>Centralizes Application-layer registration for the Administration module.</summary>
+public static class AdministrationModule
+{
+    /// <summary>Registers account and permission administration use cases for the lifetime of an HTTP request.</summary>
+    public static IServiceCollection AddAdministrationUseCases(this IServiceCollection services)
+    {
+        services.AddScoped<IListModsUseCase, ListModsUseCase>();
+        services.AddScoped<ICreateModUseCase, CreateModUseCase>();
+        services.AddScoped<IGetModDetailUseCase, GetModDetailUseCase>();
+        services.AddScoped<IUpdateModUseCase, UpdateModUseCase>();
+        services.AddScoped<IGetPermissionCatalogUseCase, GetPermissionCatalogUseCase>();
+        services.AddScoped<IGetModPermissionsUseCase, GetModPermissionsUseCase>();
+        services.AddScoped<IReplaceModPermissionsUseCase, ReplaceModPermissionsUseCase>();
+        services.AddScoped<IReplaceModRolePermissionsUseCase, ReplaceModRolePermissionsUseCase>();
+        services.AddScoped<IGetDashboardSummaryUseCase, GetDashboardSummaryUseCase>();
+        services.AddScoped<IGetDashboardTimeSeriesUseCase, GetDashboardTimeSeriesUseCase>();
+        services.AddScoped<IGetDashboardTopUseCase, GetDashboardTopUseCase>();
+        services.AddScoped<IGetFailedOutboxMessagesUseCase, GetFailedOutboxMessagesUseCase>();
+        services.AddScoped<IGetSystemAuditLogsUseCase, GetSystemAuditLogsUseCase>();
+        services.AddScoped<IGetSystemAuditLogDetailUseCase, GetSystemAuditLogDetailUseCase>();
+        return services;
+    }
+}
