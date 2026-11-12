@@ -113,6 +113,17 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 context.State = change.Proposed with { PendingStateChange = context.State.PendingStateChange, SourceRoadmapUpdatedAt = context.State.SourceRoadmapUpdatedAt,
                     HistoryStartSequence = context.State.HistoryStartSequence, TranscriptStartSequence = context.State.TranscriptStartSequence };
             }
+            catch (FluentValidation.ValidationException error)
+            {
+                // State model gửi sai luật là tham số sai của tool: trả về để model tự sửa hoặc hỏi lại người dùng trong cùng lượt.
+                // Trước đây exception thoát ra ngoài, lượt kết thúc bằng câu của lần gọi trước, thường là câu rỗng (hội thoại 548).
+                // State đầu lượt giữ nguyên vì phép gán ở trên chưa chạy.
+                telemetry.Trace("state_rejected_detail", context.ConversationId, context.TurnId, context.AttemptId,
+                    new { rejected = error.Errors.Select(item => new { property = item.PropertyName, value = item.AttemptedValue }) });
+                return ArgumentError(context, $"State gửi kèm bị từ chối: {string.Join(" ", error.Errors.Select(item => $"{item.PropertyName}: {item.ErrorMessage}").Distinct())} " +
+                    "Lưu ý: mealSlot chỉ hợp lệ khi có dayNumber, và dayNumber phải nằm trong số ngày của chuyến. " +
+                    "Sửa state rồi gọi lại; nếu người dùng chưa nêu thông tin còn thiếu (ví dụ bữa đó thuộc ngày nào), hãy hỏi lại họ thay vì tự chọn.");
+            }
         }
         // STEP-02: When AgentScopedPlanning.IsLongTrip(context.State) holds, context.State.MealSlots.Length is 0 and context.Source is not { Items.Length: > 0 }, set context.State.
         // Backend tự ghép chuyến dài theo bữa, nên phải biết các bữa ngay cả khi model không ghi mealSlots.
