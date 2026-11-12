@@ -64,10 +64,20 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return element;
         }
         catch (JsonException) { throw Invalid("Tham số công cụ không hợp lệ."); }
+        // Chỉ ghi lại, không bắt: bộ lọc trả false nên exception vẫn đi tiếp như cũ.
+        catch (Exception error) when (ToolFailed(context, call, error)) { throw; }
         finally
         {
             telemetry.Record("tool", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
         }
+    }
+
+    /// <summary>Records a tool that ended in an exception (type and message), then lets the exception continue unchanged.</summary>
+    private bool ToolFailed(AgentContext context, AgentToolCall call, Exception error)
+    {
+        telemetry.Record("tool_failed", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, errorType = error.GetType().Name });
+        telemetry.Trace("tool_failed_detail", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, call.Arguments, error.Message });
+        return false;
     }
 
     private static readonly HashSet<string> Fillers =

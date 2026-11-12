@@ -451,10 +451,30 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         catch (FluentValidation.ValidationException error) when (context.CatalogProvinces is not null && AgentIntakePolicy.Eligible(context))
         {
             var problem = error.Errors.FirstOrDefault()?.ErrorMessage ?? "Thông tin chuyến đi chưa hợp lệ.";
+            StateRejected(context, error, "intake_last_reply", lastReply);
             return new(Raw(lastReply), turnState, null, null);
         }
         // STEP-56: On any other FluentValidation.ValidationException, return the result of Misunderstood.
-        catch (FluentValidation.ValidationException) { return Misunderstood(context, turnState, lastReply); }
+        catch (FluentValidation.ValidationException error)
+        {
+            StateRejected(context, error, "misunderstood", lastReply);
+            return Misunderstood(context, turnState, lastReply);
+        }
+    }
+
+    /// <summary>Records which state rule stopped the turn and how the turn ended; behaviour is unchanged.</summary>
+    /// <remarks>Rule names and validator messages are fixed backend text, so they go to the normal log; the rejected values and the reply go to the Development trace only.</remarks>
+    private void StateRejected(AgentContext context, FluentValidation.ValidationException error, string handledAs, string? lastReply)
+    {
+        telemetry.Record("state_rejected", context.ConversationId, context.TurnId, context.AttemptId, new
+        {
+            handledAs, replyEmpty = string.IsNullOrWhiteSpace(lastReply),
+            errors = error.Errors.Select(item => new { property = item.PropertyName, message = item.ErrorMessage })
+        });
+        telemetry.Trace("state_rejected_detail", context.ConversationId, context.TurnId, context.AttemptId, new
+        {
+            lastReply, rejected = error.Errors.Select(item => new { property = item.PropertyName, value = item.AttemptedValue })
+        });
     }
 
     /// <summary>Route legs are fetched per day from a paid map service for each validation; a long trip skips them in chat and the saved roadmap fetches a day's route when it is opened.</summary>
