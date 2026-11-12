@@ -120,7 +120,10 @@ public sealed class AgentConstraintGuard
 
     // Taste evidence
 
-    // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu.
+    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): vừa.</summary>
+    public const double DefaultTasteLevel = 0.5;
+
+    // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu, nên chỉ được dùng mức mặc định.
     private static readonly HashSet<string> NoLevelWords = ["thich", "an", "mon", "vi", "do", "khau", "muon", "uu", "tien", "toi", "minh", "em", "la", "va", "ma"];
 
     /// <summary>The dimensions the proposed state sets or changes with no quoted level; empty when the state is backed or the user already confirmed it.</summary>
@@ -154,7 +157,8 @@ public sealed class AgentConstraintGuard
         // STEP-01: Prepare quote through Plain and return false early when it is empty or the user never wrote it.
         var quote = Plain(target.LevelQuote ?? "");
         if (quote.Length == 0 || !written.Contains(quote, StringComparison.Ordinal)) return false;
-        // STEP-02: Prepare tastes and return whether a word remains that is neither the taste nor a word of liking.
+        // STEP-02: A taste the user wrote with no level is the default moderate level (user decision 2026-11-12: plan with it instead of asking); any other level needs a word stating it.
+        if (target.Target == DefaultTasteLevel) return true;
         var tastes = AgentTasteClarificationPolicy.MentionedTastes(target.LevelQuote!).SelectMany(taste => Plain(taste).Split(' ')).ToHashSet();
         return quote.Split(' ').Any(word => !tastes.Contains(word) && !NoLevelWords.Contains(word));
     }

@@ -1228,8 +1228,8 @@ public sealed class AgentToolExecutorTests
         return dish;
     }
 
-    // TEST-38: A taste level the user never stated is refused before any catalog read or ranking and leaves the state unchanged; covers no quote, a quote nobody wrote and a quote naming only the taste.
-    /// <summary>Conversation 10 got a level the model invented; the model has to ask instead of ranking with it.</summary>
+    // TEST-38: A level other than the default that the user never stated is refused before any catalog read or ranking and leaves the state unchanged; covers no quote, a quote nobody wrote and a quote naming only the taste.
+    /// <summary>Conversation 10 got a level the model invented; the model is told to quote the user and use the default level, never to ask.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("cay vừa")]
@@ -1250,10 +1250,33 @@ public sealed class AgentToolExecutorTests
 
         // STEP-04: Assert result.status is "invalid_arguments", the warning tells the model to ask and context.State is unchanged.
         result.GetProperty("status").GetString().Should().Be("invalid_arguments");
-        result.GetProperty("warnings")[0].GetString().Should().Contain("taste_intensity");
+        result.GetProperty("warnings")[0].GetString().Should().Contain("levelQuote").And.NotContain("taste_intensity");
         context.State.Should().BeSameAs(before);
         // STEP-05: Verify GetCandidateIdsAsync is never called.
         fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-58: A taste the user wrote with no level is ranked at the default moderate level instead of being refused; covers liking wording and a bare taste.
+    /// <summary>Conversation 568 asked "cay nhẹ, vừa, nhiều hay rất nhiều, cả chuyến hay một bữa?" after "ưu tiên đồ cay" (user decision 2026-11-12: plan instead).</summary>
+    [Theory]
+    [InlineData("ưu tiên đồ cay")]
+    [InlineData("thích ăn cay")]
+    public async Task ExecuteAsync_TasteWithoutLevel_RanksAtDefault(string quote)
+    {
+        // STEP-01: Get context with the user's message and an input quoting it at the default level.
+        var fixture = AgentTestData.Validator(Named(1, "Bún"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync([1]);
+        var context = AgentTestData.Context();
+        context.Request.Content = $"lập lịch giúp tôi, {quote}";
+        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", ANGI.Application.Services.Agent.Constraints.AgentConstraintGuard.DefaultTasteLevel, quote)] } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        // STEP-02: Run tools.ExecuteAsync with context and keep result.
+        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
+
+        // STEP-03: Assert the call was not refused and the taste reached the state.
+        (result.TryGetProperty("status", out var status) ? status.GetString() : null).Should().NotBe("invalid_arguments");
+        context.State.TasteTargets.Should().ContainSingle(x => x.Dimension == "spicy" && x.Target == ANGI.Application.Services.Agent.Constraints.AgentConstraintGuard.DefaultTasteLevel);
     }
 
     // TEST-39: An unknown taste dimension is refused by the strict schema before any catalog read or ranking.
