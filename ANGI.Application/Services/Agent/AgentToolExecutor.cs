@@ -528,6 +528,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             : meals.Select(meal => new AgentScope(day, meal))).ToArray();
     }
 
+    /// <summary>The first position of a scope that is searched (a declared meal, or the scope's own meal), the first one at all for legacy state.</summary>
+    private static (short Day, string Meal) FirstSearched(AgentState state, AgentScope scope, (short Day, string Meal)[] slots) =>
+        slots.FirstOrDefault(x => state.MealSlots.Length == 0 || state.MealSlots.Contains(x.Meal) || scope.MealSlot == x.Meal, slots[0]);
+
     /// <summary>Compares only positions this scope actually searches: declared meals, or every meal for legacy state.</summary>
     private static bool IsHomogeneous(AgentState state, AgentScope scope) => AgentScopedPlanning.Slots(state, scope)
         .Where(x => state.MealSlots.Length == 0 || state.MealSlots.Contains(x.Meal) || scope.MealSlot == x.Meal)
@@ -553,8 +557,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-01: Prepare state and slots through AgentScopedPlanning.Slots().ToArray.
         var state = context.State;
         var slots = AgentScopedPlanning.Slots(state, scope).ToArray();
-        // STEP-02: Set (day, meal).
-        var (day, meal) = slots[0];
+        // STEP-02: Set (day, meal) from the first position the scope really searches: a day with only lunch declared read breakfast's request, so a dish named for lunch was ignored.
+        var (day, meal) = FirstSearched(state, scope, slots);
         // STEP-03: Prepare mealRequest through AgentScopedPlanning.Request, tagIds through Concat().Concat().Distinct().ToArray and more.
         var mealRequest = AgentScopedPlanning.Request(state, day, meal);
         // Tag phải có thật trong catalog. Gộp các bộ lọc theo hướng giữ/siết ràng buộc state.

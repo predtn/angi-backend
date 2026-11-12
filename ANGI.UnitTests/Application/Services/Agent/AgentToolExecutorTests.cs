@@ -863,6 +863,31 @@ public sealed class AgentToolExecutorTests
         if (warned) limits[^1].Should().BeEmpty();
     }
 
+    // TEST-59: A day that declares only lunch reads lunch's request, so a dish the user named for it filters the search.
+    /// <summary>The scope of a whole day used to read breakfast's request first, and a dish named for lunch on a lunch-only trip was ignored.</summary>
+    [Fact]
+    public async Task ExecuteAsync_LunchOnlyDay_ReadsLunchRequest()
+    {
+        // STEP-01: Create a catalog searched by dish id and a lunch-only trip naming a dish for lunch on day 1.
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var limits = new List<int[]>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => { limits.Add([.. filter.DishIds]); return filter.DishIds.Count > 0 ? [1] : new[] { 2 }; });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context();
+        context.Request.Content = "bữa trưa ngày 1 ăn Phở";
+        context.State = context.State with { MealSlots = ["lunch"], MealRequests = [new(1, "lunch", "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        // STEP-02: Run tools.ExecuteAsync with context.
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        // STEP-03: Assert one search was limited to the named dish.
+        limits.Should().Contain(ids => ids.SequenceEqual(new[] { 1 }));
+    }
+
     // TEST-23: A request already on a meal stays on it, whatever the wording and whatever meal the restaurant usually serves.
     /// <summary>The backend no longer moves a placed request by reading the user's wording (user decision 2026-11-11: a named dish goes on the meal it was put on).</summary>
     [Theory]
