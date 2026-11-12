@@ -188,6 +188,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.Exchanges.Add(new(step.Tools, results));
                     phase = AgentTurnPhase.Act;
                     context.ForcedTool = null;
+                    context.ReadState = null;
                     // Model viết câu trả lời từ kết quả gợi ý ở lần gọi kế tiếp; tools đóng lại nên đây là lần gọi cuối của lượt.
                     if (context.DishSuggestion is { } found)
                     {
@@ -258,6 +259,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("use_tool", context.ConversationId, context.TurnId, context.AttemptId, new { output.Tool });
                     phase = AgentTurnPhase.Forced;
                     context.ForcedTool = output.Tool;
+                    // Lần gọi sau đọc lại cùng tin nhắn từ đầu; không có kết quả đọc này thì nó có thể đọc khác (hội thoại 558 mất 10 món người dùng chỉ "các món trên").
+                    context.ReadState = output.State;
                     repaired = false;
                     continue;
                 }

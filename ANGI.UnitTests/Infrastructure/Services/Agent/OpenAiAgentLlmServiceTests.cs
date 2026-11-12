@@ -806,6 +806,34 @@ public sealed class OpenAiAgentLlmServiceTests
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
     }
 
+    // TEST-35: The forced step shows the state the read step gave, right before the message; other steps do not.
+    /// <summary>Conversation 558: without its own reading the forced call read "các món trên" again and dropped the ten suggested dishes.</summary>
+    [Fact]
+    public async Task RunAsync_ForcedStep_ShowsTheReadState()
+    {
+        // STEP-01: Get a forced context with a read state naming a dish, and capture the messages sent.
+        var context = AgentTestData.Context();
+        context.Phase = AgentTurnPhase.Forced;
+        context.ForcedTool = "get_recommendation";
+        context.ReadState = AgentTestData.State() with { MealRequests = [new(null, null, "Cháo Đậu Xanh Chay", null, [])] };
+        var messages = new List<(string Role, string Content)>();
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            messages.AddRange(body.RootElement.GetProperty("messages").EnumerateArray()
+                .Select(message => (message.GetProperty("role").GetString()!, message.GetProperty("content").ValueKind == JsonValueKind.String ? message.GetProperty("content").GetString()! : "")));
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+
+        // STEP-02: Call RunAsync.
+        await Service(handler).RunAsync(context, false, CancellationToken.None);
+
+        // STEP-03: Assert the reading sits right before the user message, names the tool and carries the dish.
+        messages[^1].Should().Be(("user", context.Request.Content));
+        messages[^2].Role.Should().Be("system");
+        messages[^2].Content.Should().Contain("get_recommendation").And.Contain("Cháo Đậu Xanh Chay");
+    }
+
     // TEST-33: Requests with the same rules and tools share a prompt cache key whoever sends them; another step gets another key; the stable catalog sits before the turn's data.
     /// <summary>Prompt caching only reuses an identical prefix, so the key follows the prefix and the catalog is kept out of the per-turn data.</summary>
     [Fact]

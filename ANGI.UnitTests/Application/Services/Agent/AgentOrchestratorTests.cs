@@ -816,6 +816,32 @@ public sealed class AgentOrchestratorTests
         context.Exchanges.Should().ContainSingle();
     }
 
+    // TEST-56: The state the read step gave reaches the forced call and is gone once the tool has run.
+    /// <summary>Conversation 558: the read put the ten suggested dishes in mealRequests, the forced call, which never saw that reading, sent none.</summary>
+    [Fact]
+    public async Task RunAsync_ChatMessage_ForcedCallSeesTheReadState()
+    {
+        // STEP-01: Get context and script a read with a state, the tool call, and the final answer, recording the read state of each call.
+        var context = IntakeContext("ở Cầu Giấy", new AgentState());
+        var read = new AgentState { Province = "Thành phố Hà Nội", NumDays = 3 };
+        var seen = new List<AgentState?>();
+        var next = new Queue<AgentLlmStep>([new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "locate_places", State = read }),
+            Locates("Cầu Giấy"), Asks("trip_details", "Bạn đi mấy ngày nè?")]);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((current, _, _) => seen.Add(current.ReadState))
+            .ReturnsAsync(() => next.Dequeue());
+
+        // STEP-02: Call Create().RunAsync.
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        // STEP-03: Assert only the forced call carried the read state.
+        seen.Should().HaveCount(3);
+        seen[0].Should().BeNull();
+        seen[1].Should().BeSameAs(read);
+        seen[2].Should().BeNull();
+    }
+
     // TEST-35: The steps that already know the work skip the read; covers a button command, a submitted form and a replan after confirmation.
     /// <summary>Reading again would only spend a call on a message that carries no new meaning.</summary>
     [Theory]

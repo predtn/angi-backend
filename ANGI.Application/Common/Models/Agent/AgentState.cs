@@ -229,6 +229,11 @@ public sealed class AgentContext
     public AgentTurnPhase Phase { get; set; } = AgentTurnPhase.Act;
     /// <summary>The tool named in the read step, for the forced call.</summary>
     public string? ForcedTool { get; set; }
+    /// <summary>
+    /// The state the read step gave for this message, shown to the forced call so it fills the tool from that reading instead of reading again.
+    /// Conversation 558: the read put the ten suggested dishes in mealRequests, the forced call, which never saw it, sent none.
+    /// </summary>
+    public AgentState? ReadState { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>
