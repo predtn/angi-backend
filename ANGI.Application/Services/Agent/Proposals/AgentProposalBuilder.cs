@@ -292,6 +292,21 @@ public sealed class AgentProposalBuilder
         return items.Count == 0 ? null : new AgentOutput { Action = "create_proposal", Reply = "", Items = items.ToArray() };
     }
 
+    /// <summary>
+    /// The best-ranked dish issued this turn for this exact day, meal and condition, preferring one not in <paramref name="used"/>; null when none was issued.
+    /// It fills a meal whose dish was made up, or kept from a plan that no longer fits, so the draft stays complete without another model call or a question.
+    /// </summary>
+    public static int? IssuedDish(AgentState state, IEnumerable<AgentCandidateGrant> grants, short day, string meal, IReadOnlySet<int> used)
+    {
+        // STEP-01: Prepare the dishes issued for this day and meal under the same ranking inputs, best ranked first.
+        var fingerprint = AgentScopedPlanning.Fingerprint(state, day, meal);
+        var options = grants.Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == day) && (grant.MealSlot is null || grant.MealSlot == meal) &&
+                AgentScopedPlanning.Fingerprint(grant.Constraints, day, meal) == fingerprint)
+            .SelectMany(grant => grant.DishIds).ToArray();
+        // STEP-02: Return the first one not used yet, or the first one when all are used.
+        return options.Where(id => !used.Contains(id)).Select(id => (int?)id).FirstOrDefault() ?? options.Select(id => (int?)id).FirstOrDefault();
+    }
+
     /// <summary>Builds a backend-derived delta from validated source identity instead of storing untrusted model metadata.</summary>
     private static AgentChange[] Delta(AgentItem[] original, List<AgentItem> items)
     {

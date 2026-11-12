@@ -417,7 +417,55 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
                 // STEP-41: Call telemetry.Record.
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
-                // THÍ NGHIỆM: không chặn, không vòng sửa, không tự thay món (scope/budget/repeat). Món catalog đọc được thì lấy tên, giá; món không đọc được giữ nguyên như model viết.
+                // A dish the model made up (not in the catalog, not issued by a tool for that day, meal and condition, outside the province or area) is never shown:
+                // the model corrects the draft once from the issued candidates; one still made up after that is replaced by the best dish issued for its meal.
+                // A dish kept from the plan the user already has is not made up even when it no longer fits (an itinerary change made 9 such in conversation 570):
+                // it is replaced by a dish issued for its meal this turn when there is one, and otherwise stays with a warning, so the plan never loses a meal.
+                var keptDishes = (context.Source?.Items ?? []).Select(item => item.DishId).ToHashSet();
+                var fabricated = validated.Validation.Errors.Where(error => AgentProposalValidator.FabricatedDish(error) is { } id && !keptDishes.Contains(id)).ToArray();
+                if (fabricated.Length > 0)
+                {
+                    telemetry.Record("fabrication", context.ConversationId, context.TurnId, context.AttemptId, new { fabricated, repaired = proposalRepaired });
+                    if (!proposalRepaired && calls + 1 < limits.MaxLlmCalls)
+                    {
+                        context.RejectedOutput = output;
+                        context.RepairFeedback = "Các món sau không lấy từ ứng viên đã được cấp cho đúng ngày, bữa và điều kiện hiện tại: " + string.Join(" ", fabricated) +
+                            " Chỉ chọn dishId có trong kết quả tool của lượt này cho đúng ngày và bữa đó; giữ nguyên các món khác.";
+                        proposalRepaired = repaired = true;
+                        continue;
+                    }
+                }
+                var invented = fabricated.Select(AgentProposalValidator.FabricatedDish).OfType<int>().ToHashSet();
+                var stale = validated.Validation.Errors.Select(AgentProposalValidator.FabricatedDish).OfType<int>().Where(keptDishes.Contains).ToHashSet();
+                if (invented.Count > 0 || stale.Count > 0)
+                {
+                    var used = snapshot.Items.Select(item => item.DishId).ToHashSet();
+                    var items = new List<AgentItem>();
+                    int replaced = 0, restored = 0, dropped = 0, refreshed = 0;
+                    foreach (var item in snapshot.Items)
+                    {
+                        var made = invented.Contains(item.DishId);
+                        if (!made && !stale.Contains(item.DishId)) { items.Add(item); continue; }
+                        if (AgentProposalBuilder.IssuedDish(snapshot.State, context.Grants, item.DayNumber, item.MealSlot, used) is { } pick)
+                        {
+                            used.Add(pick);
+                            items.Add(item with { DishId = pick, SourceItemId = null, RequestId = null, Price = 0, DishName = null, RestaurantName = null, Latitude = null, Longitude = null, RankingFingerprint = null });
+                            if (made) replaced++; else refreshed++;
+                        }
+                        // Nothing issued for that meal: an edit keeps the meal's dish from the saved plan; only a meal new to this draft is left empty.
+                        else if (made && context.Source?.Items.FirstOrDefault(old => old.ItemKey == item.ItemKey) is { } previous) { items.Add(previous); restored++; }
+                        else if (made) dropped++;
+                        else items.Add(item);
+                    }
+                    if (replaced + restored + dropped + refreshed > 0)
+                    {
+                        snapshot = snapshot with { Items = [.. items] };
+                        validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
+                    }
+                    if (replaced + restored + dropped > 0) telemetry.Record("fabrication_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { replaced, restored, dropped });
+                    if (refreshed > 0) telemetry.Record("stale_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { refreshed });
+                }
+                // Other errors (budget, repeats, meal fit, a dish kept from the plan) do not block: the draft is shown with them as warnings.
                 if (validated.Validation.Errors.Length > 0)
                 {
                     telemetry.Record("validation_ignored", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors });
