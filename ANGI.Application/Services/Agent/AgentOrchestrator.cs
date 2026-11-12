@@ -656,7 +656,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
         // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
-        var spelled = AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context);
+        var spelled = AgentConstraintGuard.WithDailyBudget(AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context), context.State);
         context.UnknownPlace = null;
         var placed = AgentConstraintGuard.RetainPlacements(spelled, context.PlacedRequests);
         try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline); }

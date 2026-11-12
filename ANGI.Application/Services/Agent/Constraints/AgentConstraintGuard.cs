@@ -198,6 +198,23 @@ public sealed class AgentConstraintGuard
         return figures.Length > 0 && !figures.Any(figure => budget >= figure / Tolerance && budget <= figure * days * Tolerance);
     }
 
+    // "500k/ngày", "500k mỗi ngày", "500k một ngày", "500k 1 ngày": the quoted figure is per day.
+    private static readonly Regex PerDay = new(@"(?:/|\bmoi\b|\bmot\b|\b1\b)\s*ngay\b", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A budget the model copied from a per-day quote without multiplying it by the trip's days becomes the trip budget (conversation 573 stored "500k/ngày"
+    /// as 500.000 for 3 days; 570 got 1.500.000 from the same words). Only an amount equal to the quote's single figure changes; anything else is left to the other checks.
+    /// </summary>
+    public static AgentState? WithDailyBudget(AgentState? proposed, AgentState current)
+    {
+        // STEP-01: Return proposed unless a new budget on a trip of several days comes from a per-day quote.
+        var days = proposed?.NumDays ?? current.NumDays ?? 1;
+        if (proposed?.BudgetAmount is not { } budget || budget == current.BudgetAmount || days <= 1 || proposed.BudgetQuote is not { } quote ||
+            !PerDay.IsMatch(AgentPlaceResolver.Fold(quote.Normalize(NormalizationForm.FormC)).ToLowerInvariant())) return proposed;
+        // STEP-02: Multiply only when the budget is exactly the one figure quoted.
+        return Figures(quote).ToArray() is [var daily] && daily == budget ? proposed with { BudgetAmount = budget * days } : proposed;
+    }
+
     /// <summary>The amounts in the quote that are clearly money: with a known unit, or large enough alone.</summary>
     private static IEnumerable<decimal> Figures(string quote)
     {

@@ -156,6 +156,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// <summary>Filters before ranking, validates the entire reco response and issues scoped backend grants.</summary>
     private async Task<object> RecommendAsync(AgentContext context, AgentRecommendationInput input, CancellationToken ct)
     {
+        // A per-day budget copied without multiplying by the days is the trip's budget (conversation 573).
+        input = input with { State = AgentConstraintGuard.WithDailyBudget(input.State, context.State) };
         // STEP-01: Return the result of ArgumentError early when AgentConstraintGuard.UnbackedTastes() has items, otherwise when context.ReplanAfterConfirmation is false, set context.State.
         // Khẩu vị người dùng không hề viết thì không được xếp hạng. Khẩu vị họ viết mà không nêu mức thì dùng mức vừa (0.5), không hỏi lại (user decision 2026-11-12).
         if (AgentConstraintGuard.UnbackedTastes(context, input.State) is { Length: > 0 } unbacked)

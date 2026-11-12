@@ -81,4 +81,36 @@ public sealed class AgentBudgetEvidencePolicyTests
         AgentConstraintGuard.HasUnbackedBudget(Context("có", state), state with { BudgetAmount = 370000 }).Should().BeFalse();
         AgentConstraintGuard.HasUnbackedBudget(Context("có", state), state with { BudgetAmount = 1110000, BudgetQuote = "370000" }).Should().BeTrue();
     }
+
+    // TEST-05: A per-day quote copied as the trip budget is multiplied by the days; covers "/ngày", "mỗi ngày" and "1 ngày", an amount already multiplied,
+    // a whole-trip quote, a one-day trip, an unchanged budget and a length known only from the current state.
+    /// <summary>Conversation 573 stored "500k/ngày" as 500.000 for a 3-day trip; 570 got 1.500.000 from the same words.</summary>
+    [Theory]
+    [InlineData("500k/ngày", 500000, (short)3, 1500000)]
+    [InlineData("500k mỗi ngày", 500000, (short)3, 1500000)]
+    [InlineData("500k 1 ngày", 500000, (short)2, 1000000)]
+    [InlineData("500k/ngày", 1500000, (short)3, 1500000)]
+    [InlineData("500k cả chuyến", 500000, (short)3, 500000)]
+    [InlineData("500k/ngày", 500000, (short)1, 500000)]
+    public void WithDailyBudget_MultipliesOnlyACopiedDailyFigure(string quote, int amount, short days, int expected)
+    {
+        // STEP-01: Create the proposed state.
+        var proposed = new AgentState { NumDays = days, BudgetAmount = amount, BudgetQuote = quote };
+
+        // STEP-02: Assert the trip budget.
+        AgentConstraintGuard.WithDailyBudget(proposed, new AgentState())!.BudgetAmount.Should().Be(expected);
+    }
+
+    // TEST-06: An unchanged budget is left alone, and a trip length missing from the proposal is taken from the current state.
+    /// <summary>The model often leaves out values it did not change; the check must still know the trip's days.</summary>
+    [Fact]
+    public void WithDailyBudget_UsesCurrentStateAndKeepsUnchanged()
+    {
+        // STEP-01: Create a current 3-day state with a budget, and proposals without a length.
+        var current = new AgentState { NumDays = 3, BudgetAmount = 500000 };
+
+        // STEP-02: Assert the unchanged budget stays and a new daily one is multiplied by the current length.
+        AgentConstraintGuard.WithDailyBudget(new AgentState { BudgetAmount = 500000, BudgetQuote = "500k/ngày" }, current)!.BudgetAmount.Should().Be(500000);
+        AgentConstraintGuard.WithDailyBudget(new AgentState { BudgetAmount = 400000, BudgetQuote = "400k/ngày" }, current)!.BudgetAmount.Should().Be(1200000);
+    }
 }
