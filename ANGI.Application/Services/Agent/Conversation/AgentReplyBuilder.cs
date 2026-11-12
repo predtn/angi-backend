@@ -168,12 +168,19 @@ public static class AgentReplyBuilder
         // STEP-02b: Return null early when nothing is kept and nothing removed, or there was no plan before.
         if (snapshot.Items.Length == changed.Length && removed.Length == 0 || sourceItems.Length == 0) return null;
         // STEP-03: Prepare parts from the changed and removed items.
-        var parts = changed.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}").ToList();
+        // A dish put next to a meal's kept dish reads "X vào bữa tối ngày 1", not "bữa tối ngày 1 sang X", which says the old dish was replaced (conversation 556).
+        var parts = changed.Take(MaxNamedChanges).Select(item => Added(item, sourceItems, removed)
+            ? $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}"
+            : $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}").ToList();
         if (changed.Length > MaxNamedChanges) parts.Add($"{changed.Length - MaxNamedChanges} món khác");
         if (removed.Length > 0) parts.Add($"bỏ {string.Join(", ", removed.Select(item => Safe(item.DishName)).Distinct())}");
         // STEP-04: Return the parts joined, or a plain sentence when the edit changed no dish.
         return parts.Count > 0 ? string.Join("; ", parts) : "giữ nguyên các món";
     }
+
+    /// <summary>True for a dish added next to what its meal kept: a new item while no earlier dish of that day and meal was removed.</summary>
+    private static bool Added(AgentItem item, AgentItem[] sourceItems, AgentItem[] removed) =>
+        sourceItems.All(old => old.ItemKey != item.ItemKey) && !removed.Any(old => old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot);
 
     /// <summary>Says exactly what an edit changed and that the rest stayed; a plan with nothing retained reads as a new plan.</summary>
     private static string Summary(AgentSnapshot snapshot, AgentSnapshot? source)
@@ -196,8 +203,15 @@ public static class AgentReplyBuilder
         // STEP-04: When changed.Length > 0, prepare named through changed.Take().Select and call parts.Add.
         if (changed.Length > 0)
         {
-            var named = changed.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}");
-            parts.Add($"Mình đổi {string.Join("; ", named)}{(changed.Length > MaxNamedChanges ? $" và {changed.Length - MaxNamedChanges} món khác" : "")}.");
+            // Món thêm cạnh món đang giữ của bữa được nói là "thêm", món thay chỗ món cũ là "đổi".
+            var added = changed.Where(item => Added(item, sourceItems, removed)).ToArray();
+            var replaced = changed.Except(added).ToArray();
+            if (added.Length > 0)
+                parts.Add($"Mình thêm {string.Join("; ", added.Take(MaxNamedChanges).Select(item => $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}"))}" +
+                    $"{(added.Length > MaxNamedChanges ? $" và {added.Length - MaxNamedChanges} món khác" : "")}.");
+            if (replaced.Length > 0)
+                parts.Add($"Mình đổi {string.Join("; ", replaced.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}"))}" +
+                    $"{(replaced.Length > MaxNamedChanges ? $" và {replaced.Length - MaxNamedChanges} món khác" : "")}.");
         }
         // STEP-05: When removed.Length > 0, call parts.Add.
         if (removed.Length > 0)

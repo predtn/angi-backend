@@ -211,6 +211,18 @@ public sealed class AgentReplyBuilderTests
         AgentReplyBuilder.FillSlots(template, snapshot, source).Should().Be("Mình đổi bữa tối ngày 2 sang Bánh Pie Gà Nấm nhé.");
     }
 
+    // TEST-06f: A dish added next to a meal's kept dish reads as added, not as the meal changing to it (conversation 556).
+    /// <summary>Names an added dish "X vào bữa tối ngày 2" while the meal keeps its dish.</summary>
+    [Fact]
+    public void FillSlots_AddedDish_ReadsAsAdded()
+    {
+        var kept = AgentTestData.Item(2, "b", 2, "dinner") with { DishName = "Bún Chả" };
+        var source = AgentTestData.Snapshot(kept);
+        var snapshot = AgentTestData.Snapshot(kept, AgentTestData.Item(3, "c", 2, "dinner") with { DishName = "Cháo Đậu Xanh Chay" });
+
+        AgentReplyBuilder.FillSlots("Mình thêm {changes} nhé.", snapshot, source).Should().Be("Mình thêm Cháo Đậu Xanh Chay vào bữa tối ngày 2 nhé.");
+    }
+
     // TEST-07: A meal-level taste override also states that taste is a soft, unguaranteed preference.
     /// <summary>Applies the taste disclaimer to scoped overrides, not only trip targets.</summary>
     [Fact]
