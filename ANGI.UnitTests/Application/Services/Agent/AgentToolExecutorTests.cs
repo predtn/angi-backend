@@ -831,6 +831,38 @@ public sealed class AgentToolExecutorTests
         context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
     }
 
+    // TEST-57: fromOffered ranks only the suggested dishes that fit, and a meal they cannot fill is ranked over the whole catalog with a warning; without it the catalog is used.
+    /// <summary>"Dựa vào các món trên hãy lập lịch" limits the candidates to the suggestion instead of pinning each dish to a meal (conversations 568 and 570).</summary>
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 1)]
+    [InlineData(true, 3)]
+    public async Task ExecuteAsync_FromOffered_RanksOnlySuggestedDishes(bool fromOffered, int days)
+    {
+        // STEP-01: Create a catalog with a suggested dish (1) and another (2), and record the dish ids each search was limited to.
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var limits = new List<int[]>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) =>
+            {
+                limits.Add([.. filter.DishIds]);
+                return filter.DishIds.Count > 0 ? filter.DishIds.Where(id => id == 1).ToArray() : new[] { 1, 2 };
+            });
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = (short)days, MealSlots = ["lunch"], OfferedDishes = [new(1, "Phở", 10, "Quán A")] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        // STEP-02: Run tools.ExecuteAsync with context.
+        var result = await tools.ExecuteAsync(context, Call(Input() with { FromOffered = fromOffered }), CancellationToken.None);
+
+        // STEP-03: Assert the first search was limited to the suggestion only with fromOffered, and a meal of three days fell back to the catalog with a warning.
+        limits[0].Should().Equal(fromOffered ? [1] : Array.Empty<int>());
+        var warned = result.GetProperty("warnings").EnumerateArray().Any(x => x.GetString()!.StartsWith("Các món vừa gợi ý không đủ"));
+        warned.Should().Be(fromOffered && days == 3);
+        if (warned) limits[^1].Should().BeEmpty();
+    }
+
     // TEST-23: A request already on a meal stays on it, whatever the wording and whatever meal the restaurant usually serves.
     /// <summary>The backend no longer moves a placed request by reading the user's wording (user decision 2026-11-11: a named dish goes on the meal it was put on).</summary>
     [Theory]

@@ -287,7 +287,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var coverageWarning = coverage.Any(meal => meal.AvailableCount == 0)
             ? "Có bữa chưa có ứng viên phù hợp trong kết quả này. Kiểm tra mealCoverage và lấy gợi ý riêng cho bữa đó trước khi kết luận thiếu món."
             : rankings.Any(x => !x.PerMeal && x.ExpectedMeals > x.Picked.Count) ? "Có thể chưa đủ lựa chọn cho các bữa; cần lấy thêm gợi ý hoặc hỏi người dùng, không tự nới điều kiện." : null;
-        string[] warnings = [.. personalized ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."], .. legWarnings];
+        string[] warnings = [.. personalized ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."], .. legWarnings,
+            .. input.FromOffered && context.OfferedShortfall.Count > 0
+                ? [$"Các món vừa gợi ý không đủ cho {string.Join(", ", context.OfferedShortfall.Distinct().Select(meal => AgentReplyBuilder.Meal(meal)))} nên các bữa đó lấy món khác trên ANGI; nói ngắn gọn điều này với người dùng."]
+                : Array.Empty<string>()];
         var candidateCount = rankings.Sum(x => x.CandidateCount);
         var ignoredCount = rankings.Sum(x => x.IgnoredCount);
         var mealCoverage = coverage.Select(x => new { x.DayNumber, x.MealSlot, x.AvailableCount, x.RequiredTags });
@@ -621,9 +624,15 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var picked = new List<ANGI.Domain.Entities.Dish>();
         var requestIds = new List<Guid?>();
         int candidateTotal = 0, ignoredTotal = 0;
+        // "Dựa vào các món trên hãy lập lịch": fromOffered limits the candidates to the dishes the last suggestion showed, and ranking picks among them by taste
+        // and by each day's area. Nothing is pinned to a meal, so a dish that fits no meal is simply not chosen (conversations 568 and 570 asked again and again
+        // when pinned dishes did not fit). A dish or restaurant the user named for a meal keeps its own filter.
+        var offeredPool = input.FromOffered && namedDishIds.Length == 0 && restaurantId is null
+            ? (state.OfferedDishes ?? []).Select(dish => dish.DishId).Except(excluded).ToArray() : [];
         // STEP-09: Go through each mealSlot in meals.
         foreach (var mealSlot in meals)
         {
+            var poolIds = offeredPool;
             // STEP-10: Prepare mealTags from tagIds.Append.
             // Bữa sáng/trưa/tối mặc định chỉ xếp hạng món chính, trừ khi người dùng đã chọn loại món/món/quán cho bữa đó
             // (ví dụ "bữa sáng chỉ đồ uống") hoặc model đang tìm món phụ bằng tagIds loại món.
@@ -633,7 +642,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             async Task<ANGI.Domain.Entities.Dish[]> EligibleAsync(NearbyArea? searchArea)
             {
                 var filter = new DishCandidateFilter { Province = state.Province, TagIds = mealTags, ExcludeTagIds = excludeTags,
-                    ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds,
+                    ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds.Length > 0 ? namedDishIds : poolIds,
                     // A dish the user named goes on the meal they named, whatever meal its catalog tags list; picks of our own keep the tags.
                     RequireAllTags = true, CompatibleMealTimeCode = namedDishIds.Length > 0 ? null : mealSlot };
                 // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
@@ -660,6 +669,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var mealKey = AgentScopedPlanning.IsLongTrip(state) && perMealSearch ? $"{mealSlot}|{AgentScopedPlanning.Fingerprint(state, vectorSlot.Day, vectorSlot.Meal)}" : null;
             var known = mealKey is not null ? _rankedMeals.GetValueOrDefault(mealKey) : null;
             var eligible = known?.Eligible ?? await EligibleAsync(area);
+            // The suggested dishes that fit this meal and its area are too few for its days: the meal is ranked over the whole catalog instead, and the model is told.
+            if (poolIds.Length > 0 && known is null &&
+                eligible.Length < (mealSlot is null ? 1 : slots.Where(x => x.Meal == mealSlot).Select(x => x.Day).Distinct().Count()))
+            {
+                poolIds = [];
+                eligible = await EligibleAsync(area);
+                context.OfferedShortfall.Add(mealSlot ?? "all");
+            }
             // STEP-12: When namedCenter exists, mealSlot exists, distinctNames is true and 1 more condition(s), prepare widenedKm, check whether eligible.Length is 0 and 2 more action(s).
             // Nơi đến người dùng nêu tên mà bữa này không có món trong bán kính: chỉ bữa này được tìm xa dần, các bữa khác của ngày vẫn giữ bán kính cũ.
             // Món hoặc quán được yêu cầu đích danh giữ cách báo thiếu cũ, vì tìm xa hơn không tạo ra đúng món/quán đó.
@@ -1210,7 +1227,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
 public sealed record AgentRecommendationInput(AgentState? State = null, string? Province = null, string Scope = "full",
     short? DayNumber = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null,
     int[]? ExcludeDishIds = null, decimal? MaxPricePerMeal = null, decimal? RadiusKm = null, int TopK = 50, bool Alternative = false,
-    decimal? MaxLegKm = null);
+    decimal? MaxLegKm = null, bool FromOffered = false);
 
 /// <summary>What a dish suggestion is limited to; every value comes from the user's own request.</summary>
 public sealed record AgentSuggestionInput(string? Province = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MaxPrice = null, int Count = 1, AgentTasteTarget[]? TasteTargets = null, string? Area = null);

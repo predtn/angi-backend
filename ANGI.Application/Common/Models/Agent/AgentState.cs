@@ -234,6 +234,8 @@ public sealed class AgentContext
     /// Conversation 558: the read put the ten suggested dishes in mealRequests, the forced call, which never saw it, sent none.
     /// </summary>
     public AgentState? ReadState { get; set; }
+    /// <summary>Meals of this turn's rankings that the suggested dishes could not fill, filled from the whole catalog instead; told to the model as a warning.</summary>
+    public List<string> OfferedShortfall { get; } = [];
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>

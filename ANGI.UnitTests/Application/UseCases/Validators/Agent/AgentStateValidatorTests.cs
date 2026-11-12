@@ -106,4 +106,18 @@ public sealed class AgentStateValidatorTests
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 201) }] }).IsValid.Should().BeFalse();
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 200) }] }).IsValid.Should().BeTrue();
     }
+
+    // TEST-05: Two dish requests on one scope are refused with a message that names the cause and points to fromOffered; the same dishes on their own meals pass.
+    /// <summary>Conversations 558 and 560: ten trip-wide dishes got the general message, and the model guessed the wrong fix three times.</summary>
+    [Fact]
+    public void Validate_MealRequests_OneEntryPerScope()
+    {
+        // STEP-01: Create a state with two trip-wide dishes and one with the same dishes on their own meals.
+        var shared = new AgentState { NumDays = 2, MealRequests = [new(null, null, "Món A", null, []), new(null, null, "Món B", null, [])] };
+        var placed = shared with { MealRequests = [new(1, "breakfast", "Món A", null, []), new(1, "lunch", "Món B", null, [])] };
+
+        // STEP-02: Assert the shared scope fails with the scope message only, and the placed one passes.
+        new AgentStateValidator().Validate(shared).Errors.Should().ContainSingle().Which.ErrorMessage.Should().Contain("fromOffered=true");
+        new AgentStateValidator().Validate(placed).IsValid.Should().BeTrue();
+    }
 }

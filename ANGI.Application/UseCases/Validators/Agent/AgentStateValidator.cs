@@ -28,9 +28,11 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
         RuleFor(x => x.MealRequests).NotNull().Must((state, values) => values is null || values.Length <= MaxDays * 6 + 1 &&
             values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidName(x.DishName) && ValidName(x.RestaurantName) &&
                 (!x.RestaurantId.HasValue || x.RestaurantId > 0 && x.RestaurantName is not null) &&
-                x.TagIds is not null && x.TagIds.Length <= 100 && x.TagIds.All(id => id > 0) && x.TagIds.Distinct().Count() == x.TagIds.Length) &&
-            values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
+                x.TagIds is not null && x.TagIds.Length <= 100 && x.TagIds.All(id => id > 0) && x.TagIds.Distinct().Count() == x.TagIds.Length))
             .WithMessage("Yêu cầu món/quán theo phạm vi không hợp lệ.");
+        // Lỗi riêng cho trùng phạm vi: model đọc câu này để sửa state. Câu chung ở trên khiến nó đoán sai nguyên nhân (hội thoại 560).
+        RuleFor(x => x.MealRequests).Must(values => values is null || values.Any(x => x is null) || values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
+            .WithMessage("Mỗi phạm vi (cả chuyến, một ngày hoặc một bữa) chỉ có một yêu cầu món/quán. Muốn lập lịch từ các món vừa gợi ý thì gọi get_recommendation với fromOffered=true, không ghi các món đó vào mealRequests.");
         RuleFor(x => x.TasteTargets).NotNull().Must(x => x is null || x.Length <= 12 &&
             x.All(t => t is not null && AgentTasteOntology.Dimensions.Contains(t.Dimension) && AgentTasteOntology.Scale.Contains(t.Target)) &&
             x.Select(t => t.Dimension).Distinct().Count() == x.Length).WithMessage("Mức khẩu vị phải thuộc ontology và không trùng chiều.");
