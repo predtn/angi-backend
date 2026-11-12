@@ -20,7 +20,7 @@ public sealed class SendAgentMessageRequestDtoValidator : AbstractValidator<Send
         RuleFor(x => x.SelectedItemKey).NotEmpty().WithMessage("Khóa món đã chọn không được để trống.")
             .MaximumLength(100).WithMessage("Khóa món không được vượt quá 100 ký tự.").When(x => x.SelectedItemKey is not null);
         RuleFor(x => x.Command).NotEmpty().WithMessage("Vui lòng cung cấp lệnh hội thoại.");
-        RuleFor(x => x.Command).Must(x => x is "chat" or "alternative" or "discard" or "reset").WithMessage("Lệnh hội thoại không hợp lệ.")
+        RuleFor(x => x.Command).Must(x => x is "chat" or "alternative" or "discard" or "reset" or "plan_trip" or "suggest_lunch" or "suggest_specialty").WithMessage("Lệnh hội thoại không hợp lệ.")
             .When(x => !string.IsNullOrWhiteSpace(x.Command));
         RuleFor(x => x.ConfirmedState!).SetValidator(new AgentStateValidator()).When(x => x.ConfirmedState is not null);
         RuleFor(x => x.ConfirmedState).Must(state => state is null || state.PendingStateChange is null &&

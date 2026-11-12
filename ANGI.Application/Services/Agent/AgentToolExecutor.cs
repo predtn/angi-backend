@@ -72,6 +72,62 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         }
     }
 
+    /// <summary>The starter buttons above an empty chat. Each one already says what the user wants, so the backend runs its tool itself.</summary>
+    public static readonly string[] StarterCommands = ["plan_trip", "suggest_lunch", "suggest_specialty"];
+    /// <summary>How many dishes a starter suggestion shows.</summary>
+    public const int StarterSuggestionCount = 10;
+    private static readonly string[] RegionTagCodes = ["local_sf_mien_bac", "local_sf_mien_trung", "local_sf_mien_nam"];
+
+    /// <summary>
+    /// Builds the one tool call a starter button means, with every argument fixed by the backend, so the model never guesses the intent:
+    /// plan_trip = the whole trip with breakfast, lunch and dinner; suggest_lunch = lunch dishes within the per-meal budget;
+    /// suggest_specialty = main dishes of the province's regional cuisine. Null when the trip lacks what the call needs; the turn then runs as chat.
+    /// </summary>
+    public async Task<AgentToolCall?> StarterCallAsync(AgentContext context, CancellationToken ct)
+    {
+        var state = context.State;
+        if (string.IsNullOrWhiteSpace(state.Province)) return null;
+        switch (context.Request.Command)
+        {
+            case "plan_trip":
+                if (state.NumDays is null) return null;
+                // Lịch mặc định có đủ ba bữa để mỗi bữa được xếp hạng riêng. Ghi thẳng vào state của lượt (bữa là giá trị backend đặt cho nút này),
+                // không gửi state trong tham số: state đầy đủ có các trường backend tự quản mà schema của tool không nhận (hội thoại 556).
+                if (state.MealSlots.Length == 0) context.State = state with { MealSlots = ["breakfast", "lunch", "dinner"] };
+                return StarterCall("get_recommendation", new AgentRecommendationInput(null, state.Province, "full", null, null, [], [], [], TopK: 30));
+            case "suggest_lunch":
+                return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, "lunch", [], [], StarterMealBudget(state), StarterSuggestionCount, [], null));
+            case "suggest_specialty":
+                var catalogTags = await tags.GetTagsAsync(null, ct);
+                var main = catalogTags.FirstOrDefault(tag => tag.Code == AgentScopedPlanning.MainTagCode);
+                // Catalog không có tag "đặc sản": lấy ẩm thực vùng có nhiều món chính nhất trong tỉnh, đếm thật trên catalog thay vì để model đoán vùng.
+                short? region = null;
+                var best = 0;
+                foreach (var tag in catalogTags.Where(tag => RegionTagCodes.Contains(tag.Code)))
+                {
+                    var ids = (short[])[tag.Id, .. main is null ? [] : new[] { main.Id }];
+                    var count = (await dishes.GetCandidateIdsAsync(new DishCandidateFilter { Province = state.Province, TagIds = ids, RequireAllTags = true }, limits.MaxCandidates, ct)).Count;
+                    if (count > best) (best, region) = (count, tag.Id);
+                }
+                short[] tagIds = [.. region is null ? [] : new[] { region.Value }, .. main is null ? [] : new[] { main.Id }];
+                return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, null, tagIds, [], null, StarterSuggestionCount, [], null));
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>The price cap a "meal within budget" means: the stated cap per meal, or the trip budget shared over every meal of the trip.</summary>
+    private static decimal? StarterMealBudget(AgentState state)
+    {
+        if (state.MaxPricePerMeal is { } cap) return cap;
+        if (state.BudgetUnrestricted || state.BudgetAmount is not { } budget || state.NumDays is not { } days || days <= 0) return null;
+        var meals = Math.Max(1, state.MealSlots.Length == 0 ? 3 : state.MealSlots.Length);
+        return decimal.Floor(budget / (days * meals) / 1000m) * 1000m;
+    }
+
+    private static AgentToolCall StarterCall(string name, object input) =>
+        new($"starter-{name}", name, JsonSerializer.SerializeToElement(input, AgentJson.Options));
+
     /// <summary>Records a tool that ended in an exception (type and message), then lets the exception continue unchanged.</summary>
     private bool ToolFailed(AgentContext context, AgentToolCall call, Exception error)
     {

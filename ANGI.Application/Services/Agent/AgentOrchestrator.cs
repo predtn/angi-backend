@@ -61,6 +61,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         string? lastReply = null;
         try
         {
+            // Prompt mẫu là nút bấm, không phải câu người dùng gõ: backend tự chạy đúng một tool với tham số cố định (tỉnh, bữa, ngân sách, phạm vi),
+            // model chỉ đọc kết quả và viết câu trả lời. Trước đây cùng một câu mẫu lúc được hỏi lại, lúc gợi ý món, lúc lập cả lịch (hội thoại 549, 550, 552, 553).
+            if (await tools.StarterCallAsync(context, timeout.Token) is { } starter)
+            {
+                var starterResult = await tools.ExecuteAsync(context, starter, timeout.Token);
+                executedTools.Add(starter.Name + ":" + starter.Arguments.GetRawText());
+                context.Exchanges.Add(new([starter], [starterResult]));
+                toolRounds++;
+                toolCalls++;
+                // Gợi ý món: lần gọi model duy nhất chỉ viết câu cho các món đã chọn.
+                if (context.DishSuggestion is not null) context.ToolsClosed = true;
+                telemetry.Record("starter", context.ConversationId, context.TurnId, context.AttemptId, new { context.Request.Command, starter.Name });
+            }
             // STEP-13: Repeat while calls < limits.MaxLlmCalls.
             for (var calls = 0; calls < limits.MaxLlmCalls; calls++)
             {

@@ -39,6 +39,103 @@ public sealed class AgentToolExecutorTests
         context.ToolNotice.Should().BeNull();
     }
 
+    // TEST-01b: A state the validator rejects (a meal slot without its day) goes back to the model as a tool error, so the turn
+    // continues and the model can ask which day, instead of ending with the previous, often empty, reply (conversation 548).
+    /// <summary>Returns invalid_arguments naming the rule and keeps the turn's state.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RecommendationWithInvalidState_ReturnsErrorToModel()
+    {
+        var fixture = AgentTestData.Validator();
+        var context = AgentTestData.Context();
+        var before = context.State;
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var invalid = before with { MealRequests = [new AgentMealRequest(null, "lunch", "Bánh Cuốn Chay Nấm Hương", null, [])] };
+        var result = await tools.ExecuteAsync(context, Call(Input() with { State = invalid }), CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        result.GetProperty("warnings")[0].GetString().Should().Contain("MealRequests").And.Contain("dayNumber");
+        context.State.Should().BeSameAs(before);
+    }
+
+    // TEST-01c: Starter buttons carry their whole meaning: the backend fixes the tool and every argument, so nothing is left for the model to guess.
+    /// <summary>plan_trip plans the whole trip with three meals; suggest_lunch caps lunch at the trip budget shared over every meal.</summary>
+    [Fact]
+    public async Task StarterCallAsync_FixesToolAndArguments()
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.State = context.State with { BudgetAmount = 600000 };
+
+        context.Request.Command = "plan_trip";
+        var plan = await tools.StarterCallAsync(context, CancellationToken.None);
+        context.Request.Command = "suggest_lunch";
+        var lunch = await tools.StarterCallAsync(context, CancellationToken.None);
+        context.Request.Command = "chat";
+        var chat = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        plan!.Name.Should().Be("get_recommendation");
+        plan.Arguments.GetProperty("scope").GetString().Should().Be("full");
+        context.State.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        lunch!.Name.Should().Be("suggest_dish");
+        lunch.Arguments.GetProperty("mealSlot").GetString().Should().Be("lunch");
+        // 600.000 đồng cho 2 ngày x 3 bữa = 100.000 đồng mỗi bữa.
+        lunch.Arguments.GetProperty("maxPrice").GetDecimal().Should().Be(100000);
+        chat.Should().BeNull();
+    }
+
+    // TEST-01c2: Every starter call passes the same strict tool schema the model's calls pass; plan_trip once sent the whole state,
+    // whose backend-owned fields the schema refuses, and every press failed with "Cấu trúc tham số công cụ không hợp lệ" (conversation 556).
+    /// <summary>Checks each starter's arguments against the tool schema checked at the top of ExecuteAsync.</summary>
+    [Theory]
+    [InlineData("plan_trip")]
+    [InlineData("suggest_lunch")]
+    [InlineData("suggest_specialty")]
+    public async Task StarterCallAsync_ArgumentsPassToolSchema(string command)
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        // State với các trường backend tự quản, như sau vài lượt chat thật.
+        context.State = context.State with { Preferences = new() { Initialized = true }, OfferedDishes = [new(1, "Phở", 2, "Quán A")] };
+        context.Request.Command = command;
+
+        var call = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        AgentLlmSchema.IsValid(call!.Arguments, AgentLlmSchema.Tools[call.Name]).Should().BeTrue();
+    }
+
+    // TEST-01c3: A trip stored with the full province name ("Thành phố …") keeps the ranked dishes of restaurants stored with the short name.
+    // The ranked list was filtered by an exact name match, so every dish was dropped and plan_trip found nothing (conversation 556, turn 4).
+    /// <summary>Returns the ranked dish although the trip and the restaurant spell the province differently.</summary>
+    [Fact]
+    public async Task ExecuteAsync_FullProvinceName_KeepsRankedDishes()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { Province = "Thành phố Da Nang" };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { Province = null }), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(221);
+    }
+
+    // TEST-01d: A starter without a known province runs as an ordinary chat turn instead of guessing a place.
+    /// <summary>Returns no starter call when the trip has no province yet.</summary>
+    [Fact]
+    public async Task StarterCallAsync_WithoutProvince_ReturnsNull()
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.State = context.State with { Province = null };
+        context.Request.Command = "suggest_lunch";
+
+        (await tools.StarterCallAsync(context, CancellationToken.None)).Should().BeNull();
+    }
+
     // TEST-02: Selection scope and allowed meal slots never widen a grant; covers full, day and slot scopes.
     /// <summary>Checks that issued grants and allowedMealSlots follow the requested day/meal scope and dish meal tags.</summary>
     [Theory]
@@ -438,6 +535,28 @@ public sealed class AgentToolExecutorTests
         // STEP-05: Assert result.items.EnumerateArray().Select(filtered) equals 1 and context.Grants.Single().DishIds equals 1.
         result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2);
         context.Grants.Single().DishIds.Should().Equal(1, 2);
+    }
+
+    // TEST-14b: A dish the user names for a meal stays a candidate even when the plan already has it at another meal:
+    // the no-repeat rule only covers dishes the backend picks itself (conversation 552 ended with no_candidates).
+    /// <summary>Grants the named dish for the named meal although the source plan serves it elsewhere.</summary>
+    [Fact]
+    public async Task ExecuteAsync_NamedDishAlreadyInPlan_StaysCandidate()
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.ExcludeDishIds.Contains(1) ? [] : new[] { 1 });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1) with { DishName = "Phở" }));
+        context.State = context.State with { MealSlots = ["lunch", "dinner"], MealRequests = [new(2, "dinner", "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { Scope = "slot", DayNumber = 2, MealSlot = "dinner" }), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1);
+        context.Grants.Single().DishIds.Should().Equal(1);
     }
 
     // TEST-15: Caller cancellation during the per-meal candidate query propagates and issues no grant.
