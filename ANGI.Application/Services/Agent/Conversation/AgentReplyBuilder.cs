@@ -68,10 +68,7 @@ public static class AgentReplyBuilder
         // STEP-08: When TasteScopes() exists, call notes.Add.
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) notes.Add($"Mình ưu tiên khẩu vị {tastes}, {TasteNote}.");
-        // STEP-09: Add where each named dish or restaurant was placed to notes.
-        // Món/quán người dùng gọi tên được xếp vào bữa nào thì nói rõ, để họ biết có thể yêu cầu đổi sang bữa khác.
-        notes.AddRange(snapshot.State.MealRequests.Where(x => x.DayNumber.HasValue && x.MealSlot is not null && (x.DishName ?? x.RestaurantName) is not null)
-            .Select(request => $"Theo yêu cầu của bạn: {Safe(request.DishName ?? request.RestaurantName)} ở {Meal(request.MealSlot!)} ngày {request.DayNumber}."));
+        // Không còn ghi chú "Theo yêu cầu của bạn: … ở … ngày …": món nằm ngay trong lịch, và một lịch dựng từ danh sách món đã gợi ý thành chín dòng lặp lại (user decision 2026-11-12).
         // STEP-10: When Where(filtered).GroupBy(filtered).Any matches the filter, call notes.Add.
         // Lặp còn lại sau khi backend đã thay các món lặp tránh được; món người dùng gọi tên không tính.
         if (snapshot.Items.Where(item => AgentScopedPlanning.Request(snapshot.State, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null })
