@@ -65,7 +65,8 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
         context.Restaurants.AsNoTracking().Where(restaurant => restaurant.Id == restaurantId)
             .Select(restaurant => new Domain.Entities.Restaurant
             {
-                Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, AddressLine = restaurant.AddressLine,
+                Id = restaurant.Id, Name = restaurant.Name, Slug = restaurant.Slug, Description = restaurant.Description,
+                AddressLine = restaurant.AddressLine,
                 Ward = restaurant.Ward, ProvinceName = restaurant.ProvinceName, Latitude = restaurant.Latitude,
                 Longitude = restaurant.Longitude, PriceLevel = restaurant.PriceLevel, RatingAvg = restaurant.RatingAvg,
                 RatingCount = restaurant.RatingCount, OperatingStatus = restaurant.OperatingStatus,
@@ -160,7 +161,7 @@ public sealed class RestaurantModerationRepository(ANGIContext context) : IResta
             .Skip((int)offset).Take(request.PageSize)
             .Select(r => new ModRestaurantListItem(new Domain.Entities.Restaurant
             {
-                Id = r.Id, Name = r.Name, Slug = r.Slug, AddressLine = r.AddressLine,
+                Id = r.Id, Name = r.Name, Slug = r.Slug, Description = r.Description, AddressLine = r.AddressLine,
                 Ward = r.Ward, ProvinceName = r.ProvinceName, Latitude = r.Latitude, Longitude = r.Longitude,
                 PriceLevel = r.PriceLevel, RatingAvg = r.RatingAvg, RatingCount = r.RatingCount,
                 CoverMedia = r.CoverMediaId == null ? null : new MediaFile { Url = r.CoverMedia!.Url },

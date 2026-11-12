@@ -295,6 +295,7 @@ public sealed class RestaurantRepository : IRestaurantRepository
             Id = r.Id,
             Name = r.Name,
             Slug = r.Slug,
+            Description = r.Description,
             CoverUrl = r.CoverMedia?.Url,
             AddressLine = r.AddressLine,
             Ward = r.Ward,

@@ -101,7 +101,16 @@ namespace ANGI.WebApi.Configs
                 ? $"ip:{GetIpAddress(context)}"
                 : $"user:{userId}";
 
-            // STEP-04: Return the result of CreateFixedWindowPartition.
+            // STEP-04: Return the read partition for GET and HEAD, which have their own budget.
+            if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+            {
+                return CreateFixedWindowPartition(
+                    $"read:{clientKey}",
+                    settings.ReadPermitLimit,
+                    TimeSpan.FromSeconds(settings.ReadWindowSeconds));
+            }
+
+            // STEP-05: Return the result of CreateFixedWindowPartition.
             return CreateFixedWindowPartition(
                 $"general:{clientKey}",
                 settings.GeneralPermitLimit,
@@ -159,6 +168,8 @@ namespace ANGI.WebApi.Configs
         private static bool AreValid(RateLimitSettings settings)
         {
             return settings.GeneralPermitLimit > 0 &&
+                   settings.ReadPermitLimit > 0 &&
+                   settings.ReadWindowSeconds > 0 &&
                    settings.GeneralWindowSeconds > 0 &&
                    settings.LoginPermitLimit > 0 &&
                    settings.LoginWindowMinutes > 0 &&

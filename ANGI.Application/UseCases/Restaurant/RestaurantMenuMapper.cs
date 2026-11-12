@@ -184,6 +184,7 @@ internal static class RestaurantMenuMapper
         {
             Id = source.Id,
             Name = source.Name,
+            Description = source.Description,
             Price = source.Price,
             CoverUrl = source.CoverUrl,
             DishForm = source.DishForm,
@@ -205,6 +206,7 @@ internal static class RestaurantMenuMapper
         {
             Id = dish.Id,
             Name = dish.Name,
+            Description = dish.Description,
             Price = dish.Price,
             CoverUrl = dish.CoverMedia?.Url,
             DishForm = ToApiValue(dish.DishForm),

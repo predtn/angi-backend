@@ -181,6 +181,7 @@ public sealed class UserModerationRepository(ANGIContext context, TimeProvider c
                     Id = restaurant.Id,
                     Name = restaurant.Name,
                     Slug = restaurant.Slug,
+                    Description = restaurant.Description,
                     CoverUrl = restaurant.CoverMedia?.Url,
                     AddressLine = restaurant.AddressLine,
                     Ward = restaurant.Ward,

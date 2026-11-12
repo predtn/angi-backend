@@ -37,7 +37,7 @@ On top of the [external service keys](configuration.md) (on Render, `:` becomes 
 
 ### Real client IP
 
-`TrustedClientIp__ProxyKey` matters because the frontend calls the API from its Next.js server: without it every guest arrives with the Vercel server's IP and they all share one anonymous rate limit (100 requests / minute). With it, the frontend sends the browser IP in `X-Angi-Client-Ip` with `X-Angi-Proxy-Key`, and the API uses that IP only when the key matches (`TrustedClientIpMiddleware`). A wrong or missing key falls back to the connection IP, so a direct caller cannot choose its own IP. Leave it empty locally.
+`TrustedClientIp__ProxyKey` matters because the frontend calls the API from its Next.js server: without it every guest arrives with the Vercel server's IP and they all share one anonymous budget (300 reads and 100 writes a minute). With it, the frontend sends the browser IP in `X-Angi-Client-Ip` with `X-Angi-Proxy-Key`, and the API uses that IP only when the key matches (`TrustedClientIpMiddleware`). A wrong or missing key falls back to the connection IP, so a direct caller cannot choose its own IP. Leave it empty locally.
 
 ### Refresh tokens across frontend instances
 
