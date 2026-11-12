@@ -527,6 +527,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 .Select(x => checked((int)x.Id)).ToArray();
             if (namedDishIds.Length == 0)
                 return ScopedRanking.Stopped(scope, CatalogNotice(context, "Chưa tìm thấy món được yêu cầu trong menu khả dụng của nhà hàng đã chọn. Bạn có muốn chọn món hoặc nhà hàng khác không?", "menu_mismatch"));
+            // Món người dùng gọi đích danh vẫn được đặt vào bữa họ nêu dù món đó đã có ở bữa khác của lịch: luật chống lặp món chỉ dành cho món backend tự chọn.
+            // Trước đây món đang ở bữa trưa ngày 3 bị loại khỏi bữa tối người dùng muốn thêm, nên lượt trả no_candidates (hội thoại 552).
+            // "Món khác" (differentFromPlan) vẫn loại món cũ, và excludeDishIds do model gửi vẫn được giữ.
+            if (!mealRequest.DifferentFromPlan && !alternative)
+                excluded = excluded.Except(namedDishIds.Except(input.ExcludeDishIds!)).ToArray();
         }
         // STEP-08: Prepare maxPrice through Min, place from FirstOrDefault, radius through Min, area and 12 more.
         // Hai giới hạn cùng tồn tại thì lấy giá trị nhỏ hơn: tool không được tăng trần giá/bán kính của state.
@@ -624,6 +629,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             // Bữa không có món phù hợp được ghi nhận qua mealCoverage = 0; không tự nới điều kiện.
             if (candidates.Count == 0)
             {
+                // Món người dùng gọi đích danh có trong catalog nhưng bị bộ lọc của bữa loại hết: nói rõ bộ lọc nào để model giải thích hoặc hỏi lại,
+                // thay vì câu chung "chưa có lựa chọn phù hợp" mà người dùng không hiểu vì sao.
+                if (namedDishIds.Length > 0 && mealRequest.DishName is { } named)
+                    return ScopedRanking.Stopped(scope, CatalogNotice(context, NamedDishBlocked(named, day, mealSlot, maxPrice, area, requiredTags,
+                        namedDishIds.Any(excluded.Contains)), "named_dish_filtered"));
                 if (mealSlot is not null) chosenByMeal[mealSlot] = [];
                 continue;
             }
@@ -1014,6 +1024,20 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     {
         context.ToolNotice = message;
         return new { status, rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>(), warnings = new[] { message } };
+    }
+
+    /// <summary>Names the filters that removed a dish the user asked for by name, so the reply can say why instead of "no suitable choice".</summary>
+    private static string NamedDishBlocked(string dishName, short? day, string? mealSlot, decimal? maxPrice, NearbyArea? area, string[] requiredTags, bool excluded)
+    {
+        var reasons = new List<string>();
+        if (excluded) reasons.Add("món này nằm trong danh sách loại trừ của lượt này (người dùng muốn món khác hoặc đã bỏ món này)");
+        if (maxPrice is { } price) reasons.Add($"trần giá mỗi món {price.ToString("#,0", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"))} đồng");
+        if (area is not null) reasons.Add($"bán kính {area.RadiusKm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} km quanh điểm đã chọn");
+        if (requiredTags.Length > 0) reasons.Add($"yêu cầu loại món: {string.Join(", ", requiredTags.Select(AgentReplyBuilder.Safe))}");
+        var meal = day is null ? "bữa này" : $"ngày {day}{(mealSlot is null ? "" : ", " + AgentReplyBuilder.Meal(mealSlot))}";
+        return $"Món “{AgentReplyBuilder.Safe(dishName)}” có trong danh mục nhưng không đặt được vào {meal}" +
+            (reasons.Count > 0 ? $" vì điều kiện hiện tại: {string.Join("; ", reasons)}." : " vì món hoặc quán đang tạm ngưng phục vụ.") +
+            " Hãy nói rõ lý do này với người dùng và hỏi họ muốn đổi điều kiện hay chọn món khác; không tự đặt món khác vào bữa đó.";
     }
 
     /// <summary>A catalog lookup notice that later ranking calls cannot erase, so catalog questions keep the name and the near matches.</summary>
