@@ -137,7 +137,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         // STEP-02: Return null early when term.Length < MinPlaceLength or IsOpenDay(place) holds.
         if (term.Length < MinPlaceLength || IsOpenDay(place)) return null;
         // STEP-03: Prepare inProvince from restaurants.Where and label through InvariantCulture.TextInfo.ToTitleCase.
-        var inProvince = province is null ? restaurants : restaurants.Where(x => string.Equals(x.Province.Trim(), province.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+        var inProvince = province is null ? restaurants : restaurants.Where(x => ProvinceSearch.Same(x.Province, province)).ToArray();
         var label = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(place.Trim().ToLowerInvariant());
         // STEP-04: Return the result of Sized early when Landmarks has an entry for term.
         if (Landmarks.TryGetValue(term, out var landmark)) return Sized(label, landmark.Latitude, landmark.Longitude, inProvince);

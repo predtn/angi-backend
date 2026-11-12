@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models.Discovery;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -70,7 +71,7 @@ public sealed class AgentConstraintGuard
             proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
         // STEP-08: Prepare movedProvince from Trim, numDays and areas from current.DayAreas ?? [].Where.
         // Nơi đến theo ngày do backend đọc từ lời người dùng, model không được ghi. Đổi tỉnh hoặc rút ngắn chuyến thì bỏ các nơi đến không còn áp dụng.
-        var movedProvince = current.Province is not null && !string.Equals(current.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var movedProvince = current.Province is not null && !ProvinceSearch.Same(current.Province, proposed.Province);
         var numDays = proposed.NumDays;
         var areas = movedProvince ? [] : (current.DayAreas ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
         // STEP-09: When areas.SequenceEqual(...) does not hold, set proposed.
@@ -89,7 +90,7 @@ public sealed class AgentConstraintGuard
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
         // STEP-15: Prepare confirmed and relaxed from AgentScopedPlanning.Slots.
         var confirmed = baseline ?? current;
-        var relaxed = confirmed.Province is not null && !string.Equals(confirmed.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
+        var relaxed = confirmed.Province is not null && !ProvinceSearch.Same(confirmed.Province, proposed.Province)
             || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
             || confirmed.BudgetAmount.HasValue && (!proposed.BudgetAmount.HasValue || proposed.BudgetAmount > confirmed.BudgetAmount)
             || !confirmed.BudgetUnrestricted && proposed.BudgetUnrestricted

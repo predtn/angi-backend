@@ -148,9 +148,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-09: Return the result of ArgumentError early when input.Scope is not ("full" or "day" or "slot"), (input.Scope is "full" and more.
         // full = cả chuyến; day = một ngày; slot = một bữa của một ngày.
         // Kiểm tra thêm giá VND, bán kính, số ID và topK để không vượt hợp đồng Recommendation.
+        // "Thành phố Hà Nội" và "Hà Nội" là một tỉnh: so khớp chính xác từng chữ từng khiến lần gọi đầu bị từ chối và tốn thêm một lần gọi LLM (hội thoại 552).
+        if (input.Province is not null && !ProvinceSearch.Same(input.Province, state.Province))
+            return ArgumentError(context, $"province “{AgentReplyBuilder.Safe(input.Province)}” khác tỉnh của chuyến (“{AgentReplyBuilder.Safe(state.Province)}”). Dùng đúng tỉnh trong state, hoặc để province=null.");
         if (input.Scope is not ("full" or "day" or "slot") || input.Scope == "full" && (input.DayNumber.HasValue || input.MealSlot is not null) ||
             input.Scope is "day" or "slot" && !input.DayNumber.HasValue || input.Scope == "day" && input.MealSlot is not null || input.Scope == "slot" && input.MealSlot is null ||
-            input.Province is not null && !string.Equals(input.Province.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) ||
             input.TopK < 1 || input.TopK > limits.MaxRanked || input.ExcludeDishIds is null || input.ExcludeDishIds.Length > 2000 || input.ExcludeDishIds.Any(x => x <= 0) ||
             input.TagIds is null || input.ExcludeTagIds is null || input.TagIds.Length > 100 || input.ExcludeTagIds.Length > 100 ||
             input.TagIds.Any(x => x <= 0) || input.ExcludeTagIds.Any(x => x <= 0) ||
@@ -654,7 +656,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             if (mealKey is not null) _rankedMeals[mealKey] = new(eligible, ranked, catalog);
             // STEP-29: Prepare actual through Select(filtered).Where(filtered).ToArray and distinct from actual.DistinctBy.
             var actual = rankedIds.Where(catalog.ContainsKey).Select(id => catalog[id])
-                .Where(d => string.Equals(d.Restaurant.ProvinceName?.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                .Where(d => ProvinceSearch.Same(d.Restaurant.ProvinceName, state.Province) &&
                     (namedDishIds.Length > 0 || FitsMeal(d, mealSlot)) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
                     (namedDishIds.Length == 0 || namedDishIds.Contains(d.Id)) && mealTags.All(id => d.DishTags.Any(t => t.TagId == id))).ToArray();
             // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
@@ -825,7 +827,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var categories = catalogTags.Where(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category).Select(tag => tag.Id).ToHashSet();
         var main = catalogTags.FirstOrDefault(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
         var required = main is not null && !wanted.Any(categories.Contains) ? wanted.Append(main.Id).ToArray() : wanted;
-        var otherProvince = !string.IsNullOrWhiteSpace(input.Province) && !string.Equals(input.Province.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var otherProvince = !string.IsNullOrWhiteSpace(input.Province) && !ProvinceSearch.Same(input.Province, state.Province);
         // Nơi người dùng vừa nêu cho lần gợi ý này được ưu tiên hơn khu của chuyến đi.
         var area = named is not null ? new NearbyArea(named.Latitude, named.Longitude, named.RadiusKm) : otherProvince ? null : AgentScopedPlanning.Area(state, 0);
         var filter = new DishCandidateFilter { Province = named?.Province ?? (otherProvince ? input.Province!.Trim() : state.Province), TagIds = required,

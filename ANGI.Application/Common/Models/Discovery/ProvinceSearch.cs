@@ -9,10 +9,16 @@ public static class ProvinceSearch
     private static readonly string[] AdministrativePrefixes = ["Thành phố ", "Tỉnh "];
 
     /// <summary>A "contains" pattern on the province's own name, which matches both the short and the full spelling.</summary>
-    public static string Pattern(string province)
+    public static string Pattern(string province) => LikePattern.Contains(ShortName(province));
+
+    /// <summary>True when two spellings name the same province ("Thành phố Hà Nội" and "Hà Nội"), ignoring case.</summary>
+    public static bool Same(string? left, string? right) =>
+        left is not null && right is not null && string.Equals(ShortName(left), ShortName(right), StringComparison.OrdinalIgnoreCase);
+
+    private static string ShortName(string province)
     {
         var name = province.Trim();
         var prefix = AdministrativePrefixes.FirstOrDefault(value => name.StartsWith(value, StringComparison.OrdinalIgnoreCase));
-        return LikePattern.Contains(prefix is null ? name : name[prefix.Length..]);
+        return prefix is null ? name : name[prefix.Length..].Trim();
     }
 }

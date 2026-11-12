@@ -41,4 +41,17 @@ public sealed class ProvinceSearchTests
     {
         ProvinceSearch.Pattern(province).Should().Be(expected);
     }
+
+    // TEST-04: The full and the short spelling name one province; a different province or a missing value never matches.
+    /// <summary>Keeps get_recommendation from rejecting "Thành phố Hà Nội" for a trip stored as "Hà Nội" (conversation 552).</summary>
+    [Theory]
+    [InlineData("Thành phố Hà Nội", "Hà Nội", true)]
+    [InlineData("hà nội", " Thành phố Hà Nội ", true)]
+    [InlineData("Tỉnh Lào Cai", "Lào Cai", true)]
+    [InlineData("Hà Nội", "Hải Phòng", false)]
+    [InlineData("Hà Nội", null, false)]
+    public void Same_ComparesProvinceNames(string? left, string? right, bool expected)
+    {
+        ProvinceSearch.Same(left, right).Should().Be(expected);
+    }
 }

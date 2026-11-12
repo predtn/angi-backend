@@ -149,7 +149,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (requested.DifferentFromPlan && snapshot.Items.Any(other => other.DishId == item.DishId &&
                 (other.DayNumber != item.DayNumber || other.MealSlot != item.MealSlot)))
                 errors.Add($"Món {item.DishId} bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.");
-            if (!string.Equals(dish.Restaurant.ProvinceName?.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            if (!ProvinceSearch.Same(dish.Restaurant.ProvinceName, state.Province) ||
                 state.ExcludeTagIds.Any(tagSet.Contains) || state.TagIds.Any(id => !tagSet.Contains(id)) ||
                 state.MaxPricePerMeal.HasValue && dish.Price > state.MaxPricePerMeal ||
                 AgentScopedPlanning.MealArea(state, item.DayNumber, item.MealSlot) is { } area && !area.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
