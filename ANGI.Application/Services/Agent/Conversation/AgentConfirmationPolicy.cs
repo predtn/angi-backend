@@ -184,6 +184,19 @@ public static class AgentConfirmationPolicy
                 week = date == today ? "hôm nay" : date.DayNumber - today.DayNumber <= 6 - sinceMonday ? "tuần này" : "tuần sau" }).ToArray();
     }
 
+    /// <summary>
+    /// Each day of the trip with its date and weekday, so the model looks up 'thứ 3' or '13/11' instead of counting from startDate itself.
+    /// Null when the trip has no start date or no length: a weekday or a date then cannot name a trip day, and the model asks.
+    /// </summary>
+    public static object[]? TripDays(AgentState state)
+    {
+        if (state.StartDate is not { } start || state.NumDays is not { } days || days <= 0) return null;
+        // Chuyến rất dài chỉ cần bảng đủ để tra; ngày vượt bảng vẫn là "ngày N" và validator chặn số ngày vượt chuyến.
+        return Enumerable.Range(0, Math.Min((int)days, 62)).Select(offset => start.AddDays(offset))
+            .Select((date, index) => (object)new { dayNumber = index + 1, date = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), weekday = Weekdays[(int)date.DayOfWeek] })
+            .ToArray();
+    }
+
     private static DateOnly? Date(Match match, string day, string month, string year, DateOnly notBefore)
     {
         // STEP-01: Prepare d through int.Parse, m through int.Parse, stated from int.Parse and y.

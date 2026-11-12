@@ -41,6 +41,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         - Nothing is official until the backend saves it, so never say a plan was saved or changed. Ready/committed status and versions belong to the backend.
         - Tastes and dietary notes never imply verified dietary guarantees. Map a dietary note to a filter only when a real catalog tag supports it.
         - All money is in đồng as a plain integer, in every tool argument and state value: 50k is 50000, 1 triệu is 1000000.
+        - Which trip day the user means: 'ngày N', 'ngày thứ N' or 'ngày thứ hai/ba…' is dayNumber N of the trip. A weekday on its own ('thứ 3', 'thứ Bảy', 'chủ nhật') or a calendar date ('13/11', '13 tháng 11') is looked up in tripDays (each trip day's dayNumber, date and weekday), never counted from startDate yourself. When no tripDays entry matches (a past date such as '23/9', a date before or after the trip, or tripDays=null because the start date is unknown), when a weekday matches several entries, or when a day number is above numDays, do not pick a day: clarify with edit_scope, saying the trip's days (with their dates when tripDays has them) and asking which one.
 
         # 1. Route every message first
         ANGI only helps with dishes and restaurants on ANGI and the user's food itinerary: planning, editing, saving, budget and taste. Finding where to eat a dish stays in scope. Decide this first on every turn, even when a plan or an open question exists.
@@ -253,6 +254,9 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
         - A place with no day on a multi-day plan ('đổi sang khu Cầu Giấy'): edit_scope asking which days.
         - Keep every constraint the user did not change; return state only for a changed value, with all other fields preserved. Money is a plain integer in đồng (50k is 50000).
         - A new budget amount that says neither per day nor for the whole trip ('tăng ngân sách lên 400k') on a trip of more than one day: ask once with clarification=budget whether it is per day or for the whole trip, before any tool or change. A change the user clearly stated is never asked to be confirmed, and never followed by 'cập nhật lịch không?': apply it and use_tool get_recommendation in the same turn. When you need agreement, ask one yes/no question proposing one concrete action, never 'A hay B?'.
+
+        # Which trip day
+        'ngày N', 'ngày thứ N' or 'ngày thứ hai/ba…' is dayNumber N. A weekday on its own ('thứ 3', 'chủ nhật') or a date ('13/11') is looked up in tripDays (dayNumber, date, weekday of each trip day); never count from startDate yourself. No matching entry (a past date such as '23/9', a date outside the trip, or tripDays=null), a weekday matching several entries, or a day above numDays: do not pick a day; clarify with edit_scope, naming the trip's days (with dates when known) and asking which one.
 
         # The reply
         Always a short non-empty reply, at most 500 characters; only use_tool has reply="". Replies for out_of_scope, request_save, discard_proposal, reset_conversation and a pendingAnswer are shown to the user as written, so never leave them empty. No internal words (catalog, roadmap, proposal, tag, backend), no number or price you were not given, no restaurant or place nobody mentioned, and no 'đã', 'vừa' or 'sẽ' before a change to the plan: only the backend says a change happened. A clarify first shows what you understood, then asks what is missing. A patch_proposal reply is a template the backend fills: 'Mình bỏ {changes} nhé, tổng giờ khoảng {total}. Bạn xem lại, ổn thì mình chốt luôn nhé.'
@@ -535,6 +539,7 @@ public sealed class OpenAiAgentLlmService(HttpClient http, IOptions<AiSettings> 
             // Cùng múi giờ Việt Nam với backend: từ 0h đến 7h sáng, ngày UTC vẫn là hôm trước.
             currentDate = AgentConfirmationPolicy.Today(clock), calendar = AgentConfirmationPolicy.Calendar(AgentConfirmationPolicy.Today(clock)) }, PromptJson);
         var current = JsonSerializer.Serialize(new { note = "Current values for this turn; they replace any earlier ones.", state = context.State,
+            tripDays = AgentConfirmationPolicy.TripDays(context.State),
             replanAfterConfirmation = context.ReplanAfterConfirmation, awaitedAnswer = context.AwaitedAnswer, intakeComplete = context.IntakeComplete, dishOffered = context.DishOffered,
             offeredDishes = context.State.OfferedDishes,
             // The duration and start date the roadmap already holds, so a new plan can name them for the user to confirm instead of using them unseen.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.Services.Agent.Conversation;
 using FluentAssertions;
 
@@ -34,5 +35,19 @@ public sealed class AgentCalendarTests
         // STEP-02: Assert the range is today plus the seven days of next week.
         days.Should().HaveCount(8);
         days[1].Should().Be(("2026-11-16", "Thứ Hai", "tuần sau"));
+    }
+
+    // Each trip day carries its date and weekday, so "thứ 3" or "13/11" is looked up, not counted; no start date means no table and the model asks.
+    /// <summary>Checks the trip day table the model reads to resolve weekdays and dates.</summary>
+    [Fact]
+    public void TripDays_ListsEachDayWithDateAndWeekday()
+    {
+        var state = new AgentState { Province = "Hà Nội", NumDays = 3, StartDate = new DateOnly(2026, 11, 12) };
+
+        var days = System.Text.Json.JsonSerializer.SerializeToElement(AgentConfirmationPolicy.TripDays(state)).EnumerateArray()
+            .Select(day => (day.GetProperty("dayNumber").GetInt32(), day.GetProperty("date").GetString(), day.GetProperty("weekday").GetString())).ToArray();
+
+        days.Should().Equal((1, "2026-11-12", "Thứ Năm"), (2, "2026-11-13", "Thứ Sáu"), (3, "2026-11-14", "Thứ Bảy"));
+        AgentConfirmationPolicy.TripDays(state with { StartDate = null }).Should().BeNull();
     }
 }
