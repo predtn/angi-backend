@@ -46,10 +46,43 @@ public sealed class AgentTelemetryTests
                 telemetry.Trace("user_message", 7, 3, 4, new { content = "đổi bữa tối ngày 2" });
                 telemetry.Record("completed", 7, 3, 4);
             }
-            var file = Directory.GetFiles(Path.Combine(root, "logs"), "agent-trace-*.log").Should().ContainSingle().Subject;
-            var text = File.ReadAllText(file);
-            text.Should().Contain("conversation=7 turn=3 completed").And.Contain("đổi bữa tối ngày 2").And.Contain("\"user_message\"");
+            var summary = File.ReadAllText(Directory.GetFiles(Path.Combine(root, "logs"), "agent-trace-*.log").Should().ContainSingle().Subject);
+            var detail = File.ReadAllText(Directory.GetFiles(Path.Combine(root, "logs"), "agent-detail-*.log").Should().ContainSingle().Subject);
+            summary.Should().Contain("conversation=7 turn=3 completed").And.Contain("đổi bữa tối ngày 2").And.Contain("VẤN ĐỀ: không có");
+            detail.Should().Contain("conversation=7 turn=3 completed").And.Contain("\"user_message\"");
             logger.Messages.Should().NotContain(line => line.Contains("đổi bữa tối"));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    // TEST-05: A failed turn's summary lists the problems first, with the code line that recorded them and the exception's ANGI frames.
+    /// <summary>Checks a reader can see what failed and where without opening the JSON.</summary>
+    [Fact]
+    public void Dispose_FailedTurn_SummaryPointsAtProblemAndCode()
+    {
+        var root = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            using (var telemetry = new AgentTelemetry(new CapturingLogger(), Writer(root, "Development")))
+            {
+                telemetry.Record("claimed", 7, 3, 4);
+                telemetry.Record("llm", 7, 3, 4, new { elapsedMs = 1200.0, callNumber = 2, repair = false, outcome = "caller_cancelled" });
+                telemetry.Record("turn_failed", 7, 3, 4, new { errorType = "TaskCanceledException" });
+                telemetry.Trace("error", 7, 3, 4, new
+                {
+                    message = "The operation was canceled.",
+                    detail = "System.Threading.Tasks.TaskCanceledException: The operation was canceled.\r\n ---> System.IO.IOException: Unable to read data\r\n"
+                        + "   at ANGI.Infrastructure.Services.Agent.OpenAiAgentLlmService.SendAsync(AgentContext context) in E:\\x\\OpenAiAgentLlmService.cs:line 335\r\n"
+                        + "   at ANGI.Application.Services.Agent.AgentOrchestrator.RunAsync(AgentContext context) in E:\\x\\AgentOrchestrator.cs:line 86"
+                });
+            }
+            var summary = File.ReadAllText(Directory.GetFiles(Path.Combine(root, "logs"), "agent-trace-*.log").Single());
+            summary.Should().Contain("✗ THẤT BẠI").And.Contain("VẤN ĐỀ (3 lỗi, 0 cảnh báo)")
+                .And.Contain("caller_cancelled")
+                .And.Contain("ghi nhận tại AgentTelemetryTests.Dispose_FailedTurn_SummaryPointsAtProblemAndCode")
+                .And.Contain("nguyên nhân gốc: System.IO.IOException: Unable to read data")
+                .And.Contain("ném ra tại OpenAiAgentLlmService.SendAsync (OpenAiAgentLlmService.cs:335)")
+                .And.Contain("được gọi từ AgentOrchestrator.RunAsync (AgentOrchestrator.cs:86)");
         }
         finally { Directory.Delete(root, true); }
     }
@@ -70,6 +103,17 @@ public sealed class AgentTelemetryTests
             Directory.Exists(Path.Combine(root, "logs")).Should().BeFalse();
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    // TEST-03b: A very large event keeps its small fields and cuts only the large ones, so the summary still shows the reply (conversation 556).
+    /// <summary>Checks that a long final_reply keeps "reply" readable.</summary>
+    [Fact]
+    public void ToNode_LargeEvent_KeepsSmallFields()
+    {
+        var node = AgentTraceWriter.ToNode(new { reply = "Mình thêm món nhé.", state = new string('x', 50_000) });
+
+        node!["reply"]!.GetValue<string>().Should().Be("Mình thêm món nhé.");
+        node["state"]!.GetValue<string>().Should().StartWith("[cắt bớt");
     }
 
     // TEST-04: Files older than the retention window are deleted; recent ones and other files stay.

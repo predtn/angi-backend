@@ -41,23 +41,29 @@ public sealed class AgentTelemetry(ILogger<AgentTelemetry> logger, AgentTraceWri
             var names = events.Select(item => item.Name).ToHashSet();
             var outcome = names.Contains("turn_failed") ? "failed" : names.Contains("completed") ? "completed" : "unfinished";
             var first = events[0];
+            var attemptId = events.Select(item => item.AttemptId).LastOrDefault(id => id is not null);
+            var header = $"{first.Time:yyyy-MM-dd HH:mm:ss} conversation={turn.Key.ConversationId} turn={turn.Key.TurnId} {outcome}";
+            var summary = AgentTraceSummary.Build(header, attemptId, outcome, events[^1].ElapsedMs,
+                events.Select(item => new AgentTraceSummary.Event(item.ElapsedMs, item.Name, item.Data, item.At)).ToArray(),
+                AgentTraceWriter.DetailFileName(DateTime.Now));
             var body = new JsonObject
             {
                 ["time"] = first.Time.ToString("yyyy-MM-dd HH:mm:ss"),
                 ["correlationId"] = CorrelationId,
                 ["conversationId"] = turn.Key.ConversationId,
                 ["turnId"] = turn.Key.TurnId,
-                ["attemptId"] = events.Select(item => item.AttemptId).LastOrDefault(id => id is not null),
+                ["attemptId"] = attemptId,
                 ["outcome"] = outcome,
                 ["totalMs"] = Math.Round(events[^1].ElapsedMs),
                 ["events"] = new JsonArray(events.Select(item => (JsonNode)new JsonObject
                 {
                     ["atMs"] = Math.Round(item.ElapsedMs),
                     ["event"] = item.Name,
+                    ["at"] = item.At,
                     ["data"] = item.Data
                 }).ToArray())
             };
-            trace.Write($"{first.Time:yyyy-MM-dd HH:mm:ss} conversation={turn.Key.ConversationId} turn={turn.Key.TurnId} {outcome}", body);
+            trace.Write(header, summary, body);
         }
     }
 
@@ -66,9 +72,12 @@ public sealed class AgentTelemetry(ILogger<AgentTelemetry> logger, AgentTraceWri
     private void Collect(string name, long conversationId, long? turnId, long? attemptId, object? data)
     {
         if (trace is not { Enabled: true }) return;
+        var node = AgentTraceWriter.ToNode(data);
+        // Only problems pay for a stack walk: it tells the reader which line of code recorded the error or warning.
+        var at = AgentTraceSummary.LevelOf(name, node) == AgentTraceLevel.Info ? null : AgentTraceSummary.CallSite();
         lock (_events)
-            _events.Add(new(name, conversationId, turnId, attemptId, DateTime.Now, Stopwatch.GetElapsedTime(_started).TotalMilliseconds, AgentTraceWriter.ToNode(data)));
+            _events.Add(new(name, conversationId, turnId, attemptId, DateTime.Now, Stopwatch.GetElapsedTime(_started).TotalMilliseconds, node, at));
     }
 
-    private sealed record TraceEvent(string Name, long ConversationId, long? TurnId, long? AttemptId, DateTime Time, double ElapsedMs, JsonNode? Data);
+    private sealed record TraceEvent(string Name, long ConversationId, long? TurnId, long? AttemptId, DateTime Time, double ElapsedMs, JsonNode? Data, string? At);
 }
