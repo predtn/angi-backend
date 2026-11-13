@@ -68,7 +68,7 @@ public static partial class AgentTraceSummary
             if (type.Namespace?.StartsWith("ANGI.", StringComparison.Ordinal) != true) continue;
             if (type == typeof(AgentTelemetry) || type == typeof(AgentTraceSummary)) continue;
             var file = frame.GetFileName();
-            return file is null ? $"{type.Name}.{name}" : $"{type.Name}.{name} ({Path.GetFileName(file)}:{frame.GetFileLineNumber()})";
+            return file is null ? $"{type.Name}.{name}" : $"{type.Name}.{name} ({FileName(file)}:{frame.GetFileLineNumber()})";
         }
         return null;
     }
@@ -129,6 +129,12 @@ public static partial class AgentTraceSummary
         return text.ToString();
     }
 
+    /// <summary>
+    /// The file name of a path from a stack trace. The trace may come from another OS than the one reading it, so both
+    /// '/' and '\' separate folders: Path.GetFileName on Linux would keep "E:\x\File.cs" whole.
+    /// </summary>
+    private static string FileName(string path) => path[(path.LastIndexOfAny(['/', '\\']) + 1)..];
+
     /// <summary>Extra lines under a problem: where it was recorded and, for an exception, its root cause and the ANGI call chain.</summary>
     private static IEnumerable<string> Explain(Event item, IEnumerable<Event> later)
     {
@@ -150,7 +156,7 @@ public static partial class AgentTraceSummary
             var causes = InnerException().Matches(detail);
             if (causes.Count > 0) yield return $"nguyên nhân gốc: {Shorten(causes[^1].Groups[1].Value.Trim(), 200)}";
             var frames = AngiFrame().Matches(detail)
-                .Select(match => $"{ShortMethod(match.Groups[1].Value)} ({Path.GetFileName(match.Groups[2].Value)}:{match.Groups[3].Value})")
+                .Select(match => $"{ShortMethod(match.Groups[1].Value)} ({FileName(match.Groups[2].Value)}:{match.Groups[3].Value})")
                 .ToArray();
             if (frames.Length > 0)
             {
