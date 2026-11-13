@@ -65,13 +65,15 @@ public sealed class AgentProposalBuilder
             // STEP-09: Give a fresh key to every repeated item key.
             // Khóa món chỉ là định danh kỹ thuật: model đôi khi lặp lại một khóa cho hai bữa (hội thoại 238), nên backend đặt khóa mới cho lần lặp
             // thay vì bỏ cả lịch. Lần xuất hiện đầu giữ khóa cũ để vẫn khớp món nguồn.
-            if (output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
+            // A blank or over-long key is just as technical: it got the same refusal twice and ended the turn with 503 (Round 3, AG-14/AG-20).
+            static bool Unusable(string? key) => string.IsNullOrWhiteSpace(key) || key.Length > 100;
+            if (output.Items.Any(item => Unusable(item.ItemKey)) || output.Items.Select(item => item.ItemKey).Distinct(StringComparer.Ordinal).Count() != output.Items.Length)
             {
-                var taken = output.Items.Select(item => item.ItemKey).Concat(original.Select(item => item.ItemKey)).ToHashSet(StringComparer.Ordinal);
+                var taken = output.Items.Select(item => item.ItemKey).Where(key => !Unusable(key)).Concat(original.Select(item => item.ItemKey)).ToHashSet(StringComparer.Ordinal);
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 output = output with { Items = output.Items.Select(item =>
                 {
-                    if (seen.Add(item.ItemKey)) return item;
+                    if (!Unusable(item.ItemKey) && seen.Add(item.ItemKey)) return item;
                     var fresh = Enumerable.Range(2, int.MaxValue - 2).Select(n => $"{item.DayNumber}-{item.MealSlot}-{n}").First(taken.Add);
                     return item with { ItemKey = fresh };
                 }).ToArray() };
@@ -183,8 +185,11 @@ public sealed class AgentProposalBuilder
         // STEP-22: Throw the error from Invalid when outside.SequenceEqual(...) does not hold.
         if (!outside.SequenceEqual(items.Where(item => !output.Scope.Contains(item)).OrderBy(x => x.ItemKey))) throw Invalid("Các món ngoài phạm vi phải được giữ nguyên.");
         // STEP-23: Throw the error from Invalid when items.Count > AgentStateValidator.MaxItems, items.Any matches the filter or Select(filtered).Distinct().Count() is not items.Count.
-        if (items.Count > AgentStateValidator.MaxItems || items.Any(x => string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100) || items.Select(x => x.ItemKey).Distinct().Count() != items.Count)
-            throw Invalid("Khóa món bị trùng hoặc số món vượt giới hạn.");
+        // Each refusal names its reason and the keys involved, so a repair can fix exactly that instead of repeating the same output.
+        if (items.Count > AgentStateValidator.MaxItems) throw Invalid($"Số món ({items.Count}) vượt giới hạn {AgentStateValidator.MaxItems}.");
+        if (items.Any(x => string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100)) throw Invalid("Có món thiếu itemKey hoặc itemKey dài quá 100 ký tự.");
+        if (items.GroupBy(x => x.ItemKey).Where(group => group.Count() > 1).Select(group => group.Key).ToArray() is { Length: > 0 } repeated)
+            throw Invalid($"Khóa món bị trùng: {string.Join(", ", repeated.Take(5))}. Mỗi món cần một itemKey riêng; món giữ nguyên dùng đúng khóa của món nguồn.");
         // STEP-24: When context.Request.Command is "alternative", prepare excluded through original.Where().Select(filtered).ToHashSet and more.
         if (context.Request.Command == "alternative")
         {
@@ -287,6 +292,21 @@ public sealed class AgentProposalBuilder
         return items.Count == 0 ? null : new AgentOutput { Action = "create_proposal", Reply = "", Items = items.ToArray() };
     }
 
+    /// <summary>
+    /// The best-ranked dish issued this turn for this exact day, meal and condition, preferring one not in <paramref name="used"/>; null when none was issued.
+    /// It fills a meal whose dish was made up, or kept from a plan that no longer fits, so the draft stays complete without another model call or a question.
+    /// </summary>
+    public static int? IssuedDish(AgentState state, IEnumerable<AgentCandidateGrant> grants, short day, string meal, IReadOnlySet<int> used)
+    {
+        // STEP-01: Prepare the dishes issued for this day and meal under the same ranking inputs, best ranked first.
+        var fingerprint = AgentScopedPlanning.Fingerprint(state, day, meal);
+        var options = grants.Where(grant => (!grant.DayNumber.HasValue || grant.DayNumber == day) && (grant.MealSlot is null || grant.MealSlot == meal) &&
+                AgentScopedPlanning.Fingerprint(grant.Constraints, day, meal) == fingerprint)
+            .SelectMany(grant => grant.DishIds).ToArray();
+        // STEP-02: Return the first one not used yet, or the first one when all are used.
+        return options.Where(id => !used.Contains(id)).Select(id => (int?)id).FirstOrDefault() ?? options.Select(id => (int?)id).FirstOrDefault();
+    }
+
     /// <summary>Builds a backend-derived delta from validated source identity instead of storing untrusted model metadata.</summary>
     private static AgentChange[] Delta(AgentItem[] original, List<AgentItem> items)
     {
@@ -316,8 +336,11 @@ public sealed class AgentProposalBuilder
             requested.FocusMeal is not null && scope.MealSlot != requested.FocusMeal))
             throw Invalid("Phạm vi khác ngày hoặc bữa đã chọn trong yêu cầu.");
         // STEP-03: Throw the error from Invalid when scope is missing, (scope.DayNumber has a value and (context.State.NumDays has no value and more.
+        // A meal on every day ("bỏ bữa trưa toàn chuyến") is the whole-trip scope with only that meal's changes; saying so stops the repair repeating the same scope (AG-29).
+        if (scope is { DayNumber: null, MealSlot: not null })
+            throw Invalid("mealSlot cần dayNumber. Để sửa cùng một bữa ở nhiều ngày, để scope trống (cả chuyến) và chỉ gửi thay đổi của bữa đó ở từng ngày.");
         if (scope is null || scope.DayNumber.HasValue && (!context.State.NumDays.HasValue || scope.DayNumber < 1 || scope.DayNumber > context.State.NumDays) ||
-            scope.MealSlot is not null && (!scope.DayNumber.HasValue || !AgentStateValidator.Meals.Contains(scope.MealSlot))) throw Invalid("Phạm vi chỉnh sửa không hợp lệ.");
+            scope.MealSlot is not null && !AgentStateValidator.Meals.Contains(scope.MealSlot)) throw Invalid("Phạm vi chỉnh sửa không hợp lệ.");
         // STEP-04: Throw the error from Invalid when context.State.FocusDay has a value and more.
         if (context.State.FocusDay.HasValue && (scope.DayNumber != context.State.FocusDay ||
             context.State.FocusMeal is not null && scope.MealSlot != context.State.FocusMeal)) throw Invalid("Phạm vi khác ngày hoặc bữa đã chọn.");
@@ -325,7 +348,10 @@ public sealed class AgentProposalBuilder
         if (context.Request.SelectedItemKey is { } selected)
         {
             var item = context.Source?.Items.SingleOrDefault(x => x.ItemKey == selected);
-            if (item is null || !scope.Contains(item)) throw Invalid("Không tìm thấy món đã chọn trong phạm vi.");
+            if (item is null) throw Invalid("Không tìm thấy món đã chọn trong phạm vi.");
+            // Name where the selected dish is, so the next call can target it instead of repeating the meal it edited last (Round 2, AG-27).
+            if (!scope.Contains(item))
+                throw Invalid($"Món đã chọn là {AgentReplyBuilder.Safe(item.DishName)} ở {AgentReplyBuilder.Meal(item.MealSlot)} ngày {item.DayNumber}: dùng phạm vi dayNumber={item.DayNumber}, mealSlot={item.MealSlot}.");
         }
     }
 

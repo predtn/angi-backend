@@ -33,6 +33,37 @@ public sealed class AgentDayClusteringTests
         plan.LegsKm.Single().Should().BeLessThan(3);
     }
 
+    // TEST-01b: A plan a little over budget swaps one meal for a cheaper dish of that meal; covers a single covering swap that keeps the day close,
+    // a plan already within budget and a plan with no cheaper dish left.
+    /// <summary>Fixes a re-picked plan costing 350.000 for a 345.000 budget because each meal was chosen alone against an even share (S1).</summary>
+    [Fact]
+    public void FitBudget_SwapsCheapestCloseDishOnlyWhenOver()
+    {
+        // STEP-01: Breakfast 40k (one dish), lunch ranks a 60k dish first, then a cheap far one and a cheap close one.
+        var prices = new Dictionary<int, decimal> { [1] = 40000, [2] = 60000, [3] = 30000, [4] = 35000 };
+        var lists = new Dictionary<string, Option[]>
+        {
+            ["breakfast"] = [At(1, "PHỞ", HoanKiem)],
+            ["lunch"] = [At(2, "LẨU", BaDinh), At(3, "BÚN XA", HaDong), At(4, "CƠM", BaDinh)]
+        };
+        var plans = new[] { new AgentDayClustering.DayPlan(1, [new("breakfast", lists["breakfast"][0]), new("lunch", lists["lunch"][0])], [2]) };
+        IReadOnlyList<Option> Candidates(short _, string meal) => lists[meal];
+
+        // STEP-02: Fit to 80k, 200k, 60k and 70k.
+        var fitted = AgentDayClustering.FitBudget(plans, Candidates, id => prices[id], 80000, 5).Single();
+        var within = AgentDayClustering.FitBudget(plans, Candidates, id => prices[id], 200000, 5).Single();
+        var impossible = AgentDayClustering.FitBudget(plans, Candidates, id => prices[id], 60000, 5).Single();
+        var farOnly = AgentDayClustering.FitBudget(plans, Candidates, id => prices[id], 70000, 5).Single();
+
+        // STEP-03: Assert the close cheaper lunch replaces the dear one, nothing changes within budget or when even the cheapest dishes cannot fit (70k > 60k),
+        // and a far dish is taken only when it is what makes the plan fit.
+        fitted.Meals.Select(pick => pick.Dish.DishId).Should().Equal(1, 4);
+        within.Meals.Select(pick => pick.Dish.DishId).Should().Equal(1, 2);
+        impossible.Meals.Select(pick => pick.Dish.DishId).Should().Equal(1, 2);
+        farOnly.Meals.Select(pick => pick.Dish.DishId).Should().Equal(1, 3);
+        plans.Single().Meals.Select(pick => pick.Dish.DishId).Should().Equal(1, 2);
+    }
+
     // TEST-02: With nothing within the leg distance, the nearest dish is taken rather than the top-ranked one.
     /// <summary>A far meal is never chosen when a nearer one exists.</summary>
     [Fact]

@@ -19,6 +19,8 @@ public static class AgentModule
         services.AddSingleton(limits);
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<IAgentCatalogRepository, AgentCatalogRepository>();
+        // Trace chi tiết từng turn chỉ bật ở Development (AgentTrace:Enabled), ghi ra logs/agent-trace-yyyyMMdd.log.
+        services.AddSingleton<AgentTraceWriter>();
         services.AddScoped<IAgentTelemetry, AgentTelemetry>();
         var ai = configuration.GetSection(AiSettings.SectionName).Get<AiSettings>() ?? new();
         // Nối IAgentLlmService mà Orchestrator sử dụng với adapter HTTP OpenAiAgentLlmService.

@@ -575,7 +575,7 @@ public sealed class OpenAiAgentLlmServiceTests
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
             system.Should().Contain("action=chat is only for social messages").And.Contain("action=out_of_scope is for everything else")
-                .And.Contain("hướng dẫn bóc cam").And.Contain("replaces it with fixed text").And.Contain("the start date is asked only when the user wants to save a plan without one");
+                .And.Contain("hướng dẫn bóc cam").And.Contain("replaces it with fixed text").And.Contain("it is asked when the user wants to save a plan without one");
             var schema = body.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("properties");
             schema.GetProperty("action").GetProperty("enum").EnumerateArray().Select(value => value.GetString()).Should().Contain(["chat", "out_of_scope"]);
             schema.TryGetProperty("suggestedDish", out _).Should().BeTrue();
@@ -595,10 +595,10 @@ public sealed class OpenAiAgentLlmServiceTests
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var messages = body.RootElement.GetProperty("messages");
-            messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("only when the user gave nothing but a province").And.Contain("clarification=place_scope").And.Contain("clarification=preferences")
+            messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("A province alone means the whole province").And.Contain("plan at once, with no question about taste").And.NotContain("clarification=preferences")
                 .And.Contain("When budgetAmount=null, say plainly that the plan has no budget").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
                 .And.Contain("gợi ý code giúp tôi trang giao diện").And.Contain("tôi muốn ăn ngọt").And.Contain("nhà tôi ở Cầu Giấy").And.Contain("Mention a plan only when hasPlan=true")
-                .And.Contain("A starting point is never required").And.Contain("'toàn thành phố'").And.Contain("whether it is per day or for the whole trip")
+                .And.NotContain("clarification=place_scope").And.Contain("budgetFits=false").And.Contain("whether it is per day or for the whole trip")
                 .And.NotContain("because the backend asks for them when the user saves");
             using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
@@ -680,8 +680,8 @@ public sealed class OpenAiAgentLlmServiceTests
             data.RootElement.GetProperty("dishOffered").GetBoolean().Should().BeTrue();
             body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Contain("món sở trường của tôi là gì")
                 .And.Contain("never out_of_scope").And.Contain("only when personalized=true").And.Contain("status=nothing_found")
-                .And.Contain("{name1}, {restaurant1}, {price1} and {address1}").And.Contain("means 0.75 for this call only").And.Contain("Outside suggest_dish, a bare preference")
-                .And.Contain("Set count to how many the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} whenever editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("beside that dish or replace it")
+                .And.Contain("{name1}, {restaurant1}, {price1} and {address1}").And.Contain("means 0.75 for this call only").And.Contain("is vừa=0.5: apply it and plan, never ask its level")
+                .And.Contain("Set count to the number the user's latest message asks for").And.Contain("copy into levelQuote the exact words the user wrote").And.Contain("{total} always").And.Contain("{changes} whenever editing").And.Contain("how you read it and invite a change").And.Contain("'tôi thích ngọt'").And.Contain("When hasPlan=true").And.Contain("dishOffered=true").And.Contain("replace it and say so")
                 .And.Contain("gợi ý món theo sở thích của tôi").And.NotContain("The backend answers the user itself");
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
@@ -804,6 +804,34 @@ public sealed class OpenAiAgentLlmServiceTests
 
         // STEP-03: Assert the output is read.
         (await Service(handler).RunAsync(context, false, CancellationToken.None))!.Output.Should().NotBeNull();
+    }
+
+    // TEST-35: The forced step shows the state the read step gave, right before the message; other steps do not.
+    /// <summary>Conversation 558: without its own reading the forced call read "các món trên" again and dropped the ten suggested dishes.</summary>
+    [Fact]
+    public async Task RunAsync_ForcedStep_ShowsTheReadState()
+    {
+        // STEP-01: Get a forced context with a read state naming a dish, and capture the messages sent.
+        var context = AgentTestData.Context();
+        context.Phase = AgentTurnPhase.Forced;
+        context.ForcedTool = "get_recommendation";
+        context.ReadState = AgentTestData.State() with { MealRequests = [new(null, null, "Cháo Đậu Xanh Chay", null, [])] };
+        var messages = new List<(string Role, string Content)>();
+        var handler = new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            messages.AddRange(body.RootElement.GetProperty("messages").EnumerateArray()
+                .Select(message => (message.GetProperty("role").GetString()!, message.GetProperty("content").ValueKind == JsonValueKind.String ? message.GetProperty("content").GetString()! : "")));
+            return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
+        });
+
+        // STEP-02: Call RunAsync.
+        await Service(handler).RunAsync(context, false, CancellationToken.None);
+
+        // STEP-03: Assert the reading sits right before the user message, names the tool and carries the dish.
+        messages[^1].Should().Be(("user", context.Request.Content));
+        messages[^2].Role.Should().Be("system");
+        messages[^2].Content.Should().Contain("get_recommendation").And.Contain("Cháo Đậu Xanh Chay");
     }
 
     // TEST-33: Requests with the same rules and tools share a prompt cache key whoever sends them; another step gets another key; the stable catalog sits before the turn's data.

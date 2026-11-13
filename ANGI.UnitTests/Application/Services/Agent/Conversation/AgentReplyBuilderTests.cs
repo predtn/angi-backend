@@ -126,6 +126,103 @@ public sealed class AgentReplyBuilderTests
         AgentReplyBuilder.PlanNotes(snapshot).Should().Contain(AgentReplyBuilder.RatingFallbackNote);
     }
 
+    // TEST-06b: A dish kept from the saved roadmap was never ranked, so it does not count as a rating fallback.
+    /// <summary>Stops every edit of a hand-made roadmap from claiming its dishes were ordered by rating (Round 2, AG-86).</summary>
+    [Fact]
+    public void KeptRoadmapItem_IsNotRatingFallback()
+    {
+        // STEP-01: Get snapshot holding one item kept from the roadmap.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item() with { SourceItemId = 41 });
+        // STEP-02: Assert AgentReplyBuilder.PlanNotes() does not contain AgentReplyBuilder.RatingFallbackNote.
+        AgentReplyBuilder.PlanNotes(snapshot).Should().NotContain(AgentReplyBuilder.RatingFallbackNote);
+    }
+
+    // TEST-06c: A new plan says no budget applies when no budget was set, whether or not the user said so; an edit of a saved roadmap only when they did.
+    /// <summary>Covers a budget never discussed (Round 2, AG-10), an explicit "chưa chốt" and an edit of a roadmap that never had a budget.</summary>
+    [Theory]
+    [InlineData(false, null, true)]
+    [InlineData(true, null, true)]
+    [InlineData(false, 7L, false)]
+    [InlineData(true, 7L, true)]
+    public void NoBudget_IsNotedForNewPlansAndUndecidedBudgets(bool unrestricted, long? baseRoadmapId, bool noted)
+    {
+        // STEP-01: Get snapshot with no budget.
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item()) with
+            { State = AgentTestData.State() with { BudgetAmount = null, BudgetUnrestricted = unrestricted }, BaseRoadmapId = baseRoadmapId };
+        // STEP-02: Assert whether AgentReplyBuilder.PlanNotes() contains AgentReplyBuilder.NoBudgetNote.
+        AgentReplyBuilder.PlanNotes(snapshot).Contains(AgentReplyBuilder.NoBudgetNote).Should().Be(noted);
+    }
+
+    // TEST-06d: A draft made after the old one was dropped for an outside edit says so on the card; a deleted roadmap or a normal turn does not.
+    /// <summary>The card states the outside edit even when the model's reply skips it (Round 2, AG-57).</summary>
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public void AttachNotes_OutsideEdit_IsStatedOnTheCard(bool dropped, bool deleted, bool noted)
+    {
+        // STEP-01: Create context with the flags.
+        var context = new AgentContext
+        {
+            ConversationId = 7, UserId = 3, State = AgentTestData.State(), OutdatedProposalDropped = dropped, AttachedRoadmapDeleted = deleted,
+            Request = new ANGI.Application.DTOs.Agent.SendAgentMessageRequestDto { Content = "Đổi bữa trưa ngày 1" }
+        };
+        // STEP-02: Attach notes to a snapshot and assert whether the first note is AgentReplyBuilder.OutsideEditNote.
+        var notes = AgentReplyBuilder.AttachNotes(AgentTestData.Snapshot(AgentTestData.Item()) with { Notes = ["x"] }, context).Notes!;
+        notes.Contains(AgentReplyBuilder.OutsideEditNote).Should().Be(noted);
+        notes.Should().Contain("x");
+    }
+
+    // TEST-06f: A plan this turn made cost more than the budget gets the fixed over-budget question; covers a fitting plan, a reply that already
+    // speaks of the budget, a plan already over the same budget, and a plan that went over because the budget was lowered.
+    /// <summary>Fixes an over-budget plan being presented as fine when the model skipped the budget question (S1, AG-19).</summary>
+    [Fact]
+    public void WithBudgetNote_NewlyOverBudget_AddsQuestionOnce()
+    {
+        // STEP-01: Build a 370k plan, a source already over 300k and one that fit the older 500k budget.
+        var plan = AgentTestData.Snapshot(AgentTestData.Item(1, "a") with { Price = 200000 }, AgentTestData.Item(2, "b", 1, "dinner") with { Price = 170000 });
+        var overBefore = plan with { State = plan.State with { BudgetAmount = 300000 } };
+        var fitBefore = plan with { State = plan.State with { BudgetAmount = 500000 } };
+        const string reply = "Lịch xong rồi nè.";
+
+        // STEP-02: Assert the note appears only when the plan newly went over.
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 400000, null).Should().Be(reply);
+        AgentReplyBuilder.WithBudgetNote("Lịch vượt ngân sách nhé.", plan, 300000, null).Should().Be("Lịch vượt ngân sách nhé.");
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 300000, overBefore).Should().Be(reply);
+        AgentReplyBuilder.WithBudgetNote("Mình cập nhật theo ngân sách mới nhé.", plan, 300000, null).Should().EndWith("hay giữ nguyên lịch này?");
+        AgentReplyBuilder.WithBudgetNote(reply, plan, 300000, fitBefore).Should()
+            .Be("Lịch xong rồi nè. Lịch này tổng khoảng 370.000 đồng/người, vượt ngân sách 300.000 đồng bạn đặt. Mình nâng ngân sách lên 370.000 đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?");
+    }
+
+    // TEST-06e: A template that already names the meal before {changes} does not say it twice; a plain template is unchanged.
+    /// <summary>Fixes "đổi bữa tối ngày 2 sang bữa tối ngày 2 sang …" (Round 3, AG-35/AG-57).</summary>
+    [Theory]
+    [InlineData("Mình đổi bữa tối ngày 2 sang {changes} nhé.")]
+    [InlineData("Mình đổi {changes} nhé.")]
+    public void FillSlots_MealBeforeChanges_IsNotRepeated(string template)
+    {
+        // STEP-01: Build a source and a snapshot where only day 2 dinner changed.
+        var kept = AgentTestData.Item(1, "a", 1, "lunch") with { DishName = "Phở" };
+        var before = AgentTestData.Item(2, "b", 2, "dinner") with { DishName = "Bún Chả" };
+        var source = AgentTestData.Snapshot(kept, before);
+        var snapshot = AgentTestData.Snapshot(kept, before with { DishId = 3, DishName = "Bánh Pie Gà Nấm" });
+
+        // STEP-02: Assert the meal is named once.
+        AgentReplyBuilder.FillSlots(template, snapshot, source).Should().Be("Mình đổi bữa tối ngày 2 sang Bánh Pie Gà Nấm nhé.");
+    }
+
+    // TEST-06f: A dish added next to a meal's kept dish reads as added, not as the meal changing to it (conversation 556).
+    /// <summary>Names an added dish "X vào bữa tối ngày 2" while the meal keeps its dish.</summary>
+    [Fact]
+    public void FillSlots_AddedDish_ReadsAsAdded()
+    {
+        var kept = AgentTestData.Item(2, "b", 2, "dinner") with { DishName = "Bún Chả" };
+        var source = AgentTestData.Snapshot(kept);
+        var snapshot = AgentTestData.Snapshot(kept, AgentTestData.Item(3, "c", 2, "dinner") with { DishName = "Cháo Đậu Xanh Chay" });
+
+        AgentReplyBuilder.FillSlots("Mình thêm {changes} nhé.", snapshot, source).Should().Be("Mình thêm Cháo Đậu Xanh Chay vào bữa tối ngày 2 nhé.");
+    }
+
     // TEST-07: A meal-level taste override also states that taste is a soft, unguaranteed preference.
     /// <summary>Applies the taste disclaimer to scoped overrides, not only trip targets.</summary>
     [Fact]

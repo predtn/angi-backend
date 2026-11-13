@@ -13,6 +13,16 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
     /// <summary>Error of a proposal whose total exceeds the trip budget; the orchestrator turns it into a budget question.</summary>
     public const string BudgetExceeded = "Tổng tiền vượt ngân sách toàn chuyến cho một người.";
 
+    // The parts of this validator's own messages that mean a dish was made up rather than chosen badly: not in the catalog, not issued by a tool for that
+    // day, meal and condition, or outside the trip's province or area. Budget, repeats and meal fit are soft and stay warnings (user decision 2026-11-12).
+    private static readonly string[] FabricationMarkers = ["không còn khả dụng.", "cần nguồn ứng viên mới đúng phạm vi", "không đáp ứng ràng buộc chuyến đi.",
+        "được lấy theo khẩu vị khác", "không còn đáp ứng điều kiện lúc lấy ứng viên"];
+
+    /// <summary>The dish an error is about when it says the dish was made up (see <see cref="FabricationMarkers"/>); null for any other error.</summary>
+    public static int? FabricatedDish(string error) =>
+        FabricationMarkers.Any(marker => error.Contains(marker, StringComparison.Ordinal)) &&
+        System.Text.RegularExpressions.Regex.Match(error, @"^Món (\d+) ") is { Success: true } match ? int.Parse(match.Groups[1].Value) : null;
+
     /// <summary>
     /// A declared meal the source already lacks (removed earlier, or deleted from the roadmap by hand) is not this edit's gap,
     /// so an unrelated edit is not rejected for it. A day or meal slot new to this plan still has to be filled.
@@ -149,7 +159,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (requested.DifferentFromPlan && snapshot.Items.Any(other => other.DishId == item.DishId &&
                 (other.DayNumber != item.DayNumber || other.MealSlot != item.MealSlot)))
                 errors.Add($"Món {item.DishId} bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.");
-            if (!string.Equals(dish.Restaurant.ProvinceName?.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            if (!ProvinceSearch.Same(dish.Restaurant.ProvinceName, state.Province) ||
                 state.ExcludeTagIds.Any(tagSet.Contains) || state.TagIds.Any(id => !tagSet.Contains(id)) ||
                 state.MaxPricePerMeal.HasValue && dish.Price > state.MaxPricePerMeal ||
                 AgentScopedPlanning.MealArea(state, item.DayNumber, item.MealSlot) is { } area && !area.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
@@ -202,7 +212,6 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 if (result.OriginSkipped) warnings.Add($"Bỏ điểm xuất phát ngày {day.Key} vì cách món đầu quá 30 km.");
             }
         }
-        if (normalized.Any(x => !x.RequestId.HasValue)) warnings.Add("Một phần đề xuất dùng xếp hạng đánh giá thay cho cá nhân hóa.");
         var changes = snapshot.Changes?.Select(change => change.Item is null ? change : change with
             { Item = normalized.FirstOrDefault(item => item.ItemKey == change.Item.ItemKey) ?? change.Item }).ToArray();
         var onlyScopeErrors = scopeRejected.Count > 0 && errors.Count == scopeRejected.Count;

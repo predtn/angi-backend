@@ -88,3 +88,6 @@ docs/shopeefood_clean.xlsx
 
 # macOS/IDE per-user data written into the repo (device id)
 /Library/
+
+# Local log files (app log + Agent trace); never commit, they hold test chat content
+logs/

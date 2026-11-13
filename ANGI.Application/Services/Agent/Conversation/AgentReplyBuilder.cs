@@ -20,7 +20,9 @@ public static class AgentReplyBuilder
     private const int MaxNamedChanges = 3;
     // Các ô model được đặt trong câu về bản nháp; backend điền sau khi đã kiểm tra xong món.
     private static readonly Regex ProposalSlot = new(@"\{(?<slot>total|numDays|place|changes)\}", RegexOptions.CultureInvariant);
-    public const string RatingFallbackNote = "Một số món được xếp theo điểm đánh giá vì mình chưa đủ dữ liệu về khẩu vị của bạn.";
+    // The same note covers a user with too little taste data and an unreachable recommendation service, so it names no cause.
+    public const string OutsideEditNote = "Lịch đã được sửa ở nơi khác nên bản nháp trước đã được bỏ; bản này dựa trên lịch mới nhất.";
+    public const string RatingFallbackNote = "Một số món được xếp theo điểm đánh giá, chưa theo khẩu vị của bạn.";
     public const string TasteNote = "nhưng chưa thể bảo đảm từng món đúng mức vị đó";
     public const string NoBudgetNote = "Lịch này chưa áp ngân sách. Khi chốt được mức nào, bạn nhắn mình để lập lại nhé.";
     public const string NothingToSave = "Hiện chưa có lịch nào để lưu. Bạn cho mình biết muốn ăn ở đâu, mấy ngày để mình lập lịch nhé.";
@@ -57,16 +59,16 @@ public static class AgentReplyBuilder
         notes.AddRange(AgentPlaceResolver.WidenedNotes(snapshot));
         // STEP-06: When snapshot.State has the expected shape, call notes.Add.
         // Không có mức nào chặn tổng tiền: nói rõ để người dùng không tưởng lịch đã theo một ngân sách.
-        if (snapshot.State is { BudgetUnrestricted: true, BudgetAmount: null }) notes.Add(NoBudgetNote);
+        // A new plan whose budget was never discussed has budgetUnrestricted=false too, and is just as unlimited.
+        if (snapshot.State.BudgetAmount is null && (snapshot.State.BudgetUnrestricted || snapshot.BaseRoadmapId is null)) notes.Add(NoBudgetNote);
         // STEP-07: When snapshot.Items.Any matches the filter, call notes.Add.
-        if (snapshot.Items.Any(item => !item.RequestId.HasValue)) notes.Add(RatingFallbackNote);
+        // Only dishes this draft added count: a dish kept from the saved roadmap (the user's own choice) was never ranked at all.
+        // This note is the one place the fallback is shown; the validator no longer repeats it as a warning on the same card.
+        if (snapshot.Items.Any(item => !item.RequestId.HasValue && item.SourceItemId is null)) notes.Add(RatingFallbackNote);
         // STEP-08: When TasteScopes() exists, call notes.Add.
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) notes.Add($"Mình ưu tiên khẩu vị {tastes}, {TasteNote}.");
-        // STEP-09: Add where each named dish or restaurant was placed to notes.
-        // Món/quán người dùng gọi tên được xếp vào bữa nào thì nói rõ, để họ biết có thể yêu cầu đổi sang bữa khác.
-        notes.AddRange(snapshot.State.MealRequests.Where(x => x.DayNumber.HasValue && x.MealSlot is not null && (x.DishName ?? x.RestaurantName) is not null)
-            .Select(request => $"Theo yêu cầu của bạn: {Safe(request.DishName ?? request.RestaurantName)} ở {Meal(request.MealSlot!)} ngày {request.DayNumber}."));
+        // Không còn ghi chú "Theo yêu cầu của bạn: … ở … ngày …": món nằm ngay trong lịch, và một lịch dựng từ danh sách món đã gợi ý thành chín dòng lặp lại (user decision 2026-11-12).
         // STEP-10: When Where(filtered).GroupBy(filtered).Any matches the filter, call notes.Add.
         // Lặp còn lại sau khi backend đã thay các món lặp tránh được; món người dùng gọi tên không tính.
         if (snapshot.Items.Where(item => AgentScopedPlanning.Request(snapshot.State, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null })
@@ -76,6 +78,23 @@ public static class AgentReplyBuilder
         return [.. notes];
     }
 
+    /// <summary>
+    /// Ends the reply with the over-budget fact when this turn made the plan cost more than the budget and the reply never mentions the budget.
+    /// The model was told to say it but skipped it in 2 of 3 live runs (S1, AG-19), so the user saw a plan presented as fine. A plan already over
+    /// the same budget before this turn, or a reply already saying it is over ("vượt"), gets no repeat; "ngân sách mới" alone does not count (S1). The question names the total, so a "có" can set it as the new budget.
+    /// </summary>
+    public static string WithBudgetNote(string reply, AgentSnapshot snapshot, decimal? budget, AgentSnapshot? source)
+    {
+        // STEP-01: Return reply early when there is no budget or the plan fits it.
+        var total = snapshot.Items.Sum(item => item.Price);
+        if (budget is not { } limit || total <= limit) return reply;
+        // STEP-02: Return reply early when the plan was already over the same budget or the reply already speaks of the budget.
+        if (source is not null && source.State.BudgetAmount == limit && source.Items.Sum(item => item.Price) > limit) return reply;
+        if (AgentIntakePolicy.Plain(reply).Contains("vuot", StringComparison.Ordinal)) return reply;
+        // STEP-03: Return reply with the fixed note.
+        return $"{reply.TrimEnd()} Lịch này tổng khoảng {Money(total)} đồng/người, vượt ngân sách {Money(limit)} đồng bạn đặt. Mình nâng ngân sách lên {Money(total)} đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?".Trim();
+    }
+
     /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
     public static string FillSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
     {
@@ -83,6 +102,10 @@ public static class AgentReplyBuilder
         var total = $"{Money(snapshot.Items.Sum(item => item.Price))} đồng/người";
         var template = (reply ?? "").Trim();
         if (changes?.Split(' ')[0] is { Length: > 0 } verb) template = Regex.Replace(template, $@"(?<!\p{{L}}){Regex.Escape(verb)}\s+(?=\{{changes\}})", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // The filled changes already read "bữa tối ngày 2 sang <món>", so a template written as "đổi bữa tối ngày 2 sang {changes}" would say the meal twice
+        // (Round 3, AG-35/AG-57). This reads only the model's own template, never the user's words.
+        if (changes?.IndexOf(" sang ", StringComparison.Ordinal) is > 0 and var cut)
+            template = Regex.Replace(template, $@"{Regex.Escape(changes[..cut])}\s+sang\s+(?=\{{changes\}})", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         var filled = ProposalSlot.Replace(template, match => match.Groups["slot"].Value switch
         {
             "total" => total,
@@ -104,6 +127,8 @@ public static class AgentReplyBuilder
                 dishNotes[note.DishId] = new(note.DishId, intro, reason);
         return snapshot with
         {
+            // The model's draft reply is a template and was seen to skip this (Round 2, AG-57), so the card states it from the flag.
+            Notes = context.OutdatedProposalDropped && !context.AttachedRoadmapDeleted ? [OutsideEditNote, .. snapshot.Notes ?? []] : snapshot.Notes,
             DishNotes = [.. dishNotes.Values.Where(note => present.Contains(note.DishId)).OrderBy(note => note.DishId)],
             DaySummaries = [.. snapshot.Items.Select(item => item.DayNumber).Distinct().Order().SelectMany(day => DaySummary(day, snapshot, context))]
         };
@@ -133,15 +158,26 @@ public static class AgentReplyBuilder
         var changed = AgentJson.OrderItems(snapshot.Items).Where(item => !sourceItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId &&
             old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot)).ToArray();
         var removed = sourceItems.Where(old => snapshot.Items.All(item => item.ItemKey != old.ItemKey)).ToArray();
-        // STEP-02: Return null early when nothing is kept and nothing removed, or there was no plan before.
+        // STEP-02: A roadmap that had no dishes yet: name what was added, so "Mình thêm {changes} nhé" never reads "Mình thêm  nhé" (Round 3 bug report).
+        if (source is not null && sourceItems.Length == 0 && changed.Length > 0)
+            return string.Join("; ", changed.Take(MaxNamedChanges).Select(item => $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}")) +
+                (changed.Length > MaxNamedChanges ? $"; {changed.Length - MaxNamedChanges} món khác" : "");
+        // STEP-02b: Return null early when nothing is kept and nothing removed, or there was no plan before.
         if (snapshot.Items.Length == changed.Length && removed.Length == 0 || sourceItems.Length == 0) return null;
         // STEP-03: Prepare parts from the changed and removed items.
-        var parts = changed.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}").ToList();
+        // A dish put next to a meal's kept dish reads "X vào bữa tối ngày 1", not "bữa tối ngày 1 sang X", which says the old dish was replaced (conversation 556).
+        var parts = changed.Take(MaxNamedChanges).Select(item => Added(item, sourceItems, removed)
+            ? $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}"
+            : $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}").ToList();
         if (changed.Length > MaxNamedChanges) parts.Add($"{changed.Length - MaxNamedChanges} món khác");
         if (removed.Length > 0) parts.Add($"bỏ {string.Join(", ", removed.Select(item => Safe(item.DishName)).Distinct())}");
         // STEP-04: Return the parts joined, or a plain sentence when the edit changed no dish.
         return parts.Count > 0 ? string.Join("; ", parts) : "giữ nguyên các món";
     }
+
+    /// <summary>True for a dish added next to what its meal kept: a new item while no earlier dish of that day and meal was removed.</summary>
+    private static bool Added(AgentItem item, AgentItem[] sourceItems, AgentItem[] removed) =>
+        sourceItems.All(old => old.ItemKey != item.ItemKey) && !removed.Any(old => old.DayNumber == item.DayNumber && old.MealSlot == item.MealSlot);
 
     /// <summary>Says exactly what an edit changed and that the rest stayed; a plan with nothing retained reads as a new plan.</summary>
     private static string Summary(AgentSnapshot snapshot, AgentSnapshot? source)
@@ -164,8 +200,15 @@ public static class AgentReplyBuilder
         // STEP-04: When changed.Length > 0, prepare named through changed.Take().Select and call parts.Add.
         if (changed.Length > 0)
         {
-            var named = changed.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}");
-            parts.Add($"Mình đổi {string.Join("; ", named)}{(changed.Length > MaxNamedChanges ? $" và {changed.Length - MaxNamedChanges} món khác" : "")}.");
+            // Món thêm cạnh món đang giữ của bữa được nói là "thêm", món thay chỗ món cũ là "đổi".
+            var added = changed.Where(item => Added(item, sourceItems, removed)).ToArray();
+            var replaced = changed.Except(added).ToArray();
+            if (added.Length > 0)
+                parts.Add($"Mình thêm {string.Join("; ", added.Take(MaxNamedChanges).Select(item => $"{Safe(item.DishName)} vào {Meal(item.MealSlot)} ngày {item.DayNumber}"))}" +
+                    $"{(added.Length > MaxNamedChanges ? $" và {added.Length - MaxNamedChanges} món khác" : "")}.");
+            if (replaced.Length > 0)
+                parts.Add($"Mình đổi {string.Join("; ", replaced.Take(MaxNamedChanges).Select(item => $"{Meal(item.MealSlot)} ngày {item.DayNumber} sang {Safe(item.DishName)}"))}" +
+                    $"{(replaced.Length > MaxNamedChanges ? $" và {replaced.Length - MaxNamedChanges} món khác" : "")}.");
         }
         // STEP-05: When removed.Length > 0, call parts.Add.
         if (removed.Length > 0)

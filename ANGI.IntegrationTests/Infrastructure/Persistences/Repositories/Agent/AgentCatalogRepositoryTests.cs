@@ -40,6 +40,29 @@ public sealed class AgentCatalogRepositoryTests(PostgresApiFactory factory) : IC
         });
     }
 
+    // TEST-01b: The province filter matches the short and full spelling alike and still excludes another province.
+    /// <summary>Fixes every suggested dish being "outside_province" when the model named "Thành phố Hà Nội" for a catalog that says "Hà Nội" (conversation 530).</summary>
+    [PostgresEndToEndFact]
+    public async Task Lookup_ProvinceFullSpelling_MatchesShortName()
+    {
+        // STEP-01: Reset the test database and get seed from DiscoverySeed.PublicDishAsync.
+        await factory.ResetDatabaseAsync();
+        var seed = await DiscoverySeed.PublicDishAsync(factory);
+        // STEP-02: Assert the full spelling finds the dish and another province does not.
+        await factory.ExecuteDbAsync(async db =>
+        {
+            var restaurant = await db.Restaurants.SingleAsync(x => x.Id == seed.RestaurantId);
+            restaurant.ProvinceName = "Hà Nội";
+            var dish = await db.Dishes.SingleAsync(x => x.Id == seed.DishId);
+            dish.Name = "Cơm Sườn Xào Chua Ngọt";
+            await db.SaveChangesAsync();
+            var repository = new AgentCatalogRepository(db);
+            (await repository.SearchAsync("dish", "Cơm Sườn Xào Chua Ngọt", "Thành phố Hà Nội", 21, default)).Should().ContainSingle(x => x.Id == seed.DishId);
+            (await repository.SearchAsync("dish", "Cơm Sườn Xào Chua Ngọt", "Hà Nội", 21, default)).Should().ContainSingle(x => x.Id == seed.DishId);
+            (await repository.SearchAsync("dish", "Cơm Sườn Xào Chua Ngọt", "Đà Nẵng", 21, default)).Should().BeEmpty();
+        });
+    }
+
     // TEST-02: The candidate limit is applied after requiring all agent tags and meal compatibility.
     /// <summary>Ensures the candidate limit never cuts off dishes that match every requested tag.</summary>
     [PostgresEndToEndFact]

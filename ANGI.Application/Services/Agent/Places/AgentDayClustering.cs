@@ -72,6 +72,56 @@ public static class AgentDayClustering
         return [.. near, .. far];
     }
 
+    /// <summary>
+    /// Brings the plan's total within <paramref name="limit"/> by swapping picks for cheaper dishes of the same meal. Each meal was picked on its
+    /// own against an even per-meal share, so dear meals with no cheap dish pushed the total a little over a budget the trip could meet (S1:
+    /// 350.000 for 345.000). A swap that covers the whole excess is chosen by staying within legKm of that day's other meals, then by rank;
+    /// otherwise the largest saving is taken (close ones first) and the loop goes on. It stops when the plan fits or no cheaper dish is left,
+    /// so a plan still over budget really has no cheaper arrangement among the candidates. Names already in the plan are never added twice.
+    /// </summary>
+    public static DayPlan[] FitBudget(DayPlan[] plans, Func<short, string, IReadOnlyList<Option>> candidates, Func<int, decimal> price,
+        decimal limit, double legKm)
+    {
+        // A budget even the cheapest dish of every meal cannot meet keeps the best-ranked close plan: swapping would only make it worse
+        // and still over, and the reply then offers to raise the budget to that plan's total.
+        var cheapest = plans.Sum(plan => plan.Meals.Sum(pick => candidates(plan.DayNumber, pick.MealSlot).Select(option => price(option.DishId))
+            .Append(price(pick.Dish.DishId)).Min()));
+        if (cheapest > limit) return plans;
+        var result = plans.Select(plan => plan with { Meals = [.. plan.Meals] }).ToArray();
+        decimal Total() => result.Sum(plan => plan.Meals.Sum(pick => price(pick.Dish.DishId)));
+        // Mỗi lần đổi giảm hẳn tổng tiền nên vòng lặp luôn dừng; giới hạn số lần chỉ để chắc chắn.
+        for (var round = 0; round < 100 && Total() is var total && total > limit; round++)
+        {
+            var over = total - limit;
+            var names = result.SelectMany(plan => plan.Meals).Select(pick => pick.Dish.Name).ToHashSet(StringComparer.Ordinal);
+            var swaps = new List<(int Plan, int Meal, Option Dish, decimal Saving, bool Far, int Rank)>();
+            for (var p = 0; p < result.Length; p++)
+                for (var m = 0; m < result[p].Meals.Length; m++)
+                {
+                    var pick = result[p].Meals[m];
+                    var current = price(pick.Dish.DishId);
+                    var others = result[p].Meals.Where((_, index) => index != m).Select(other => other.Dish).ToArray();
+                    var options = candidates(result[p].DayNumber, pick.MealSlot);
+                    for (var rank = 0; rank < options.Count; rank++)
+                    {
+                        var option = options[rank];
+                        if (price(option.DishId) >= current || option.Name != pick.Dish.Name && names.Contains(option.Name)) continue;
+                        var far = others.Any(other => Distance(other, option) > legKm);
+                        swaps.Add((p, m, option, current - price(option.DishId), far, rank));
+                    }
+                }
+            if (swaps.Count == 0) break;
+            var covering = swaps.Where(swap => swap.Saving >= over).ToArray();
+            var chosen = covering.Length > 0
+                ? covering.OrderBy(swap => swap.Far).ThenBy(swap => swap.Rank).ThenBy(swap => swap.Saving).First()
+                : swaps.OrderBy(swap => swap.Far).ThenByDescending(swap => swap.Saving).ThenBy(swap => swap.Rank).First();
+            var plan = result[chosen.Plan];
+            plan.Meals[chosen.Meal] = plan.Meals[chosen.Meal] with { Dish = chosen.Dish };
+            result[chosen.Plan] = plan with { LegsKm = Legs(plan.Meals.Select(pick => pick.Dish).ToArray()) };
+        }
+        return result;
+    }
+
     public static double Km(double lat1, double lng1, double lat2, double lng2)
     {
         static double Rad(double degrees) => degrees * Math.PI / 180;

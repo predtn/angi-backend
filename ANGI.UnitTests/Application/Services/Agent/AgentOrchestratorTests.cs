@@ -500,6 +500,38 @@ public sealed class AgentOrchestratorTests
         if (!listed) result.Reply.Should().Be(reply);
     }
 
+    // TEST-22b: Keeping the plan after the budget offer saves the same dishes under the offered budget; any other new amount changes no draft.
+    /// <summary>Fixes "Chốt đi" being refused as "lịch chưa theo ngân sách mới" after the user took the raise but kept the dishes (S1).</summary>
+    [Theory]
+    [InlineData(370000, true)]
+    [InlineData(400000, false)]
+    public async Task RunAsync_BudgetOfferKeptPlan_KeepsDishesUnderNewBudget(int budget, bool kept)
+    {
+        // STEP-01: Prepare a draft on a 300k budget whose last reply offered 370k.
+        var source = AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1));
+        source = source with { State = source.State with { BudgetAmount = 300000 } };
+        var context = AgentTestData.Context(source);
+        context.Request.Content = "không, giữ lịch này";
+        context.State = source.State with { BudgetOffer = 370000 };
+        // STEP-02: Mock IAgentLlmService; the model answers with the new budget.
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer("Mình giữ nguyên lịch nhé.") with { State = context.State with { BudgetAmount = budget, BudgetOffer = null } }));
+
+        // STEP-03: Get result from Create().RunAsync.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        // STEP-04: Assert only the offered amount yields a draft with the same dish and the offer cleared.
+        if (kept)
+        {
+            result.Snapshot.Should().NotBeNull();
+            result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(1);
+            result.Snapshot.State.BudgetAmount.Should().Be(370000);
+            result.State.BudgetOffer.Should().BeNull();
+        }
+        else result.Snapshot.Should().BeNull();
+    }
+
     // TEST-23: Items attached to a question are dropped rather than failing the turn, and never reach a proposal.
     /// <summary>A clarify or answer can never edit a plan, so its stray items are simply ignored.</summary>
     [Fact]
@@ -782,6 +814,32 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Assert the phases of the three calls and that the tool ran.
         seen.Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "locate_places"), (AgentTurnPhase.Act, null));
         context.Exchanges.Should().ContainSingle();
+    }
+
+    // TEST-56: The state the read step gave reaches the forced call and is gone once the tool has run.
+    /// <summary>Conversation 558: the read put the ten suggested dishes in mealRequests, the forced call, which never saw that reading, sent none.</summary>
+    [Fact]
+    public async Task RunAsync_ChatMessage_ForcedCallSeesTheReadState()
+    {
+        // STEP-01: Get context and script a read with a state, the tool call, and the final answer, recording the read state of each call.
+        var context = IntakeContext("ở Cầu Giấy", new AgentState());
+        var read = new AgentState { Province = "Thành phố Hà Nội", NumDays = 3 };
+        var seen = new List<AgentState?>();
+        var next = new Queue<AgentLlmStep>([new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "locate_places", State = read }),
+            Locates("Cầu Giấy"), Asks("trip_details", "Bạn đi mấy ngày nè?")]);
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentContext, bool, CancellationToken>((current, _, _) => seen.Add(current.ReadState))
+            .ReturnsAsync(() => next.Dequeue());
+
+        // STEP-02: Call Create().RunAsync.
+        await Create(llm.Object, intakeCatalog: IntakeCatalog(), places: Places()).RunAsync(context, default);
+
+        // STEP-03: Assert only the forced call carried the read state.
+        seen.Should().HaveCount(3);
+        seen[0].Should().BeNull();
+        seen[1].Should().BeSameAs(read);
+        seen[2].Should().BeNull();
     }
 
     // TEST-35: The steps that already know the work skip the read; covers a button command, a submitted form and a replan after confirmation.
@@ -1249,6 +1307,78 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Verify exactly one repair call carried the rejection reason.
         llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
         context.RepairFeedback.Should().NotBeNullOrEmpty();
+    }
+
+    // TEST-57: A dish no tool issued is sent back once with the reason; a corrected draft is shown, and one still made up after that is replaced by the dish issued for its meal.
+    /// <summary>Hallucination guard (user decision 2026-11-12): a made-up dish never reaches the user, and the user is never asked anything about it.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_MadeUpDish_RepairsOnceThenReplaces(bool recover)
+    {
+        // STEP-01: A one-meal trip whose only issued candidate is dish 1, while the model first picks dish 2.
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var context = IntakeContext("lập lịch đi", state);
+        context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        AgentOutput Draft(int dish) => new() { Action = "create_proposal", Reply = "Lịch xong rồi nè, tổng khoảng {total}.", State = context.State, Scope = new(), Items = [AgentTestData.Item(dish, "a")] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], Draft(2)));
+        llm.Setup(x => x.RunAsync(context, true, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], Draft(recover ? 1 : 2)));
+
+        // STEP-02: Run the turn.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        // STEP-03: Assert one repair carried the reason, and either way the draft holds the issued dish, never the made-up one.
+        llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
+        context.RepairFeedback.Should().Contain("Món 2");
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(1);
+    }
+
+    // TEST-58: A dish kept from the saved plan that no longer passes (here gone from the catalog) is replaced by the dish issued for its meal, with no repair call;
+    // with nothing issued for that meal it stays, so the plan never loses a meal.
+    /// <summary>Conversation 570: after an itinerary change nine kept dishes no longer fit; they are neither shown as made up nor left out.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_StaleKeptDish_IsReplacedWhenAMealCandidateExists(bool issued)
+    {
+        // STEP-01: A saved one-meal plan holding dish 3, which the catalog no longer has, and a draft that keeps it.
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var kept = new AgentItem("a", 77, 1, "lunch", 0, 3);
+        var context = AgentTestData.Context(new AgentSnapshot(state, [kept], []));
+        context.State = state;
+        if (issued) context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Lịch xong rồi nè, tổng khoảng {total}.", State = state, Scope = new(), Items = [kept] }));
+
+        // STEP-02: Run the turn.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        // STEP-03: Assert no repair call, and the kept dish was replaced only when a dish was issued for its meal.
+        llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Never);
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(issued ? 1 : 3);
+    }
+
+    // TEST-59: An edit that swaps in a made-up dish with nothing issued for that meal keeps the meal's dish from the saved plan instead of leaving it empty.
+    /// <summary>The draft never shows the made-up dish, and a plan the user already has never loses a meal because of it.</summary>
+    [Fact]
+    public async Task RunAsync_MadeUpDishInEdit_KeepsSavedDish()
+    {
+        // STEP-01: A saved one-meal plan holding dish 1, no candidate issued this turn, and a draft that swaps in dish 9, which the catalog does not have.
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var context = AgentTestData.Context(new AgentSnapshot(state, [new AgentItem("a", 77, 1, "lunch", 0, 1)], []));
+        context.State = state;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "create_proposal", Reply = "Lịch xong rồi nè, tổng khoảng {total}.", State = state, Scope = new(), Items = [AgentTestData.Item(9, "a")] }));
+
+        // STEP-02: Run the turn.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        // STEP-03: Assert one repair was tried and the draft keeps the saved dish.
+        llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
+        result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(1);
     }
 
     // TEST-54: A new plan whose model output repeats an item key keeps every meal, giving the repeat a fresh key (conversation 238).

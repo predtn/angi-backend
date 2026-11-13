@@ -58,13 +58,82 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 _ => throw Invalid("Agent yêu cầu công cụ không được phép.")
             };
             // Kết quả có cấu trúc được Orchestrator đưa lại cho LLM trong tool exchange kế tiếp.
-            return JsonSerializer.SerializeToElement(result, AgentJson.Options);
+            var element = JsonSerializer.SerializeToElement(result, AgentJson.Options);
+            // Chỉ vào trace Development: tham số và kết quả tool đúng như model sẽ đọc.
+            telemetry.Trace("tool_result", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, call.Arguments, result = element });
+            return element;
         }
         catch (JsonException) { throw Invalid("Tham số công cụ không hợp lệ."); }
+        // Chỉ ghi lại, không bắt: bộ lọc trả false nên exception vẫn đi tiếp như cũ.
+        catch (Exception error) when (ToolFailed(context, call, error)) { throw; }
         finally
         {
             telemetry.Record("tool", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
         }
+    }
+
+    /// <summary>The starter buttons above an empty chat. Each one already says what the user wants, so the backend runs its tool itself.</summary>
+    public static readonly string[] StarterCommands = ["plan_trip", "suggest_lunch", "suggest_specialty"];
+    /// <summary>How many dishes a starter suggestion shows.</summary>
+    public const int StarterSuggestionCount = 10;
+    private static readonly string[] RegionTagCodes = ["local_sf_mien_bac", "local_sf_mien_trung", "local_sf_mien_nam"];
+
+    /// <summary>
+    /// Builds the one tool call a starter button means, with every argument fixed by the backend, so the model never guesses the intent:
+    /// plan_trip = the whole trip with breakfast, lunch and dinner; suggest_lunch = lunch dishes within the per-meal budget;
+    /// suggest_specialty = main dishes of the province's regional cuisine. Null when the trip lacks what the call needs; the turn then runs as chat.
+    /// </summary>
+    public async Task<AgentToolCall?> StarterCallAsync(AgentContext context, CancellationToken ct)
+    {
+        var state = context.State;
+        if (string.IsNullOrWhiteSpace(state.Province)) return null;
+        switch (context.Request.Command)
+        {
+            case "plan_trip":
+                if (state.NumDays is null) return null;
+                // Lịch mặc định có đủ ba bữa để mỗi bữa được xếp hạng riêng. Ghi thẳng vào state của lượt (bữa là giá trị backend đặt cho nút này),
+                // không gửi state trong tham số: state đầy đủ có các trường backend tự quản mà schema của tool không nhận (hội thoại 556).
+                if (state.MealSlots.Length == 0) context.State = state with { MealSlots = ["breakfast", "lunch", "dinner"] };
+                return StarterCall("get_recommendation", new AgentRecommendationInput(null, state.Province, "full", null, null, [], [], [], TopK: 30));
+            case "suggest_lunch":
+                return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, "lunch", [], [], StarterMealBudget(state), StarterSuggestionCount, [], null));
+            case "suggest_specialty":
+                var catalogTags = await tags.GetTagsAsync(null, ct);
+                var main = catalogTags.FirstOrDefault(tag => tag.Code == AgentScopedPlanning.MainTagCode);
+                // Catalog không có tag "đặc sản": lấy ẩm thực vùng có nhiều món chính nhất trong tỉnh, đếm thật trên catalog thay vì để model đoán vùng.
+                short? region = null;
+                var best = 0;
+                foreach (var tag in catalogTags.Where(tag => RegionTagCodes.Contains(tag.Code)))
+                {
+                    var ids = (short[])[tag.Id, .. main is null ? [] : new[] { main.Id }];
+                    var count = (await dishes.GetCandidateIdsAsync(new DishCandidateFilter { Province = state.Province, TagIds = ids, RequireAllTags = true }, limits.MaxCandidates, ct)).Count;
+                    if (count > best) (best, region) = (count, tag.Id);
+                }
+                short[] tagIds = [.. region is null ? [] : new[] { region.Value }, .. main is null ? [] : new[] { main.Id }];
+                return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, null, tagIds, [], null, StarterSuggestionCount, [], null));
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>The price cap a "meal within budget" means: the stated cap per meal, or the trip budget shared over every meal of the trip.</summary>
+    private static decimal? StarterMealBudget(AgentState state)
+    {
+        if (state.MaxPricePerMeal is { } cap) return cap;
+        if (state.BudgetUnrestricted || state.BudgetAmount is not { } budget || state.NumDays is not { } days || days <= 0) return null;
+        var meals = Math.Max(1, state.MealSlots.Length == 0 ? 3 : state.MealSlots.Length);
+        return decimal.Floor(budget / (days * meals) / 1000m) * 1000m;
+    }
+
+    private static AgentToolCall StarterCall(string name, object input) =>
+        new($"starter-{name}", name, JsonSerializer.SerializeToElement(input, AgentJson.Options));
+
+    /// <summary>Records a tool that ended in an exception (type and message), then lets the exception continue unchanged.</summary>
+    private bool ToolFailed(AgentContext context, AgentToolCall call, Exception error)
+    {
+        telemetry.Record("tool_failed", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, errorType = error.GetType().Name });
+        telemetry.Trace("tool_failed_detail", context.ConversationId, context.TurnId, context.AttemptId, new { call.Name, call.Arguments, error.Message });
+        return false;
     }
 
     private static readonly HashSet<string> Fillers =
@@ -87,10 +156,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// <summary>Filters before ranking, validates the entire reco response and issues scoped backend grants.</summary>
     private async Task<object> RecommendAsync(AgentContext context, AgentRecommendationInput input, CancellationToken ct)
     {
+        // A per-day budget copied without multiplying by the days is the trip's budget (conversation 573).
+        input = input with { State = AgentConstraintGuard.WithDailyBudget(input.State, context.State) };
         // STEP-01: Return the result of ArgumentError early when AgentConstraintGuard.UnbackedTastes() has items, otherwise when context.ReplanAfterConfirmation is false, set context.State.
-        // Mức khẩu vị người dùng chưa nói thì chưa được xếp hạng: model phải hỏi lại, không được tự chọn một con số.
+        // Khẩu vị người dùng không hề viết thì không được xếp hạng. Khẩu vị họ viết mà không nêu mức thì dùng mức vừa (0.5), không hỏi lại (user decision 2026-11-12).
         if (AgentConstraintGuard.UnbackedTastes(context, input.State) is { Length: > 0 } unbacked)
-            return ArgumentError(context, $"Mức của {string.Join(", ", unbacked)} chưa có nguyên văn người dùng trong levelQuote. Nếu họ chưa nêu mức, hãy hỏi lại (clarification=taste_intensity), không xếp hạng.");
+            return ArgumentError(context, $"Khẩu vị {string.Join(", ", unbacked)} chưa có nguyên văn người dùng trong levelQuote. Chép đúng chữ người dùng đã viết cho vị đó vào levelQuote; " +
+                "nếu họ không nêu mức thì dùng target=0.5 (vừa) rồi gọi lại, không hỏi người dùng. Nếu họ chưa hề nói vị đó thì bỏ nó khỏi state.");
         // Ngân sách mới chưa có nguyên văn người dùng thì chưa được dùng để chọn món.
         if (AgentConstraintGuard.HasUnbackedBudget(context, input.State))
             return ArgumentError(context, "budgetAmount cần budgetQuote là nguyên văn người dùng đã viết và đúng cỡ số tiền họ nêu. Nếu họ chưa nêu ngân sách, giữ nguyên giá trị cũ.");
@@ -109,6 +181,17 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);
                 context.State = change.Proposed with { PendingStateChange = context.State.PendingStateChange, SourceRoadmapUpdatedAt = context.State.SourceRoadmapUpdatedAt,
                     HistoryStartSequence = context.State.HistoryStartSequence, TranscriptStartSequence = context.State.TranscriptStartSequence };
+            }
+            catch (FluentValidation.ValidationException error)
+            {
+                // State model gửi sai luật là tham số sai của tool: trả về để model tự sửa hoặc hỏi lại người dùng trong cùng lượt.
+                // Trước đây exception thoát ra ngoài, lượt kết thúc bằng câu của lần gọi trước, thường là câu rỗng (hội thoại 548).
+                // State đầu lượt giữ nguyên vì phép gán ở trên chưa chạy.
+                telemetry.Trace("state_rejected_detail", context.ConversationId, context.TurnId, context.AttemptId,
+                    new { rejected = error.Errors.Select(item => new { property = item.PropertyName, value = item.AttemptedValue }) });
+                return ArgumentError(context, $"State gửi kèm bị từ chối: {string.Join(" ", error.Errors.Select(item => $"{item.PropertyName}: {item.ErrorMessage}").Distinct())} " +
+                    "Lưu ý: mealSlot chỉ hợp lệ khi có dayNumber, và dayNumber phải nằm trong số ngày của chuyến. " +
+                    "Sửa state rồi gọi lại; nếu người dùng chưa nêu thông tin còn thiếu (ví dụ bữa đó thuộc ngày nào), hãy hỏi lại họ thay vì tự chọn.");
             }
         }
         // STEP-02: When AgentScopedPlanning.IsLongTrip(context.State) holds, context.State.MealSlots.Length is 0 and context.Source is not { Items.Length: > 0 }, set context.State.
@@ -145,9 +228,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-09: Return the result of ArgumentError early when input.Scope is not ("full" or "day" or "slot"), (input.Scope is "full" and more.
         // full = cả chuyến; day = một ngày; slot = một bữa của một ngày.
         // Kiểm tra thêm giá VND, bán kính, số ID và topK để không vượt hợp đồng Recommendation.
+        // "Thành phố Hà Nội" và "Hà Nội" là một tỉnh: so khớp chính xác từng chữ từng khiến lần gọi đầu bị từ chối và tốn thêm một lần gọi LLM (hội thoại 552).
+        if (input.Province is not null && !ProvinceSearch.Same(input.Province, state.Province))
+            return ArgumentError(context, $"province “{AgentReplyBuilder.Safe(input.Province)}” khác tỉnh của chuyến (“{AgentReplyBuilder.Safe(state.Province)}”). Dùng đúng tỉnh trong state, hoặc để province=null.");
         if (input.Scope is not ("full" or "day" or "slot") || input.Scope == "full" && (input.DayNumber.HasValue || input.MealSlot is not null) ||
             input.Scope is "day" or "slot" && !input.DayNumber.HasValue || input.Scope == "day" && input.MealSlot is not null || input.Scope == "slot" && input.MealSlot is null ||
-            input.Province is not null && !string.Equals(input.Province.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) ||
             input.TopK < 1 || input.TopK > limits.MaxRanked || input.ExcludeDishIds is null || input.ExcludeDishIds.Length > 2000 || input.ExcludeDishIds.Any(x => x <= 0) ||
             input.TagIds is null || input.ExcludeTagIds is null || input.TagIds.Length > 100 || input.ExcludeTagIds.Length > 100 ||
             input.TagIds.Any(x => x <= 0) || input.ExcludeTagIds.Any(x => x <= 0) ||
@@ -190,7 +275,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             return Notice(context, rankings.Any(x => x.Coverage.Length > 0) ? AgentReplyBuilder.Coverage(context)
                 : "Chưa tìm thấy món khả dụng đáp ứng các điều kiện hiện tại. Bạn có muốn điều chỉnh điều kiện hoặc chọn bữa khác không?", "no_candidates");
         // STEP-19b: Keep each day's meals close together, picking deeper in the same reco lists when needed.
-        var (suggestedDays, legWarnings) = ArrangeDays(context, state, scope, input, rankings);
+        var (suggestedDays, legWarnings, suggestedTotal) = ArrangeDays(context, state, scope, input, rankings);
         // STEP-20: Prepare coverage through rankings.SelectMany(filtered).ToArray and returned through DistinctBy(filtered).Count.
         var coverage = rankings.SelectMany(x => x.Coverage).ToArray();
         var returned = rankings.SelectMany(x => x.Picked).DistinctBy(x => x.Id).Count();
@@ -204,12 +289,17 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var coverageWarning = coverage.Any(meal => meal.AvailableCount == 0)
             ? "Có bữa chưa có ứng viên phù hợp trong kết quả này. Kiểm tra mealCoverage và lấy gợi ý riêng cho bữa đó trước khi kết luận thiếu món."
             : rankings.Any(x => !x.PerMeal && x.ExpectedMeals > x.Picked.Count) ? "Có thể chưa đủ lựa chọn cho các bữa; cần lấy thêm gợi ý hoặc hỏi người dùng, không tự nới điều kiện." : null;
-        string[] warnings = [.. personalized ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."], .. legWarnings];
+        string[] warnings = [.. personalized ? Array.Empty<string>() : ["Đang dùng thứ tự đánh giá thay cho cá nhân hóa."], .. legWarnings,
+            .. input.FromOffered && context.OfferedShortfall.Count > 0
+                ? [$"Các món vừa gợi ý không đủ cho {string.Join(", ", context.OfferedShortfall.Distinct().Select(meal => AgentReplyBuilder.Meal(meal)))} nên các bữa đó lấy món khác trên ANGI; nói ngắn gọn điều này với người dùng."]
+                : Array.Empty<string>()];
         var candidateCount = rankings.Sum(x => x.CandidateCount);
         var ignoredCount = rankings.Sum(x => x.IgnoredCount);
         var mealCoverage = coverage.Select(x => new { x.DayNumber, x.MealSlot, x.AvailableCount, x.RequiredTags });
         // Ngân sách chia đều cho các bữa: mốc giá để model chọn món vừa túi tiền, không phải bộ lọc (một bữa có thể đắt hơn nếu bữa khác rẻ hơn).
         var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
+        // suggestedDays already prefers dishes within budgetPerMeal; budgetFits=false means even those picks cost more than the budget, so the model asks about it.
+        bool? budgetFits = state.BudgetAmount is { } budget && suggestedTotal is { } suggestedSum ? suggestedSum <= budget : null;
         // STEP-23: Return the anonymous result early when rankings.Count is 1.
         // Payload gọn cho LLM: tọa độ do backend tự tra khi tính tuyến, bữa ăn nằm ở allowedMealSlots nên tags chỉ giữ mã loại món.
         // Giữ thông báo fallback để model không mô tả thứ tự theo đánh giá là ranking cá nhân hóa.
@@ -218,7 +308,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             {
                 rankingMode = personalized ? "personalized" : "rating_fallback",
                 selectionScope = new { scope.DayNumber, scope.MealSlot },
-                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
+                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits,
                 suggestedDays, items = Items(rankings[0])
             };
         // STEP-24: Return the anonymous result.
@@ -227,7 +317,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             rankingMode = personalized ? "personalized" : "rating_fallback",
             selectionScope = new { scope.DayNumber, scope.MealSlot },
-            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal,
+            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits,
             suggestedDays, scopedResults = rankings.Select(x => new { selectionScope = new { x.Scope.DayNumber, x.Scope.MealSlot }, items = Items(x) })
         };
     }
@@ -237,7 +327,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// meal per day for the model to take; an edit of one meal puts the dishes near the day's other meals first. Dishes picked from deeper
     /// in a reco list get the grant of that same list, so nothing outside the ranked, filtered candidates is ever offered.
     /// </summary>
-    private static (object[] Days, string[] Warnings) ArrangeDays(AgentContext context, AgentState state, AgentScope scope,
+    private static (object[] Days, string[] Warnings, decimal? Total) ArrangeDays(AgentContext context, AgentState state, AgentScope scope,
         AgentRecommendationInput input, List<ScopedRanking> rankings)
     {
         var legKm = input.MaxLegKm is { } stated ? Math.Clamp((double)stated, AgentDayClustering.MinLegKm, AgentDayClustering.MaxLegKm) : AgentDayClustering.DefaultLegKm;
@@ -256,18 +346,19 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 ranking.Picked.AddRange(keep);
                 ranking.ChosenByMeal[slotMeal] = keep;
             }
-            return ([], []);
+            return ([], [], null);
         }
         var meals = AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray();
-        if (meals.Length < 2) return ([], []);
+        if (meals.Length < 2) return ([], [], null);
         var days = AgentScopedPlanning.Slots(state, scope).Select(slot => slot.Day).Distinct().Order().ToArray();
         var dishes = new Dictionary<int, ANGI.Domain.Entities.Dish>();
         var options = new Dictionary<(short, string), IReadOnlyList<AgentDayClustering.Option>>();
+        var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
         ScopedRanking? Owner(short day, string meal) => rankings.FirstOrDefault(ranking => ranking.Scope.Covers(new AgentScope(day, meal)) && ranking.Pools?.ContainsKey(meal) == true);
         IReadOnlyList<AgentDayClustering.Option> Candidates(short day, string meal)
         {
             if (options.TryGetValue((day, meal), out var known)) return known;
-            var list = (Owner(day, meal)?.Pools![meal] ?? []).Where(dish => Position(dish) is not null).Select(dish =>
+            var list = Affordable((Owner(day, meal)?.Pools![meal] ?? []).Where(dish => Position(dish) is not null), budgetPerMeal).Select(dish =>
             {
                 dishes[dish.Id] = dish;
                 var (latitude, longitude) = Position(dish)!.Value;
@@ -279,6 +370,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var used = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Select(item => AgentScopedPlanning.Normalize(item.DishName))
             .OfType<string>().ToHashSet(StringComparer.Ordinal);
         var plans = AgentDayClustering.Arrange(days, meals, Candidates, legKm, used, day => StartPoint(state, day));
+        // The even per-meal share alone can leave the total a little over a budget the trip can meet; cheaper dishes of the same meal close the gap.
+        var keptOutside = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Sum(item => item.Price);
+        if (state.BudgetAmount is { } tripBudget)
+            plans = AgentDayClustering.FitBudget(plans, Candidates, id => dishes[id].Price, tripBudget - keptOutside, legKm);
         foreach (var plan in plans)
             foreach (var pick in plan.Meals)
             {
@@ -295,7 +390,22 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             plan.DayNumber, meals = plan.Meals.Select(pick => new { pick.MealSlot, pick.Dish.DishId, dishes[pick.Dish.DishId].Name }), plan.LegsKm, plan.StartKm
         }).ToArray();
-        return (suggested, warnings);
+        // The plan's total with these picks: the kept dishes outside this scope plus the suggested ones.
+        var kept = (context.Source?.Items ?? []).Where(item => !scope.Contains(item)).Sum(item => item.Price);
+        var total = plans.Length == 0 ? (decimal?)null : kept + plans.SelectMany(plan => plan.Meals).Sum(pick => dishes[pick.Dish.DishId].Price);
+        return (suggested, warnings, total);
+    }
+
+    /// <summary>
+    /// One meal's candidates with the budget in mind: dishes within the even per-meal share come first in rank order, then the others from cheapest up.
+    /// None is dropped: a hard cap left so few dishes that one was repeated four times in a plan (conversation 471). Without a budget the rank order
+    /// is unchanged. Reads prices only, never wording.
+    /// </summary>
+    private static IEnumerable<ANGI.Domain.Entities.Dish> Affordable(IEnumerable<ANGI.Domain.Entities.Dish> ranked, decimal? perMeal)
+    {
+        if (perMeal is not { } cap) return ranked;
+        var all = ranked.ToArray();
+        return [.. all.Where(dish => dish.Price <= cap), .. all.Where(dish => dish.Price > cap).OrderBy(dish => dish.Price)];
     }
 
     /// <summary>True when a dish of the plan on that day sits outside the day's place, beyond any radius a meal was widened to.</summary>
@@ -346,7 +456,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         foreach (var request in AgentConstraintGuard.PlaceableRequests(state, messages))
         {
             // STEP-04: Call FittingMealsAsync and keep fitting.
-            var fitting = await FittingMealsAsync(state, request, ct);
+            var fitting = await FittingMealsAsync(context, state, request, ct);
             // STEP-05: Skip this round when fitting is missing or AgentConstraintGuard.PlaceSlot() is not { } slot.
             if (fitting is null || AgentConstraintGuard.PlaceSlot(state, request, fitting) is not { } slot) continue;
             // STEP-06: Set state.
@@ -358,29 +468,15 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             if (context.ConstraintBaseline is { } baseline)
                 context.ConstraintBaseline = AgentConstraintGuard.RebasePlacement(baseline, request, slot.Day, slot.Meal);
         }
-        // STEP-09: Go through each request in AgentConstraintGuard.RelocatableRequests().
-        // Bữa do backend tự xếp mà món/quán mới không phục vụ (quán lẩu chỉ bán bữa tối thay cho bữa trưa): chuyển sang bữa hợp lệ gần nhất trong ngày.
-        foreach (var request in AgentConstraintGuard.RelocatableRequests(state, messages))
-        {
-            // STEP-10: Call FittingMealsAsync and keep fitting.
-            var fitting = await FittingMealsAsync(state, request, ct);
-            // STEP-11: Skip this round when fitting is missing, fitting contains request.MealSlot or AgentConstraintGuard.PlaceSlot() is not { } slot.
-            if (fitting is null || fitting.Contains(request.MealSlot!) ||
-                AgentConstraintGuard.PlaceSlot(state, request with { MealSlot = null }, fitting) is not { } slot) continue;
-            // STEP-12: Set state.
-            state = AgentConstraintGuard.PlaceRequest(state, request, slot.Day, slot.Meal);
-            // STEP-13: Queue state.MealRequests[^1] through context.PlacedRequests.Add.
-            context.PlacedRequests.Add(state.MealRequests[^1]);
-            // STEP-14: When context.ConstraintBaseline exists, set context.ConstraintBaseline.
-            if (context.ConstraintBaseline is { } baseline)
-                context.ConstraintBaseline = AgentConstraintGuard.RebasePlacement(baseline, request, slot.Day, slot.Meal);
-        }
-        // STEP-15: Return state.
+        // A dish or restaurant put on a meal stays on that meal even when its catalog tags list another one: placement above already picks
+        // a fitting meal for a trip-wide name, and a meal the user or model named is kept (user decision 2026-11-11; Round 3 bug report: "3 món này
+        // vào bữa sáng 3 ngày" was moved to lunch and dinner because a wording reader missed "cả 3 ngày").
+        // STEP-09: Return state.
         return state;
     }
 
     /// <summary>Meals the named dish or restaurant can serve, best first; null when the name is unresolved so the ranking step reports it.</summary>
-    private async Task<string[]?> FittingMealsAsync(AgentState state, AgentMealRequest request, CancellationToken ct)
+    private async Task<string[]?> FittingMealsAsync(AgentContext context, AgentState state, AgentMealRequest request, CancellationToken ct)
     {
         // STEP-01: Prepare meals through AgentConstraintGuard.PlaceableMeals and restaurantId.
         var meals = AgentConstraintGuard.PlaceableMeals(state);
@@ -388,7 +484,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-02: When request.RestaurantName exists, prepare restaurant through LookupAsync, return null early when restaurant.Status is not "found" and 1 more action(s).
         if (request.RestaurantName is { } restaurantName)
         {
-            var restaurant = await LookupAsync(new("restaurant", restaurantName, state.Province, request.RestaurantId), ct);
+            var restaurant = await LookupAsync(context, new("restaurant", restaurantName, state.Province, request.RestaurantId), ct);
             if (restaurant.Status != "found") return null;
             restaurantId = restaurant.Matches.Single().RestaurantId;
         }
@@ -398,7 +494,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (request.DishName is { } dishName)
         {
             // STEP-05: Call LookupAsync and keep lookup.
-            var lookup = await LookupAsync(new("dish", dishName, state.Province), ct);
+            var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
             // STEP-06: Return null early when lookup.Status is not "found" or "family".
             if (lookup.Status is not ("found" or "family")) return null;
             // STEP-07: Set dishIds.
@@ -434,6 +530,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             : meals.Select(meal => new AgentScope(day, meal))).ToArray();
     }
 
+    /// <summary>The first position of a scope that is searched (a declared meal, or the scope's own meal), the first one at all for legacy state.</summary>
+    private static (short Day, string Meal) FirstSearched(AgentState state, AgentScope scope, (short Day, string Meal)[] slots) =>
+        slots.FirstOrDefault(x => state.MealSlots.Length == 0 || state.MealSlots.Contains(x.Meal) || scope.MealSlot == x.Meal, slots[0]);
+
     /// <summary>Compares only positions this scope actually searches: declared meals, or every meal for legacy state.</summary>
     private static bool IsHomogeneous(AgentState state, AgentScope scope) => AgentScopedPlanning.Slots(state, scope)
         .Where(x => state.MealSlots.Length == 0 || state.MealSlots.Contains(x.Meal) || scope.MealSlot == x.Meal)
@@ -447,7 +547,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         description = x.Description is { Length: > 160 } ? x.Description[..160] : x.Description,
         allowedMealSlots = ranking.PerMeal
             ? AgentStateValidator.Meals.Where(slot => ranking.ChosenByMeal.GetValueOrDefault(slot)?.Any(d => d.Id == x.Id) == true).ToArray()
-            : AgentStateValidator.Meals.Where(slot => (ranking.Scope.MealSlot is null || ranking.Scope.MealSlot == slot) && FitsMeal(x, slot)).ToArray(),
+            // A one-meal search already passed that meal's filter (or holds the dish the user named for it), so it is allowed there.
+            : ranking.Scope.MealSlot is { } only ? [only] : AgentStateValidator.Meals.Where(slot => FitsMeal(x, slot)).ToArray(),
         tags = x.DishTags.Where(t => t.Tag.TagType != ANGI.Domain.Enums.TagType.MealTime).Select(t => t.Tag.Code).ToArray()
     });
 
@@ -458,8 +559,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-01: Prepare state and slots through AgentScopedPlanning.Slots().ToArray.
         var state = context.State;
         var slots = AgentScopedPlanning.Slots(state, scope).ToArray();
-        // STEP-02: Set (day, meal).
-        var (day, meal) = slots[0];
+        // STEP-02: Set (day, meal) from the first position the scope really searches: a day with only lunch declared read breakfast's request, so a dish named for lunch was ignored.
+        var (day, meal) = FirstSearched(state, scope, slots);
         // STEP-03: Prepare mealRequest through AgentScopedPlanning.Request, tagIds through Concat().Concat().Distinct().ToArray and more.
         var mealRequest = AgentScopedPlanning.Request(state, day, meal);
         // Tag phải có thật trong catalog. Gộp các bộ lọc theo hướng giữ/siết ràng buộc state.
@@ -479,19 +580,24 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-06: When mealRequest.RestaurantName exists, prepare lookup through LookupAsync and more.
         if (mealRequest.RestaurantName is { } restaurantName)
         {
-            var lookup = await LookupAsync(new("restaurant", restaurantName, state.Province, mealRequest.RestaurantId), ct);
+            var lookup = await LookupAsync(context, new("restaurant", restaurantName, state.Province, mealRequest.RestaurantId), ct);
             if (lookup.Status != "found") return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             restaurantId = lookup.Matches.Single().RestaurantId;
         }
         // STEP-07: When mealRequest.DishName exists, prepare lookup through LookupAsync and more.
         if (mealRequest.DishName is { } dishName)
         {
-            var lookup = await LookupAsync(new("dish", dishName, state.Province), ct);
+            var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
             if (lookup.Status is not ("found" or "family")) return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             namedDishIds = lookup.Matches.Where(x => x.Available && (!restaurantId.HasValue || x.RestaurantId == restaurantId))
                 .Select(x => checked((int)x.Id)).ToArray();
             if (namedDishIds.Length == 0)
                 return ScopedRanking.Stopped(scope, CatalogNotice(context, "Chưa tìm thấy món được yêu cầu trong menu khả dụng của nhà hàng đã chọn. Bạn có muốn chọn món hoặc nhà hàng khác không?", "menu_mismatch"));
+            // Món người dùng gọi đích danh vẫn được đặt vào bữa họ nêu dù món đó đã có ở bữa khác của lịch: luật chống lặp món chỉ dành cho món backend tự chọn.
+            // Trước đây món đang ở bữa trưa ngày 3 bị loại khỏi bữa tối người dùng muốn thêm, nên lượt trả no_candidates (hội thoại 552).
+            // "Món khác" (differentFromPlan) vẫn loại món cũ, và excludeDishIds do model gửi vẫn được giữ.
+            if (!mealRequest.DifferentFromPlan && !alternative)
+                excluded = excluded.Except(namedDishIds.Except(input.ExcludeDishIds!)).ToArray();
         }
         // STEP-08: Prepare maxPrice through Min, place from FirstOrDefault, radius through Min, area and 12 more.
         // Hai giới hạn cùng tồn tại thì lấy giá trị nhỏ hơn: tool không được tăng trần giá/bán kính của state.
@@ -524,9 +630,15 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var picked = new List<ANGI.Domain.Entities.Dish>();
         var requestIds = new List<Guid?>();
         int candidateTotal = 0, ignoredTotal = 0;
+        // "Dựa vào các món trên hãy lập lịch": fromOffered limits the candidates to the dishes the last suggestion showed, and ranking picks among them by taste
+        // and by each day's area. Nothing is pinned to a meal, so a dish that fits no meal is simply not chosen (conversations 568 and 570 asked again and again
+        // when pinned dishes did not fit). A dish or restaurant the user named for a meal keeps its own filter.
+        var offeredPool = input.FromOffered && namedDishIds.Length == 0 && restaurantId is null
+            ? (state.OfferedDishes ?? []).Select(dish => dish.DishId).Except(excluded).ToArray() : [];
         // STEP-09: Go through each mealSlot in meals.
         foreach (var mealSlot in meals)
         {
+            var poolIds = offeredPool;
             // STEP-10: Prepare mealTags from tagIds.Append.
             // Bữa sáng/trưa/tối mặc định chỉ xếp hạng món chính, trừ khi người dùng đã chọn loại món/món/quán cho bữa đó
             // (ví dụ "bữa sáng chỉ đồ uống") hoặc model đang tìm món phụ bằng tagIds loại món.
@@ -536,8 +648,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             async Task<ANGI.Domain.Entities.Dish[]> EligibleAsync(NearbyArea? searchArea)
             {
                 var filter = new DishCandidateFilter { Province = state.Province, TagIds = mealTags, ExcludeTagIds = excludeTags,
-                    ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds,
-                    RequireAllTags = true, CompatibleMealTimeCode = mealSlot };
+                    ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds.Length > 0 ? namedDishIds : poolIds,
+                    // A dish the user named goes on the meal they named, whatever meal its catalog tags list; picks of our own keep the tags.
+                    RequireAllTags = true, CompatibleMealTimeCode = namedDishIds.Length > 0 ? null : mealSlot };
                 // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
                 // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
                 // Catalog có rất nhiều bản cùng tên ở nhiều quán: lấy rộng rồi gom theo tên, giữ quán đứng đầu thứ tự rating,
@@ -547,7 +660,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                     : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
                 // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
                 var qualified = pool.Where(cards.ContainsKey).Select(id => cards[id])
-                    .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, mealSlot) &&
+                    .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && (namedDishIds.Length > 0 || FitsMeal(dish, mealSlot)) &&
                         (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
                 if (distinctNames) qualified = namedCenter is not null
                     ? NearestBranches(qualified, dish => AgentScopedPlanning.Normalize(dish.Name), namedCenter)
@@ -562,6 +675,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var mealKey = AgentScopedPlanning.IsLongTrip(state) && perMealSearch ? $"{mealSlot}|{AgentScopedPlanning.Fingerprint(state, vectorSlot.Day, vectorSlot.Meal)}" : null;
             var known = mealKey is not null ? _rankedMeals.GetValueOrDefault(mealKey) : null;
             var eligible = known?.Eligible ?? await EligibleAsync(area);
+            // The suggested dishes that fit this meal and its area are too few for its days: the meal is ranked over the whole catalog instead, and the model is told.
+            if (poolIds.Length > 0 && known is null &&
+                eligible.Length < (mealSlot is null ? 1 : slots.Where(x => x.Meal == mealSlot).Select(x => x.Day).Distinct().Count()))
+            {
+                poolIds = [];
+                eligible = await EligibleAsync(area);
+                context.OfferedShortfall.Add(mealSlot ?? "all");
+            }
             // STEP-12: When namedCenter exists, mealSlot exists, distinctNames is true and 1 more condition(s), prepare widenedKm, check whether eligible.Length is 0 and 2 more action(s).
             // Nơi đến người dùng nêu tên mà bữa này không có món trong bán kính: chỉ bữa này được tìm xa dần, các bữa khác của ngày vẫn giữ bán kính cũ.
             // Món hoặc quán được yêu cầu đích danh giữ cách báo thiếu cũ, vì tìm xa hơn không tạo ra đúng món/quán đó.
@@ -588,6 +709,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             // Bữa không có món phù hợp được ghi nhận qua mealCoverage = 0; không tự nới điều kiện.
             if (candidates.Count == 0)
             {
+                // Món người dùng gọi đích danh có trong catalog nhưng bị bộ lọc của bữa loại hết: nói rõ bộ lọc nào để model giải thích hoặc hỏi lại,
+                // thay vì câu chung "chưa có lựa chọn phù hợp" mà người dùng không hiểu vì sao.
+                if (namedDishIds.Length > 0 && mealRequest.DishName is { } named)
+                    return ScopedRanking.Stopped(scope, CatalogNotice(context, NamedDishBlocked(named, day, mealSlot, maxPrice, area, requiredTags,
+                        namedDishIds.Any(excluded.Contains)), "named_dish_filtered"));
                 if (mealSlot is not null) chosenByMeal[mealSlot] = [];
                 continue;
             }
@@ -641,8 +767,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             if (mealKey is not null) _rankedMeals[mealKey] = new(eligible, ranked, catalog);
             // STEP-29: Prepare actual through Select(filtered).Where(filtered).ToArray and distinct from actual.DistinctBy.
             var actual = rankedIds.Where(catalog.ContainsKey).Select(id => catalog[id])
-                .Where(d => string.Equals(d.Restaurant.ProvinceName?.Trim(), state.Province!.Trim(), StringComparison.OrdinalIgnoreCase) &&
-                    FitsMeal(d, mealSlot) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
+                .Where(d => ProvinceSearch.Same(d.Restaurant.ProvinceName, state.Province) &&
+                    (namedDishIds.Length > 0 || FitsMeal(d, mealSlot)) && (!restaurantId.HasValue || d.RestaurantId == restaurantId) &&
                     (namedDishIds.Length == 0 || namedDishIds.Contains(d.Id)) && mealTags.All(id => d.DishTags.Any(t => t.TagId == id))).ToArray();
             // Catalog có cùng một món ở nhiều quán với cùng vector nên điểm gần như bằng nhau: chỉ giữ bản xếp hạng cao nhất
             // của mỗi tên. Khi chia theo bữa, ưu tiên tên chưa dùng ở bữa trước (OrderBy ổn định nên vẫn giữ thứ tự ranking).
@@ -690,7 +816,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-41: Prepare coverage through RecordCoverage.
         // Bữa không có món vẫn được ghi mealCoverage = 0 để model/reply dựa trên bằng chứng thay vì đoán thiếu món.
         var coverage = RecordCoverage(context, state, scope, slot => perMealSearch
-            ? chosenByMeal.GetValueOrDefault(slot)?.Length ?? 0 : picked.Count(dish => FitsMeal(dish, slot)), requiredTags);
+            ? chosenByMeal.GetValueOrDefault(slot)?.Length ?? 0 : picked.Count(dish => namedDishIds.Length > 0 || FitsMeal(dish, slot)), requiredTags);
         // STEP-42: Return the new result.
         return new(scope, perMealSearch, chosenByMeal, picked, requestIds, candidateTotal, ignoredTotal, coverage,
             slots.Count(x => state.MealSlots.Contains(x.Meal)), Pools: pools);
@@ -812,7 +938,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var categories = catalogTags.Where(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category).Select(tag => tag.Id).ToHashSet();
         var main = catalogTags.FirstOrDefault(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
         var required = main is not null && !wanted.Any(categories.Contains) ? wanted.Append(main.Id).ToArray() : wanted;
-        var otherProvince = !string.IsNullOrWhiteSpace(input.Province) && !string.Equals(input.Province.Trim(), state.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var otherProvince = !string.IsNullOrWhiteSpace(input.Province) && !ProvinceSearch.Same(input.Province, state.Province);
         // Nơi người dùng vừa nêu cho lần gợi ý này được ưu tiên hơn khu của chuyến đi.
         var area = named is not null ? new NearbyArea(named.Latitude, named.Longitude, named.RadiusKm) : otherProvince ? null : AgentScopedPlanning.Area(state, 0);
         var filter = new DishCandidateFilter { Province = named?.Province ?? (otherProvince ? input.Province!.Trim() : state.Province), TagIds = required,
@@ -841,14 +967,20 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // Khẩu vị nói trong câu gợi ý chỉ áp cho lần xếp hạng này, đè lên khẩu vị của chuyến đi và không ghi vào state.
         var targets = state.TasteTargets.Concat((input.TasteTargets ?? []).Where(target => AgentTasteOntology.Scale.Contains(target.Target))).ToArray();
         var vector = taste.Preferences?.Initialized == true ? AgentTasteOntology.Apply(taste.Preferences, targets).EffectiveVector : null;
+        // Reco is asked for more than will be shown, so dishes of the same restaurant can be skipped and the list still fills.
         var result = taste.Preferences?.Initialized == true
-            ? await recommendation.RecommendConversationAsync(context.UserId, ids, count, new RecommendationVector("conversation", vector), ct) : null;
+            ? await recommendation.RecommendConversationAsync(context.UserId, ids, Math.Min(ids.Length, count * 3), new RecommendationVector("conversation", vector), ct) : null;
         var ranked = result?.DishIds.Where(ids.Contains).ToArray() ?? [];
         var order = ranked.Length > 0 ? ranked : ids;
         // STEP-07: Prepare personalized, then return the result of AgentDishSuggestionPolicy.Suggestion.
         // Chỉ tính là theo khẩu vị khi người dùng có hồ sơ khẩu vị và reco xác nhận đã xếp bằng vector: reco bỏ qua vector của người chưa có tương tác nào, nên khẩu vị vừa nói một mình chưa đủ.
         var personalized = taste.Preferences?.BaselineVector?.Any(value => value != 0) == true && vector is not null && ranked.Length > 0 && result?.VectorSource == "conversation";
-        return AgentDishSuggestionPolicy.Suggestion(order.Take(count).Select(id => candidates.First(dish => dish.Id == id)).ToArray(), aroundPin, personalized, hasPlan, named?.Label, areaNotFound, mealAsked);
+        // Rank order, at most MaxPerRestaurant dishes of one restaurant; only when that leaves the list short are the skipped dishes used, still in rank order.
+        var ordered = order.Select(id => candidates.First(dish => dish.Id == id)).ToArray();
+        var perRestaurant = new Dictionary<long, int>();
+        var varied = ordered.Where(dish => (perRestaurant[dish.RestaurantId] = perRestaurant.GetValueOrDefault(dish.RestaurantId) + 1) <= AgentDishSuggestionPolicy.MaxPerRestaurant).Take(count).ToList();
+        varied.AddRange(ordered.Where(dish => !varied.Contains(dish)).Take(count - varied.Count));
+        return AgentDishSuggestionPolicy.Suggestion(varied, aroundPin, personalized, hasPlan, named?.Label, areaNotFound, mealAsked);
     }
 
     /// <summary>Locates the place a suggestion was asked around; a place that cannot be located is reported rather than silently ignored, and a province is a filter of its own.</summary>
@@ -884,7 +1016,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (AgentPlaceResolver.IsKnownPlace(context.State, input.Name))
             return ArgumentError(context, "Đây là nơi đến trong hành trình của người dùng, không phải tên món/quán; backend đã tìm quanh nơi này. Hãy gọi get_recommendation.");
         // STEP-05: Call LookupAsync and keep result.
-        var result = await LookupAsync(input, ct);
+        var result = await LookupAsync(context, input, ct);
         // STEP-06: When result.Status is "found", set context.CatalogAnswer; otherwise set context.ToolNotice.
         // Tìm thấy đúng tên chỉ là dữ kiện để trả lời câu hỏi về catalog, không phải câu hỏi cho người dùng: nếu gán ToolNotice,
         // mọi câu clarify của lượt sẽ thành "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI."
@@ -897,7 +1029,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         return new { result.Status, result.Message, result.Matches };
     }
 
-    private async Task<CatalogLookup> LookupAsync(AgentCatalogInput input, CancellationToken ct)
+    /// <summary>Remembers that this name needs a choice from the user, then returns the lookup unchanged.</summary>
+    private static CatalogLookup Ambiguous(AgentContext context, string name, CatalogLookup lookup)
+    {
+        context.AmbiguousNames.Add(name);
+        return lookup;
+    }
+
+    private async Task<CatalogLookup> LookupAsync(AgentContext context, AgentCatalogInput input, CancellationToken ct)
     {
         // STEP-01: Throw the error from Invalid when input.Kind is not ("dish" or "restaurant"), input.Name is blank, input.Name.Length > 200 or 2 more condition(s).
         if (input.Kind is not ("dish" or "restaurant") || string.IsNullOrWhiteSpace(input.Name) || input.Name.Length > 200 ||
@@ -909,11 +1048,20 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var matches = await catalogSearch.SearchAsync(input.Kind, input.Name, input.Province, 21, ct);
         // STEP-04: Prepare exact through matches.Where(filtered).ToArray.
         var exact = matches.Where(x => AgentScopedPlanning.Normalize(x.Name) == AgentScopedPlanning.Normalize(input.Name)).ToArray();
-        // STEP-05: When input.SelectedId has a value, set exact.
-        if (input.SelectedId.HasValue) exact = exact.Where(x => x.Id == input.SelectedId).ToArray();
+        // STEP-05: When input.SelectedId has a value, keep only that result of this search.
+        // A branch is usually named longer than the name the user gave ("Cháo Súp Linh Hoa - Trần Khát Chân" for "Cháo Súp Linh Hoa").
+        // Such a longer-named result counts only once the user was asked to choose for this name (state.CatalogChoices), so the model
+        // can never pick a branch on its own; an exact-name result always counts.
+        var name = AgentScopedPlanning.Normalize(input.Name)!;
+        if (input.SelectedId.HasValue)
+        {
+            var exactPick = exact.Where(x => x.Id == input.SelectedId).ToArray();
+            var asked = context.State.CatalogChoices?.Contains(name) == true;
+            exact = exactPick.Length > 0 ? exactPick : asked ? matches.Where(x => x.Id == input.SelectedId).ToArray() : [];
+        }
         // STEP-06: Return the new result early when input.SelectedId has a value and exact.Length is 0.
         if (input.SelectedId.HasValue && exact.Length == 0)
-            return new("ambiguous", "Lựa chọn chưa khớp kết quả tra cứu đúng tên. Bạn muốn chọn kết quả nào trong danh sách?", matches.Take(20).ToArray());
+            return Ambiguous(context, name, new("ambiguous", "Lựa chọn chưa khớp kết quả tra cứu đúng tên. Bạn muốn chọn kết quả nào trong danh sách?", matches.Take(20).ToArray()));
         // STEP-07: When exact.Length is 0, prepare elsewhere from catalogSearch.SearchAsync, prepare outside through elsewhere.Any and 1 more action(s).
         if (exact.Length == 0)
         {
@@ -925,6 +1073,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                     : new("unavailable", "Món/quán có trong hệ thống nhưng hiện chưa khả dụng. Bạn có muốn xem lựa chọn khác không?", family);
             var elsewhere = input.Province is null ? [] : await catalogSearch.SearchAsync(input.Kind, input.Name, null, 21, ct);
             var outside = elsewhere.Any(x => AgentScopedPlanning.Normalize(x.Name) == AgentScopedPlanning.Normalize(input.Name));
+            if (!outside && matches.Length > 0) context.AmbiguousNames.Add(name);
             return new(outside ? "outside_province" : matches.Length > 0 ? "ambiguous" : "not_found",
                 outside ? "Có kết quả cùng tên trong hệ thống nhưng ngoài tỉnh đã chọn. Bạn muốn giữ địa điểm hay thay đổi?"
                 : matches.Length > 0 ? "Chưa xác định được đúng món/quán theo tên đã yêu cầu. Bạn muốn chọn kết quả nào trong danh sách?"
@@ -932,7 +1081,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         }
         // STEP-08: Return the new result early when (input.Kind is "restaurant" and exact.Length is not 1) or exact.Length > 20.
         if (input.Kind == "restaurant" && exact.Length != 1 || exact.Length > 20)
-            return new("ambiguous", "Có nhiều kết quả cùng tên. Bạn muốn chọn nhà hàng/chi nhánh nào trong danh sách?", exact.Take(20).ToArray());
+            return Ambiguous(context, name, new("ambiguous", "Có nhiều kết quả cùng tên. Bạn muốn chọn nhà hàng/chi nhánh nào trong danh sách?", exact.Take(20).ToArray()));
         // STEP-09: Return the new result early when exact.Any does not match the filter.
         if (!exact.Any(x => x.Available))
             return new("unavailable", "Món/quán có trong hệ thống nhưng hiện chưa khả dụng. Bạn có muốn xem lựa chọn khác không?", exact);
@@ -955,6 +1104,20 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     {
         context.ToolNotice = message;
         return new { status, rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>(), warnings = new[] { message } };
+    }
+
+    /// <summary>Names the filters that removed a dish the user asked for by name, so the reply can say why instead of "no suitable choice".</summary>
+    private static string NamedDishBlocked(string dishName, short? day, string? mealSlot, decimal? maxPrice, NearbyArea? area, string[] requiredTags, bool excluded)
+    {
+        var reasons = new List<string>();
+        if (excluded) reasons.Add("món này nằm trong danh sách loại trừ của lượt này (người dùng muốn món khác hoặc đã bỏ món này)");
+        if (maxPrice is { } price) reasons.Add($"trần giá mỗi món {price.ToString("#,0", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"))} đồng");
+        if (area is not null) reasons.Add($"bán kính {area.RadiusKm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} km quanh điểm đã chọn");
+        if (requiredTags.Length > 0) reasons.Add($"yêu cầu loại món: {string.Join(", ", requiredTags.Select(AgentReplyBuilder.Safe))}");
+        var meal = day is null ? "bữa này" : $"ngày {day}{(mealSlot is null ? "" : ", " + AgentReplyBuilder.Meal(mealSlot))}";
+        return $"Món “{AgentReplyBuilder.Safe(dishName)}” có trong danh mục nhưng không đặt được vào {meal}" +
+            (reasons.Count > 0 ? $" vì điều kiện hiện tại: {string.Join("; ", reasons)}." : " vì món hoặc quán đang tạm ngưng phục vụ.") +
+            " Hãy nói rõ lý do này với người dùng và hỏi họ muốn đổi điều kiện hay chọn món khác; không tự đặt món khác vào bữa đó.";
     }
 
     /// <summary>A catalog lookup notice that later ranking calls cannot erase, so catalog questions keep the name and the near matches.</summary>
@@ -1070,7 +1233,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
 public sealed record AgentRecommendationInput(AgentState? State = null, string? Province = null, string Scope = "full",
     short? DayNumber = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null,
     int[]? ExcludeDishIds = null, decimal? MaxPricePerMeal = null, decimal? RadiusKm = null, int TopK = 50, bool Alternative = false,
-    decimal? MaxLegKm = null);
+    decimal? MaxLegKm = null, bool FromOffered = false);
 
 /// <summary>What a dish suggestion is limited to; every value comes from the user's own request.</summary>
 public sealed record AgentSuggestionInput(string? Province = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MaxPrice = null, int Count = 1, AgentTasteTarget[]? TasteTargets = null, string? Area = null);

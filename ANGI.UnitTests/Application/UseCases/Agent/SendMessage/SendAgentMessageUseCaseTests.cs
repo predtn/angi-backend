@@ -430,10 +430,10 @@ public sealed class SendAgentMessageUseCaseTests
         // STEP-02: Run Create().ExecuteAsync with request.
         var turn = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
 
-        // STEP-03: Assert the model was told the roadmap is gone, its reply is shown, and only its reset detaches the roadmap.
+        // STEP-03: Assert the model was told the roadmap is gone, its reply is shown, and the deleted roadmap is detached after this turn whatever the action (Round 3, AG-60).
         told.Should().Equal(true);
         turn.Reply.Should().Be("Lịch cũ đã bị xóa, mình làm lại từ đầu nhé.");
-        fixture.Conversation.RoadmapId.Should().Be(action == "reset_conversation" ? null : 41);
+        fixture.Conversation.RoadmapId.Should().BeNull();
     }
 
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),

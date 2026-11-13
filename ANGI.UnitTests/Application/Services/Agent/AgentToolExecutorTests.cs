@@ -39,6 +39,103 @@ public sealed class AgentToolExecutorTests
         context.ToolNotice.Should().BeNull();
     }
 
+    // TEST-01b: A state the validator rejects (a meal slot without its day) goes back to the model as a tool error, so the turn
+    // continues and the model can ask which day, instead of ending with the previous, often empty, reply (conversation 548).
+    /// <summary>Returns invalid_arguments naming the rule and keeps the turn's state.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RecommendationWithInvalidState_ReturnsErrorToModel()
+    {
+        var fixture = AgentTestData.Validator();
+        var context = AgentTestData.Context();
+        var before = context.State;
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var invalid = before with { MealRequests = [new AgentMealRequest(null, "lunch", "Bánh Cuốn Chay Nấm Hương", null, [])] };
+        var result = await tools.ExecuteAsync(context, Call(Input() with { State = invalid }), CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        result.GetProperty("warnings")[0].GetString().Should().Contain("MealRequests").And.Contain("dayNumber");
+        context.State.Should().BeSameAs(before);
+    }
+
+    // TEST-01c: Starter buttons carry their whole meaning: the backend fixes the tool and every argument, so nothing is left for the model to guess.
+    /// <summary>plan_trip plans the whole trip with three meals; suggest_lunch caps lunch at the trip budget shared over every meal.</summary>
+    [Fact]
+    public async Task StarterCallAsync_FixesToolAndArguments()
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.State = context.State with { BudgetAmount = 600000 };
+
+        context.Request.Command = "plan_trip";
+        var plan = await tools.StarterCallAsync(context, CancellationToken.None);
+        context.Request.Command = "suggest_lunch";
+        var lunch = await tools.StarterCallAsync(context, CancellationToken.None);
+        context.Request.Command = "chat";
+        var chat = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        plan!.Name.Should().Be("get_recommendation");
+        plan.Arguments.GetProperty("scope").GetString().Should().Be("full");
+        context.State.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        lunch!.Name.Should().Be("suggest_dish");
+        lunch.Arguments.GetProperty("mealSlot").GetString().Should().Be("lunch");
+        // 600.000 đồng cho 2 ngày x 3 bữa = 100.000 đồng mỗi bữa.
+        lunch.Arguments.GetProperty("maxPrice").GetDecimal().Should().Be(100000);
+        chat.Should().BeNull();
+    }
+
+    // TEST-01c2: Every starter call passes the same strict tool schema the model's calls pass; plan_trip once sent the whole state,
+    // whose backend-owned fields the schema refuses, and every press failed with "Cấu trúc tham số công cụ không hợp lệ" (conversation 556).
+    /// <summary>Checks each starter's arguments against the tool schema checked at the top of ExecuteAsync.</summary>
+    [Theory]
+    [InlineData("plan_trip")]
+    [InlineData("suggest_lunch")]
+    [InlineData("suggest_specialty")]
+    public async Task StarterCallAsync_ArgumentsPassToolSchema(string command)
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        // State với các trường backend tự quản, như sau vài lượt chat thật.
+        context.State = context.State with { Preferences = new() { Initialized = true }, OfferedDishes = [new(1, "Phở", 2, "Quán A")] };
+        context.Request.Command = command;
+
+        var call = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        AgentLlmSchema.IsValid(call!.Arguments, AgentLlmSchema.Tools[call.Name]).Should().BeTrue();
+    }
+
+    // TEST-01c3: A trip stored with the full province name ("Thành phố …") keeps the ranked dishes of restaurants stored with the short name.
+    // The ranked list was filtered by an exact name match, so every dish was dropped and plan_trip found nothing (conversation 556, turn 4).
+    /// <summary>Returns the ranked dish although the trip and the restaurant spell the province differently.</summary>
+    [Fact]
+    public async Task ExecuteAsync_FullProvinceName_KeepsRankedDishes()
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { Province = "Thành phố Da Nang" };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { Province = null }), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(221);
+    }
+
+    // TEST-01d: A starter without a known province runs as an ordinary chat turn instead of guessing a place.
+    /// <summary>Returns no starter call when the trip has no province yet.</summary>
+    [Fact]
+    public async Task StarterCallAsync_WithoutProvince_ReturnsNull()
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.State = context.State with { Province = null };
+        context.Request.Command = "suggest_lunch";
+
+        (await tools.StarterCallAsync(context, CancellationToken.None)).Should().BeNull();
+    }
+
     // TEST-02: Selection scope and allowed meal slots never widen a grant; covers full, day and slot scopes.
     /// <summary>Checks that issued grants and allowedMealSlots follow the requested day/meal scope and dish meal tags.</summary>
     [Theory]
@@ -440,6 +537,28 @@ public sealed class AgentToolExecutorTests
         context.Grants.Single().DishIds.Should().Equal(1, 2);
     }
 
+    // TEST-14b: A dish the user names for a meal stays a candidate even when the plan already has it at another meal:
+    // the no-repeat rule only covers dishes the backend picks itself (conversation 552 ended with no_candidates).
+    /// <summary>Grants the named dish for the named meal although the source plan serves it elsewhere.</summary>
+    [Fact]
+    public async Task ExecuteAsync_NamedDishAlreadyInPlan_StaysCandidate()
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.ExcludeDishIds.Contains(1) ? [] : new[] { 1 });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context(AgentTestData.Snapshot(AgentTestData.Item(1, "a", 1) with { DishName = "Phở" }));
+        context.State = context.State with { MealSlots = ["lunch", "dinner"], MealRequests = [new(2, "dinner", "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { Scope = "slot", DayNumber = 2, MealSlot = "dinner" }), CancellationToken.None);
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1);
+        context.Grants.Single().DishIds.Should().Equal(1);
+    }
+
     // TEST-15: Caller cancellation during the per-meal candidate query propagates and issues no grant.
     /// <summary>Verifies the cancellation token reaches the catalog query and is not converted into a tool result.</summary>
     [Fact]
@@ -653,6 +772,38 @@ public sealed class AgentToolExecutorTests
         }
     }
 
+    // TEST-21b: A branch whose name is longer than the name the user gave resolves once the user was asked to choose for that name;
+    // covers no ID, a listed ID after the question, a listed ID the model picked before any question, and an unlisted ID.
+    /// <summary>Fixes the loop where "Cháo Súp Linh Hoa" kept asking which branch (Round 2) without letting the model pick a branch unasked (Round 3, AG-22).</summary>
+    [Theory]
+    [InlineData(null, true, "ambiguous")]
+    [InlineData(576L, true, "found")]
+    [InlineData(576L, false, "ambiguous")]
+    [InlineData(999L, true, "ambiguous")]
+    public async Task ExecuteAsync_SearchCatalog_ChosenBranchResolves(long? selectedId, bool asked, string status)
+    {
+        // STEP-01: Stub catalog.SearchAsync with two branches named longer than the searched name.
+        var fixture = AgentTestData.Validator();
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("restaurant", "Cháo Linh", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync(
+            [new(575, "Cháo Linh - Hoàng Văn Thái", 575, "Cháo Linh - Hoàng Văn Thái", "Da Nang", "4 Hoàng Văn Thái", true),
+             new(576, "Cháo Linh - Trần Khát Chân", 576, "Cháo Linh - Trần Khát Chân", "Da Nang", "530 Trần Khát Chân", true)]);
+        catalog.Setup(x => x.SearchAsync("restaurant", "Cháo Linh", null, 21, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var call = new AgentToolCall("s", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("restaurant", "Cháo Linh", "Da Nang", selectedId), AgentJson.Options));
+
+        // STEP-02: Run tools.ExecuteAsync and keep result, with or without the name recorded as asked.
+        var context = AgentTestData.Context();
+        if (asked) context.State = context.State with { CatalogChoices = [AgentScopedPlanning.Normalize("Cháo Linh")!] };
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        // STEP-03: Assert the status, that a found branch is the chosen one, and that an ambiguous name is remembered for the question.
+        result.GetProperty("status").GetString().Should().Be(status);
+        if (status == "found") result.GetProperty("matches").EnumerateArray().Single().GetProperty("id").GetInt64().Should().Be(576);
+        else context.AmbiguousNames.Should().Contain(AgentScopedPlanning.Normalize("Cháo Linh")!);
+    }
+
     // TEST-22: A named dish without a meal is placed on one fitting meal before ranking, so other meals keep their own candidates.
     /// <summary>Fixes "phải có món X" filtering every meal to X and ending in "no candidates for breakfast".</summary>
     [Fact]
@@ -680,12 +831,69 @@ public sealed class AgentToolExecutorTests
         context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
     }
 
-    // TEST-23: A restaurant serving only dinner moves off a meal the backend chose; a meal the user named stays and reports no candidates.
-    /// <summary>Fixes a replacement restaurant getting stuck on the lunch position its predecessor was placed on.</summary>
+    // TEST-57: fromOffered ranks only the suggested dishes that fit, and a meal they cannot fill is ranked over the whole catalog with a warning; without it the catalog is used.
+    /// <summary>"Dựa vào các món trên hãy lập lịch" limits the candidates to the suggestion instead of pinning each dish to a meal (conversations 568 and 570).</summary>
     [Theory]
-    [InlineData("đổi sang quán Lẩu Bò", "dinner")]
+    [InlineData(true, 1)]
+    [InlineData(false, 1)]
+    [InlineData(true, 3)]
+    public async Task ExecuteAsync_FromOffered_RanksOnlySuggestedDishes(bool fromOffered, int days)
+    {
+        // STEP-01: Create a catalog with a suggested dish (1) and another (2), and record the dish ids each search was limited to.
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var limits = new List<int[]>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) =>
+            {
+                limits.Add([.. filter.DishIds]);
+                return filter.DishIds.Count > 0 ? filter.DishIds.Where(id => id == 1).ToArray() : new[] { 1, 2 };
+            });
+        var context = AgentTestData.Context();
+        context.State = context.State with { NumDays = (short)days, MealSlots = ["lunch"], OfferedDishes = [new(1, "Phở", 10, "Quán A")] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        // STEP-02: Run tools.ExecuteAsync with context.
+        var result = await tools.ExecuteAsync(context, Call(Input() with { FromOffered = fromOffered }), CancellationToken.None);
+
+        // STEP-03: Assert the first search was limited to the suggestion only with fromOffered, and a meal of three days fell back to the catalog with a warning.
+        limits[0].Should().Equal(fromOffered ? [1] : Array.Empty<int>());
+        var warned = result.GetProperty("warnings").EnumerateArray().Any(x => x.GetString()!.StartsWith("Các món vừa gợi ý không đủ"));
+        warned.Should().Be(fromOffered && days == 3);
+        if (warned) limits[^1].Should().BeEmpty();
+    }
+
+    // TEST-59: A day that declares only lunch reads lunch's request, so a dish the user named for it filters the search.
+    /// <summary>The scope of a whole day used to read breakfast's request first, and a dish named for lunch on a lunch-only trip was ignored.</summary>
+    [Fact]
+    public async Task ExecuteAsync_LunchOnlyDay_ReadsLunchRequest()
+    {
+        // STEP-01: Create a catalog searched by dish id and a lunch-only trip naming a dish for lunch on day 1.
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var limits = new List<int[]>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => { limits.Add([.. filter.DishIds]); return filter.DishIds.Count > 0 ? [1] : new[] { 2 }; });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        catalog.Setup(x => x.SearchAsync("dish", "Phở", "Da Nang", 21, It.IsAny<CancellationToken>())).ReturnsAsync([new(1, "Phở", 10, "Quán A", "Da Nang", "1 A", true)]);
+        var context = AgentTestData.Context();
+        context.Request.Content = "bữa trưa ngày 1 ăn Phở";
+        context.State = context.State with { MealSlots = ["lunch"], MealRequests = [new(1, "lunch", "Phở", null, [])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        // STEP-02: Run tools.ExecuteAsync with context.
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        // STEP-03: Assert one search was limited to the named dish.
+        limits.Should().Contain(ids => ids.SequenceEqual(new[] { 1 }));
+    }
+
+    // TEST-23: A request already on a meal stays on it, whatever the wording and whatever meal the restaurant usually serves.
+    /// <summary>The backend no longer moves a placed request by reading the user's wording (user decision 2026-11-11: a named dish goes on the meal it was put on).</summary>
+    [Theory]
+    [InlineData("đổi sang quán Lẩu Bò", "lunch")]
     [InlineData("bữa trưa ngày 1 ăn ở quán Lẩu Bò", "lunch")]
-    public async Task ExecuteAsync_RestaurantCannotServeMeal_MovesOnlyBackendPlacement(string content, string expected)
+    public async Task ExecuteAsync_RequestOnAMeal_StaysOnIt(string content, string expected)
     {
         // STEP-01: Create fixture through AgentTestData.Validator.
         var fixture = AgentTestData.Validator(Named(1, "Lẩu"));
@@ -1035,7 +1243,7 @@ public sealed class AgentToolExecutorTests
         await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
 
         // STEP-05: Assert filters.Where(filtered).Select(filtered) equals 3m and context.State.WidenedMeals ?? [] holds no matching item.
-        filters.Where(filter => filter.Area is not null && filter.CompatibleMealTimeCode == "lunch").Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
+        filters.Where(filter => filter.Area is not null && filter.DishIds.Contains(1)).Select(filter => filter.Area!.RadiusKm).Should().Equal(3m);
         (context.State.WidenedMeals ?? []).Should().NotContain(meal => meal.MealSlot == "lunch");
     }
 
@@ -1077,8 +1285,8 @@ public sealed class AgentToolExecutorTests
         return dish;
     }
 
-    // TEST-38: A taste level the user never stated is refused before any catalog read or ranking and leaves the state unchanged; covers no quote, a quote nobody wrote and a quote naming only the taste.
-    /// <summary>Conversation 10 got a level the model invented; the model has to ask instead of ranking with it.</summary>
+    // TEST-38: A level other than the default that the user never stated is refused before any catalog read or ranking and leaves the state unchanged; covers no quote, a quote nobody wrote and a quote naming only the taste.
+    /// <summary>Conversation 10 got a level the model invented; the model is told to quote the user and use the default level, never to ask.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("cay vừa")]
@@ -1099,10 +1307,33 @@ public sealed class AgentToolExecutorTests
 
         // STEP-04: Assert result.status is "invalid_arguments", the warning tells the model to ask and context.State is unchanged.
         result.GetProperty("status").GetString().Should().Be("invalid_arguments");
-        result.GetProperty("warnings")[0].GetString().Should().Contain("taste_intensity");
+        result.GetProperty("warnings")[0].GetString().Should().Contain("levelQuote").And.NotContain("taste_intensity");
         context.State.Should().BeSameAs(before);
         // STEP-05: Verify GetCandidateIdsAsync is never called.
         fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-58: A taste the user wrote with no level is ranked at the default moderate level instead of being refused; covers liking wording and a bare taste.
+    /// <summary>Conversation 568 asked "cay nhẹ, vừa, nhiều hay rất nhiều, cả chuyến hay một bữa?" after "ưu tiên đồ cay" (user decision 2026-11-12: plan instead).</summary>
+    [Theory]
+    [InlineData("ưu tiên đồ cay")]
+    [InlineData("thích ăn cay")]
+    public async Task ExecuteAsync_TasteWithoutLevel_RanksAtDefault(string quote)
+    {
+        // STEP-01: Get context with the user's message and an input quoting it at the default level.
+        var fixture = AgentTestData.Validator(Named(1, "Bún"));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync([1]);
+        var context = AgentTestData.Context();
+        context.Request.Content = $"lập lịch giúp tôi, {quote}";
+        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", ANGI.Application.Services.Agent.Constraints.AgentConstraintGuard.DefaultTasteLevel, quote)] } };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        // STEP-02: Run tools.ExecuteAsync with context and keep result.
+        var result = await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
+
+        // STEP-03: Assert the call was not refused and the taste reached the state.
+        (result.TryGetProperty("status", out var status) ? status.GetString() : null).Should().NotBe("invalid_arguments");
+        context.State.TasteTargets.Should().ContainSingle(x => x.Dimension == "spicy" && x.Target == ANGI.Application.Services.Agent.Constraints.AgentConstraintGuard.DefaultTasteLevel);
     }
 
     // TEST-39: An unknown taste dimension is refused by the strict schema before any catalog read or ranking.

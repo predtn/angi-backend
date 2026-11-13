@@ -470,4 +470,19 @@ public sealed class AgentProposalValidatorTests
         var catalog = Enumerable.Range(1, 10).Append(221).Select(id => AgentTestData.Dish(id)).ToArray();
         return (new AgentSnapshot(state, items, grants.ToArray(), Scope: new()), grants, catalog);
     }
+
+    // TEST-20: Only errors saying a dish was made up name it as fabricated; covers a dish not in the catalog, one not issued, one outside the trip's area or province,
+    // a stale grant, and the soft errors (budget, repeat, meal fit, a missing meal) that stay warnings.
+    /// <summary>The orchestrator blocks a made-up dish and lets the model correct it once; soft rule errors keep showing the draft (user decision 2026-11-12).</summary>
+    [Theory]
+    [InlineData("Món 12 không còn khả dụng.", 12)]
+    [InlineData("Món 13 cần nguồn ứng viên mới đúng phạm vi và khẩu vị. Vị trí bị từ chối: ngày 1, bữa lunch. Món chưa có trong kết quả được cấp; chọn món khác từ kết quả hiện có.", 13)]
+    [InlineData("Món 14 không đáp ứng ràng buộc chuyến đi.", 14)]
+    [InlineData("Món 15 được lấy theo khẩu vị khác; cần lấy gợi ý lại.", 15)]
+    [InlineData("Món 16 không phù hợp bữa đã chọn.", null)]
+    [InlineData("Món 17 bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.", null)]
+    [InlineData(AgentProposalValidator.BudgetExceeded, null)]
+    [InlineData("Chưa có món cho bữa lunch ngày 1.", null)]
+    // STEP-01: Assert the dish named by a made-up error, and null for any other error.
+    public void FabricatedDish_OnlyForMadeUpDishes(string error, int? dish) => AgentProposalValidator.FabricatedDish(error).Should().Be(dish);
 }

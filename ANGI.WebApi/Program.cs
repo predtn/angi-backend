@@ -19,6 +19,13 @@ if (!builder.Environment.IsDevelopment())
         options.UseUtcTimestamp = true;
     });
 }
+else
+{
+    // Máy dev: ghi thêm log ra logs/app-yyyyMMdd.log (thư mục bị git bỏ qua), chỉ giữ 7 ngày gần nhất.
+    builder.Logging.AddProvider(new ANGI.Infrastructure.Services.Logging.DailyFileLoggerProvider(
+        Path.Combine(builder.Environment.ContentRootPath, "logs"),
+        builder.Configuration.GetValue("FileLogging:RetentionDays", 7)));
+}
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);

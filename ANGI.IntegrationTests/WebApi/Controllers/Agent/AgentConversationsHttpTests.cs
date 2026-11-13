@@ -741,32 +741,30 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         });
     }
 
-    // TEST-20: A hallucinated dish ID is shown as the model wrote it but saving it fails with PROPOSAL_NOT_COMMITTABLE and writes nothing; a provider failure keeps the current proposal.
-    /// <summary>Verifies the save writer, not the chat turn, is what keeps an unknown dish out of the roadmap, and an availability failure stores nothing.</summary>
+    // TEST-20: A hallucinated dish ID never reaches the draft: after one repair the meal keeps its dish from the current plan and nothing is saved; a provider failure keeps the current proposal.
+    /// <summary>Verifies the chat turn keeps an unknown dish out of the draft (user decision 2026-11-12), and an availability failure stores nothing.</summary>
     [PostgresEndToEndFact]
     public async Task InvalidOutputAndProviderFailure_NeverReachRoadmap()
     {
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host and derive client from scenario.Client.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
-        // STEP-02: Obtain conversation through OpenAsync and turn through SendAsync.
+        // STEP-02: Obtain conversation through OpenAsync and turn through SendAsync, and keep the dish the first draft put on lunch of day 1.
         var conversation = await OpenAsync(client); var turn = await SendAsync(client, conversation.ConversationId, Message(1));
-        // STEP-03: Set scenario.Llm.Override to a patch that swaps in a dish ID the catalog does not have.
+        var lunch = turn.Proposal!.Snapshot.Items.Single(item => item.ItemKey == "d1").DishId;
+        // STEP-03: Set scenario.Llm.Override to a patch that swaps in a dish ID the catalog does not have, on every call including the repair.
         scenario.Llm.Override = _ => new AgentLlmStep([], new AgentOutput { Action = "patch_proposal", Reply = "Fake", BaseProposalVersion = 1,
             Scope = new(1, "lunch"), Changes = [new("replace", "d1", new AgentItem("d1", null, 1, "lunch", 0, int.MaxValue))] });
-        // STEP-04: Obtain invalid through SendAsync; assert invalid.Proposal holds the unknown dish ID.
+        // STEP-04: Obtain invalid through SendAsync; assert the draft never holds the unknown dish ID and lunch keeps its dish.
         var invalid = await SendAsync(client, conversation.ConversationId, Message(turn.ConversationVersion));
-        invalid.Proposal!.Snapshot.Items.Should().Contain(item => item.DishId == int.MaxValue);
-        // STEP-05: Send POST {Path}/{conversation.ConversationId}/confirm for invalid.Proposal and keep rejected.
-        using var rejected = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/confirm",
-            new { proposalId = invalid.Proposal.ProposalId, proposalVersion = invalid.Proposal.Version });
-        // STEP-06: Assert ErrorAsync confirms PROPOSAL_NOT_COMMITTABLE and no roadmap was written.
-        await ErrorAsync(rejected, HttpStatusCode.Conflict, "PROPOSAL_NOT_COMMITTABLE");
+        invalid.Proposal!.Snapshot.Items.Should().NotContain(item => item.DishId == int.MaxValue);
+        invalid.Proposal.Snapshot.Items.Single(item => item.ItemKey == "d1").DishId.Should().Be(lunch);
+        // STEP-05: Assert no roadmap was written by the chat turn.
         (await factory.ExecuteDbAsync(db => db.Roadmaps.CountAsync())).Should().Be(0);
-        // STEP-07: Set scenario.Llm.Override to return no step, as a failed provider does.
+        // STEP-06: Set scenario.Llm.Override to return no step, as a failed provider does.
         scenario.Llm.Override = _ => null;
-        // STEP-08: Send POST {Path}/{conversation.ConversationId}/messages with a request body and keep unavailable.
+        // STEP-07: Send POST {Path}/{conversation.ConversationId}/messages with a request body and keep unavailable.
         using var unavailable = await client.PostAsJsonAsync($"{Path}/{conversation.ConversationId}/messages", Message(invalid.ConversationVersion));
-        // STEP-09: Obtain restored through GetAsync; assert ErrorAsync confirms AGENT_UNAVAILABLE, the current proposal is unchanged and nothing is processing.
+        // STEP-08: Obtain restored through GetAsync; assert ErrorAsync confirms AGENT_UNAVAILABLE, the current proposal is unchanged and nothing is processing.
         await ErrorAsync(unavailable, HttpStatusCode.ServiceUnavailable, "AGENT_UNAVAILABLE");
         var restored = await GetAsync(client, conversation.ConversationId);
         restored.CurrentProposal!.ProposalId.Should().Be(invalid.Proposal.ProposalId); restored.Processing.Should().BeFalse();
@@ -2023,8 +2021,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         var reset = await SendPromptAsync(client, conversation.ConversationId, "làm lại từ đầu");
         var current = await GetAsync(client, conversation.ConversationId);
 
-        // STEP-06: Assert both messages reached the model with attachedRoadmapDeleted set.
-        told.Should().NotBeEmpty().And.OnlyContain(deletedFlag => deletedFlag);
+        // STEP-06: Assert the first message reached the model with attachedRoadmapDeleted set and the reset after it did not:
+        // the turn that told the user detaches the roadmap, so the notice is not repeated on every reply (Round 3, AG-60).
+        told.Should().NotBeEmpty();
+        told.First().Should().BeTrue(); told.Last().Should().BeFalse();
         // STEP-07: Assert reset.Reply is the model's reply, current.State.Province is null and current.CurrentProposal is null.
         reset.Reply.Should().Be("Mình làm lại từ đầu nhé.");
         current.State.Province.Should().BeNull(); current.CurrentProposal.Should().BeNull();

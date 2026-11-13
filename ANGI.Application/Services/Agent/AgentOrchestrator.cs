@@ -61,6 +61,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         string? lastReply = null;
         try
         {
+            // Prompt mẫu là nút bấm, không phải câu người dùng gõ: backend tự chạy đúng một tool với tham số cố định (tỉnh, bữa, ngân sách, phạm vi),
+            // model chỉ đọc kết quả và viết câu trả lời. Trước đây cùng một câu mẫu lúc được hỏi lại, lúc gợi ý món, lúc lập cả lịch (hội thoại 549, 550, 552, 553).
+            if (await tools.StarterCallAsync(context, timeout.Token) is { } starter)
+            {
+                var starterResult = await tools.ExecuteAsync(context, starter, timeout.Token);
+                executedTools.Add(starter.Name + ":" + starter.Arguments.GetRawText());
+                context.Exchanges.Add(new([starter], [starterResult]));
+                toolRounds++;
+                toolCalls++;
+                // Gợi ý món: lần gọi model duy nhất chỉ viết câu cho các món đã chọn.
+                if (context.DishSuggestion is not null) context.ToolsClosed = true;
+                telemetry.Record("starter", context.ConversationId, context.TurnId, context.AttemptId, new { context.Request.Command, starter.Name });
+            }
             // STEP-13: Repeat while calls < limits.MaxLlmCalls.
             for (var calls = 0; calls < limits.MaxLlmCalls; calls++)
             {
@@ -105,6 +118,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     schemaRepaired, proposalRepaired, emptyRepaired, coverageRepaired,
                     failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
                     step.Failure?.ProviderCode, step.Failure?.Reason
+                });
+                // Chỉ vào trace Development: model đã trả gì ở lần gọi này (tool nó gọi, output đã đọc, hoặc chuỗi thô khi sai schema).
+                telemetry.Trace("llm_output", context.ConversationId, context.TurnId, context.AttemptId, new
+                {
+                    callNumber = calls + 1, repair = repaired, context.RepairFeedback,
+                    tools = step.Tools.Select(tool => new { tool.Name, tool.Arguments }), step.Output, rawContent = step.RawContent
                 });
                 // STEP-21: Return the result of SuggestionTurnAsync early when context.DishSuggestion exists.
                 // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng đều dùng câu cố định, không gọi thêm và không báo lỗi cho người dùng.
@@ -169,6 +188,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.Exchanges.Add(new(step.Tools, results));
                     phase = AgentTurnPhase.Act;
                     context.ForcedTool = null;
+                    context.ReadState = null;
                     // Model viết câu trả lời từ kết quả gợi ý ở lần gọi kế tiếp; tools đóng lại nên đây là lần gọi cuối của lượt.
                     if (context.DishSuggestion is { } found)
                     {
@@ -190,7 +210,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     context.Grants.AddRange(context.ReserveGrants);
                     context.ReserveGrants.Clear();
                     telemetry.Record("long_trip_assembled", context.ConversationId, context.TurnId, context.AttemptId, new { days = context.State.NumDays, items = longPlan.Items.Length });
-                    step = new([], longPlan, step.Tokens);
+                    // No model call writes this turn's words, so it gets the prompt's own new-plan template; the backend fills its slots as for any draft.
+                    step = new([], longPlan with { Reply = LongTripReply }, step.Tokens);
                     assembled = true;
                 }
                 // STEP-24: Prepare output.
@@ -238,6 +259,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("use_tool", context.ConversationId, context.TurnId, context.AttemptId, new { output.Tool });
                     phase = AgentTurnPhase.Forced;
                     context.ForcedTool = output.Tool;
+                    // Lần gọi sau đọc lại cùng tin nhắn từ đầu; không có kết quả đọc này thì nó có thể đọc khác (hội thoại 558 mất 10 món người dùng chỉ "các món trên").
+                    context.ReadState = output.State;
                     repaired = false;
                     continue;
                 }
@@ -315,6 +338,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         return new(Raw(output.Reply),
                             future.State, checkedFuture.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedFuture.Snapshot with { State = future.State }) }, checkedFuture.Validation);
                     }
+                    // The user took the budget the reply offered but kept the dishes ("không cần chọn lại"): the same plan is saved with the new budget,
+                    // so the draft and the conversation agree and saving is not refused as "lịch chưa theo ngân sách mới" (S1).
+                    if (output.Action == "answer" && context.Source is { } keptSource && confirmedState.BudgetOffer is { } offer &&
+                        context.State.BudgetAmount == offer && keptSource.State.BudgetAmount != offer)
+                    {
+                        var kept = keptSource with { State = context.State with { PendingQuestion = null, PendingPlanningRequest = null, BudgetOffer = null }, Changes = [],
+                            RetainedItems = keptSource.Items, Scope = new() };
+                        var checkedKept = await validator.ValidateAsync(kept, keptSource, false, Routes(context), timeout.Token, context.Grants);
+                        telemetry.Record("budget_kept_plan", context.ConversationId, context.TurnId, context.AttemptId, new { offer, checkedKept.Validation.Errors });
+                        if (checkedKept.Validation.Errors.Length == 0)
+                            return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, checkedKept.Snapshot, keptSource)), kept.State,
+                                checkedKept.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedKept.Snapshot with { State = kept.State }) }, checkedKept.Validation);
+                    }
                     // Các câu hỏi trước khi lập lịch đi theo thứ tự: chưa rõ địa điểm, số ngày, ngân sách thì chưa hỏi phạm vi hay khẩu vị.
                     // THÍ NGHIỆM: không ép thứ tự hỏi, không kiểm câu; chỉ điền ô {plan} bằng lịch thật.
                     var reply = Raw(output.Action == "answer" && context.Source is not null
@@ -381,7 +417,55 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
                 // STEP-41: Call telemetry.Record.
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
-                // THÍ NGHIỆM: không chặn, không vòng sửa, không tự thay món (scope/budget/repeat). Món catalog đọc được thì lấy tên, giá; món không đọc được giữ nguyên như model viết.
+                // A dish the model made up (not in the catalog, not issued by a tool for that day, meal and condition, outside the province or area) is never shown:
+                // the model corrects the draft once from the issued candidates; one still made up after that is replaced by the best dish issued for its meal.
+                // A dish kept from the plan the user already has is not made up even when it no longer fits (an itinerary change made 9 such in conversation 570):
+                // it is replaced by a dish issued for its meal this turn when there is one, and otherwise stays with a warning, so the plan never loses a meal.
+                var keptDishes = (context.Source?.Items ?? []).Select(item => item.DishId).ToHashSet();
+                var fabricated = validated.Validation.Errors.Where(error => AgentProposalValidator.FabricatedDish(error) is { } id && !keptDishes.Contains(id)).ToArray();
+                if (fabricated.Length > 0)
+                {
+                    telemetry.Record("fabrication", context.ConversationId, context.TurnId, context.AttemptId, new { fabricated, repaired = proposalRepaired });
+                    if (!proposalRepaired && calls + 1 < limits.MaxLlmCalls)
+                    {
+                        context.RejectedOutput = output;
+                        context.RepairFeedback = "Các món sau không lấy từ ứng viên đã được cấp cho đúng ngày, bữa và điều kiện hiện tại: " + string.Join(" ", fabricated) +
+                            " Chỉ chọn dishId có trong kết quả tool của lượt này cho đúng ngày và bữa đó; giữ nguyên các món khác.";
+                        proposalRepaired = repaired = true;
+                        continue;
+                    }
+                }
+                var invented = fabricated.Select(AgentProposalValidator.FabricatedDish).OfType<int>().ToHashSet();
+                var stale = validated.Validation.Errors.Select(AgentProposalValidator.FabricatedDish).OfType<int>().Where(keptDishes.Contains).ToHashSet();
+                if (invented.Count > 0 || stale.Count > 0)
+                {
+                    var used = snapshot.Items.Select(item => item.DishId).ToHashSet();
+                    var items = new List<AgentItem>();
+                    int replaced = 0, restored = 0, dropped = 0, refreshed = 0;
+                    foreach (var item in snapshot.Items)
+                    {
+                        var made = invented.Contains(item.DishId);
+                        if (!made && !stale.Contains(item.DishId)) { items.Add(item); continue; }
+                        if (AgentProposalBuilder.IssuedDish(snapshot.State, context.Grants, item.DayNumber, item.MealSlot, used) is { } pick)
+                        {
+                            used.Add(pick);
+                            items.Add(item with { DishId = pick, SourceItemId = null, RequestId = null, Price = 0, DishName = null, RestaurantName = null, Latitude = null, Longitude = null, RankingFingerprint = null });
+                            if (made) replaced++; else refreshed++;
+                        }
+                        // Nothing issued for that meal: an edit keeps the meal's dish from the saved plan; only a meal new to this draft is left empty.
+                        else if (made && context.Source?.Items.FirstOrDefault(old => old.ItemKey == item.ItemKey) is { } previous) { items.Add(previous); restored++; }
+                        else if (made) dropped++;
+                        else items.Add(item);
+                    }
+                    if (replaced + restored + dropped + refreshed > 0)
+                    {
+                        snapshot = snapshot with { Items = [.. items] };
+                        validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
+                    }
+                    if (replaced + restored + dropped > 0) telemetry.Record("fabrication_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { replaced, restored, dropped });
+                    if (refreshed > 0) telemetry.Record("stale_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { refreshed });
+                }
+                // Other errors (budget, repeats, meal fit, a dish kept from the plan) do not block: the draft is shown with them as warnings.
                 if (validated.Validation.Errors.Length > 0)
                 {
                     telemetry.Record("validation_ignored", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors });
@@ -389,20 +473,27 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     var merged = snapshot with { Items = snapshot.Items.Select(item => read.TryGetValue(item.ItemKey, out var known) && known.DishId == item.DishId ? known : item).ToArray() };
                     // Validator có thể dừng trước khi đọc catalog (thiếu tỉnh, câu hỏi đang chờ...): vẫn điền tên, giá, toạ độ để lịch không hiện trống.
                     var (filled, total) = await validator.ReadCatalogAsync(merged, timeout.Token);
-                    validated = (filled, validated.Validation with { Errors = [], TotalCost = validated.Validation.TotalCost > 0 ? validated.Validation.TotalCost : total });
+                    // Draft is not blocked, but a total above the user's budget stays visible on the card instead of being presented as within budget.
+                    var shown = validated.Validation.Errors.Contains(AgentProposalValidator.BudgetExceeded)
+                        ? validated.Validation.Warnings.Append(AgentProposalValidator.BudgetExceeded).Distinct().ToArray() : validated.Validation.Warnings;
+                    validated = (filled, validated.Validation with { Errors = [], Warnings = shown, TotalCost = validated.Validation.TotalCost > 0 ? validated.Validation.TotalCost : total });
                 }
                 // STEP-48: Update context: PreviewOutput.
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
                 context.PreviewOutput = output;
                 // STEP-49: Prepare reviewedState from AgentConstraintGuard.Uncovered.
+                // The total of an over-budget draft is the budget the reply offers; a "có" may set exactly this amount without quoting it.
+                var draftTotal = validated.Snapshot.Items.Sum(item => item.Price);
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null, PlanningIntake = null,
+                    BudgetOffer = context.State.BudgetAmount is { } limit && draftTotal > limit ? draftTotal : null,
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentConstraintGuard.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
                 // STEP-50: Return the new result.
                 // THÍ NGHIỆM: chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
                 var reviewed = validated.Snapshot with { State = reviewedState };
-                return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source)), reviewedState,
+                return new(Raw(AgentReplyBuilder.WithBudgetNote(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source),
+                        validated.Snapshot, reviewedState.BudgetAmount, context.Source)), reviewedState,
                     reviewed with { Notes = AgentReplyBuilder.PlanNotes(reviewed) }, validated.Validation);
             }
             // STEP-51: Throw the error from Unavailable.
@@ -424,10 +515,30 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         catch (FluentValidation.ValidationException error) when (context.CatalogProvinces is not null && AgentIntakePolicy.Eligible(context))
         {
             var problem = error.Errors.FirstOrDefault()?.ErrorMessage ?? "Thông tin chuyến đi chưa hợp lệ.";
+            StateRejected(context, error, "intake_last_reply", lastReply);
             return new(Raw(lastReply), turnState, null, null);
         }
         // STEP-56: On any other FluentValidation.ValidationException, return the result of Misunderstood.
-        catch (FluentValidation.ValidationException) { return Misunderstood(context, turnState, lastReply); }
+        catch (FluentValidation.ValidationException error)
+        {
+            StateRejected(context, error, "misunderstood", lastReply);
+            return Misunderstood(context, turnState, lastReply);
+        }
+    }
+
+    /// <summary>Records which state rule stopped the turn and how the turn ended; behaviour is unchanged.</summary>
+    /// <remarks>Rule names and validator messages are fixed backend text, so they go to the normal log; the rejected values and the reply go to the Development trace only.</remarks>
+    private void StateRejected(AgentContext context, FluentValidation.ValidationException error, string handledAs, string? lastReply)
+    {
+        telemetry.Record("state_rejected", context.ConversationId, context.TurnId, context.AttemptId, new
+        {
+            handledAs, replyEmpty = string.IsNullOrWhiteSpace(lastReply),
+            errors = error.Errors.Select(item => new { property = item.PropertyName, message = item.ErrorMessage })
+        });
+        telemetry.Trace("state_rejected_detail", context.ConversationId, context.TurnId, context.AttemptId, new
+        {
+            lastReply, rejected = error.Errors.Select(item => new { property = item.PropertyName, value = item.AttemptedValue })
+        });
     }
 
     /// <summary>Route legs are fetched per day from a paid map service for each validation; a long trip skips them in chat and the saved roadmap fetches a day's route when it is opened.</summary>
@@ -535,18 +646,18 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         return null;
     }
 
+    /// <summary>Same wording as the new-plan template in the system prompt; slots are filled after validation.</summary>
+    internal const string LongTripReply = "Lịch {numDays} ngày ở {place} xong rồi nè, tổng khoảng {total}. Bạn xem thử, ưng thì bảo mình chốt nhé!";
+
     // THÍ NGHIỆM: người dùng chỉ thấy câu model viết, kể cả khi nó rỗng; backend không có câu nào của riêng nó.
     private static string Raw(string? reply) => (reply ?? "").Trim();
 
     /// <summary>THÍ NGHIỆM: nhận state của model như nó viết. Chỉ giữ chuẩn hóa tên tỉnh, các trường backend sở hữu và FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
-        var spelled = AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context);
-        if (context.UnknownPlace is not null)
-        {
-            spelled = spelled! with { Province = proposed!.Province };
-            context.UnknownPlace = null;
-        }
+        // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
+        var spelled = AgentConstraintGuard.WithDailyBudget(AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context), context.State);
+        context.UnknownPlace = null;
         var placed = AgentConstraintGuard.RetainPlacements(spelled, context.PlacedRequests);
         try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline); }
         catch (AgentStateChangeRequiredException change)
@@ -566,7 +677,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
         // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.
         // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
-        return new(reply, turnState with { DishOffered = true, PendingQuestion = null }, null, null, "chat");
+        // The shown dishes are remembered past this turn, so a later "thêm món đó vào bữa tối ngày 2" or "3 món này vào bữa sáng" knows which dishes are meant.
+        var offered = suggestion.Dishes.Where(dish => dish.DishId > 0).Select(dish => new AgentOfferedDish(dish.DishId, dish.Name, dish.RestaurantId, dish.Restaurant)).ToArray();
+        return new(reply, turnState with { DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes }, null, null, "chat");
     }
 
     /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>

@@ -1,3 +1,4 @@
+using ANGI.Application.Common.Models.Discovery;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -54,8 +55,10 @@ public sealed class AgentConstraintGuard
         proposed = WithoutQuotes(proposed ?? current);
         if (proposed.BudgetQuote is not null) proposed = proposed with { BudgetQuote = null };
         // STEP-03: When proposed.PendingPlanningRequest is not current.PendingPlanningRequest and more.
-        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake || proposed.DishOffered != current.DishOffered)
-            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered };
+        if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake || proposed.DishOffered != current.DishOffered ||
+            proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer)
+            proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered,
+                OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer };
         // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
@@ -68,7 +71,7 @@ public sealed class AgentConstraintGuard
             proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
         // STEP-08: Prepare movedProvince from Trim, numDays and areas from current.DayAreas ?? [].Where.
         // Nơi đến theo ngày do backend đọc từ lời người dùng, model không được ghi. Đổi tỉnh hoặc rút ngắn chuyến thì bỏ các nơi đến không còn áp dụng.
-        var movedProvince = current.Province is not null && !string.Equals(current.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var movedProvince = current.Province is not null && !ProvinceSearch.Same(current.Province, proposed.Province);
         var numDays = proposed.NumDays;
         var areas = movedProvince ? [] : (current.DayAreas ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
         // STEP-09: When areas.SequenceEqual(...) does not hold, set proposed.
@@ -87,7 +90,7 @@ public sealed class AgentConstraintGuard
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
         // STEP-15: Prepare confirmed and relaxed from AgentScopedPlanning.Slots.
         var confirmed = baseline ?? current;
-        var relaxed = confirmed.Province is not null && !string.Equals(confirmed.Province.Trim(), proposed.Province?.Trim(), StringComparison.OrdinalIgnoreCase)
+        var relaxed = confirmed.Province is not null && !ProvinceSearch.Same(confirmed.Province, proposed.Province)
             || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
             || confirmed.BudgetAmount.HasValue && (!proposed.BudgetAmount.HasValue || proposed.BudgetAmount > confirmed.BudgetAmount)
             || !confirmed.BudgetUnrestricted && proposed.BudgetUnrestricted
@@ -117,7 +120,10 @@ public sealed class AgentConstraintGuard
 
     // Taste evidence
 
-    // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu.
+    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): vừa.</summary>
+    public const double DefaultTasteLevel = 0.5;
+
+    // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu, nên chỉ được dùng mức mặc định.
     private static readonly HashSet<string> NoLevelWords = ["thich", "an", "mon", "vi", "do", "khau", "muon", "uu", "tien", "toi", "minh", "em", "la", "va", "ma"];
 
     /// <summary>The dimensions the proposed state sets or changes with no quoted level; empty when the state is backed or the user already confirmed it.</summary>
@@ -151,7 +157,8 @@ public sealed class AgentConstraintGuard
         // STEP-01: Prepare quote through Plain and return false early when it is empty or the user never wrote it.
         var quote = Plain(target.LevelQuote ?? "");
         if (quote.Length == 0 || !written.Contains(quote, StringComparison.Ordinal)) return false;
-        // STEP-02: Prepare tastes and return whether a word remains that is neither the taste nor a word of liking.
+        // STEP-02: A taste the user wrote with no level is the default moderate level (user decision 2026-11-12: plan with it instead of asking); any other level needs a word stating it.
+        if (target.Target == DefaultTasteLevel) return true;
         var tastes = AgentTasteClarificationPolicy.MentionedTastes(target.LevelQuote!).SelectMany(taste => Plain(taste).Split(' ')).ToHashSet();
         return quote.Split(' ').Any(word => !tastes.Contains(word) && !NoLevelWords.Contains(word));
     }
@@ -172,11 +179,14 @@ public sealed class AgentConstraintGuard
     // Cho phép chia theo người, nhân theo ngày và phần lẻ chưa đọc được ("1 triệu rưỡi"); chỉ bắt chênh lệch cỡ đơn vị.
     private const decimal Tolerance = 10m;
 
-    /// <summary>True when the proposed state sets a budget with no quote of the user's words, or one whose size does not fit the figure quoted.</summary>
+    /// <summary>
+    /// True when the proposed state sets a budget with no quote of the user's words, or one whose size does not fit the figure quoted.
+    /// Exactly the backend's own offer (state.budgetOffer, the over-budget draft's total) needs no quote, so "có" to raising the budget can be applied.
+    /// </summary>
     public static bool HasUnbackedBudget(AgentContext context, AgentState? proposed)
     {
-        // STEP-01: Return false early when no new budget is proposed or the user already confirmed it.
-        if (proposed?.BudgetAmount is not { } budget || budget == context.State.BudgetAmount || context.ReplanAfterConfirmation) return false;
+        // STEP-01: Return false early when no new budget is proposed, it is the backend's offer, or the user already confirmed it.
+        if (proposed?.BudgetAmount is not { } budget || budget == context.State.BudgetAmount || budget == context.State.BudgetOffer || context.ReplanAfterConfirmation) return false;
         // STEP-02: Prepare quote and written, then return true early when the user never wrote the quote.
         var quote = AgentIntakePolicy.Plain(proposed.BudgetQuote ?? "");
         var written = AgentIntakePolicy.Plain(string.Join(' ', context.History.Where(turn => turn.Role == "user").Select(turn => turn.Content)
@@ -186,6 +196,23 @@ public sealed class AgentConstraintGuard
         var figures = Figures(proposed.BudgetQuote!).ToArray();
         var days = Math.Max((decimal)(proposed.NumDays ?? 1), 1m);
         return figures.Length > 0 && !figures.Any(figure => budget >= figure / Tolerance && budget <= figure * days * Tolerance);
+    }
+
+    // "500k/ngày", "500k mỗi ngày", "500k một ngày", "500k 1 ngày": the quoted figure is per day.
+    private static readonly Regex PerDay = new(@"(?:/|\bmoi\b|\bmot\b|\b1\b)\s*ngay\b", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A budget the model copied from a per-day quote without multiplying it by the trip's days becomes the trip budget (conversation 573 stored "500k/ngày"
+    /// as 500.000 for 3 days; 570 got 1.500.000 from the same words). Only an amount equal to the quote's single figure changes; anything else is left to the other checks.
+    /// </summary>
+    public static AgentState? WithDailyBudget(AgentState? proposed, AgentState current)
+    {
+        // STEP-01: Return proposed unless a new budget on a trip of several days comes from a per-day quote.
+        var days = proposed?.NumDays ?? current.NumDays ?? 1;
+        if (proposed?.BudgetAmount is not { } budget || budget == current.BudgetAmount || days <= 1 || proposed.BudgetQuote is not { } quote ||
+            !PerDay.IsMatch(AgentPlaceResolver.Fold(quote.Normalize(NormalizationForm.FormC)).ToLowerInvariant())) return proposed;
+        // STEP-02: Multiply only when the budget is exactly the one figure quoted.
+        return Figures(quote).ToArray() is [var daily] && daily == budget ? proposed with { BudgetAmount = budget * days } : proposed;
     }
 
     /// <summary>The amounts in the quote that are clearly money: with a known unit, or large enough alone.</summary>
@@ -255,7 +282,8 @@ public sealed class AgentConstraintGuard
     /// <summary>The dish/restaurant requests wider than a meal whose wording does not ask for every meal.</summary>
     public static AgentMealRequest[] PlaceableRequests(AgentState state, IEnumerable<string> messages)
     {
-        var texts = messages.Select(Normalize).ToArray();
+        // Each clause is read on its own: in "1 triệu cả chuyến, phải có món Bún chả" the "cả chuyến" belongs to the budget, not to the dish.
+        var texts = messages.SelectMany(message => Regex.Split(message, @"[,.;!?\n]+")).Select(Normalize).ToArray();
         return state.MealRequests.Where(request => request.MealSlot is null && (request.DishName ?? request.RestaurantName) is { } name &&
             !texts.Any(text => text.Contains(Normalize(name), StringComparison.Ordinal) && Regex.IsMatch(text, EveryMeal, RegexOptions.CultureInvariant))).ToArray();
     }
@@ -277,17 +305,6 @@ public sealed class AgentConstraintGuard
                     return (day, meal);
         // STEP-03: Return null.
         return null;
-    }
-
-    /// <summary>
-    /// Named meal requests the user did not place themselves: a backend placement may move when the name cannot serve that meal
-    /// (a dinner-only restaurant replacing a lunch request), but "bữa trưa ngày 1 ăn ở X" stays and gets an honest question.
-    /// </summary>
-    public static AgentMealRequest[] RelocatableRequests(AgentState state, IEnumerable<string> messages)
-    {
-        var named = messages.SelectMany(message => AgentMealScopePolicy.Read(message, state).Meals).ToHashSet();
-        return state.MealRequests.Where(request => request.MealSlot is not null && (request.DishName ?? request.RestaurantName) is not null &&
-            !named.Contains(new AgentScope(request.DayNumber, request.MealSlot))).ToArray();
     }
 
     /// <summary>Replaces a wide request with its placed meal; tags and differentFromPlan keep their wide scope without the name.</summary>
