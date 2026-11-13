@@ -29,7 +29,11 @@ candidate IDs, `vector_source=conversation` and nullable `user_vector_override`.
 The response must echo that source. Missing support, uninitialized preferences or
 service failure uses rating fallback, without a recommendation request ID.
 Scoring, implicit scores, survey/feedback interaction count `m` and cold-start remain
-unchanged: at `m=0`, the conversation vector has no personalization weight.
+unchanged for profile requests. For a conversation request with a vector, reco
+config_version 3 ranks with `max(m, conversation_m_min)` and `conversation_m_min = 5`,
+so a new user's stated taste gets Δ = 0.5 instead of 0 (reco
+`docs/Conversation_Preferences_Ver1.0.md`). The floor lives in reco only: the backend
+request is unchanged, and the floor is never stored or added to `m`.
 
 ## Conversation identity and retention
 
