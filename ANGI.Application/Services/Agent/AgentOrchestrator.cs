@@ -199,9 +199,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     }
                     // Model xin gợi ý khi còn thiếu tỉnh/số ngày/ngân sách: hỏi ngay bằng câu cố định, giữ state vừa nhận
                     // (kể cả khẩu vị người dùng vừa trả lời) và không gọi thêm LLM.
-                    // THÍ NGHIỆM: thiếu thông tin chuyến đi không còn trả câu hỏi cố định; model đọc status của tool và tự hỏi.
+                    // Thiếu thông tin chuyến đi không có câu hỏi cố định: model đọc status của tool và tự hỏi.
                     // Hội thoại 94 tốn thêm 2 lần gọi LLM vì model xin tiếp ứng viên dù đã đủ món cho mọi bữa.
-                    // THÍ NGHIỆM: không tự đóng tool khi backend thấy đã đủ món.
+                    // Backend không tự đóng tool khi thấy đã đủ món; model quyết định khi nào trả output cuối.
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
                     // ở các lần gọi sau, vì thông báo cũ khiến model lặp lại đúng tool call vừa chạy.
                     repaired = false;
@@ -277,13 +277,13 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("request_save", context.ConversationId, context.TurnId, context.AttemptId);
                     return new(output.Reply, turnState, null, null, "request_save");
                 }
-                // THÍ NGHIỆM: bỏ bước kiểm câu và bắt model viết lại (ReplyGuard).
+                // Câu model viết không bị kiểm hay bắt viết lại.
                 // STEP-26: When output.Action is one of the listed values, call telemetry.Record and return the model reply as it is.
                 // Dừng trước khi nhận state của model: câu lạc đề không được đổi điều kiện chuyến đi, và mọi items/changes kèm theo đều bị bỏ qua.
                 if (output.Action is "chat" or "food_info" or "out_of_scope")
                 {
                     telemetry.Record(output.Action, context.ConversationId, context.TurnId, context.AttemptId);
-                    // THÍ NGHIỆM: hiện nguyên văn câu model viết, kể cả out_of_scope (không còn câu từ chối cố định, không dán câu hỏi cũ).
+                    // Hiện nguyên văn câu model viết, kể cả out_of_scope: không có câu từ chối cố định và không dán lại câu hỏi cũ.
                     var social = Raw(output.Reply);
                     // Câu từ chối nhắc lại câu hỏi nên câu hỏi vẫn mở. Với câu model tự viết, người dùng đã nói sang chuyện khác: câu hỏi cũ không còn treo,
                     // nó vẫn nằm trong lịch sử model đọc và model tự quyết có hỏi lại không.
@@ -298,15 +298,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     return new(Raw(output.Reply), context.State, null, null,
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
-                // THÍ NGHIỆM: bỏ kiểm bằng chứng mức khẩu vị (levelQuote) và ngân sách (budgetQuote).
+                // Ở đây không kiểm levelQuote/budgetQuote; hai bằng chứng này chỉ được kiểm trên đường gọi get_recommendation.
                 // Model chỉ hỏi lại và không đề xuất state nào: chưa có gì để áp, nên chưa hỏi xác nhận các con số đang giữ, tránh chen ngang câu hỏi của model.
                 if (!context.ReplanAfterConfirmation && !(output.Action == "clarify" && output.State is null))
                     context.State = AcceptRaw(context, output.State);
                 // STEP-29: Handle the early exits in order: an unknown province, the preferences question, then the new result.
                 // Tỉnh ANGI chưa có dữ liệu: nói rõ rồi hỏi lại, chữ của model có thể đã coi nơi đó là được.
                 // Chuyến đi đã đủ thông tin mà model định lập lịch hoặc hỏi lại chuyện đã biết: câu hỏi khẩu vị vẫn phải đến trước, nên không bước nào bị bỏ qua.
-                // THÍ NGHIỆM: không ép thứ tự hỏi (câu hỏi khẩu vị cố định).
-                // THÍ NGHIỆM: bỏ regex ActsOnUnstatedLevel.
+                // Backend không ép thứ tự hỏi; model tự quyết hỏi gì trước.
+                // Mức khẩu vị người dùng chưa nêu do model đọc, không dùng regex.
                 // STEP-30: When output.Action is "clarify" or "answer", check whether output.Items.Length is not 0 or output.Changes.Length is not 0 and more.
                 if (output.Action is "clarify" or "answer")
                 {
@@ -320,12 +320,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         telemetry.Record("ignored_items", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, itemCount = output.Items.Length, changeCount = output.Changes.Length });
                         output = output with { Items = [], Changes = [] };
                     }
-                    // THÍ NGHIỆM: bỏ intake_repair.
+                    // Câu hỏi của model không bị gửi lại để sửa theo thứ tự thu thập thông tin.
                     // Tên món/quán catalog chưa xác nhận (không thấy, nhiều kết quả, ngoài tỉnh) chưa phải ràng buộc: không giữ trong state,
                     // nếu không lượt sau người dùng chọn quán khác sẽ bị hỏi "xác nhận thay đổi yêu cầu món/quán".
                     if (context.CatalogNotice is not null) context.State = AgentConstraintGuard.WithoutUnsettledNames(context.State, confirmedState);
-                    // THÍ NGHIỆM: model được tự hỏi về thiếu món hay ngân sách bằng lời của nó.
-                    // THÍ NGHIỆM: không bắt model đổi answer thành đề xuất khi điều kiện ngày/bữa đổi.
+                    // Model tự hỏi về việc thiếu món hay ngân sách bằng lời của nó.
+                    // Khi điều kiện ngày/bữa đổi, answer không bị ép thành đề xuất (trừ hai trường hợp ngay dưới).
                     if (output.Action == "answer" && context.State.PreferenceApplication == "future" && context.Source is { } futureSource &&
                         futureSource.Items.Any(item => AgentScopedPlanning.Fingerprint(futureSource.State, item.DayNumber, item.MealSlot) !=
                             AgentScopedPlanning.Fingerprint(context.State, item.DayNumber, item.MealSlot)))
@@ -352,7 +352,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                                 checkedKept.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedKept.Snapshot with { State = kept.State }) }, checkedKept.Validation);
                     }
                     // Các câu hỏi trước khi lập lịch đi theo thứ tự: chưa rõ địa điểm, số ngày, ngân sách thì chưa hỏi phạm vi hay khẩu vị.
-                    // THÍ NGHIỆM: không ép thứ tự hỏi, không kiểm câu; chỉ điền ô {plan} bằng lịch thật.
+                    // Không ép thứ tự hỏi, không kiểm câu; chỉ điền ô {plan} bằng lịch thật.
                     var reply = Raw(output.Action == "answer" && context.Source is not null
                         ? output.Reply.Replace("{plan}", AgentReplyBuilder.Plan(context) ?? "", StringComparison.Ordinal) : output.Reply);
                     // Model đã trả lời thay vì hỏi tiếp nghĩa là câu hỏi cũ không còn mở; câu hỏi khẩu vị còn gắn với yêu cầu đang lập nên giữ.
@@ -372,7 +372,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         telemetry.Record("intake", context.ConversationId, context.TurnId, context.AttemptId, new { stage });
                     }
                     // Nơi backend vừa định vị được nói kèm câu hỏi: người dùng thấy ngay nếu bị hiểu sai trước khi có món nào được chọn.
-                    // THÍ NGHIỆM: không chèn ghi chú địa điểm của backend trước câu hỏi.
+                    // Backend không chèn ghi chú địa điểm trước câu hỏi của model.
                     return new(reply, context.State, null, null);
                 }
                 // STEP-31: Update context: State.
@@ -490,7 +490,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentConstraintGuard.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
                 // STEP-50: Return the new result.
-                // THÍ NGHIỆM: chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
+                // Chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
                 var reviewed = validated.Snapshot with { State = reviewedState };
                 return new(Raw(AgentReplyBuilder.WithBudgetNote(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source),
                         validated.Snapshot, reviewedState.BudgetAmount, context.Source)), reviewedState,
@@ -640,7 +640,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             AgentIntakePolicy.ProvinceInTitle(context.State.Title, provinces) is { } titled)
             context.State = context.State with { Province = titled };
         // STEP-04: Return the fixed answer early when a pinned point has no restaurant around it.
-        // THÍ NGHIỆM: không trả câu cố định khi quanh điểm đã chọn không có quán.
+        // Quanh điểm đã chọn không có quán thì không trả câu cố định; lượt chat đi tiếp tới model.
         // STEP-05: Update context: IntakeComplete, then return null.
         context.IntakeComplete = context.State.PlanningIntake == AgentIntakePolicy.Preferences;
         return null;
@@ -649,10 +649,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     /// <summary>Same wording as the new-plan template in the system prompt; slots are filled after validation.</summary>
     internal const string LongTripReply = "Lịch {numDays} ngày ở {place} xong rồi nè, tổng khoảng {total}. Bạn xem thử, ưng thì bảo mình chốt nhé!";
 
-    // THÍ NGHIỆM: người dùng chỉ thấy câu model viết, kể cả khi nó rỗng; backend không có câu nào của riêng nó.
+    // Người dùng chỉ thấy câu model viết; backend không có câu thay thế.
     private static string Raw(string? reply) => (reply ?? "").Trim();
 
-    /// <summary>THÍ NGHIỆM: nhận state của model như nó viết. Chỉ giữ chuẩn hóa tên tỉnh, các trường backend sở hữu và FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
+    /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
         // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
@@ -672,7 +672,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     private async Task<AgentPreparedTurn> SuggestionTurnAsync(AgentContext context, AgentDishSuggestion suggestion, AgentOutput? output, AgentState turnState, CancellationToken ct)
     {
         // STEP-02: Prepare reply through AgentDishSuggestionPolicy.Worded, call telemetry.Record and RecordReplaced when output exists.
-        // THÍ NGHIỆM: chỉ điền ô {name1}…; không kiểm câu, không thêm địa chỉ, không thay bằng câu cố định.
+        // Chỉ điền các ô {name1}…; không kiểm câu. Câu cố định chỉ dùng khi lần gọi viết câu thất bại.
         var reply = Raw(AgentDishSuggestionPolicy.FillSlots(output?.Reply, suggestion));
         telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
         // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.

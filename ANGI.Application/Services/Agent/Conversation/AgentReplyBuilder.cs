@@ -95,7 +95,7 @@ public static class AgentReplyBuilder
         return $"{reply.TrimEnd()} Lịch này tổng khoảng {Money(total)} đồng/người, vượt ngân sách {Money(limit)} đồng bạn đặt. Mình nâng ngân sách lên {Money(total)} đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?".Trim();
     }
 
-    /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
+    /// <summary>Điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
     public static string FillSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
     {
         var changes = Changes(snapshot, source);
@@ -117,7 +117,7 @@ public static class AgentReplyBuilder
         return filled;
     }
 
-    /// <summary>THÍ NGHIỆM: gắn ghi chú món và tóm tắt ngày model viết vào bản nháp, không kiểm; chỉ bỏ ghi chú rỗng. Ghi chú cũ của món còn lại được giữ.</summary>
+    /// <summary>Gắn ghi chú món và tóm tắt ngày model viết vào bản nháp, không kiểm; chỉ bỏ ghi chú rỗng. Ghi chú cũ của món còn lại được giữ.</summary>
     public static AgentSnapshot AttachNotes(AgentSnapshot snapshot, AgentContext context)
     {
         var dishNotes = (context.Source?.DishNotes ?? []).ToDictionary(note => note.DishId);
