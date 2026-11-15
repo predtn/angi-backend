@@ -56,9 +56,9 @@ public sealed class AgentConstraintGuard
         if (proposed.BudgetQuote is not null) proposed = proposed with { BudgetQuote = null };
         // STEP-03: When proposed.PendingPlanningRequest is not current.PendingPlanningRequest and more.
         if (proposed.PendingPlanningRequest != current.PendingPlanningRequest || proposed.PendingSave != current.PendingSave || proposed.PlanningIntake != current.PlanningIntake || proposed.DishOffered != current.DishOffered ||
-            proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer)
+            proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer || proposed.LastSuggestion != current.LastSuggestion || proposed.OfferedLists != current.OfferedLists)
             proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered,
-                OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer };
+                OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer, LastSuggestion = current.LastSuggestion, OfferedLists = current.OfferedLists };
         // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)

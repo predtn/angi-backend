@@ -80,7 +80,8 @@ public static class AgentLlmSchema
             ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
             ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
-            ["alternative"] = Scalar("boolean"), ["maxLegKm"] = Nullable(Scalar("number")), ["fromOffered"] = Scalar("boolean")
+            ["alternative"] = Scalar("boolean"), ["maxLegKm"] = Nullable(Scalar("number")), ["fromOffered"] = Scalar("boolean"),
+            ["priceTier"] = Nullable(Choice("high", "low")), ["offeredListIds"] = Nullable(ArrayOf(Scalar("integer")))
         }),
         ["estimate_day_route"] = Obj(new()
         {
@@ -92,7 +93,9 @@ public static class AgentLlmSchema
         {
             ["province"] = Nullable(Scalar("string")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["maxPrice"] = Nullable(Scalar("number")), ["count"] = Scalar("integer"),
-            ["tasteTargets"] = ArrayOf(TasteTarget), ["area"] = Nullable(Scalar("string"))
+            ["tasteTargets"] = ArrayOf(TasteTarget), ["area"] = Nullable(Scalar("string")),
+            ["minPrice"] = Nullable(Scalar("number")), ["nameQuery"] = Nullable(Scalar("string")), ["dishForm"] = Nullable(Choice("dry", "soup")),
+            ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating"))
         }),
         ["locate_places"] = Obj(new()
         {

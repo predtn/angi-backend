@@ -12,6 +12,28 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
 {
     /// <summary>Error of a proposal whose total exceeds the trip budget; the orchestrator turns it into a budget question.</summary>
     public const string BudgetExceeded = "Tổng tiền vượt ngân sách toàn chuyến cho một người.";
+    /// <summary>Error of a plan whose shape is broken (a day outside the trip, a repeated key or position, an unknown meal); it blocks the draft and the save.</summary>
+    public const string StructureInvalid = "Cấu trúc lịch không hợp lệ hoặc vượt giới hạn.";
+
+    /// <summary>
+    /// Names each broken part of a plan's shape for the model to fix (conversation 593 sent ten meals as day 0): items on a day outside 1..numDays,
+    /// an unknown meal, a repeated item key or two items on the same day, meal and position.
+    /// </summary>
+    public static string[] StructureProblems(AgentSnapshot snapshot)
+    {
+        var days = snapshot.State.NumDays ?? 0;
+        var problems = new List<string>();
+        foreach (var item in snapshot.Items.Where(item => item is not null))
+        {
+            if (item.DayNumber < 1 || item.DayNumber > days) problems.Add($"itemKey {item.ItemKey} có dayNumber {item.DayNumber}; dayNumber phải từ 1 đến {days}.");
+            if (!AgentStateValidator.Meals.Contains(item.MealSlot)) problems.Add($"itemKey {item.ItemKey} có mealSlot {item.MealSlot} không hợp lệ.");
+        }
+        problems.AddRange(snapshot.Items.Where(item => item is not null).GroupBy(item => item.ItemKey).Where(group => group.Count() > 1)
+            .Select(group => $"itemKey {group.Key} bị lặp; mỗi món cần một itemKey riêng."));
+        problems.AddRange(snapshot.Items.Where(item => item is not null).GroupBy(item => (item.DayNumber, item.MealSlot, item.SortOrder)).Where(group => group.Count() > 1)
+            .Select(group => $"Ngày {group.Key.DayNumber} bữa {group.Key.MealSlot} có hai món cùng sortOrder {group.Key.SortOrder}."));
+        return problems.Distinct().ToArray();
+    }
 
     // The parts of this validator's own messages that mean a dish was made up rather than chosen badly: not in the catalog, not issued by a tool for that
     // day, meal and condition, or outside the trip's province or area. Budget, repeats and meal fit are soft and stay warnings (user decision 2026-11-12).
@@ -89,7 +111,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
             snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||
             snapshot.Items.GroupBy(x => x.DayNumber).Any(x => x.Count() > 24))
-            errors.Add("Cấu trúc lịch không hợp lệ hoặc vượt giới hạn.");
+            errors.Add(StructureInvalid);
         return errors;
     }
 

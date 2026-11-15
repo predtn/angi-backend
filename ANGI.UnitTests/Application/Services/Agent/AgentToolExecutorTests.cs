@@ -831,6 +831,57 @@ public sealed class AgentToolExecutorTests
         context.PlacedRequests.Should().Equal(new AgentMealRequest(1, "lunch", "Phở", null, []));
     }
 
+    // TEST-57a: Conversation 596: a budget sent without the user's words goes back asking for those words, with no "keep the old value" way out;
+    // a quote the user wrote earlier in any wording ("8 lít") is accepted, since the backend only checks the user really wrote it.
+    /// <summary>The refusal asks for the quote; slang copied from an earlier message passes.</summary>
+    [Theory]
+    [InlineData(null, "invalid_arguments")]
+    [InlineData("8 lít", "ranked")]
+    public async Task ExecuteAsync_BudgetQuote_AsksForUserWordsOrAcceptsEarlierSlang(string? quote, string outcome)
+    {
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var context = AgentTestData.Context();
+        context.History.Add(new("user", "ngân sách của tôi có 8 lít thôi"));
+        context.Request.Content = "ok";
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { State = context.State with { BudgetAmount = 800000, BudgetQuote = quote } }), CancellationToken.None);
+
+        if (outcome == "invalid_arguments")
+        {
+            result.GetProperty("status").GetString().Should().Be(outcome);
+            result.GetProperty("warnings")[0].GetString().Should().Contain("Chép đoạn chữ đó").And.NotContain("giữ nguyên");
+        }
+        else result.TryGetProperty("status", out var status).Should().BeFalse(status.ToString());
+    }
+
+    // TEST-57b: Conversation 597: "dựa vào các món like nhiều nhất" meant an earlier list, not the latest one. offeredListIds limits the candidates to
+    // the named lists (several are merged), no id means the latest list, and an id the state never stored goes back to the model.
+    /// <summary>Covers one earlier list, two lists merged, the latest by default and an unknown id.</summary>
+    [Theory]
+    [InlineData(new[] { 1 }, new[] { 1 }, "ok")]
+    [InlineData(new[] { 1, 2 }, new[] { 1, 2 }, "ok")]
+    [InlineData(new int[0], new[] { 2 }, "ok")]
+    [InlineData(new[] { 9 }, new int[0], "invalid_arguments")]
+    public async Task ExecuteAsync_OfferedListIds_LimitToNamedLists(int[] listIds, int[] expected, string outcome)
+    {
+        var fixture = AgentTestData.Validator(Named(1, "Phở"), Named(2, "Bún"));
+        var limits = new List<int[]>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => { limits.Add([.. filter.DishIds]); return filter.DishIds.Count > 0 ? filter.DishIds.ToArray() : new[] { 1, 2 }; });
+        var context = AgentTestData.Context();
+        AgentOfferedDish pho = new(1, "Phở", 10, "Quán A"), bun = new(2, "Bún", 11, "Quán B");
+        context.State = context.State with { NumDays = 1, MealSlots = ["lunch"], OfferedDishes = [bun],
+            OfferedLists = [new(1, new AgentLastSuggestion(SortBy: "likes"), [pho]), new(2, new AgentLastSuggestion("dinner"), [bun])] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { FromOffered = true, OfferedListIds = listIds }), CancellationToken.None);
+
+        if (outcome == "invalid_arguments") { result.GetProperty("status").GetString().Should().Be(outcome); limits.Should().BeEmpty(); return; }
+        limits[0].Should().BeEquivalentTo(expected);
+    }
+
     // TEST-57: fromOffered ranks only the suggested dishes that fit, and a meal they cannot fill is ranked over the whole catalog with a warning; without it the catalog is used.
     /// <summary>"Dựa vào các món trên hãy lập lịch" limits the candidates to the suggestion instead of pinning each dish to a meal (conversations 568 and 570).</summary>
     [Theory]
@@ -1765,6 +1816,267 @@ public sealed class AgentToolExecutorTests
         // STEP-04: Assert the dish named and hasPlan.
         result.GetProperty("dishes")[0].GetProperty("name").GetString().Should().Be($"Dish {expected}");
         result.GetProperty("hasPlan").GetBoolean().Should().Be(hasPlan);
+    }
+
+    // TEST-56b: "Bữa trưa hợp ngân sách" with no budget asks first (conversation 578); an open budget suggests with no cap.
+    /// <summary>suggest_lunch runs no tool while the budget is unknown, and runs uncapped once the user left it open.</summary>
+    [Fact]
+    public async Task StarterCallAsync_LunchWithoutBudget_AsksFirst_OpenBudgetSuggestsFreely()
+    {
+        var fixture = AgentTestData.Validator();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.Request.Command = "suggest_lunch";
+        context.State = context.State with { BudgetAmount = null, MaxPricePerMeal = null, BudgetUnrestricted = false };
+
+        var unknown = await tools.StarterCallAsync(context, CancellationToken.None);
+        context.State = context.State with { BudgetUnrestricted = true };
+        var open = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        unknown.Should().BeNull();
+        // The lunch suggestion stays the topic, so the price the user answers suggests lunch again.
+        context.State.LastSuggestion.Should().Match<AgentLastSuggestion>(x => x.MealSlot == "lunch" && x.BudgetShare);
+        open!.Name.Should().Be("suggest_dish");
+        open.Arguments.GetProperty("maxPrice").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    // TEST-56c: "Tôi muốn phở khô" (conversation 585) matches dish names, ignores the category the model guessed, and still skips a dish shown before unless no other matches.
+    /// <summary>A named kind of dish keeps only dishes of that kind; dishes already suggested stay out while another fits.</summary>
+    [Theory]
+    [InlineData(new[] { 1, 2, 3 }, false, "Phở Khô Gia Lai")]
+    [InlineData(new[] { 1, 2, 3 }, true, "Phở Trộn Khô Bò")]
+    [InlineData(new[] { 1, 3 }, true, "Phở Khô Gia Lai")]
+    public async Task ExecuteAsync_SuggestDishByName_KeepsTheKindAndSkipsShown(int[] pool, bool shownBefore, string expected)
+    {
+        var dry = AgentTestData.Dish(1); dry.Name = "Phở Khô Gia Lai"; dry.Price = 60000;
+        var other = AgentTestData.Dish(2); other.Name = "Phở Trộn Khô Bò"; other.Price = 60000;
+        var noodle = AgentTestData.Dish(3); noodle.Name = "Mì Quảng Ếch";
+        var fixture = AgentTestData.Validator(dry, other, noodle);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(pool);
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        if (shownBefore) context.History.Add(new("assistant", "Bạn thử Phở Khô Gia Lai ở Real restaurant nhé."));
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        // The model also guessed the noodle category beside the name, as in conversation 585; the name decides the kind.
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [13], ExcludeTagIds: [], TasteTargets: [], Count: 1,
+            NameQuery: "phở khô"), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        result.GetProperty("dishes").EnumerateArray().Select(dish => dish.GetProperty("name").GetString()).Should().NotContain("Mì Quảng Ếch");
+        result.GetProperty("dishes")[0].GetProperty("name").GetString().Should().Be(expected);
+    }
+
+    // TEST-56c2: "Phở khô" is nameQuery "phở" with dishForm dry: the catalog's dish form filters the search, so phở trộn, cuốn and xào stay and soups go.
+    /// <summary>dishForm reaches the catalog filter as the domain enum; an unknown form goes back to the model.</summary>
+    [Theory]
+    [InlineData("dry", ANGI.Domain.Enums.DishForm.Dry)]
+    [InlineData("soup", ANGI.Domain.Enums.DishForm.Soup)]
+    [InlineData(null, null)]
+    public async Task ExecuteAsync_SuggestDishForm_FiltersCatalogByDishForm(string? form, ANGI.Domain.Enums.DishForm? expected)
+    {
+        var dish = AgentTestData.Dish(1); dish.Name = "Phở Cuốn Ngũ Xã";
+        var fixture = AgentTestData.Validator(dish);
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter)).ReturnsAsync(new[] { 1 });
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [],
+            NameQuery: "phở", DishForm: form), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        filters.Single().DishForm.Should().Be(expected);
+        result.GetProperty("dishes")[0].GetProperty("name").GetString().Should().Be("Phở Cuốn Ngũ Xã");
+        AgentLlmSchema.IsValid(call.Arguments, AgentLlmSchema.Tools["suggest_dish"]).Should().BeTrue();
+    }
+
+    // TEST-56c3: Planning, a place or a catalog lookup ends the suggestion as the topic; another suggestion replaces it.
+    /// <summary>LastSuggestion is cleared before get_recommendation, locate_places and search_catalog run, so a later budget belongs to the trip.</summary>
+    [Theory]
+    [InlineData("get_recommendation")]
+    [InlineData("locate_places")]
+    [InlineData("search_catalog")]
+    public async Task ExecuteAsync_OtherTool_ClearsLastSuggestion(string tool)
+    {
+        var fixture = AgentTestData.Validator();
+        var context = AgentTestData.Context();
+        context.State = context.State with { LastSuggestion = new("lunch", [], [], BudgetShare: true) };
+        var call = tool switch
+        {
+            "get_recommendation" => Call(Input()),
+            "locate_places" => LocateCall("Cầu Giấy"),
+            _ => new AgentToolCall("c", "search_catalog", JsonSerializer.SerializeToElement(new AgentCatalogInput("dish", "Phở Bò"), AgentJson.Options))
+        };
+
+        try { await PlaceTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, call, CancellationToken.None); }
+        catch (Exception) { /* Only the clearing before the tool runs is under test here. */ }
+
+        context.State.LastSuggestion.Should().BeNull();
+    }
+
+    // TEST-56c4: "Món được like nhiều nhất" / "rate cao nhất" (conversation 594) return the true top by the catalog's counts, dishes already shown included.
+    /// <summary>likes orders by likes minus dislikes; rating by the restaurant score, restaurants with too few reviews last.</summary>
+    [Theory]
+    [InlineData("likes", new[] { 2, 3, 1 })]
+    [InlineData("rating", new[] { 3, 1, 2 })]
+    public async Task ExecuteAsync_SuggestDishSortBy_ReturnsTrueTopIncludingShown(string sortBy, int[] expected)
+    {
+        var one = AgentTestData.Dish(1); one.LikeCount = 1; one.Restaurant.RatingAvg = 4.2m; one.Restaurant.RatingCount = 10;
+        var two = AgentTestData.Dish(2); two.LikeCount = 5; two.DislikeCount = 1; two.Restaurant = new Restaurant { Name = "B", ProvinceName = "Da Nang", RatingAvg = 5m, RatingCount = 1 };
+        var three = AgentTestData.Dish(3); three.LikeCount = 3; three.Restaurant = new Restaurant { Name = "C", ProvinceName = "Da Nang", RatingAvg = 4.8m, RatingCount = 20 };
+        var fixture = AgentTestData.Validator(one, two, three);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1, 2, 3 });
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        context.History.Add(new("assistant", "Bạn thử Dish 2 và Dish 3 nhé."));
+        var reco = new Mock<IRecommendationService>();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, reco.Object, new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Count: 10, SortBy: sortBy), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        context.DishSuggestion!.Dishes.Select(dish => dish.DishId).Should().Equal(expected);
+        result.GetProperty("sortedBy").GetString().Should().Be(sortBy);
+        result.GetProperty("personalized").GetBoolean().Should().BeFalse();
+        reco.Verify(x => x.RecommendConversationAsync(It.IsAny<int>(), It.IsAny<IReadOnlyList<int>>(), It.IsAny<int>(), It.IsAny<RecommendationVector>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-56d: "Món đúng 32000" (conversation 582) is searched as exactly that price; when none exists the nearest prices below and above are returned.
+    /// <summary>An exact price filters both bounds and nothing found says what does exist.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestDishExactPrice_NothingFoundGivesNearestPrices()
+    {
+        var cheap = AgentTestData.Dish(1); cheap.Price = 30000;
+        var dear = AgentTestData.Dish(2); dear.Price = 35000;
+        var fixture = AgentTestData.Validator(cheap, dear);
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.MinPrice is null ? new[] { 1, 2 } : Array.Empty<int>());
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [],
+            MinPrice: 32000, MaxPrice: 32000), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        filters[0].MinPrice.Should().Be(32000);
+        filters[0].MaxPrice.Should().Be(32000);
+        result.GetProperty("status").GetString().Should().Be("nothing_found");
+        result.GetProperty("nearestPriceBelow").GetDecimal().Should().Be(30000);
+        result.GetProperty("nearestPriceAbove").GetDecimal().Should().Be(35000);
+    }
+
+    // TEST-56e: A minimum above the maximum goes back to the model instead of searching.
+    /// <summary>minPrice over maxPrice is the model's to fix.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestDishMinAboveMax_IsSentBack()
+    {
+        var fixture = AgentTestData.Validator();
+        var context = AgentTestData.Context();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [],
+            MinPrice: 50000, MaxPrice: 30000), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        context.DishSuggestion.Should().BeNull();
+    }
+
+    // TEST-56f: "Toàn món đắt nhất" (conversation 581) keeps the priciest third of a meal, never fewer than its days plus two; "low" the cheapest; no tier changes nothing.
+    /// <summary>The share keeps rank order and only reads prices.</summary>
+    [Fact]
+    public void PriceTierShare_KeepsPriciestOrCheapestShareInOrder()
+    {
+        var dishes = Enumerable.Range(1, 9).Select(id => { var dish = AgentTestData.Dish(id); dish.Price = id * 10000; return dish; }).Reverse().ToArray();
+        dishes = [.. dishes.Where(dish => dish.Id % 2 == 0), .. dishes.Where(dish => dish.Id % 2 == 1)];
+
+        AgentToolExecutor.PriceTierShare(dishes, "high", 1).Select(dish => dish.Id).Should().Equal(8, 9, 7);
+        AgentToolExecutor.PriceTierShare(dishes, "low", 1).Select(dish => dish.Id).Should().Equal(2, 3, 1);
+        AgentToolExecutor.PriceTierShare(dishes, "high", 3).Should().HaveCount(5);
+        AgentToolExecutor.PriceTierShare(dishes, null, 1).Should().Equal(dishes);
+        // "Món đắt nhất trong ngân sách": with 55.000 đồng per meal the dearest three within it, not the dearest overall.
+        AgentToolExecutor.PriceTierShare(dishes, "high", 1, 55000).Select(dish => dish.Id).Should().Equal(4, 5, 3);
+        // Too few within the share: the cheapest above it fill the rest.
+        AgentToolExecutor.PriceTierShare(dishes, "high", 1, 15000).Select(dish => dish.Id).Should().Equal(2, 3, 1);
+    }
+
+    // TEST-56f3: A low budget used to reorder a pool of dearer top picks and find nothing cheap; now reco ranks the dishes the budget affords,
+    // topped up with the cheapest above it when too few fit, and nothing changes without a budget.
+    /// <summary>Covers enough affordable dishes, too few (filled from the cheapest above, order kept) and no budget.</summary>
+    [Fact]
+    public void AffordableShare_KeepsWhatTheBudgetAffords_FillsFromCheapest()
+    {
+        var dishes = Enumerable.Range(1, 40).Select(id => { var dish = AgentTestData.Dish(id); dish.Price = id * 10000; return dish; }).Reverse().ToArray();
+
+        AgentToolExecutor.AffordableShare(dishes, 350000, 3).Select(dish => dish.Price).Should().OnlyContain(price => price <= 350000).And.HaveCount(35);
+        var topped = AgentToolExecutor.AffordableShare(dishes, 100000, 3);
+        topped.Should().HaveCount(AgentToolExecutor.MinAffordable);
+        topped.Max(dish => dish.Price).Should().Be(300000);
+        topped.Select(dish => dish.Id).Should().BeInDescendingOrder();
+        AgentToolExecutor.AffordableShare(dishes, null, 3).Should().Equal(dishes);
+    }
+
+    // TEST-56f4: get_recommendation with a low budget ranks only the affordable dishes: reco receives the cheap ones, not the dearer top of the catalog.
+    /// <summary>The candidates sent to reco follow the budget per meal.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RecommendationWithLowBudget_RanksAffordableDishes()
+    {
+        var catalog = Enumerable.Range(1, 40).Select(id => { var dish = AgentTestData.Dish(id); dish.Name = $"Dish {id}"; dish.Price = (41 - id) * 10000; return dish; }).ToArray();
+        var fixture = AgentTestData.Validator(catalog);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(catalog.Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        // 2 days x 3 meals = 6 meals; 600.000 đồng gives 100.000 đồng per meal.
+        context.State = context.State with { BudgetAmount = 600000 };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        var prices = result.GetProperty("items").EnumerateArray().Select(item => catalog.Single(dish => dish.Id == item.GetProperty("dishId").GetInt32()).Price).ToArray();
+        prices.Should().NotBeEmpty().And.OnlyContain(price => price <= 300000);
+        prices.Should().Contain(price => price <= 100000);
+    }
+
+    // TEST-56f2: Conversation 589 could not say whether the plan held ANGI's dearest dishes: the result now names the kept prices and the meal's range on ANGI.
+    /// <summary>priceTier=high keeps days plus two dearest dishes and reports keptFrom..keptTo, dearestOnAngi and atTop.</summary>
+    [Fact]
+    public async Task ExecuteAsync_RecommendationPriceTier_ReportsKeptRange()
+    {
+        var catalog = Enumerable.Range(1, 6).Select(id => { var dish = AgentTestData.Dish(id); dish.Name = $"Dish {id}"; dish.Price = id * 10000; return dish; }).ToArray();
+        var fixture = AgentTestData.Validator(catalog);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(catalog.Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        context.State = context.State with { BudgetAmount = null, BudgetUnrestricted = true };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        var result = await tools.ExecuteAsync(context, Call(Input() with { PriceTier = "high" }), CancellationToken.None);
+
+        var tier = result.GetProperty("priceTiers")[0];
+        tier.GetProperty("kept").GetInt32().Should().Be(4);
+        tier.GetProperty("keptFrom").GetDecimal().Should().Be(30000);
+        tier.GetProperty("keptTo").GetDecimal().Should().Be(60000);
+        tier.GetProperty("dearestOnAngi").GetDecimal().Should().Be(60000);
+        tier.GetProperty("atTop").GetBoolean().Should().BeTrue();
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().NotContain([1, 2]);
+    }
+
+    // TEST-56g: Around a named place each address says how far the dish is (conversation 583).
+    /// <summary>The distance goes into the address the reply shows.</summary>
+    [Fact]
+    public void Suggestion_AroundNamedPlace_AddsDistanceToAddress()
+    {
+        var dish = At(1, 0.01m);
+        dish.Restaurant.AddressLine = "127 Hàng Buồm";
+
+        var suggestion = AgentDishSuggestionPolicy.Suggestion([dish], false, false, area: "Hồ Gươm", distanceKm: _ => 0.77);
+
+        suggestion.Dishes[0].Address.Should().Be("127 Hàng Buồm, cách Hồ Gươm khoảng 0,8 km");
+        AgentDishSuggestionPolicy.Suggestion([dish], false, false).Dishes[0].Address.Should().Be("127 Hàng Buồm");
     }
 
     /// <summary>Builds a dish whose restaurant lies the given degrees north of the centre.</summary>
