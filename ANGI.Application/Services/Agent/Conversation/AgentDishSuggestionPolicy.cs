@@ -31,8 +31,10 @@ public static class AgentDishSuggestionPolicy
     }
 
     /// <summary>States the chosen dishes with their backend-owned restaurant, price, address and meals, and says they follow the user's taste only when they were ranked by it.</summary>
-    public static string Reply(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized = false, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false)
+    public static string Reply(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized = false, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false,
+        Func<Dish, double>? distanceKm = null)
     {
+        string AddressNote(Dish dish) => Address(dish, area, distanceKm) is { } address ? $" Địa chỉ: {address}." : "";
         // STEP-01: Return NothingFound early when dishes.Count is 0.
         if (dishes.Count == 0) return NothingFound;
         // STEP-02: Prepare near, start and next.
@@ -53,12 +55,23 @@ public static class AgentDishSuggestionPolicy
     }
 
     /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply to fall back on.</summary>
-    public static AgentDishSuggestion Suggestion(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false) => new(
+    /// <param name="distanceKm">Around a place the user named: each dish's straight-line distance from it, added to the address so the user sees how near it is.</param>
+    public static AgentDishSuggestion Suggestion(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false,
+        Func<Dish, double>? distanceKm = null) => new(
         dishes.Select(dish => new AgentSuggestedDish(AgentReplyBuilder.Safe(dish.Name), AgentReplyBuilder.Safe(dish.Restaurant.Name), dish.Price,
-            string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine), mealAsked ? null : Meals(dish), dish.Id, dish.RestaurantId)).ToArray(),
-        personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked), hasPlan, area, areaNotFound);
+            Address(dish, area, distanceKm), mealAsked ? null : Meals(dish), dish.Id, dish.RestaurantId)).ToArray(),
+        personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked, distanceKm), hasPlan, area, areaNotFound);
 
-    /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
+    /// <summary>The restaurant's address, with "cách {area} khoảng N km" when the search stayed around a named place.</summary>
+    private static string? Address(Dish dish, string? area, Func<Dish, double>? distanceKm)
+    {
+        var address = string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine);
+        if (distanceKm is null || area is null) return address;
+        var near = $"cách {AgentReplyBuilder.Safe(area)} khoảng {Math.Round(distanceKm(dish), 1).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"))} km";
+        return address is null ? near : $"{address}, {near}";
+    }
+
+    /// <summary>Điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
     public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(WithAddresses(Template(reply), suggestion), slot =>
     {
         var index = int.Parse(slot.Groups["dish"].Value) - 1;
@@ -94,8 +107,6 @@ public static class AgentDishSuggestionPolicy
     private static string Named(Dish dish, bool mealAsked) =>
         AgentReplyBuilder.Safe(dish.Name) + (!mealAsked && Meals(dish) is { } meals ? $" (hợp {meals})" : "");
 
-    private static string AddressNote(Dish dish) =>
-        string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? "" : $" Địa chỉ: {AgentReplyBuilder.Safe(dish.Restaurant.AddressLine)}.";
 
     /// <summary>The meals a dish is tagged for, in words; null when it has no such tag or fits every main meal, so there is nothing to warn about.</summary>
     private static string? Meals(Dish dish)

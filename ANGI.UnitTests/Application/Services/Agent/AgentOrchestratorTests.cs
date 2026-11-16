@@ -920,6 +920,72 @@ public sealed class AgentOrchestratorTests
         result.State.DishOffered.Should().BeTrue();
     }
 
+    // TEST-38a: Each suggestion list is kept with its conditions, the oldest dropped past five, and a doubly escaped "\n" in the reply becomes a real line break (conversation 597).
+    /// <summary>Stores the new list with a fresh id and shows line breaks, not "\n" as text.</summary>
+    [Fact]
+    public async Task RunAsync_Suggestion_KeepsListWithConditions_AndRealLineBreaks()
+    {
+        var older = Enumerable.Range(1, 5).Select(id => new AgentOfferedList(id, new AgentLastSuggestion("lunch"), [new(id, $"Dish {id}", 1, "Real restaurant")])).ToArray();
+        var context = IntakeContext("gợi ý vài món", new AgentState { OfferedLists = older });
+        var llm = WordingLlm(context, new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Mình gợi ý nhé:\\n{name1} ở {restaurant1}." }));
+
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Contain("nhé:\n").And.NotContain("\\n");
+        result.State.OfferedLists!.Select(list => list.Id).Should().Equal(2, 3, 4, 5, 6);
+        result.State.OfferedLists![^1].Conditions!.MaxPrice.Should().Be(60000);
+        result.State.OfferedLists[^1].Dishes.Should().NotBeEmpty();
+    }
+
+    // TEST-38b: Conversation 586: while a lunch suggestion is still the topic and no plan exists, "nâng ngân sách lên 500k mỗi ngày" changes the trip budget
+    // and suggests lunch again at the new price per meal, instead of planning; the suggestion's conditions stay remembered.
+    /// <summary>The trip budget carries over from the read step into the suggestion turn, and the backend works out the price per meal.</summary>
+    [Fact]
+    public async Task RunAsync_BudgetChangeDuringSuggestion_SuggestsAgainAtNewShare()
+    {
+        var state = new AgentState { Province = "Da Nang", NumDays = 3, BudgetAmount = 150000, LastSuggestion = new("lunch", [], [], Count: 10, BudgetShare: true) };
+        var context = IntakeContext("nâng ngân sách lên 500k mỗi ngày", state);
+        var again = new AgentToolCall("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(MealSlot: "lunch", TagIds: [], ExcludeTagIds: [], Count: 10, TasteTargets: [], BudgetShare: true), AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "suggest_dish", State = state with { LastSuggestion = null, BudgetAmount = 1500000 } }))
+            .ReturnsAsync(new AgentLlmStep([again], null))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Thử {name1} ở {restaurant1} nhé, khoảng {price1}." }));
+
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        result.State.BudgetAmount.Should().Be(1500000);
+        // 1.500.000 đồng cho 3 ngày x 3 bữa = 166.000 đồng mỗi bữa, làm tròn xuống nghìn.
+        context.Exchanges.Single().Results[0].GetProperty("perMealCap").GetDecimal().Should().Be(166000);
+        context.Exchanges.Single().Results[0].GetProperty("fromTripBudget").GetBoolean().Should().BeTrue();
+        result.State.LastSuggestion.Should().Be(new AgentLastSuggestion("lunch", [], [], Count: 10, BudgetShare: true) with
+            { TagIds = result.State.LastSuggestion!.TagIds, ExcludeTagIds = result.State.LastSuggestion.ExcludeTagIds });
+        result.Reply.Should().Contain("Dish");
+    }
+
+    // TEST-38c: A price for one dish answered during a suggestion suggests again under it and leaves the trip budget alone.
+    /// <summary>"Tầm 50k" is a dish price, never the trip budget.</summary>
+    [Fact]
+    public async Task RunAsync_DishPriceDuringSuggestion_KeepsTripBudget()
+    {
+        var state = new AgentState { Province = "Da Nang", NumDays = 3, BudgetAmount = 150000, LastSuggestion = new("lunch", [], [], Count: 10, BudgetShare: true) };
+        var context = IntakeContext("tầm 50k", state);
+        var priced = new AgentToolCall("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(MealSlot: "lunch", TagIds: [], ExcludeTagIds: [], MaxPrice: 50000, Count: 10, TasteTargets: []), AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "suggest_dish" }))
+            .ReturnsAsync(new AgentLlmStep([priced], null))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = "Thử {name1} nhé." }));
+
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        result.State.BudgetAmount.Should().Be(150000);
+        result.State.LastSuggestion!.MaxPrice.Should().Be(50000);
+        result.State.LastSuggestion.BudgetShare.Should().BeFalse();
+    }
+
     // TEST-39: The model reads every message that used to get a backend reply, and its own wording is shown; covers greetings, thanks, help, vague edits, a bare "ok", tastes, novelty and a missing meal, with no trip, over an empty roadmap and over a plan.
     /// <summary>The user asked for the model to hold the conversation, with the backend guarding from behind.</summary>
     [Theory]
@@ -1307,6 +1373,29 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Verify exactly one repair call carried the rejection reason.
         llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
         context.RepairFeedback.Should().NotBeNullOrEmpty();
+    }
+
+    // TEST-56c: Conversation 593 sent ten meals as day 0: a broken plan shape is never shown; the model fixes it once from the named items,
+    // and a second broken draft ends with the controlled error.
+    /// <summary>A structure error is repaired once with the item named, never ignored like a soft plan rule.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_DayZero_RepairsOnceThenFailsControlled(bool recover)
+    {
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var context = IntakeContext("lập lịch đi", state);
+        context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        AgentOutput Draft(short day) => new() { Action = "create_proposal", Reply = "Lịch xong rồi nè, tổng khoảng {total}.", State = context.State, Scope = new(), Items = [AgentTestData.Item(1, "d1-l", day)] };
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, false, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], Draft(0)));
+        llm.Setup(x => x.RunAsync(context, true, It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], Draft(recover ? (short)1 : (short)0)));
+        var run = () => Create(llm.Object, catalog: [AgentTestData.Dish(1)]).RunAsync(context, default);
+
+        if (recover) (await run()).Snapshot!.Items.Should().ContainSingle(item => item.DayNumber == 1);
+        else await run.Should().ThrowAsync<ServiceUnavailableException>();
+        llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Once);
+        context.RepairFeedback.Should().Contain("itemKey d1-l có dayNumber 0").And.Contain("từ 1 đến 1");
     }
 
     // TEST-57: A dish no tool issued is sent back once with the reason; a corrected draft is shown, and one still made up after that is replaced by the dish issued for its meal.

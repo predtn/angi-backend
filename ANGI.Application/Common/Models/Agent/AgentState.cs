@@ -77,6 +77,18 @@ public sealed record AgentState
     /// <summary>Backend-owned: the dishes the last suggestion showed, so "thêm món đó" or "3 món này" can be added later; replaced by the next suggestion.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentOfferedDish[]? OfferedDishes { get; init; }
+    /// <summary>
+    /// Backend-owned: the conditions of the latest dish suggestion while it is still what the chat is about (conversation 586), so a price or budget
+    /// answered after it suggests again instead of planning. Cleared when planning, a place or a catalog lookup starts; replaced by the next suggestion.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentLastSuggestion? LastSuggestion { get; init; }
+    /// <summary>
+    /// Backend-owned: the latest suggestion lists (at most <see cref="AgentOfferedList.MaxKept"/>), each with the conditions that made it, so "dựa vào các món
+    /// like nhiều nhất" can mean an earlier list than the last one (conversation 597). OfferedDishes stays the latest list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentOfferedList[]? OfferedLists { get; init; }
     /// <summary>Backend-owned: restaurant names the user was asked to pick a branch for; only these may resolve to a branch whose name is longer.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? CatalogChoices { get; init; }
@@ -214,6 +226,10 @@ public sealed class AgentContext
     public HashSet<string> AmbiguousNames { get; } = [];
     /// <summary>Set when the previous reply suggested a dish, so a short answer is read against that offer instead of as a bare acknowledgement.</summary>
     public bool DishOffered { get; set; }
+    /// <summary>The conditions of this turn's dish suggestion; they become state.LastSuggestion when the turn ends.</summary>
+    public AgentLastSuggestion? Suggested { get; set; }
+    /// <summary>Per meal, the prices a priceTier ranking kept and the meal's cheapest and dearest dish on ANGI; empty without a priceTier.</summary>
+    public Dictionary<string, AgentPriceTierRange> PriceTiers { get; } = [];
     /// <summary>Days this message moved to another place on an existing plan; they need new dishes.</summary>
     public short[] MovedDays { get; set; } = [];
     public bool ItineraryChanged => MovedDays.Length > 0;
@@ -246,13 +262,30 @@ public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int Ava
 /// <param name="Meals">The meals the dish fits, in words; null when it fits any meal or the user already named one.</param>
 public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null, int DishId = 0, long RestaurantId = 0);
 
+/// <summary>The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget.</summary>
+public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
+    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null);
+
+/// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
+public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)
+{
+    /// <summary>How many suggestion lists the state keeps.</summary>
+    public const int MaxKept = 5;
+}
+
+/// <summary>One meal's priceTier share: the kept dishes cost From..To, and the meal's dishes on ANGI range from Lowest to Highest.</summary>
+public sealed record AgentPriceTierRange(decimal From, decimal To, decimal Lowest, decimal Highest, int Kept);
+
 /// <summary>A dish a suggestion showed: enough for the model to put it on a day and meal later without searching again.</summary>
 public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId, string Restaurant);
 
 /// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply shown when the model's wording fails its check.</summary>
 /// <param name="Area">The place the user named that the search stayed around.</param>
 /// <param name="AreaNotFound">The place the user named that could not be located, so the search was not narrowed to it.</param>
-public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null);
+/// <param name="PriceBelow">When nothing fits the asked price: the nearest catalog price under it for the same search, else null.</param>
+/// <param name="PriceAbove">When nothing fits the asked price: the nearest catalog price over it for the same search, else null.</param>
+public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null,
+    decimal? PriceBelow = null, decimal? PriceAbove = null);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);

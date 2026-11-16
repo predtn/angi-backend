@@ -47,7 +47,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         // STEP-09: Run validator.ValidateAsync and keep outside.
         var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, !AgentScopedPlanning.IsLongTrip(snapshot.State), ct);
         // STEP-10: Throw AgentProposalValidationException when outside.Validation.Errors.Length > 0.
-        // THÍ NGHIỆM: không chặn lưu khi validator báo lỗi.
+        // Ở bước chuẩn bị, lỗi validator không chặn lưu; CommitLockedAsync chỉ chặn lỗi toàn vẹn dữ liệu.
         // STEP-11: Return the new result.
         return new(conversation.Id, proposal.Id, proposal.ProposalVersion, snapshot);
     }

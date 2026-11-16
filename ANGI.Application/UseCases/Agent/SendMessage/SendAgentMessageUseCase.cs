@@ -172,7 +172,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                 var today = AgentConfirmationPolicy.Today(clock);
                 // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
                 // Câu lưu đầy đủ và ngày viết bằng số không phụ thuộc cách nói, nên không cần gọi LLM: chỉ backend được quyết định ghi roadmap.
-                // THÍ NGHIỆM: không đọc câu lưu hay ngày viết bằng số bằng regex; mọi tin nhắn đi qua model.
+                // Câu lưu và ngày viết bằng số không được đọc bằng regex; mọi tin nhắn đi qua model.
                 {
                     // Model đọc mọi cách nói; backend chỉ cho câu trả lời đó có hiệu lực khi đang có đúng câu hỏi này.
                     context.AwaitedAnswer = AgentConfirmationPolicy.Awaited(context.State, context.CurrentProposal, pendingSave);
@@ -240,7 +240,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             context.State, null, null, "confirm", commit);
     }
 
-    // THÍ NGHIỆM: chỉ hiện câu model viết; câu cố định của backend bị bỏ.
+    // Chỉ hiện câu model viết; tham số backend được giữ cho chỗ gọi nhưng không còn được dùng.
     private static string WithBackend(string? modelReply, string backend) => (modelReply ?? "").Trim();
 
     private static string Spoken(string? modelReply, string backend) => (modelReply ?? "").Trim();
@@ -368,7 +368,7 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         // clarify/answer hoặc validation có lỗi không tạo snapshot mới: giữ proposal cũ để xem lại.
         // State mới vẫn được lưu; Confirm sẽ kiểm tra nó có còn khớp proposal trước khi cho commit.
         // Một câu hỏi đã cho thấy lịch chưa đổi và thẻ bản nháp vẫn đang hiện; chỉ báo khi lượt này không lập được lịch.
-        // THÍ NGHIỆM: không viết nối "Bản đề xuất trước đó được giữ lại…" vào câu của model.
+        // Không viết nối "Bản đề xuất trước đó được giữ lại…" vào câu của model.
         // STEP-13: Update conversation: State.
         conversation.State = AgentJson.Write(prepared.State);
         // STEP-14: Increment conversation.Version.
