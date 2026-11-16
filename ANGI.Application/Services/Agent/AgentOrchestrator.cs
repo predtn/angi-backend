@@ -257,6 +257,16 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         return Misunderstood(context, turnState, output.Reply);
                     }
                     telemetry.Record("use_tool", context.ConversationId, context.TurnId, context.AttemptId, new { output.Tool });
+                    // "Nâng ngân sách lên 500k mỗi ngày" while a suggestion is still the topic and no plan exists (conversation 586): the trip budget changes
+                    // and the suggestion runs again on it. A suggestion turn otherwise keeps the state it began with, so only the budget is carried over.
+                    if (output.Tool == "suggest_dish" && context.State.LastSuggestion is not null && !AgentIntakePolicy.HasPlan(context) && output.State is { } read &&
+                        (read.BudgetAmount != context.State.BudgetAmount || read.BudgetUnrestricted != context.State.BudgetUnrestricted))
+                    {
+                        var accepted = AcceptRaw(context, read);
+                        context.State = context.State with { BudgetAmount = accepted.BudgetAmount, BudgetUnrestricted = accepted.BudgetUnrestricted };
+                        turnState = turnState with { BudgetAmount = accepted.BudgetAmount, BudgetUnrestricted = accepted.BudgetUnrestricted };
+                        telemetry.Record("suggestion_budget", context.ConversationId, context.TurnId, context.AttemptId, new { accepted.BudgetAmount, accepted.BudgetUnrestricted });
+                    }
                     phase = AgentTurnPhase.Forced;
                     context.ForcedTool = output.Tool;
                     // Lần gọi sau đọc lại cùng tin nhắn từ đầu; không có kết quả đọc này thì nó có thể đọc khác (hội thoại 558 mất 10 món người dùng chỉ "các món trên").
@@ -417,6 +427,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
                 // STEP-41: Call telemetry.Record.
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
+                // A broken plan shape (conversation 593: ten meals sent as day 0) is never shown as a draft, because it could not be saved: the model fixes it once
+                // from the named items, and a second broken draft ends with the controlled error while the previous draft stays.
+                if (validated.Validation.Errors.Contains(AgentProposalValidator.StructureInvalid))
+                {
+                    var problems = AgentProposalValidator.StructureProblems(snapshot);
+                    telemetry.Record("structure_invalid", context.ConversationId, context.TurnId, context.AttemptId, new { problems, repaired = proposalRepaired });
+                    if (proposalRepaired || calls + 1 >= limits.MaxLlmCalls) throw Unavailable();
+                    context.RejectedOutput = output;
+                    context.RepairFeedback = "Cấu trúc lịch không hợp lệ: " + string.Join(" ", problems.Length > 0 ? problems : ["số món hoặc vị trí món vượt giới hạn."]) +
+                        " Sửa đúng các món này, giữ nguyên các món khác.";
+                    proposalRepaired = repaired = true;
+                    continue;
+                }
                 // A dish the model made up (not in the catalog, not issued by a tool for that day, meal and condition, outside the province or area) is never shown:
                 // the model corrects the draft once from the issued candidates; one still made up after that is replaced by the best dish issued for its meal.
                 // A dish kept from the plan the user already has is not made up even when it no longer fits (an itinerary change made 9 such in conversation 570):
@@ -650,7 +673,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     internal const string LongTripReply = "Lịch {numDays} ngày ở {place} xong rồi nè, tổng khoảng {total}. Bạn xem thử, ưng thì bảo mình chốt nhé!";
 
     // Người dùng chỉ thấy câu model viết; backend không có câu thay thế.
-    private static string Raw(string? reply) => (reply ?? "").Trim();
+    // A model sometimes escapes its line breaks twice, and the chat then shows "\n" as text (conversation 597): those become real line breaks.
+    private static string Raw(string? reply) => (reply ?? "").Replace("\\r\\n", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal).Trim();
 
     /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
@@ -679,7 +703,12 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
         // The shown dishes are remembered past this turn, so a later "thêm món đó vào bữa tối ngày 2" or "3 món này vào bữa sáng" knows which dishes are meant.
         var offered = suggestion.Dishes.Where(dish => dish.DishId > 0).Select(dish => new AgentOfferedDish(dish.DishId, dish.Name, dish.RestaurantId, dish.Restaurant)).ToArray();
-        return new(reply, turnState with { DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes }, null, null, "chat");
+        // Each list shown is kept with its conditions (at most five), so a later "dựa vào các món like nhiều nhất" can name that list (conversation 597).
+        var lists = turnState.OfferedLists ?? [];
+        if (offered.Length > 0)
+            lists = [.. lists, new AgentOfferedList(lists.Length == 0 ? 1 : lists.Max(list => list.Id) + 1, context.Suggested, offered)];
+        return new(reply, turnState with { DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes,
+            LastSuggestion = context.Suggested ?? turnState.LastSuggestion, OfferedLists = lists.Length > 0 ? lists.TakeLast(AgentOfferedList.MaxKept).ToArray() : null }, null, null, "chat");
     }
 
     /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>
