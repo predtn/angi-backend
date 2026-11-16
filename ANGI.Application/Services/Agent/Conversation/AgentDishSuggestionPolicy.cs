@@ -58,7 +58,7 @@ public static class AgentDishSuggestionPolicy
             string.IsNullOrWhiteSpace(dish.Restaurant.AddressLine) ? null : AgentReplyBuilder.Safe(dish.Restaurant.AddressLine), mealAsked ? null : Meals(dish), dish.Id, dish.RestaurantId)).ToArray(),
         personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked), hasPlan, area, areaNotFound);
 
-    /// <summary>THÍ NGHIỆM: điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
+    /// <summary>Điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
     public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(WithAddresses(Template(reply), suggestion), slot =>
     {
         var index = int.Parse(slot.Groups["dish"].Value) - 1;
