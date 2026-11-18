@@ -964,6 +964,27 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("Dish");
     }
 
+    // TEST-38b2: A one-day suggestion is answered with the backend's list grouped by meal, so it needs no further model call and writes no plan.
+    /// <summary>Ends the turn right after the tool, remembering the meals for a follow-up.</summary>
+    [Fact]
+    public async Task RunAsync_SuggestionForSeveralMeals_RepliesByMealWithoutWordingCall()
+    {
+        var context = IntakeContext("gợi ý bữa sáng, trưa, tối", new AgentState());
+        var call = new AgentToolCall("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], Count: 2, TasteTargets: [], MealSlots: ["breakfast", "lunch", "dinner"]), AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "suggest_dish" }))
+            .ReturnsAsync(new AgentLlmStep([call], null));
+
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Contain("Bữa sáng:").And.Contain("Bữa trưa:").And.Contain("Bữa tối:");
+        result.Snapshot.Should().BeNull();
+        result.State.LastSuggestion!.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     // TEST-38c: A price for one dish answered during a suggestion suggests again under it and leaves the trip budget alone.
     /// <summary>"Tầm 50k" is a dish price, never the trip budget.</summary>
     [Fact]

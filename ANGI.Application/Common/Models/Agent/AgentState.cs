@@ -262,9 +262,14 @@ public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int Ava
 /// <param name="Meals">The meals the dish fits, in words; null when it fits any meal or the user already named one.</param>
 public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null, int DishId = 0, long RestaurantId = 0);
 
-/// <summary>The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget.</summary>
+/// <summary>
+/// The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget,
+/// Now means the user wants to eat right now, so the backend reads the time again on every refinement, and DishNames are the exact catalog names the model
+/// chose from near names, kept so "rẻ hơn" still searches the dish ANGI calls by that name. MealSlots are the meals of a one-day suggestion, with Count dishes each.
+/// </summary>
 public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
-    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null);
+    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false,
+    string[]? DishNames = null, string[]? MealSlots = null);
 
 /// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
 public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)
@@ -284,8 +289,9 @@ public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId
 /// <param name="AreaNotFound">The place the user named that could not be located, so the search was not narrowed to it.</param>
 /// <param name="PriceBelow">When nothing fits the asked price: the nearest catalog price under it for the same search, else null.</param>
 /// <param name="PriceAbove">When nothing fits the asked price: the nearest catalog price over it for the same search, else null.</param>
+/// <param name="ByMeal">The dishes of several meals, shown as the fixed reply grouped by meal, so no model call is needed to word it.</param>
 public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null,
-    decimal? PriceBelow = null, decimal? PriceAbove = null);
+    decimal? PriceBelow = null, decimal? PriceAbove = null, bool ByMeal = false);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);

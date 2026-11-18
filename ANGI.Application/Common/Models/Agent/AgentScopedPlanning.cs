@@ -117,8 +117,49 @@ public static class AgentScopedPlanning
     /// <summary>Catalog category code of a main dish; drinks, desserts, starters and snacks are side items.</summary>
     public const string MainTagCode = "local_sf_main";
 
+    /// <summary>Catalog category of the dishes reviewed as regional specialties.</summary>
+    public const string SpecialtyTagCode = "local_sf_specialty";
+
+    // Kinds of dish that are a meal themselves: asking for one still means its main dishes, so "Cơm &amp; xôi" for lunch is not a side of plain rice.
+    private static readonly HashSet<string> MainKindCodes = ["form.mon_com_va_ngu_coc", "form.mon_soi", "form.banh_mi_va_banh_kep", "form.lau", "form.chao",
+        "form.banh_bot_va_mon_nhan", "form.muc_menu_nhieu_cau_phan", "form.khac_cho_duyet"];
+    private static readonly HashSet<string> MainRoleCodes = ["role.mon_chinh", "role.bua_du_trong_mot_mon"];
+
     /// <summary>
-    /// Breakfast, lunch and dinner need a main dish by default. Any category tag, dish or restaurant the user asked for
+    /// True when asking for this tag means something other than a main dish: a side kind such as drinks, or a meal role such as starter.
+    /// No such dish carries the main-dish tag on the catalog, so requiring both would find nothing.
+    /// </summary>
+    public static bool ReplacesMain(Domain.Entities.Tag tag) => tag.TagType switch
+    {
+        Domain.Enums.TagType.Category => !MainKindCodes.Contains(tag.Code),
+        Domain.Enums.TagType.MealRole => !MainRoleCodes.Contains(tag.Code),
+        _ => false
+    };
+
+    /// <summary>
+    /// Splits required tags into those a dish must all have and groups it needs one of. Several category, meal role, cooking method or ingredient
+    /// tags mean any of them ("cơm hoặc bún": a dish has one kind). The main-dish tag, diets, meals and unknown ids always stay required.
+    /// </summary>
+    public static (short[] All, short[][] AnyOf) SplitTags(IEnumerable<short> tagIds, IEnumerable<Domain.Entities.Tag> catalogTags)
+    {
+        var catalog = catalogTags.GroupBy(tag => tag.Id).ToDictionary(group => group.Key, group => group.First());
+        var ids = tagIds.Distinct().ToArray();
+        bool Alternative(short id) => catalog.TryGetValue(id, out var tag) && tag.Code != MainTagCode && tag.TagType is Domain.Enums.TagType.Category
+            or Domain.Enums.TagType.MealRole or Domain.Enums.TagType.CookingMethod or Domain.Enums.TagType.Ingredient;
+        var groups = ids.Where(Alternative).GroupBy(id => catalog[id].TagType).Where(group => group.Count() > 1).Select(group => group.ToArray()).ToArray();
+        return (ids.Except(groups.SelectMany(group => group)).ToArray(), groups);
+    }
+
+    /// <summary>Whether a dish with these tags answers the required tags, read as in <see cref="SplitTags"/>.</summary>
+    public static bool FitsTags(IEnumerable<short> dishTagIds, IEnumerable<short> tagIds, IEnumerable<Domain.Entities.Tag> catalogTags)
+    {
+        var owned = dishTagIds.ToHashSet();
+        var (all, anyOf) = SplitTags(tagIds, catalogTags);
+        return all.All(owned.Contains) && anyOf.All(group => group.Any(owned.Contains));
+    }
+
+    /// <summary>
+    /// Breakfast, lunch and dinner need a main dish by default. A side kind or meal role, a dish or a restaurant the user asked for
     /// at that position (trip filters included) is an explicit choice that replaces the default, e.g. drinks-only breakfast.
     /// </summary>
     public static bool RequiresMain(AgentState state, short day, string meal, IEnumerable<Domain.Entities.Tag> catalogTags,
@@ -127,8 +168,8 @@ public static class AgentScopedPlanning
         if (meal is not ("breakfast" or "lunch" or "dinner")) return false;
         var request = Request(state, day, meal);
         if (request.DishName is not null || request.RestaurantName is not null) return false;
-        var categories = catalogTags.Where(tag => tag.TagType == Domain.Enums.TagType.Category).Select(tag => tag.Id).ToHashSet();
-        return !state.TagIds.Concat(request.TagIds).Concat(searchTagIds ?? []).Any(categories.Contains);
+        var replacing = catalogTags.Where(ReplacesMain).Select(tag => tag.Id).ToHashSet();
+        return !state.TagIds.Concat(request.TagIds).Concat(searchTagIds ?? []).Any(replacing.Contains);
     }
 
     /// <summary>

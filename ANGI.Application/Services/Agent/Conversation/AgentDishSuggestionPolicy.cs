@@ -62,6 +62,34 @@ public static class AgentDishSuggestionPolicy
             Address(dish, area, distanceKm), mealAsked ? null : Meals(dish), dish.Id, dish.RestaurantId)).ToArray(),
         personalized, aroundPin, Reply(dishes, aroundPin, personalized, hasPlan, area, areaNotFound, mealAsked, distanceKm), hasPlan, area, areaNotFound);
 
+    /// <summary>
+    /// Joins one suggestion per meal into a one-day suggestion whose reply lists the dishes under each meal. A meal with no dish says so,
+    /// and when no meal has any the first empty suggestion stays, so the model can explain it as usual.
+    /// </summary>
+    public static AgentDishSuggestion ByMeal(IReadOnlyList<(string Meal, AgentDishSuggestion Found)> meals)
+    {
+        var first = meals[0].Found;
+        var withDishes = meals.Where(meal => meal.Found.Dishes.Length > 0).ToArray();
+        if (withDishes.Length == 0) return first;
+        var personalized = withDishes.All(meal => meal.Found.Personalized);
+        var near = first.Area is not null ? $" quanh {AgentReplyBuilder.Safe(first.Area)}" : first.AroundPin ? " quanh điểm bạn đã chấm trên bản đồ" : "";
+        var unknown = first.AreaNotFound is null ? "" : $"Mình chưa định vị được “{AgentReplyBuilder.Safe(first.AreaNotFound)}” nên chưa lọc theo khu đó. ";
+        var start = unknown + (personalized ? "Theo khẩu vị của bạn, mình gợi ý" : "Mình gợi ý") + $" các món cho một ngày{near} nhé:";
+        var groups = meals.Select(meal =>
+        {
+            var label = AgentReplyBuilder.Meal(meal.Meal);
+            var lines = meal.Found.Dishes.Select(dish => $"- {dish.Name} ở {dish.Restaurant}, khoảng {AgentReplyBuilder.Money(dish.Price)} đồng." +
+                (dish.Address is null ? "" : $" Địa chỉ: {dish.Address}.")).ToArray();
+            return $"{char.ToUpperInvariant(label[0])}{label[1..]}:\n{(lines.Length > 0 ? string.Join('\n', lines) : "- Chưa có món phù hợp.")}";
+        });
+        var next = first.HasPlan ? "Muốn cho món nào vào lịch thì nhắn mình ngày và bữa nhé." : "Muốn đổi món hoặc lập lịch từ các món này cứ nhắn mình nhé.";
+        return first with
+        {
+            Dishes = [.. meals.SelectMany(meal => meal.Found.Dishes)], Personalized = personalized,
+            FixedReply = $"{start}\n\n{string.Join("\n\n", groups)}\n\n{next}", PriceBelow = null, PriceAbove = null, ByMeal = true
+        };
+    }
+
     /// <summary>The restaurant's address, with "cách {area} khoảng N km" when the search stayed around a named place.</summary>
     private static string? Address(Dish dish, string? area, Func<Dish, double>? distanceKm)
     {

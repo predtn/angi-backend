@@ -893,6 +893,11 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-04: Assert ErrorAsync confirms AGENT_RATE_LIMITED and blocked.Headers.RetryAfter is not null.
         await ErrorAsync(blocked, HttpStatusCode.TooManyRequests, "AGENT_RATE_LIMITED");
         blocked.Headers.RetryAfter.Should().NotBeNull();
+        // STEP-05: Assert the other conversation shows the shared balance and when the sent message comes back.
+        var limits = host.Services.GetRequiredService<AgentLimits>();
+        var quota = (await GetAsync(client, second.ConversationId)).Quota!;
+        quota.Remaining.Should().Be(limits.MessagesPerDay - 1); quota.Limit.Should().Be(limits.MessagesPerDay);
+        quota.ResetsAt.Should().BeCloseTo(DateTime.UtcNow.AddDays(1), TimeSpan.FromMinutes(2));
     }
 
     // TEST-26: JWT, role and request validators reject unauthorized, wrong-role and malformed Agent requests.

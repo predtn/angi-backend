@@ -18,7 +18,8 @@ public sealed class GetAgentConversationUseCase(IAgentRepository repository, ICu
         // STEP-01: Run AgentConversationRules.ValidateId.
         AgentConversationRules.ValidateId(id);
         // STEP-02: Prepare conversation from AgentConversationRules.Missing and now from clock.GetUtcNow.
-        var conversation = await repository.GetOwnedAsync(id, AgentConversationRules.UserId(user), ct) ?? throw AgentConversationRules.Missing();
+        var userId = AgentConversationRules.UserId(user);
+        var conversation = await repository.GetOwnedAsync(id, userId, ct) ?? throw AgentConversationRules.Missing();
         var now = clock.GetUtcNow().UtcDateTime;
         // STEP-03: Check the active rule through AgentConversationRules.RequireActive.
         AgentConversationRules.RequireActive(conversation, now);
@@ -30,6 +31,7 @@ public sealed class GetAgentConversationUseCase(IAgentRepository repository, ICu
             AgentConversationRules.Busy(conversation, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
                 x.SequenceNo >= (AgentJson.Read<AgentState>(conversation.State).TranscriptStartSequence ?? 0))
                 .Select(x => new AgentTranscript(AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToArray(),
-            proposal is null ? null : AgentContextBuilder.MapProposal(proposal));
+            proposal is null ? null : AgentContextBuilder.MapProposal(proposal))
+        { Quota = await AgentConversationRules.QuotaAsync(repository, userId, now, limits, ct) };
     }
 }

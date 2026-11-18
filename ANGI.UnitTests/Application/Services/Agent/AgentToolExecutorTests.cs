@@ -94,6 +94,7 @@ public sealed class AgentToolExecutorTests
     public async Task StarterCallAsync_ArgumentsPassToolSchema(string command)
     {
         var fixture = AgentTestData.Validator();
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
         var context = AgentTestData.Context();
         // State với các trường backend tự quản, như sau vài lượt chat thật.
@@ -103,6 +104,196 @@ public sealed class AgentToolExecutorTests
         var call = await tools.StarterCallAsync(context, CancellationToken.None);
 
         AgentLlmSchema.IsValid(call!.Arguments, AgentLlmSchema.Tools[call.Name]).Should().BeTrue();
+    }
+
+    /// <summary>Tags of the production catalogue the tests below filter on.</summary>
+    private static class ProdTags
+    {
+        private static ANGI.Domain.Entities.Tag T(short id, string code, ANGI.Domain.Enums.TagType type) => new() { Id = id, Code = code, Name = code, TagType = type };
+        public static readonly ANGI.Domain.Entities.Tag Main = T(5, "local_sf_main", ANGI.Domain.Enums.TagType.Category);
+        public static readonly ANGI.Domain.Entities.Tag Specialty = T(6, "local_sf_specialty", ANGI.Domain.Enums.TagType.Category);
+        public static readonly ANGI.Domain.Entities.Tag Drink = T(30, "local_sf_drink", ANGI.Domain.Enums.TagType.Category);
+        public static readonly ANGI.Domain.Entities.Tag Rice = T(31, "form.mon_com_va_ngu_coc", ANGI.Domain.Enums.TagType.Category);
+        public static readonly ANGI.Domain.Entities.Tag Noodle = T(32, "form.mon_soi", ANGI.Domain.Enums.TagType.Category);
+        public static readonly ANGI.Domain.Entities.Tag Starter = T(40, "role.khai_vi", ANGI.Domain.Enums.TagType.MealRole);
+        public static readonly ANGI.Domain.Entities.Tag DrinkRole = T(41, "role.do_uong", ANGI.Domain.Enums.TagType.MealRole);
+        public static readonly ANGI.Domain.Entities.Tag Beef = T(50, "beef", ANGI.Domain.Enums.TagType.Ingredient);
+        public static readonly ANGI.Domain.Entities.Tag Chicken = T(51, "ingredient.thit_ga", ANGI.Domain.Enums.TagType.Ingredient);
+        public static readonly ANGI.Domain.Entities.Tag[] All = [Main, Specialty, Drink, Rice, Noodle, Starter, DrinkRole, Beef, Chicken];
+    }
+
+    private static readonly ANGI.Domain.Entities.Dish[] ProdDishes =
+    [
+        Named(1, "Phở bò", ProdTags.Main, ProdTags.Noodle, ProdTags.Beef),
+        Named(2, "Cơm gà", ProdTags.Main, ProdTags.Rice, ProdTags.Chicken),
+        Named(3, "Cơm trắng", ProdTags.Rice),
+        Named(4, "Nem khai vị", ProdTags.Starter),
+        Named(5, "Trà đào", ProdTags.Drink)
+    ];
+
+    /// <summary>Runs suggest_dish over the production-shaped dishes, returning the names found and the SQL filter.</summary>
+    private static async Task<(string?[] Names, DishCandidateFilter Filter)> SuggestProd(short[] tagIds, string? nameQuery = null)
+    {
+        var fixture = AgentTestData.Validator(ProdDishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        DishCandidateFilter? seen = null;
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => seen = filter).ReturnsAsync(ProdDishes.Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: tagIds, ExcludeTagIds: [], TasteTargets: [], Count: 10, NameQuery: nameQuery), AgentJson.Options));
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+        return (result.GetProperty("dishes").EnumerateArray().Select(dish => dish.GetProperty("name").GetString()).ToArray(), seen!);
+    }
+
+    // TEST-01c2b: Starters and other side roles carry no main-dish tag on production, so the main-dish default must give way to them.
+    /// <summary>A side role finds its dishes; a role tag beside a named dish does not narrow the name search.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSideRole_DoesNotRequireMainDish()
+    {
+        var (starters, filter) = await SuggestProd([ProdTags.Starter.Id]);
+        var (tea, _) = await SuggestProd([ProdTags.DrinkRole.Id], "trà");
+
+        starters.Should().Equal("Nem khai vị");
+        filter.TagIds.Should().Equal(ProdTags.Starter.Id);
+        tea.Should().Equal("Trà đào");
+    }
+
+    // TEST-01c2c: Rice and noodles are meals themselves, so asking for them means their main dishes and not plain rice.
+    /// <summary>A meal kind keeps the main-dish tag; a side kind replaces it.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestMealKind_KeepsMainDish()
+    {
+        var (rice, filter) = await SuggestProd([ProdTags.Rice.Id]);
+        var (drinks, _) = await SuggestProd([ProdTags.Drink.Id]);
+
+        rice.Should().Equal("Cơm gà");
+        filter.TagIds.Should().BeEquivalentTo([ProdTags.Rice.Id, ProdTags.Main.Id]);
+        drinks.Should().Equal("Trà đào");
+    }
+
+    // TEST-01c2d: A dish has one kind and usually one meat, so two tags of one type mean either.
+    /// <summary>"Cơm hoặc bún" and "bò hoặc gà" reach the catalog as alternatives, with the main dish still required.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestTagsOfOneType_MeanAlternatives()
+    {
+        var (kinds, filter) = await SuggestProd([ProdTags.Rice.Id, ProdTags.Noodle.Id]);
+        var (meats, _) = await SuggestProd([ProdTags.Beef.Id, ProdTags.Chicken.Id]);
+
+        kinds.Should().BeEquivalentTo("Phở bò", "Cơm gà");
+        filter.TagIds.Should().Equal(ProdTags.Main.Id);
+        filter.TagAnyGroups.Should().ContainSingle().Which.Should().BeEquivalentTo([ProdTags.Rice.Id, ProdTags.Noodle.Id]);
+        meats.Should().BeEquivalentTo("Phở bò", "Cơm gà");
+    }
+
+    // TEST-01c2e: The specialty button shows only dishes tagged as specialties, and without that tag runs as chat instead of showing any main dish.
+    /// <summary>Filters on local_sf_specialty alone; a catalogue without it produces no tool call.</summary>
+    [Fact]
+    public async Task StarterCallAsync_Specialty_UsesSpecialtyTagOnly()
+    {
+        var fixture = AgentTestData.Validator();
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var context = AgentTestData.Context();
+        context.Request.Command = "suggest_specialty";
+
+        var call = await tools.StarterCallAsync(context, CancellationToken.None);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync([ProdTags.Main]);
+        var withoutTag = await tools.StarterCallAsync(context, CancellationToken.None);
+
+        call!.Arguments.GetProperty("tagIds").EnumerateArray().Select(id => id.GetInt16()).Should().Equal(ProdTags.Specialty.Id);
+        withoutTag.Should().BeNull();
+    }
+
+    // TEST-01c2f: A planned meal follows the same rules as a suggestion.
+    /// <summary>A starter search for lunch drops the main-dish tag; a rice search keeps it.</summary>
+    [Theory]
+    [InlineData(40, false)]
+    [InlineData(31, true)]
+    public async Task ExecuteAsync_PlanWithKindTag_AppliesMainDishRule(short tagId, bool needsMain)
+    {
+        var fixture = AgentTestData.Validator(ProdDishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        DishCandidateFilter? seen = null;
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => seen = filter).ReturnsAsync(Array.Empty<int>());
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch"] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        await tools.ExecuteAsync(context, Call(Input() with { TagIds = [tagId] }), CancellationToken.None);
+
+        seen!.TagIds.Contains(ProdTags.Main.Id).Should().Be(needsMain);
+    }
+
+    /// <summary>Runs a one-day suggestion over main dishes that carry the given meal tags.</summary>
+    private static async Task<AgentContext> SuggestMeals(ANGI.Domain.Entities.Dish[] dishes, string[] meals, int count = 2)
+    {
+        var fixture = AgentTestData.Validator(dishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => dishes
+                .Where(dish => dish.DishTags.Any(tag => tag.Tag.Code == filter.CompatibleMealTimeCode)).Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var input = new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Count: count, MealSlots: meals);
+        var arguments = JsonSerializer.SerializeToElement(input, AgentJson.Options);
+        AgentLlmSchema.IsValid(arguments, AgentLlmSchema.Tools["suggest_dish"]).Should().BeTrue();
+        await tools.ExecuteAsync(context, new AgentToolCall("s", "suggest_dish", arguments), CancellationToken.None);
+        return context;
+    }
+
+    private static ANGI.Domain.Entities.Tag MealTag(short id, string code) => new() { Id = id, Code = code, Name = code, TagType = ANGI.Domain.Enums.TagType.MealTime };
+
+    // TEST-01c2g: "Gợi ý bữa sáng, trưa, tối" is one day of ideas: two dishes per meal under each meal's name, none repeated between meals.
+    /// <summary>Groups the reply by meal in meal order and keeps a dish of breakfast out of lunch.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_GroupsDishesByMealWithoutRepeats()
+    {
+        ANGI.Domain.Entities.Tag breakfast = MealTag(1, "breakfast"), lunch = MealTag(2, "lunch"), dinner = MealTag(3, "dinner");
+        var dishes = new[]
+        {
+            Named(1, "Phở", ProdTags.Main, breakfast, lunch, dinner), Named(2, "Xôi", ProdTags.Main, breakfast), Named(3, "Bún chả", ProdTags.Main, lunch),
+            Named(4, "Cơm gà", ProdTags.Main, lunch, dinner), Named(5, "Lẩu", ProdTags.Main, dinner), Named(6, "Cá kho", ProdTags.Main, dinner)
+        };
+
+        var context = await SuggestMeals(dishes, ["dinner", "breakfast", "lunch"]);
+
+        var suggestion = context.DishSuggestion!;
+        suggestion.ByMeal.Should().BeTrue();
+        suggestion.Dishes.Select(dish => dish.Name).Should().Equal("Phở", "Xôi", "Bún chả", "Cơm gà", "Lẩu", "Cá kho");
+        suggestion.FixedReply.IndexOf("Bữa sáng:", StringComparison.Ordinal).Should().BeLessThan(suggestion.FixedReply.IndexOf("Bữa trưa:", StringComparison.Ordinal));
+        suggestion.FixedReply.IndexOf("Bữa trưa:", StringComparison.Ordinal).Should().BeLessThan(suggestion.FixedReply.IndexOf("Bữa tối:", StringComparison.Ordinal));
+        context.Suggested!.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        context.Suggested.Count.Should().Be(2);
+    }
+
+    // TEST-01c2g2: Each meal shows as many dishes as a single-meal suggestion: ten when the user states no number.
+    /// <summary>Keeps ten dishes for every meal.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_ShowsTenDishesPerMeal()
+    {
+        ANGI.Domain.Entities.Tag breakfast = MealTag(1, "breakfast"), lunch = MealTag(2, "lunch");
+        var dishes = Enumerable.Range(1, 24).Select(id => Named(id, $"Món {id}", ProdTags.Main, id <= 12 ? breakfast : lunch)).ToArray();
+        foreach (var dish in dishes) dish.RestaurantId = dish.Id;
+
+        var context = await SuggestMeals(dishes, ["breakfast", "lunch"], 10);
+
+        context.DishSuggestion!.Dishes.Should().HaveCount(20);
+        context.Suggested!.Count.Should().Be(10);
+    }
+
+    // TEST-01c2h: A meal with no dish is said plainly while the other meals are still shown.
+    /// <summary>Keeps the found meal and marks the empty one.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_SaysWhichMealHasNoDish()
+    {
+        var context = await SuggestMeals([Named(1, "Phở", ProdTags.Main, MealTag(1, "breakfast"))], ["breakfast", "lunch"]);
+
+        context.DishSuggestion!.Dishes.Should().ContainSingle();
+        context.DishSuggestion.FixedReply.Should().Contain("Bữa trưa:\n- Chưa có món phù hợp.");
     }
 
     // TEST-01c3: A trip stored with the full province name ("Thành phố …") keeps the ranked dishes of restaurants stored with the short name.
@@ -1579,6 +1770,84 @@ public sealed class AgentToolExecutorTests
 
         // STEP-03: Assert context.DishSuggestion.Dishes[0].Meals is meals.
         context.DishSuggestion!.Dishes[0].Meals.Should().Be(meals);
+    }
+
+    // TEST-46b: "Right now" searches restaurants open at the Vietnam time of today and the meal that time falls in, unless the user named a meal.
+    /// <summary>User decision 2026-11-16: the model only flags now; the backend reads the time, so 23:05 on a Monday is late night, open at 23:05 on day 1.</summary>
+    // A dish the user named keeps no meal of the time (conversation 640: cà phê at 22:36 was dropped as not late night); open now still applies.
+    [Theory]
+    [InlineData(null, null, "late_night")]
+    [InlineData("dinner", null, "dinner")]
+    [InlineData(null, "cà phê", null)]
+    public async Task ExecuteAsync_SuggestDishNow_FiltersOpenNowAndMeal(string? mealSlot, string? nameQuery, string? meal)
+    {
+        // STEP-01: 2026-11-16 16:05 UTC is Monday 23:05 in Vietnam; capture the candidate filter.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter)).ReturnsAsync(new[] { 221 });
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(),
+            Mock.Of<IAgentTelemetry>(), clock: new NowClock(new DateTimeOffset(2026, 11, 16, 16, 5, 0, TimeSpan.Zero)));
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(MealSlot: mealSlot, TagIds: [], ExcludeTagIds: [], TasteTargets: [], NameQuery: nameQuery, Now: true), AgentJson.Options));
+
+        // STEP-02: Run the call.
+        var result = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, call, CancellationToken.None), AgentJson.Options);
+
+        // STEP-03: Assert the filter is open at 23:05 on Monday with the meal, and the result tells the model the time and meal.
+        filters[0].OpenAtTime.Should().Be(new TimeOnly(23, 5));
+        filters[0].OpenOnDays.Should().Equal((short)1);
+        filters[0].CompatibleMealTimeCode.Should().Be(meal);
+        result.GetProperty("now").GetProperty("time").GetString().Should().Be("23:05");
+        result.GetProperty("now").GetProperty("meal").GetString().Should().Be(meal);
+        // The trace counts the dishes before and after business hours with its own count query, not a second search.
+        fixture.Dishes.Verify(x => x.CountCandidatesAsync(It.Is<DishCandidateFilter>(f => f.OpenAtTime == null), It.IsAny<CancellationToken>()), Times.Once);
+        context.Suggested!.Now.Should().BeTrue();
+    }
+
+    // TEST-46c: A dish name the catalog does not hold returns near names for the model to choose from, and the suggestion is not final yet.
+    /// <summary>User decision 2026-11-16: "cà phê sữa đá" lists Cà Phê Nâu Đá; a name the model makes up is refused; a chosen name searches that dish's ids.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestDishMissingName_ReturnsNearNamesThenSearchesChosen()
+    {
+        // STEP-01: The candidate search finds nothing by name; the catalog holds Cà Phê Nâu Đá as dish 221.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.DishIds.Count > 0 ? new[] { 221 } : Array.Empty<int>());
+        var catalog = new Mock<IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetDishTextsAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new AgentDishText("Cà Phê Nâu Đá", "Cà phê phin pha sữa đặc, đá.", 30000, 1, ["Cà phê"])]);
+        catalog.Setup(x => x.SearchAsync("dish", It.IsAny<string>(), It.IsAny<string?>(), 21, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string name, string? _, int _, CancellationToken _) => name == "Cà Phê Nâu Đá"
+                ? [new AgentCatalogMatch(221, "Cà Phê Nâu Đá", 1, "Cafe", "Hà Nội", "21 Phan Bội Châu", true)] : []);
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(),
+            Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var context = AgentTestData.Context();
+        context.State = new AgentState { Province = "Hà Nội" };
+        AgentToolCall Call(string? nameQuery, string[]? dishNames) => new("s", "suggest_dish", JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], NameQuery: nameQuery, DishNames: dishNames), AgentJson.Options));
+
+        // STEP-02: The missing name gives near names and leaves the suggestion open.
+        var near = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call("cà phê sữa đá", null), CancellationToken.None), AgentJson.Options);
+        near.GetProperty("status").GetString().Should().Be("near_names");
+        near.GetProperty("nearNames")[0].GetProperty("name").GetString().Should().Be("Cà Phê Nâu Đá");
+        context.DishSuggestion.Should().BeNull();
+
+        // STEP-03: A made-up name is refused; the exact name searches its dish id and keeps it for refinements.
+        var invented = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call(null, ["Cà Phê Sữa Đá Ngon"]), CancellationToken.None), AgentJson.Options);
+        invented.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        var chosen = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call(null, ["Cà Phê Nâu Đá"]), CancellationToken.None), AgentJson.Options);
+        chosen.GetProperty("status").GetString().Should().Be("suggested");
+        filters[^1].DishIds.Should().Equal(221);
+        context.Suggested!.DishNames.Should().Equal("Cà Phê Nâu Đá");
+    }
+
+    private sealed class NowClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     // TEST-47: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
