@@ -5,8 +5,14 @@ namespace ANGI.Domain.Entities
 {
     public class Roadmap : BaseEntity<long>, IHasCreatedAt, IHasUpdatedAt, ISoftDelete
     {
-        /// <summary>Longest trip a roadmap can hold; ck_roadmaps_num_days enforces the same value.</summary>
-        public const short MaxNumDays = 100;
+        /// <summary>Longest trip RM-01, RM-04 and the agent accept for a new or changed number of days (team decision: 7 days).</summary>
+        public const short MaxNumDays = 7;
+
+        /// <summary>
+        /// Longest trip ck_roadmaps_num_days stores. Roadmaps created under the earlier 100-day limit keep their days, and every
+        /// change to a day or item updates the roadmap row, so the database check stays wider than MaxNumDays.
+        /// </summary>
+        public const short MaxStoredNumDays = 100;
 
         public int UserId { get; set; }
         public string Title { get; set; } = null!;
