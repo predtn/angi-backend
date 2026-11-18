@@ -227,6 +227,75 @@ public sealed class AgentToolExecutorTests
         seen!.TagIds.Contains(ProdTags.Main.Id).Should().Be(needsMain);
     }
 
+    /// <summary>Runs a one-day suggestion over main dishes that carry the given meal tags.</summary>
+    private static async Task<AgentContext> SuggestMeals(ANGI.Domain.Entities.Dish[] dishes, string[] meals, int count = 2)
+    {
+        var fixture = AgentTestData.Validator(dishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => dishes
+                .Where(dish => dish.DishTags.Any(tag => tag.Tag.Code == filter.CompatibleMealTimeCode)).Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var input = new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Count: count, MealSlots: meals);
+        var arguments = JsonSerializer.SerializeToElement(input, AgentJson.Options);
+        AgentLlmSchema.IsValid(arguments, AgentLlmSchema.Tools["suggest_dish"]).Should().BeTrue();
+        await tools.ExecuteAsync(context, new AgentToolCall("s", "suggest_dish", arguments), CancellationToken.None);
+        return context;
+    }
+
+    private static ANGI.Domain.Entities.Tag MealTag(short id, string code) => new() { Id = id, Code = code, Name = code, TagType = ANGI.Domain.Enums.TagType.MealTime };
+
+    // TEST-01c2g: "Gợi ý bữa sáng, trưa, tối" is one day of ideas: two dishes per meal under each meal's name, none repeated between meals.
+    /// <summary>Groups the reply by meal in meal order and keeps a dish of breakfast out of lunch.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_GroupsDishesByMealWithoutRepeats()
+    {
+        ANGI.Domain.Entities.Tag breakfast = MealTag(1, "breakfast"), lunch = MealTag(2, "lunch"), dinner = MealTag(3, "dinner");
+        var dishes = new[]
+        {
+            Named(1, "Phở", ProdTags.Main, breakfast, lunch, dinner), Named(2, "Xôi", ProdTags.Main, breakfast), Named(3, "Bún chả", ProdTags.Main, lunch),
+            Named(4, "Cơm gà", ProdTags.Main, lunch, dinner), Named(5, "Lẩu", ProdTags.Main, dinner), Named(6, "Cá kho", ProdTags.Main, dinner)
+        };
+
+        var context = await SuggestMeals(dishes, ["dinner", "breakfast", "lunch"]);
+
+        var suggestion = context.DishSuggestion!;
+        suggestion.ByMeal.Should().BeTrue();
+        suggestion.Dishes.Select(dish => dish.Name).Should().Equal("Phở", "Xôi", "Bún chả", "Cơm gà", "Lẩu", "Cá kho");
+        suggestion.FixedReply.IndexOf("Bữa sáng:", StringComparison.Ordinal).Should().BeLessThan(suggestion.FixedReply.IndexOf("Bữa trưa:", StringComparison.Ordinal));
+        suggestion.FixedReply.IndexOf("Bữa trưa:", StringComparison.Ordinal).Should().BeLessThan(suggestion.FixedReply.IndexOf("Bữa tối:", StringComparison.Ordinal));
+        context.Suggested!.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        context.Suggested.Count.Should().Be(2);
+    }
+
+    // TEST-01c2g2: Each meal shows as many dishes as a single-meal suggestion: ten when the user states no number.
+    /// <summary>Keeps ten dishes for every meal.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_ShowsTenDishesPerMeal()
+    {
+        ANGI.Domain.Entities.Tag breakfast = MealTag(1, "breakfast"), lunch = MealTag(2, "lunch");
+        var dishes = Enumerable.Range(1, 24).Select(id => Named(id, $"Món {id}", ProdTags.Main, id <= 12 ? breakfast : lunch)).ToArray();
+        foreach (var dish in dishes) dish.RestaurantId = dish.Id;
+
+        var context = await SuggestMeals(dishes, ["breakfast", "lunch"], 10);
+
+        context.DishSuggestion!.Dishes.Should().HaveCount(20);
+        context.Suggested!.Count.Should().Be(10);
+    }
+
+    // TEST-01c2h: A meal with no dish is said plainly while the other meals are still shown.
+    /// <summary>Keeps the found meal and marks the empty one.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestSeveralMeals_SaysWhichMealHasNoDish()
+    {
+        var context = await SuggestMeals([Named(1, "Phở", ProdTags.Main, MealTag(1, "breakfast"))], ["breakfast", "lunch"]);
+
+        context.DishSuggestion!.Dishes.Should().ContainSingle();
+        context.DishSuggestion.FixedReply.Should().Contain("Bữa trưa:\n- Chưa có món phù hợp.");
+    }
+
     // TEST-01c3: A trip stored with the full province name ("Thành phố …") keeps the ranked dishes of restaurants stored with the short name.
     // The ranked list was filtered by an exact name match, so every dish was dropped and plan_trip found nothing (conversation 556, turn 4).
     /// <summary>Returns the ranked dish although the trip and the restaurant spell the province differently.</summary>

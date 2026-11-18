@@ -96,7 +96,8 @@ public static class AgentLlmSchema
             ["tasteTargets"] = ArrayOf(TasteTarget), ["area"] = Nullable(Scalar("string")),
             ["minPrice"] = Nullable(Scalar("number")), ["nameQuery"] = Nullable(Scalar("string")), ["dishForm"] = Nullable(Choice("dry", "soup")),
             ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating")), ["now"] = Scalar("boolean"),
-            ["dishNames"] = Nullable(ArrayOf(Scalar("string")))
+            ["dishNames"] = Nullable(ArrayOf(Scalar("string"))),
+            ["mealSlots"] = Nullable(ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night")))
         }),
         ["locate_places"] = Obj(new()
         {
