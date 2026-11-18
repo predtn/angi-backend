@@ -13,7 +13,7 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     /// <summary>Verifies the documented lower and upper boundaries are inclusive.</summary>
     [Theory]
     [InlineData(1, 0, -90, -180)]
-    [InlineData(30, 999999999, 90, 180)]
+    [InlineData(7, 999999999, 90, 180)]
     public async Task Validate_WithBoundaryValues_ShouldBeValid(short numDays, decimal budget, decimal latitude, decimal longitude)
     {
         // STEP-01: Validate CreateRoadmapRequestDto { Title, NumDays, BudgetAmount, ... } and keep result.
@@ -37,11 +37,11 @@ public sealed class CreateRoadmapRequestDtoValidatorTests
     [Fact]
     public async Task Validate_WithOutOfRangeValues_ShouldReturnEveryRelevantFailure()
     {
-        // STEP-01: Validate CreateRoadmapRequestDto { Title = a new string, NumDays = 101, BudgetAmount = -1, ... } and keep result.
+        // STEP-01: Validate CreateRoadmapRequestDto { Title = a new string, NumDays = 8, BudgetAmount = -1, ... } and keep result.
         var result = await _validator.ValidateAsync(new CreateRoadmapRequestDto
         {
             Title = new string('a', 201),
-            NumDays = 101,
+            NumDays = 8,
             BudgetAmount = -1,
             OriginMode = "pinned",
             OriginLatitude = 90.000001m,

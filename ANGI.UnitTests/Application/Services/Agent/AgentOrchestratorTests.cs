@@ -618,7 +618,7 @@ public sealed class AgentOrchestratorTests
     }
 
     // TEST-27: Over a plan a day moves through locate_places only as far as the plan allows; covers a whole-trip area, a day past the trip, and a place the day already has.
-    /// <summary>The model reads "ngày 9 ở Hoàn Kiếm"; the backend decides what it may change, and an unchanged itinerary forces no replan.</summary>
+    /// <summary>The model reads "ngày 5 ở Hoàn Kiếm"; the backend decides what it may change, and an unchanged itinerary forces no replan.</summary>
     [Theory]
     [InlineData("area")]
     [InlineData("past")]
@@ -631,7 +631,7 @@ public sealed class AgentOrchestratorTests
         var context = AgentTestData.Context(plan);
         context.State = plan.State;
         context.Request.Content = "ngày đó tôi ở Hoàn Kiếm";
-        var call = area switch { "area" => Locates("Hoàn Kiếm"), "past" => Locates(null, new AgentLocateStop([9], "Hoàn Kiếm")), _ => Locates(null, new AgentLocateStop([1], "Hoàn Kiếm")) };
+        var call = area switch { "area" => Locates("Hoàn Kiếm"), "past" => Locates(null, new AgentLocateStop([5], "Hoàn Kiếm")), _ => Locates(null, new AgentLocateStop([1], "Hoàn Kiếm")) };
         var llm = Scripted(call, new AgentLlmStep([], AgentTestData.Answer()));
 
         // STEP-02: Call Create().RunAsync.
@@ -641,7 +641,7 @@ public sealed class AgentOrchestratorTests
         context.ItineraryChanged.Should().BeFalse();
         context.State.NumDays.Should().Be(1);
         if (area == "area") context.Exchanges.Single().Results[0].GetProperty("status").GetString().Should().Be("invalid_arguments");
-        if (area == "past") context.Exchanges.Single().Results[0].GetProperty("outsideTrip")[0].GetInt16().Should().Be(9);
+        if (area == "past") context.Exchanges.Single().Results[0].GetProperty("outsideTrip")[0].GetInt16().Should().Be(5);
     }
 
     // TEST-28: A place the model read over an existing plan moves that day through locate_places, and the proposal for it is accepted.
@@ -964,6 +964,27 @@ public sealed class AgentOrchestratorTests
         result.Reply.Should().Contain("Dish");
     }
 
+    // TEST-38b2: A one-day suggestion is answered with the backend's list grouped by meal, so it needs no further model call and writes no plan.
+    /// <summary>Ends the turn right after the tool, remembering the meals for a follow-up.</summary>
+    [Fact]
+    public async Task RunAsync_SuggestionForSeveralMeals_RepliesByMealWithoutWordingCall()
+    {
+        var context = IntakeContext("gợi ý bữa sáng, trưa, tối", new AgentState());
+        var call = new AgentToolCall("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], Count: 2, TasteTargets: [], MealSlots: ["breakfast", "lunch", "dinner"]), AgentJson.Options));
+        var llm = new Mock<IAgentLlmService>();
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([], new AgentOutput { Action = "use_tool", Reply = "", Tool = "suggest_dish" }))
+            .ReturnsAsync(new AgentLlmStep([call], null));
+
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        result.Reply.Should().Contain("Bữa sáng:").And.Contain("Bữa trưa:").And.Contain("Bữa tối:");
+        result.Snapshot.Should().BeNull();
+        result.State.LastSuggestion!.MealSlots.Should().Equal("breakfast", "lunch", "dinner");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     // TEST-38c: A price for one dish answered during a suggestion suggests again under it and leaves the trip budget alone.
     /// <summary>"Tầm 50k" is a dish price, never the trip budget.</summary>
     [Fact]
@@ -1096,12 +1117,11 @@ public sealed class AgentOrchestratorTests
         context.ToolsClosed.Should().BeTrue();
     }
 
-    // TEST-43: A long trip is assembled by the backend after the one search, however long: one provider call and no paid route requests; covers just past the threshold, 30 days and the maximum.
+    // TEST-43: A long trip of a roadmap stored before the 7-day limit is assembled by the backend after the one search: one provider call and no paid route requests; covers just past the threshold and 30 days.
     /// <summary>A model reply cannot hold hundreds of items, so these trips would otherwise end in a truncated output.</summary>
     [Theory]
     [InlineData(15)]
     [InlineData(30)]
-    [InlineData(100)]
     public async Task RunAsync_LongTrip_BackendAssemblesAfterOneSearch(int days)
     {
         // STEP-01: Create state as AgentState, get context from IntakeContext, set context.IntakeComplete to true, create search as AgentRecommendationInput and 1 more.
@@ -1139,20 +1159,21 @@ public sealed class AgentOrchestratorTests
             It.IsAny<ANGI.Application.Common.Models.Roadmap.RouteProfile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // TEST-44: The duration limit reads up to 100 days in a message and refuses just above it.
-    /// <summary>"30 ngày" used to be refused by the form and "100 ngày" could not even be read.</summary>
+    // TEST-44: A duration up to the 7-day maximum is kept and one just above it is not; covers 1 (min), 7 (max) and 8 (max + 1).
+    /// <summary>The team keeps trips to a week, so the agent asks again instead of planning a longer one.</summary>
     [Theory]
-    [InlineData("lập lịch Hà Nội 30 ngày", 30)]
-    [InlineData("lập lịch Hà Nội 100 ngày", 100)]
-    public async Task RunAsync_DurationUpToMaximum_IsAccepted(string content, int days)
+    [InlineData("lập lịch Hà Nội 1 ngày", 1, true)]
+    [InlineData("lập lịch Hà Nội 7 ngày", 7, true)]
+    [InlineData("lập lịch Hà Nội 8 ngày", 8, false)]
+    public async Task RunAsync_DurationUpToMaximum_IsAccepted(string content, int days, bool accepted)
     {
         // STEP-01: Get result from Create().RunAsync.
         var llm = Scripted(Asks("trip_details", "Ngân sách của bạn khoảng bao nhiêu?", new AgentState { Province = "Hà Nội", NumDays = (short)days }));
         var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(IntakeContext(content, new AgentState()), default);
 
-        // STEP-02: Assert result.State.NumDays is days and result.Reply does not contain the expected text.
-        result.State.NumDays.Should().Be((short)days);
-        result.Reply.Should().NotContain("Số ngày phải");
+        // STEP-02: Assert result.State.NumDays is days when accepted and null otherwise.
+        result.State.NumDays.Should().Be(accepted ? (short)days : null);
+        if (accepted) result.Reply.Should().NotContain("Số ngày phải");
     }
 
     // TEST-45: The model's question about missing trip details is shown when backed, and replaced by the fixed one when it invents a figure; the question stays open in both.

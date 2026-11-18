@@ -192,7 +192,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // Model viết câu trả lời từ kết quả gợi ý ở lần gọi kế tiếp; tools đóng lại nên đây là lần gọi cuối của lượt.
                     if (context.DishSuggestion is { } found)
                     {
-                        if (calls + 1 >= limits.MaxLlmCalls) return await SuggestionTurnAsync(context, found, null, turnState, timeout.Token);
+                        // Gợi ý theo nhiều bữa đã có sẵn câu trả lời nhóm theo bữa, nên không tốn thêm lần gọi model.
+                        if (found.ByMeal || calls + 1 >= limits.MaxLlmCalls) return await SuggestionTurnAsync(context, found, null, turnState, timeout.Token);
                         context.ToolsClosed = true;
                         repaired = false;
                         continue;
@@ -683,7 +684,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var spelled = AgentConstraintGuard.WithDailyBudget(AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context), context.State);
         context.UnknownPlace = null;
         var placed = AgentConstraintGuard.RetainPlacements(spelled, context.PlacedRequests);
-        try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline); }
+        try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline, context.Roadmap?.NumDays); }
         catch (AgentStateChangeRequiredException change)
         {
             telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);
@@ -697,7 +698,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     {
         // STEP-02: Prepare reply through AgentDishSuggestionPolicy.Worded, call telemetry.Record and RecordReplaced when output exists.
         // Chỉ điền các ô {name1}…; không kiểm câu. Câu cố định chỉ dùng khi lần gọi viết câu thất bại.
-        var reply = Raw(AgentDishSuggestionPolicy.FillSlots(output?.Reply, suggestion));
+        var reply = suggestion.ByMeal ? suggestion.FixedReply : Raw(AgentDishSuggestionPolicy.FillSlots(output?.Reply, suggestion));
         telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
         // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.
         // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.

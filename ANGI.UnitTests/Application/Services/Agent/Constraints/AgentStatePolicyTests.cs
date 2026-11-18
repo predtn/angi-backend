@@ -167,4 +167,18 @@ public sealed class AgentStatePolicyTests
         policy.Accept(current, AgentTestData.State()).NamedAreaLabel.Should().Be("Cầu Giấy");
         policy.Accept(AgentTestData.State(), current).NamedAreaLabel.Should().BeNull();
     }
+
+    // TEST-LONG-02: A state of a longer saved roadmap is accepted only while it is checked against that roadmap.
+    /// <summary>Without this a chat over an older long roadmap could not change its taste or budget.</summary>
+    [Fact]
+    public void Accept_LongSavedRoadmap_KeepsItsLengthButCannotGrow()
+    {
+        // STEP-01: Prepare a 10-day state and the policy.
+        var state = AgentTestData.State() with { NumDays = 10 };
+        var policy = new AgentConstraintGuard();
+
+        // STEP-02: Assert the same length passes for that roadmap and is refused for a new trip.
+        policy.Accept(state, state with { Note = "ít cay" }, roadmapDays: 10).Note.Should().Be("ít cay");
+        policy.Invoking(guard => guard.Accept(state, state with { Note = "ít cay" })).Should().Throw<FluentValidation.ValidationException>();
+    }
 }

@@ -37,8 +37,11 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
 
     // The parts of this validator's own messages that mean a dish was made up rather than chosen badly: not in the catalog, not issued by a tool for that
     // day, meal and condition, or outside the trip's province or area. Budget, repeats and meal fit are soft and stay warnings (user decision 2026-11-12).
+    // A restaurant closed at that meal counts too (user decision 2026-11-16): candidates are filtered by business hours, so such a dish was never issued
+    // for that position, and one kept from the saved plan is swapped for a dish issued for its meal when the turn has one.
     private static readonly string[] FabricationMarkers = ["không còn khả dụng.", "cần nguồn ứng viên mới đúng phạm vi", "không đáp ứng ràng buộc chuyến đi.",
-        "được lấy theo khẩu vị khác", "không còn đáp ứng điều kiện lúc lấy ứng viên"];
+        "được lấy theo khẩu vị khác", "không còn đáp ứng điều kiện lúc lấy ứng viên", ClosedMarker];
+    private const string ClosedMarker = "thuộc quán không mở cửa vào bữa";
 
     /// <summary>The dish an error is about when it says the dish was made up (see <see cref="FabricationMarkers"/>); null for any other error.</summary>
     public static int? FabricatedDish(string error) =>
@@ -99,14 +102,14 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         // STEP-01: Prepare errors from the state validator.
         var state = snapshot.State;
         var emptyUpdate = snapshot.Items.Length == 0 && snapshot.BaseRoadmapId.HasValue;
-        var errors = (await new AgentStateValidator().ValidateAsync(state, ct)).Errors.Select(x => x.ErrorMessage).ToList();
+        var errors = (await new AgentStateValidator(snapshot.BaseRoadmapNumDays).ValidateAsync(state, ct)).Errors.Select(x => x.ErrorMessage).ToList();
         // STEP-02: Report a missing province or day count and an open question or planning request.
         // Ngân sách không bắt buộc: chưa có ngân sách nghĩa là lịch không giới hạn ngân sách.
         if (!emptyUpdate && string.IsNullOrWhiteSpace(state.Province) ||
             !state.NumDays.HasValue || state.PendingQuestion is not null || state.PendingPlanningRequest is not null)
             errors.Add("Chưa chốt đủ tỉnh, số ngày hoặc câu hỏi đang chờ.");
         // STEP-03: Report an empty, oversized or malformed item list, and return errors.
-        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItems || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
+        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItemsFor(snapshot.BaseRoadmapNumDays) || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
                 x.DayNumber < 1 || x.DayNumber > state.NumDays || !AgentStateValidator.Meals.Contains(x.MealSlot) || x.SortOrder < 0) ||
             snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
             snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||
@@ -174,7 +177,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (requested.DishName is not null && !AgentScopedPlanning.FitsName(requested.DishName, dish.Name) ||
                 requested.RestaurantName is not null && AgentScopedPlanning.Normalize(requested.RestaurantName) != AgentScopedPlanning.Normalize(dish.Restaurant.Name) ||
                 requested.RestaurantId.HasValue && requested.RestaurantId != dish.RestaurantId ||
-                requested.TagIds.Any(id => !tagSet.Contains(id)))
+                !AgentScopedPlanning.FitsTags(tagSet, requested.TagIds, allTags))
                 errors.Add($"Món {item.DishId} không đáp ứng món/quán hoặc tag được yêu cầu cho ngày/bữa.");
             if (!confirm && requested.DifferentFromPlan && source?.Items.Any(old => old.DishId == item.DishId) == true &&
                 (!unchanged || refreshed)) errors.Add($"Món {item.DishId} đã có trong lịch nguồn; cần phương án khác.");
@@ -182,7 +185,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 (other.DayNumber != item.DayNumber || other.MealSlot != item.MealSlot)))
                 errors.Add($"Món {item.DishId} bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.");
             if (!ProvinceSearch.Same(dish.Restaurant.ProvinceName, state.Province) ||
-                state.ExcludeTagIds.Any(tagSet.Contains) || state.TagIds.Any(id => !tagSet.Contains(id)) ||
+                state.ExcludeTagIds.Any(tagSet.Contains) || !AgentScopedPlanning.FitsTags(tagSet, state.TagIds, allTags) ||
                 state.MaxPricePerMeal.HasValue && dish.Price > state.MaxPricePerMeal ||
                 AgentScopedPlanning.MealArea(state, item.DayNumber, item.MealSlot) is { } area && !area.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                 errors.Add($"Món {item.DishId} không đáp ứng ràng buộc chuyến đi.");
@@ -192,11 +195,14 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 if (AgentScopedPlanning.Fingerprint(applied, item.DayNumber, item.MealSlot) !=
                     AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot))
                     errors.Add($"Món {item.DishId} được lấy theo khẩu vị khác; cần lấy gợi ý lại.");
-                if (applied.MaxPricePerMeal.HasValue && dish.Price > applied.MaxPricePerMeal || applied.ExcludeTagIds.Any(tagSet.Contains) || applied.TagIds.Any(id => !tagSet.Contains(id)) ||
+                if (applied.MaxPricePerMeal.HasValue && dish.Price > applied.MaxPricePerMeal || applied.ExcludeTagIds.Any(tagSet.Contains) || !AgentScopedPlanning.FitsTags(tagSet, applied.TagIds, allTags) ||
                     AgentScopedPlanning.MealArea(applied, item.DayNumber, item.MealSlot) is { } issued && !issued.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                     errors.Add($"Món {item.DishId} không còn đáp ứng điều kiện lúc lấy ứng viên.");
             }
             if (!FitsMeal(dish, item.MealSlot)) errors.Add($"Món {item.DishId} không phù hợp bữa đã chọn.");
+            // Checked on the trip day's weekday once the start date is known, otherwise on any day of the week; a restaurant without hours passes.
+            if (!MealHours.IsOpen([.. dish.Restaurant.BusinessHours], item.MealSlot, MealHours.Weekdays(state.StartDate, [item.DayNumber])))
+                errors.Add($"Món {item.DishId} {ClosedMarker} {item.MealSlot} ngày {item.DayNumber} theo giờ mở cửa quán đã khai.");
             if (confirm && item.Price != dish.Price) errors.Add($"Giá món {item.DishId} đã thay đổi; cần xem đề xuất mới.");
             normalized.Add(item with { Price = dish.Price, DishName = dish.Name, RestaurantName = dish.Restaurant.Name,
                 Latitude = dish.Restaurant.Latitude, Longitude = dish.Restaurant.Longitude,
@@ -269,7 +275,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     AgentScopedPlanning.Fingerprint(grant.Constraints, item.DayNumber, item.MealSlot) == fingerprint)
                 .SelectMany(grant => grant.DishIds).Any(id => known.TryGetValue(id, out var dish) && IsPublic(dish) &&
                     FitsMeal(dish, item.MealSlot) && !used.Contains(AgentScopedPlanning.Normalize(dish.Name)!) &&
-                    requested.TagIds.All(tag => dish.DishTags.Any(x => x.TagId == tag)) &&
+                    AgentScopedPlanning.FitsTags(dish.DishTags.Select(x => x.TagId), requested.TagIds, allTags) &&
                     (!main || dish.DishTags.Any(x => x.TagId == mainTag!.Id)) &&
                     (!state.MaxPricePerMeal.HasValue || dish.Price <= state.MaxPricePerMeal) &&
                     (state.BudgetAmount is not { } budget || total - item.Price + dish.Price <= budget));
@@ -333,7 +339,10 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 ? change with { Item = items.Single(x => x.ItemKey == item.ItemKey) } : change).ToArray() };
     }
 
-    /// <summary>Only active, available dishes of a verified, visible and open restaurant can enter a proposal.</summary>
+    /// <summary>
+    /// Only active, available dishes of a verified, visible and open restaurant can enter a proposal. OperatingStatus is the owner's
+    /// open / temporarily / permanently closed switch, not business hours, which are checked per meal through <see cref="MealHours"/>.
+    /// </summary>
     private static bool IsPublic(ANGI.Domain.Entities.Dish dish) => dish.Status == DishStatus.Active && dish.IsAvailable && dish.Restaurant is not null &&
         dish.Restaurant.DeletedAt is null && dish.Restaurant.VerificationStatus == RestaurantVerificationStatus.Verified &&
         dish.Restaurant.ModerationStatus == RestaurantModerationStatus.Visible && dish.Restaurant.OperatingStatus == RestaurantOperatingStatus.Open;

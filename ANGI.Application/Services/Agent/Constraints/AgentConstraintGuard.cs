@@ -47,7 +47,7 @@ public sealed class AgentConstraintGuard
     }
 
     /// <summary>Requires a backend-staged human confirmation before relaxing an existing trip requirement.</summary>
-    public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null)
+    public AgentState Accept(AgentState current, AgentState? proposed, AgentState? baseline = null, int? roadmapDays = null)
     {
         // STEP-01: Return current early when proposed is missing and current.PendingPlanningRequest is missing.
         if (proposed is null && current.PendingPlanningRequest is null) return current;
@@ -84,7 +84,7 @@ public sealed class AgentConstraintGuard
         if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel)
             proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel };
         // STEP-13: Validate proposed.
-        new AgentStateValidator().ValidateAndThrow(proposed);
+        new AgentStateValidator(roadmapDays).ValidateAndThrow(proposed);
         // STEP-14: When proposed.Preferences.Initialized is true, set proposed.
         if (proposed.Preferences?.Initialized == true)
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
