@@ -102,14 +102,14 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         // STEP-01: Prepare errors from the state validator.
         var state = snapshot.State;
         var emptyUpdate = snapshot.Items.Length == 0 && snapshot.BaseRoadmapId.HasValue;
-        var errors = (await new AgentStateValidator().ValidateAsync(state, ct)).Errors.Select(x => x.ErrorMessage).ToList();
+        var errors = (await new AgentStateValidator(snapshot.BaseRoadmapNumDays).ValidateAsync(state, ct)).Errors.Select(x => x.ErrorMessage).ToList();
         // STEP-02: Report a missing province or day count and an open question or planning request.
         // Ngân sách không bắt buộc: chưa có ngân sách nghĩa là lịch không giới hạn ngân sách.
         if (!emptyUpdate && string.IsNullOrWhiteSpace(state.Province) ||
             !state.NumDays.HasValue || state.PendingQuestion is not null || state.PendingPlanningRequest is not null)
             errors.Add("Chưa chốt đủ tỉnh, số ngày hoặc câu hỏi đang chờ.");
         // STEP-03: Report an empty, oversized or malformed item list, and return errors.
-        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItems || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
+        if (snapshot.Items.Length == 0 && !emptyUpdate || snapshot.Items.Length > AgentStateValidator.MaxItemsFor(snapshot.BaseRoadmapNumDays) || snapshot.Items.Any(x => x is null || string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100 || x.DishId <= 0 ||
                 x.DayNumber < 1 || x.DayNumber > state.NumDays || !AgentStateValidator.Meals.Contains(x.MealSlot) || x.SortOrder < 0) ||
             snapshot.Items.Select(x => x.ItemKey).Distinct().Count() != snapshot.Items.Length ||
             snapshot.Items.GroupBy(x => (x.DayNumber, x.MealSlot, x.SortOrder)).Any(x => x.Count() > 1) ||

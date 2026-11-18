@@ -30,7 +30,7 @@ public sealed class SendAgentMessageRequestDtoValidatorTests
             case "selection-long": request.SelectedItemKey = new('x', 101); break;
             case "command-null": request.Command = null!; break;
             case "command-invalid": request.Command = "delete_roadmap"; break;
-            default: request.ConfirmedState = new AgentState { NumDays = 101 }; break;
+            default: request.ConfirmedState = new AgentState { NumDays = 8 }; break;
         }
         // STEP-02: Assert the validator.Validate().IsValid is false.
         new SendAgentMessageRequestDtoValidator(new AgentLimits()).Validate(request).IsValid.Should().BeFalse();

@@ -44,6 +44,8 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
             ? await roadmaps.GetOwnedDetailAsync(sourceId, userId, ct) ?? throw RoadmapMissing() : null;
         // STEP-08: Throw the error from RoadmapConflict when source exists and source.UpdatedAt is not snapshot.BaseRoadmapUpdatedAt.
         if (source is not null && source.UpdatedAt != snapshot.BaseRoadmapUpdatedAt) throw RoadmapConflict();
+        // A draft made before its length was recorded is checked against the roadmap it edits, so a longer saved roadmap stays editable.
+        if (source is not null) snapshot = snapshot with { BaseRoadmapNumDays = source.NumDays };
         // STEP-09: Run validator.ValidateAsync and keep outside.
         var outside = await validator.ValidateAsync(snapshot, source is null ? null : AgentJson.FromRoadmap(source, snapshot.State), true, !AgentScopedPlanning.IsLongTrip(snapshot.State), ct);
         // STEP-10: Throw AgentProposalValidationException when outside.Validation.Errors.Length > 0.

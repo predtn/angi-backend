@@ -530,4 +530,21 @@ public sealed class AgentProposalValidatorTests
     [InlineData("Chưa có món cho bữa lunch ngày 1.", null)]
     // STEP-01: Assert the dish named by a made-up error, and null for any other error.
     public void FabricatedDish_OnlyForMadeUpDishes(string error, int? dish) => AgentProposalValidator.FabricatedDish(error).Should().Be(dish);
+
+    // TEST-LONG-03: Saving a draft of a longer stored roadmap is not blocked by the limit for new trips.
+    /// <summary>The draft was shown as ready but every save failed, with no way out through the chat.</summary>
+    [Theory]
+    [InlineData((short)10, false)]
+    [InlineData(null, true)]
+    public async Task IntegrityErrorsAsync_LongTrip_UsesTheStoredRoadmapLength(short? roadmapDays, bool blocked)
+    {
+        // STEP-01: Prepare a 10-day draft.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish());
+        var draft = AgentTestData.Snapshot(AgentTestData.Item());
+        draft = draft with { State = draft.State with { NumDays = 10 }, BaseRoadmapNumDays = roadmapDays };
+
+        // STEP-02: Assert the day limit blocks it only without a longer stored roadmap.
+        var errors = await fixture.Validator.IntegrityErrorsAsync(draft, null, default);
+        errors.Any(error => error.StartsWith("Số ngày phải", StringComparison.Ordinal)).Should().Be(blocked);
+    }
 }

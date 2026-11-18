@@ -186,7 +186,8 @@ public sealed class AgentProposalBuilder
         if (!outside.SequenceEqual(items.Where(item => !output.Scope.Contains(item)).OrderBy(x => x.ItemKey))) throw Invalid("Các món ngoài phạm vi phải được giữ nguyên.");
         // STEP-23: Throw the error from Invalid when items.Count > AgentStateValidator.MaxItems, items.Any matches the filter or Select(filtered).Distinct().Count() is not items.Count.
         // Each refusal names its reason and the keys involved, so a repair can fix exactly that instead of repeating the same output.
-        if (items.Count > AgentStateValidator.MaxItems) throw Invalid($"Số món ({items.Count}) vượt giới hạn {AgentStateValidator.MaxItems}.");
+        var maxItems = AgentStateValidator.MaxItemsFor(context.Roadmap?.NumDays);
+        if (items.Count > maxItems) throw Invalid($"Số món ({items.Count}) vượt giới hạn {maxItems}.");
         if (items.Any(x => string.IsNullOrWhiteSpace(x.ItemKey) || x.ItemKey.Length > 100)) throw Invalid("Có món thiếu itemKey hoặc itemKey dài quá 100 ký tự.");
         if (items.GroupBy(x => x.ItemKey).Where(group => group.Count() > 1).Select(group => group.Key).ToArray() is { Length: > 0 } repeated)
             throw Invalid($"Khóa món bị trùng: {string.Join(", ", repeated.Take(5))}. Mỗi món cần một itemKey riêng; món giữ nguyên dùng đúng khóa của món nguồn.");
@@ -217,7 +218,7 @@ public sealed class AgentProposalBuilder
         return new AgentSnapshot(context.State, AgentJson.OrderItems(items), grants,
             context.Roadmap?.Id, context.Roadmap?.UpdatedAt, Delta(original, items), output.Scope,
             original.Where(old => retainedKeys.Contains(old.ItemKey) &&
-                items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray());
+                items.Any(item => item.ItemKey == old.ItemKey && item.DishId == old.DishId)).ToArray(), BaseRoadmapNumDays: context.Roadmap?.NumDays);
     }
 
     // Mỗi món trong nguồn gửi cho model tốn khoảng 100 token ở mọi lần gọi; quá mức này chỉ gửi các ngày tin nhắn nhắc tới.
