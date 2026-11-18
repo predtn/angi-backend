@@ -10,14 +10,17 @@ public sealed class GetTagsRequestDtoValidator : AbstractValidator<GetTagsReques
     {
         "meal_time",
         "dietary",
-        "category"
+        "category",
+        "meal_role",
+        "cooking_method",
+        "ingredient"
     };
 
     public GetTagsRequestDtoValidator()
     {
         RuleFor(x => x.Type)
             .Must(type => TagTypes.Contains(type!))
-            .WithMessage("type chỉ có thể là meal_time, dietary hoặc category.")
+            .WithMessage("type chỉ có thể là meal_time, dietary, category, meal_role, cooking_method hoặc ingredient.")
             .When(x => x.Type is not null);
     }
 }
