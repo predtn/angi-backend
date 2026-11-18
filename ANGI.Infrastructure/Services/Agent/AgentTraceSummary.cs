@@ -44,6 +44,9 @@ public static partial class AgentTraceSummary
             return AgentTraceLevel.Info;
         }
         if (name == "validation") return Count(data, "errors") > 0 ? AgentTraceLevel.Warning : AgentTraceLevel.Info;
+        // A filter step that leaves no dish is where a "không tìm thấy" or an empty meal comes from, so it is listed under VẤN ĐỀ.
+        if (name == "candidates_sql") return Number(data, "found") == 0 ? AgentTraceLevel.Warning : AgentTraceLevel.Info;
+        if (name == "candidates_kept") return Number(data, "kept") == 0 && Number(data, "fromSql") > 0 ? AgentTraceLevel.Warning : AgentTraceLevel.Info;
         return Warnings.Contains(name) ? AgentTraceLevel.Warning : AgentTraceLevel.Info;
     }
 
@@ -210,6 +213,18 @@ public static partial class AgentTraceSummary
                 var first = Array(data, "errors").FirstOrDefault();
                 return Join($"{Count(data, "errors")} lỗi", Count(data, "warnings") > 0 ? $"{Count(data, "warnings")} cảnh báo" : null,
                     full ? null : first);
+            case "candidates_sql":
+                return DescribeSqlStep(data, full);
+            case "candidates_kept":
+                return DescribeKeptStep(data);
+            case "ranking":
+                return Join(Scope(data), Text(data, "mode") == "personalized" ? "reco xếp theo khẩu vị (mode=personalized)" : "chưa có khẩu vị → xếp theo đánh giá quán (mode=rating_fallback)",
+                    $"{Number(data, "candidateCount") ?? 0} ứng viên (candidateCount) → chọn {Number(data, "returnedCount") ?? 0} (returnedCount)");
+            case "suggest_search":
+                return Join(Bool(data, "named") ? "tìm theo tên món (named)" : null, Number(data, "chosen") is { } chosen ? $"tìm theo {chosen} tên đã chọn (chosen)" : null,
+                    $"cần {Number(data, "count") ?? 0} món (count)", $"tìm được {Number(data, "found") ?? 0} (found)");
+            case "near_names":
+                return $"không có món tên “{Text(data, "asked")}” (asked) → đưa {Number(data, "count") ?? 0} tên gần đúng (count) cho model chọn";
             case "final_reply":
                 return Join(Text(data, "action"), $"\"{Shorten(Text(data, "reply"), 100)}\"");
             case "turn_failed":
@@ -221,6 +236,89 @@ public static partial class AgentTraceSummary
                 var json = Compact(data);
                 return json is "{}" ? "" : Shorten(json, full ? 300 : 140)!;
         }
+    }
+
+    private static readonly Dictionary<string, string> MealNames = new(StringComparer.Ordinal)
+    {
+        ["breakfast"] = "bữa sáng", ["lunch"] = "bữa trưa", ["dinner"] = "bữa tối", ["snack"] = "ăn vặt", ["late_night"] = "bữa khuya"
+    };
+
+    private static readonly string[] WeekdayNames = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+
+    private static string? Meal(string? code) => code is null ? null : MealNames.GetValueOrDefault(code, code);
+
+    /// <summary>"Lập lịch ngày 1 bữa tối" or "Gợi ý bữa khuya": which search a filter step belongs to.</summary>
+    private static string Scope(JsonNode? data)
+    {
+        var source = Text(data, "source") switch { "plan" => "lập lịch", "suggest" => "gợi ý", _ => null };
+        var day = Number(data, "day") is { } number ? $"ngày {number}" : null;
+        return string.Join(" ", new[] { source, day, Meal(Text(data, "mealSlot") ?? Text(data, "meal")) }.Where(part => part is not null));
+    }
+
+    private static string Money(double value) => value.ToString("#,0", Invariant).Replace(',', '.') + "đ";
+
+    /// <summary>
+    /// Step 1, the hard SQL filter: every condition it applied, then "N món", and with business hours "M món → bỏ K vì giờ mở cửa → còn N".
+    /// The short line keeps the counts and the hours; the VẤN ĐỀ line also lists the other conditions.
+    /// </summary>
+    private static string DescribeSqlStep(JsonNode data, bool full)
+    {
+        var parts = new List<string?> { $"[1] lọc cứng (SQL) · {Scope(data)}" };
+        var hours = data["hours"];
+        string? hoursText = null;
+        if (hours is JsonObject)
+        {
+            var days = Nodes(hours, "weekdays").Select(day => int.TryParse(day?.ToString(), NumberStyles.Integer, Invariant, out var index) && index is >= 0 and < 7
+                ? WeekdayNames[index] : "?").ToArray();
+            var when = days.Length == 0 ? "ít nhất 1 ngày trong tuần" : string.Join(",", days);
+            hoursText = Text(hours, "rule") == "now"
+                ? $"giờ mở cửa (hours, rule=now): quán đang mở lúc {Text(hours, "from")} ({when})"
+                : $"giờ mở cửa (hours, rule=meal): quán mở trong {Meal(Text(hours, "meal"))} {Text(hours, "from")}–{Text(hours, "to")} ({when})";
+        }
+        parts.Add(hoursText ?? "không lọc giờ mở cửa (hours=null)");
+        if (full)
+        {
+            parts.Add(Text(data, "province") is { } province ? $"tỉnh {province} (province)" : null);
+            var tags = Array(data, "tags").ToArray();
+            parts.Add(tags.Length > 0 ? "tag: " + string.Join(", ", tags) + " (tags)" : null);
+            parts.Add(Text(data, "mealTag") is { } mealTag ? $"nhãn bữa: {Meal(mealTag)} (mealTag)" : "không lọc nhãn bữa (mealTag=null)");
+            parts.Add(Number(data, "minPrice") is { } min ? $"giá từ {Money(min)} (minPrice)" : null);
+            parts.Add(Number(data, "maxPrice") is { } max ? $"giá tới {Money(max)} (maxPrice)" : null);
+            parts.Add(Number(data, "radiusKm") is { } radius ? $"bán kính {radius} km (radiusKm)" : null);
+            parts.Add(Number(data, "onlyDishes") is > 0 and var only ? $"chỉ trong {only} món đã định (onlyDishes)" : null);
+            parts.Add(Number(data, "excludedDishes") is > 0 and var excluded ? $"loại {excluded} món (excludedDishes)" : null);
+        }
+        var found = Number(data, "found") ?? 0;
+        if (Number(data, "beforeHours") is { } before)
+        {
+            var after = Number(data, "afterHours") ?? found;
+            parts.Add($"{before} món (beforeHours) → bỏ {before - after} vì giờ mở cửa → còn {after} (afterHours)" + (after == 0 && before > 0 ? " — giờ mở cửa loại hết" : "") +
+                (found < after ? $" · lấy {found} món rating cao nhất (found)" : ""));
+        }
+        else parts.Add($"{found} món (found)");
+        return string.Join(" · ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
+    /// <summary>Step 2, the in-memory checks before reco: each count in order, ending with the price or budget rule and what goes to reco.</summary>
+    private static string DescribeKeptStep(JsonNode data)
+    {
+        var parts = new List<string?> { $"[2] lọc tiếp · {Scope(data)}", $"từ SQL {Number(data, "fromSql") ?? 0} (fromSql)" };
+        parts.Add(Number(data, "chosen") is { } chosen ? $"theo {chosen} món đã chọn (chosen)" : Text(data, "nameQuery") is { } name ? $"tên “{name}” (nameQuery)" : null);
+        parts.Add($"kiểm tag/bữa {Number(data, "checked") ?? 0} (checked)");
+        parts.Add($"gộp chi nhánh cùng tên {Number(data, "distinct") ?? 0} (distinct)");
+        parts.Add(Number(data, "notReplaced") is { } kept ? $"bỏ món đã đổi đi {kept} (notReplaced)" : null);
+        parts.Add(Number(data, "notShown") is { } fresh ? $"bỏ món đã gợi ý {fresh} (notShown)" : null);
+        parts.Add(Text(data, "priceRule") switch
+        {
+            "budget" => $"ngân sách {Money(Number(data, "budgetPerMeal") ?? 0)}/bữa (priceRule=budget, budgetPerMeal)",
+            "high" => "lấy món đắt nhất (priceRule=high)",
+            "low" => "lấy món rẻ nhất (priceRule=low)",
+            "price" => "theo giá người dùng nêu (priceRule=price)",
+            "named" => "món/quán người dùng gọi tên, giữ nguyên (priceRule=named)",
+            _ => "không lọc theo ngân sách (priceRule=none)"
+        });
+        parts.Add($"→ đưa reco {Number(data, "kept") ?? 0} món (kept)");
+        return string.Join(" · ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
     }
 
     /// <summary>One-line JSON with Vietnamese kept readable.</summary>

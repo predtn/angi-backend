@@ -42,6 +42,26 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
     }
 
     /// <inheritdoc />
+    public async Task<AgentDishText[]> GetDishTextsAsync(string? province, CancellationToken ct)
+    {
+        // STEP-01: Keep restaurants open for business in the province, the same rows suggestions and plans can use.
+        var restaurants = Public().Where(x => x.OperatingStatus == RestaurantOperatingStatus.Open);
+        if (province is not null)
+        {
+            var provincePattern = ProvinceSearch.Pattern(province);
+            restaurants = restaurants.Where(x => x.ProvinceName != null && EF.Functions.ILike(x.ProvinceName, provincePattern, LikePattern.Escape));
+        }
+        // STEP-02: Return their active, available dishes with tag names; the bound keeps one search small on a large catalog.
+        return await context.Dishes.AsNoTracking()
+            .Where(x => restaurants.Select(r => r.Id).Contains(x.RestaurantId) && x.Status == DishStatus.Active && x.IsAvailable)
+            .OrderBy(x => x.Id).Take(MaxDishTexts)
+            .Select(x => new AgentDishText(x.Name, x.Description, x.Price, x.RestaurantId, x.DishTags.Select(t => t.Tag.Name).ToArray()))
+            .ToArrayAsync(ct);
+    }
+
+    private const int MaxDishTexts = 5000;
+
+    /// <inheritdoc />
     public async Task<string[]> GetProvincesAsync(CancellationToken ct) =>
         (await Public().Where(x => x.ProvinceName != null).Select(x => x.ProvinceName!).Distinct().ToArrayAsync(ct))
             .Where(name => !string.IsNullOrWhiteSpace(name)).Order(StringComparer.Ordinal).ToArray();

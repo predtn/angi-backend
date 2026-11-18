@@ -322,6 +322,26 @@ public sealed class AgentProposalValidatorTests
         else result.Validation.Errors.Should().BeEmpty();
     }
 
+    // TEST-13b: A meal asked as "cơm hoặc bún" accepts a dish of either kind, and a dish of neither is still refused.
+    /// <summary>Reads several tags of one type in a meal request as alternatives.</summary>
+    [Theory]
+    [InlineData(31, true)][InlineData(33, false)]
+    public async Task ValidateAsync_MealRequestWithTagsOfOneType_AcceptsEitherTag(short dishTagId, bool accepted)
+    {
+        var tags = new[] { (Id: (short)31, Code: "form.mon_com_va_ngu_coc"), (Id: (short)32, Code: "form.mon_soi"), (Id: (short)33, Code: "form.lau") }
+            .Select(x => new ANGI.Domain.Entities.Tag { Id = x.Id, Code = x.Code, Name = x.Code, TagType = TagType.Category }).ToArray();
+        var dish = AgentTestData.Dish(); dish.DishTags.Add(new() { DishId = 1, TagId = dishTagId, Tag = tags.Single(x => x.Id == dishTagId) });
+        var fixture = AgentTestData.Validator(dish);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(tags);
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"], MealRequests = [new(1, "lunch", null, null, [31, 32])] };
+        var grant = new AgentCandidateGrant(1, "lunch", [1], Guid.NewGuid(), state);
+        var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1, "lunch") with { Price = 50000 }], [grant]);
+
+        var result = await fixture.Validator.ValidateAsync(snapshot, null, false, false, default, [grant]);
+
+        result.Validation.Errors.Any(error => error.Contains("tag được yêu cầu")).Should().Be(!accepted);
+    }
+
     // TEST-14: A new item repeating an earlier dish name is flagged for backend replacement only when an unused authorized dish fits that position; the flag never becomes an error; covers with and without a spare dish.
     /// <summary>Lets the backend vary a multi-day plan while never blocking a plan whose catalog cannot avoid the repeat.</summary>
     [Theory]
@@ -456,6 +476,30 @@ public sealed class AgentProposalValidatorTests
         (await Errors([new(1, "lunch", 5m)])).Should().Contain(error => error.Contains("không đáp ứng ràng buộc chuyến đi"));
     }
 
+    // TEST-19b: Declared business hours must reach the meal on the trip day's weekday; without a start date any weekday counts, and no hours never block.
+    /// <summary>Ensures a restaurant closed at that meal is reported with the closed-restaurant marker (user decision 2026-11-16).</summary>
+    [Fact]
+    public async Task ValidateAsync_RestaurantClosedAtMeal_ReportsClosed()
+    {
+        // STEP-01: A lunch restaurant open Monday to Saturday 10:00-14:00; 2026-11-16 is a Monday and 2026-11-15 a Sunday.
+        var dish = AgentTestData.Dish();
+        var (validator, _, _, _) = AgentTestData.Validator(dish);
+        async Task<string[]> Errors(DateOnly? startDate)
+        {
+            var state = AgentTestData.State() with { StartDate = startDate };
+            var snapshot = new AgentSnapshot(state, [AgentTestData.Item()], [new(null, null, [1], null, state)]);
+            return (await validator.ValidateAsync(snapshot, null, false, false, default, [new(null, null, [1], null, state)])).Validation.Errors;
+        }
+
+        // STEP-02: No hours pass; then a Sunday trip fails, a Monday trip and an undated trip pass.
+        (await Errors(new DateOnly(2026, 11, 15))).Should().NotContain(error => error.Contains("không mở cửa"));
+        for (short day = 1; day <= 6; day++)
+            dish.Restaurant.BusinessHours.Add(new ANGI.Domain.Entities.RestaurantBusinessHour { DayOfWeek = day, OpenTime = new(10, 0), CloseTime = new(14, 0) });
+        (await Errors(new DateOnly(2026, 11, 15))).Should().Contain(error => error.Contains("không mở cửa") && AgentProposalValidator.FabricatedDish(error) == 1);
+        (await Errors(new DateOnly(2026, 11, 16))).Should().NotContain(error => error.Contains("không mở cửa"));
+        (await Errors(null)).Should().NotContain(error => error.Contains("không mở cửa"));
+    }
+
     /// <summary>Builds a three-day plan whose day-3 breakfast holds a day-1-only candidate, with dishes 7 and 10 still unused.</summary>
     private static (AgentSnapshot Snapshot, List<AgentCandidateGrant> Grants, ANGI.Domain.Entities.Dish[] Catalog) ScopeScenario()
     {
@@ -479,6 +523,7 @@ public sealed class AgentProposalValidatorTests
     [InlineData("Món 13 cần nguồn ứng viên mới đúng phạm vi và khẩu vị. Vị trí bị từ chối: ngày 1, bữa lunch. Món chưa có trong kết quả được cấp; chọn món khác từ kết quả hiện có.", 13)]
     [InlineData("Món 14 không đáp ứng ràng buộc chuyến đi.", 14)]
     [InlineData("Món 15 được lấy theo khẩu vị khác; cần lấy gợi ý lại.", 15)]
+    [InlineData("Món 18 thuộc quán không mở cửa vào bữa dinner ngày 2 theo giờ mở cửa quán đã khai.", 18)]
     [InlineData("Món 16 không phù hợp bữa đã chọn.", null)]
     [InlineData("Món 17 bị lặp ở bữa khác trong lịch; chưa đáp ứng yêu cầu khác món.", null)]
     [InlineData(AgentProposalValidator.BudgetExceeded, null)]

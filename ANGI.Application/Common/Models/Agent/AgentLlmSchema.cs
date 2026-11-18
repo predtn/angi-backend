@@ -95,7 +95,9 @@ public static class AgentLlmSchema
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["maxPrice"] = Nullable(Scalar("number")), ["count"] = Scalar("integer"),
             ["tasteTargets"] = ArrayOf(TasteTarget), ["area"] = Nullable(Scalar("string")),
             ["minPrice"] = Nullable(Scalar("number")), ["nameQuery"] = Nullable(Scalar("string")), ["dishForm"] = Nullable(Choice("dry", "soup")),
-            ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating"))
+            ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating")), ["now"] = Scalar("boolean"),
+            ["dishNames"] = Nullable(ArrayOf(Scalar("string"))),
+            ["mealSlots"] = Nullable(ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night")))
         }),
         ["locate_places"] = Obj(new()
         {

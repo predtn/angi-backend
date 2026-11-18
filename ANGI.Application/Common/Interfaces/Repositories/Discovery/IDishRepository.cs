@@ -18,6 +18,9 @@ public interface IDishRepository
     /// </summary>
     Task<IReadOnlyList<int>> GetCandidateIdsAsync(DishCandidateFilter filter, int maxCount, CancellationToken ct);
 
+    /// <summary>Counts every candidate dish the filter matches, without the bound; the Agent trace uses it to show what one condition removed.</summary>
+    Task<int> CountCandidatesAsync(DishCandidateFilter filter, CancellationToken ct);
+
     /// <summary>Marks a DISH-03 roll as Added; it is saved with the unit of work.</summary>
     void AddRoll(DishRoll roll);
 
