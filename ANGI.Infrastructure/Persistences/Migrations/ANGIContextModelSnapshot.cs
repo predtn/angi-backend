@@ -2416,7 +2416,7 @@ namespace ANGI.Infrastructure.Persistences.Migrations
 
                     b.ToTable("tags", "core", t =>
                         {
-                            t.HasCheckConstraint("ck_tags_tag_type", "tag_type IN ('meal_time', 'dietary', 'category')");
+                            t.HasCheckConstraint("ck_tags_tag_type", "tag_type IN ('meal_time', 'dietary', 'category', 'meal_role', 'cooking_method', 'ingredient')");
                         });
                 });
 
