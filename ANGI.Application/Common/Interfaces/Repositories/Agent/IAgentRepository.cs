@@ -15,6 +15,8 @@ public interface IAgentRepository
     Task LockUserAsync(int userId, CancellationToken ct);
     /// <summary>Counts user attempts admitted since the supplied UTC instant.</summary>
     Task<int> CountAttemptsAsync(int userId, DateTime since, CancellationToken ct);
+    /// <summary>Finds the earliest user attempt admitted since the supplied UTC instant.</summary>
+    Task<DateTime?> GetOldestAttemptAsync(int userId, DateTime since, CancellationToken ct);
     /// <summary>Tracks a new conversation in the current unit of work.</summary>
     void AddConversation(AgentConversation conversation);
     /// <summary>Reads the unique conversation attached to a roadmap after acquiring the user lock.</summary>

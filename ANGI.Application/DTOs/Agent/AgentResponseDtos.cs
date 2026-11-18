@@ -9,7 +9,14 @@ public sealed record AgentConversationDto(long ConversationId, long Version, str
     /// <summary>Internal HTTP status selection; not part of the public conversation state.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool Reused { get; init; }
+
+    /// <summary>The user's messages left in the rolling 24-hour window, shared by all their conversations.</summary>
+    public AgentQuotaDto? Quota { get; init; }
 }
+
+/// <summary>Remaining = Limit minus the attempts admitted in the last 24 hours, never below zero.
+/// ResetsAt is when the oldest of those attempts leaves the window; null when none is counted.</summary>
+public sealed record AgentQuotaDto(int Remaining, int Limit, DateTime? ResetsAt = null);
 
 /// <summary>Represents a validated immutable preview.</summary>
 public sealed record AgentProposalDto(long ProposalId, int Version, string Operation, string Status,

@@ -1,6 +1,8 @@
 using ANGI.Application.Common.Exceptions;
+using ANGI.Application.Common.Interfaces.Repositories.Agent;
 using ANGI.Application.Common.Interfaces.Services.Auth;
 using ANGI.Application.Common.Models.Agent;
+using ANGI.Application.DTOs.Agent;
 using ANGI.Domain.Entities;
 using ANGI.Domain.Enums;
 using FluentValidation;
@@ -18,6 +20,16 @@ public static class AgentConversationRules
     public static void ValidateId(long id)
     {
         if (id <= 0) throw new ValidationException([new ValidationFailure("id", "ID phải lớn hơn 0.")]);
+    }
+
+    /// <summary>Counts what the daily admission check in SendAgentMessageUseCase counts, so the chat shows the same number.</summary>
+    public static async Task<AgentQuotaDto> QuotaAsync(IAgentRepository repository, int userId, DateTime now,
+        AgentLimits limits, CancellationToken ct)
+    {
+        var since = now.AddDays(-1);
+        var used = await repository.CountAttemptsAsync(userId, since, ct);
+        var oldest = used > 0 ? await repository.GetOldestAttemptAsync(userId, since, ct) : null;
+        return new(Math.Max(0, limits.MessagesPerDay - used), limits.MessagesPerDay, oldest?.AddDays(1));
     }
 
     /// <summary>Hides missing and other-user conversations behind the same error.</summary>

@@ -41,6 +41,15 @@ public sealed class AgentRepository(ANGIContext context) : IAgentRepository
             WHERE c.user_id = {userId} AND m.role = 'user' AND a.value::timestamptz >= {since}
             """).SingleAsync(ct);
 
+    /// <summary>Finds the attempt that leaves the rolling quota window first.</summary>
+    public Task<DateTime?> GetOldestAttemptAsync(int userId, DateTime since, CancellationToken ct) =>
+        context.Database.SqlQuery<DateTime?>($"""
+            SELECT min(a.value::timestamptz) AS "Value"
+            FROM core.agent_messages m JOIN core.agent_conversations c ON c.id = m.conversation_id
+            CROSS JOIN LATERAL jsonb_array_elements_text(m.payload->'attempts') a(value)
+            WHERE c.user_id = {userId} AND m.role = 'user' AND a.value::timestamptz >= {since}
+            """).SingleAsync(ct);
+
     /// <summary>Tracks a new conversation.</summary>
     public void AddConversation(AgentConversation conversation) => context.AgentConversations.Add(conversation);
 

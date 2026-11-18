@@ -82,7 +82,8 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                     AgentConversationRules.Busy(existing, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
                         x.SequenceNo >= (current.TranscriptStartSequence ?? 0)).Select(x => new AgentTranscript(
                             AgentJson.Name(x.Role), AgentJson.Read<AgentStoredMessage>(x.Payload).Content)).ToArray(),
-                    proposal is null ? null : AgentContextBuilder.MapProposal(proposal)) { Reused = true };
+                    proposal is null ? null : AgentContextBuilder.MapProposal(proposal))
+                { Reused = true, Quota = await AgentConversationRules.QuotaAsync(repository, userId, now, limits, ct) };
             }
         }
         // STEP-22: Prepare conversation as AgentConversation.
@@ -95,6 +96,7 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
         // STEP-25: Commit the transaction.
         await transaction.CommitAsync(ct);
         // STEP-26: Return the new result.
-        return new(conversation.Id, conversation.Version, "active", state, false, [], null);
+        return new(conversation.Id, conversation.Version, "active", state, false, [], null)
+        { Quota = await AgentConversationRules.QuotaAsync(repository, userId, clock.GetUtcNow().UtcDateTime, limits, ct) };
     }
 }

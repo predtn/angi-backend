@@ -6,16 +6,16 @@ namespace ANGI.UnitTests.Application.Common.Models.Agent;
 /// <summary>Verifies the Agent limits a deployment gets when configuration does not override them.</summary>
 public sealed class AgentLimitsTests
 {
-    // TEST-01: The per-user chat limit defaults to 60 messages a minute and keeps its separate daily limit.
+    // TEST-01: The per-user chat limit defaults to 20 messages a minute and 60 messages a day.
     /// <summary>Ensures the default admission limit stays in line with appsettings.json.</summary>
     [Fact]
-    public void Defaults_AllowSixtyMessagesPerMinute()
+    public void Defaults_AllowTwentyPerMinuteAndSixtyPerDay()
     {
         // STEP-01: Create limits as AgentLimits.
         var limits = new AgentLimits();
 
-        // STEP-02: Assert limits.MessagesPerMinute is 60 and limits.MessagesPerDay is 100.
-        limits.MessagesPerMinute.Should().Be(60);
-        limits.MessagesPerDay.Should().Be(100);
+        // STEP-02: Assert limits.MessagesPerMinute is 20 and limits.MessagesPerDay is 60.
+        limits.MessagesPerMinute.Should().Be(20);
+        limits.MessagesPerDay.Should().Be(60);
     }
 }
