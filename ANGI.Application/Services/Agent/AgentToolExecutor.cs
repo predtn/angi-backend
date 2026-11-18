@@ -24,8 +24,67 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Executes allowlisted read-only tools using backend-owned identity, catalog and scoped provenance.</summary>
 public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tags, IRecommendationService recommendation,
     AgentConstraintGuard statePolicy, AgentRouteEstimator routes, AgentLimits limits, IAgentTelemetry telemetry,
-    AgentPreferenceService? preferences = null, IAgentCatalogRepository? catalogSearch = null, AgentPlaceResolver? places = null)
+    AgentPreferenceService? preferences = null, IAgentCatalogRepository? catalogSearch = null, AgentPlaceResolver? places = null, TimeProvider? clock = null)
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
+    /// <summary>The weekday (0 = Sunday) and time of day in Vietnam, where ANGI's restaurants are.</summary>
+    private (short Day, TimeOnly Time) VietnamNow()
+    {
+        var now = _clock.GetUtcNow().ToOffset(TimeSpan.FromHours(7));
+        return ((short)now.DayOfWeek, TimeOnly.FromDateTime(now.DateTime));
+    }
+
+    /// <summary>
+    /// Records the hard SQL filter of one search as a trace step: every condition it applied and how many dishes it found. When business hours were
+    /// applied, the same search runs once more without them to count the dishes they removed, so the trace shows the hours filter at work.
+    /// </summary>
+    private async Task RecordSqlStepAsync(AgentContext context, string source, short? day, string? meal, DishCandidateFilter filter, int found,
+        IReadOnlyCollection<ANGI.Domain.Entities.Tag> catalogTags, CancellationToken ct)
+    {
+        var window = filter.OpenAtTime is { } moment ? MealHours.At(moment) : MealHours.For(filter.OpenForMeal);
+        // Both counts are whole totals; found is what the search kept, at most CandidatePool by restaurant rating.
+        int? beforeHours = window is null ? null
+            : await dishes.CountCandidatesAsync(filter with { OpenForMeal = null, OpenAtTime = null, OpenOnDays = [] }, ct);
+        int? afterHours = window is null ? null : await dishes.CountCandidatesAsync(filter, ct);
+        object? hours = window is null ? null : new
+        {
+            rule = filter.OpenAtTime is not null ? "now" : "meal",
+            meal = filter.OpenForMeal,
+            from = window.Start.ToString("HH:mm"),
+            to = filter.OpenAtTime is not null ? null : window.End.ToString("HH:mm"),
+            staysOpenMinutes = filter.OpenAtTime is not null ? MealHours.MinOpenMinutes : (int?)null,
+            weekdays = filter.OpenOnDays
+        };
+        telemetry.Record("candidates_sql", context.ConversationId, context.TurnId, context.AttemptId, new
+        {
+            source, day, meal, province = filter.Province,
+            tags = catalogTags.Where(tag => filter.TagIds.Contains(tag.Id)).Select(tag => tag.Name).ToArray(),
+            excludedTags = filter.ExcludeTagIds.Count, mealTag = filter.CompatibleMealTimeCode, minPrice = filter.MinPrice, maxPrice = filter.MaxPrice,
+            radiusKm = filter.Area?.RadiusKm, restaurantId = filter.RestaurantId, onlyDishes = filter.DishIds.Count, excludedDishes = filter.ExcludeDishIds.Count,
+            hours, beforeHours, afterHours, found
+        });
+    }
+
+    /// <summary>The dish name a suggestion searches on, or null when none was given or it only says "any dish".</summary>
+    private static string? SuggestedName(AgentSuggestionInput input) =>
+        string.IsNullOrWhiteSpace(input.NameQuery) || AgentDishSuggestionPolicy.IsGenericName(input.NameQuery) ? null : input.NameQuery.Trim();
+
+    /// <summary>
+    /// The meal a "right now" suggestion keeps dishes to: the one the user named, or the one the time falls in when they named no dish;
+    /// null for a named dish without a meal, and between meals.
+    /// </summary>
+    private static string? NowMeal(AgentSuggestionInput input, TimeOnly time) =>
+        AgentStateValidator.Meals.Contains(input.MealSlot) ? input.MealSlot
+        : SuggestedName(input) is not null ? null : MealHours.MealAt(time);
+
+    /// <summary>The time a "right now" suggestion searched at, the meal it kept dishes to and that only open restaurants were kept, for the reply to state.</summary>
+    private object NowFacts(AgentSuggestionInput input)
+    {
+        var (_, time) = VietnamNow();
+        return new { time = time.ToString("HH:mm"), meal = NowMeal(input, time), openRestaurantsOnly = true };
+    }
+
     // Thang điểm reco là 0..1. Đo trên yêu cầu thật của các tài khoản có vector khẩu vị: món hạng 2 kém món đầu 0,0003-0,06, hạng 5 kém 0,02-0,12.
     // Mức 0,05 gom khoảng 1-13 món đầu vào cùng một nhóm, còn chênh lệch lớn hơn vẫn do khẩu vị quyết định.
     public const double NearlyEqualScore = 0.05;
@@ -570,7 +629,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // STEP-10: For each meal in meals, prepare filter as DishCandidateFilter, prepare ids through dishes.GetCandidateIdsAsync and 1 more action(s).
         foreach (var meal in meals)
         {
-            var filter = new DishCandidateFilter { Province = state.Province, RestaurantId = restaurantId, DishIds = dishIds, RequireAllTags = true, CompatibleMealTimeCode = meal };
+            var filter = new DishCandidateFilter { Province = state.Province, RestaurantId = restaurantId, DishIds = dishIds, RequireAllTags = true, CompatibleMealTimeCode = meal, OpenForMeal = meal };
             var ids = await dishes.GetCandidateIdsAsync(filter, 1, ct);
             if (ids is { Count: > 0 }) fitting.Add(meal);
         }
@@ -712,35 +771,55 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 var filter = new DishCandidateFilter { Province = state.Province, TagIds = mealTags, ExcludeTagIds = excludeTags,
                     ExcludeDishIds = excluded, MaxPrice = maxPrice, Area = searchArea, RestaurantId = restaurantId, DishIds = namedDishIds.Length > 0 ? namedDishIds : poolIds,
                     // A dish the user named goes on the meal they named, whatever meal its catalog tags list; picks of our own keep the tags.
-                    RequireAllTags = true, CompatibleMealTimeCode = namedDishIds.Length > 0 ? null : mealSlot };
+                    RequireAllTags = true, CompatibleMealTimeCode = namedDishIds.Length > 0 ? null : mealSlot,
+                    // The restaurant must serve this meal on every weekday the meal falls on in this scope, so one grant fits each of its days;
+                    // with no start date it must serve the meal on some day of the week. A restaurant without business hours stays.
+                    OpenForMeal = mealSlot, OpenOnDays = MealHours.Weekdays(state.StartDate, slots.Where(x => x.Meal == mealSlot).Select(x => x.Day)) };
                 // Backend lọc catalog TRƯỚC, chỉ gửi tối đa MaxCandidates IDs hợp lệ sang Recommendation.
                 // Recommendation xếp hạng tập được gửi; không tự tìm món từ schema core hoặc gọi ngược backend.
                 // Catalog có rất nhiều bản cùng tên ở nhiều quán: lấy rộng rồi gom theo tên, giữ quán đứng đầu thứ tự rating,
                 // để reco xếp hạng các món khác nhau thay vì hàng trăm bản sao của vài món.
                 var pool = await dishes.GetCandidateIdsAsync(filter, Math.Max(limits.MaxCandidates, CandidatePool), ct);
+                // Step 1 in the trace: the hard SQL filter, with how many dishes the business hours removed.
+                await RecordSqlStepAsync(context, "plan", day, mealSlot, filter, pool.Count, catalogTags, ct);
                 var cards = pool.Count == 0 ? new Dictionary<int, ANGI.Domain.Entities.Dish>()
                     : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
                 // Discovery gộp tag cùng loại bằng OR; ràng buộc Agent cần món thỏa TẤT CẢ tag được yêu cầu.
-                var qualified = pool.Where(cards.ContainsKey).Select(id => cards[id])
+                var checkedDishes = pool.Where(cards.ContainsKey).Select(id => cards[id])
                     .Where(dish => mealTags.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && (namedDishIds.Length > 0 || FitsMeal(dish, mealSlot)) &&
-                        (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!)));
-                if (distinctNames) qualified = namedCenter is not null
-                    ? NearestBranches(qualified, dish => AgentScopedPlanning.Normalize(dish.Name), namedCenter)
-                    : qualified.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name));
+                        (namedDishIds.Length > 0 || !excludedNames.Contains(AgentScopedPlanning.Normalize(dish.Name)!))).ToArray();
+                var qualified = !distinctNames ? checkedDishes : namedCenter is not null
+                    ? NearestBranches(checkedDishes, dish => AgentScopedPlanning.Normalize(dish.Name), namedCenter).ToArray()
+                    : checkedDishes.DistinctBy(dish => AgentScopedPlanning.Normalize(dish.Name)).ToArray();
                 // Món người dùng đã đổi đi trong chuyến này không quay lại khi họ đổi tiếp ("món khác" nhiều lần), trừ khi không còn món nào khác.
                 var replaced = (state.ReplacedDishNames ?? []).Select(AgentScopedPlanning.Normalize).ToHashSet();
-                var found = namedDishIds.Length > 0 ? qualified.ToArray() : qualified.Where(dish => !replaced.Contains(AgentScopedPlanning.Normalize(dish.Name))).ToArray();
-                var eligibleDishes = found.Length > 0 ? found : qualified.ToArray();
+                var found = namedDishIds.Length > 0 ? qualified : qualified.Where(dish => !replaced.Contains(AgentScopedPlanning.Normalize(dish.Name))).ToArray();
+                var eligibleDishes = found.Length > 0 ? found : qualified;
+                var budgetPerMeal = AgentScopedPlanning.BudgetPerMeal(state);
+                ANGI.Domain.Entities.Dish[] kept;
+                string priceRule;
                 // A dish or restaurant the user named stays as asked; otherwise a price wish keeps the meal's priciest or cheapest share for reco to rank by taste.
-                if (namedDishIds.Length > 0 || restaurantId is not null || eligibleDishes.Length == 0) return eligibleDishes;
-                var mealDays = slots.Where(x => x.Meal == mealSlot || mealSlot is null).Select(x => x.Day).Distinct().Count();
-                // With a budget and no price wish, reco ranks the dishes the budget affords rather than reordering a pool of dearer top picks (see AffordableShare).
-                if (input.PriceTier is not ("high" or "low")) return AffordableShare(eligibleDishes, AgentScopedPlanning.BudgetPerMeal(state), mealDays);
-                var tiered = PriceTierShare(eligibleDishes, input.PriceTier, mealDays, AgentScopedPlanning.BudgetPerMeal(state));
-                // The kept price range next to the meal's dearest and cheapest dish on ANGI, so the reply can say for certain whether this is the top (conversation 589).
-                context.PriceTiers[mealSlot ?? "all"] = new AgentPriceTierRange(tiered.Min(dish => dish.Price), tiered.Max(dish => dish.Price),
-                    eligibleDishes.Min(dish => dish.Price), eligibleDishes.Max(dish => dish.Price), tiered.Length);
-                return tiered;
+                if (namedDishIds.Length > 0 || restaurantId is not null || eligibleDishes.Length == 0)
+                    (kept, priceRule) = (eligibleDishes, namedDishIds.Length > 0 || restaurantId is not null ? "named" : "none");
+                else
+                {
+                    var mealDays = slots.Where(x => x.Meal == mealSlot || mealSlot is null).Select(x => x.Day).Distinct().Count();
+                    // With a budget and no price wish, reco ranks the dishes the budget affords rather than reordering a pool of dearer top picks (see AffordableShare).
+                    if (input.PriceTier is not ("high" or "low")) (kept, priceRule) = (AffordableShare(eligibleDishes, budgetPerMeal, mealDays), budgetPerMeal is null ? "none" : "budget");
+                    else
+                    {
+                        kept = PriceTierShare(eligibleDishes, input.PriceTier, mealDays, budgetPerMeal);
+                        priceRule = input.PriceTier!;
+                        // The kept price range next to the meal's dearest and cheapest dish on ANGI, so the reply can say for certain whether this is the top (conversation 589).
+                        context.PriceTiers[mealSlot ?? "all"] = new AgentPriceTierRange(kept.Min(dish => dish.Price), kept.Max(dish => dish.Price),
+                            eligibleDishes.Min(dish => dish.Price), eligibleDishes.Max(dish => dish.Price), kept.Length);
+                    }
+                }
+                // Step 2 in the trace: what the in-memory checks, the name merge, replaced names and the budget kept for reco.
+                telemetry.Record("candidates_kept", context.ConversationId, context.TurnId, context.AttemptId, new { source = "plan", day, meal = mealSlot,
+                    fromSql = pool.Count, @checked = checkedDishes.Length, distinct = qualified.Length, notReplaced = found.Length, priceRule, budgetPerMeal,
+                    kept = kept.Length });
+                return kept;
             }
             // STEP-11: Prepare vectorSlot through slots.First, mealKey from AgentScopedPlanning.Fingerprint, known from rankedMeals.GetValueOrDefault and eligible from EligibleAsync.
             var vectorSlot = slots.First(x => mealSlot is null || x.Meal == mealSlot);
@@ -784,8 +863,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 // Món người dùng gọi đích danh có trong catalog nhưng bị bộ lọc của bữa loại hết: nói rõ bộ lọc nào để model giải thích hoặc hỏi lại,
                 // thay vì câu chung "chưa có lựa chọn phù hợp" mà người dùng không hiểu vì sao.
                 if (namedDishIds.Length > 0 && mealRequest.DishName is { } named)
+                {
+                    var weekdays = MealHours.Weekdays(state.StartDate, slots.Where(x => x.Meal == mealSlot).Select(x => x.Day));
+                    var closed = mealSlot is not null && (await dishes.GetCardDishesAsync(namedDishIds, ct))
+                        .All(dish => !MealHours.IsOpen([.. dish.Restaurant.BusinessHours], mealSlot, weekdays));
                     return ScopedRanking.Stopped(scope, CatalogNotice(context, NamedDishBlocked(named, day, mealSlot, maxPrice, area, requiredTags,
-                        namedDishIds.Any(excluded.Contains)), "named_dish_filtered"));
+                        namedDishIds.Any(excluded.Contains), closed), "named_dish_filtered"));
+                }
                 if (mealSlot is not null) chosenByMeal[mealSlot] = [];
                 continue;
             }
@@ -950,7 +1034,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // A price the trip budget gives is worked out by the backend from the current budget, so the model never divides it (conversation 586).
         if (input.BudgetShare) input = input with { MaxPrice = StarterMealBudget(context.State), MinPrice = null };
         context.Suggested = new AgentLastSuggestion(input.MealSlot, input.TagIds, input.ExcludeTagIds, input.MinPrice, input.BudgetShare ? null : input.MaxPrice,
-            input.Count, input.NameQuery, input.DishForm, input.Area, input.BudgetShare, input.SortBy);
+            input.Count, input.NameQuery, input.DishForm, input.Area, input.BudgetShare, input.SortBy, input.Now);
         // STEP-02: Prepare suggestion, record what was searched and return the result.
         var suggestion = context.DishSuggestion = await SuggestAsync(context, input, ct);
         telemetry.Record("suggest_search", context.ConversationId, context.TurnId, context.AttemptId, new { input.MinPrice, input.MaxPrice, named = input.NameQuery is not null, tags = input.TagIds?.Length ?? 0, input.Count, found = suggestion.Dishes.Length });
@@ -961,6 +1045,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             perMealCap = input.BudgetShare ? input.MaxPrice : null, fromTripBudget = input.BudgetShare ? true : (bool?)null,
             // The order the list follows when it is not the taste ranking: dish likes, or the restaurant's review score.
             sortedBy = input.SortBy,
+            // "Right now": the Vietnam time the backend searched at and the meal it chose, so the reply can say "giờ là 23h nên mình gợi ý món khuya".
+            now = input.Now ? NowFacts(input) : null,
             // Chữ về bữa ăn do backend điền vào ô {meals1}: đưa chữ này cho model thì nó viết lại lần nữa và câu trả lời bị lặp.
             dishes = suggestion.Dishes.Select(dish => new { dish.Name, dish.Restaurant, dish.Price, dish.Address, hasMeals = dish.Meals is not null }) };
     }
@@ -1038,8 +1124,19 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             MinPrice = input.MinPrice, MaxPrice = Min(state.MaxPricePerMeal, input.MaxPrice), Area = area, RequireAllTags = true,
             // "Phở khô" = nameQuery "phở" + dishForm dry: the catalog's own dish form decides soup or not, so phở trộn, cuốn and xào count as dry (conversation 585).
             DishForm = input.DishForm switch { "dry" => ANGI.Domain.Enums.DishForm.Dry, "soup" => ANGI.Domain.Enums.DishForm.Soup, _ => null },
-            CompatibleMealTimeCode = AgentStateValidator.Meals.Contains(input.MealSlot) ? input.MealSlot : null };
+            CompatibleMealTimeCode = AgentStateValidator.Meals.Contains(input.MealSlot) ? input.MealSlot : null,
+            OpenForMeal = AgentStateValidator.Meals.Contains(input.MealSlot) ? input.MealSlot : null };
+        // "Right now" (user decision 2026-11-16): the backend reads the Vietnam time and keeps only restaurants open at this moment today; a restaurant
+        // without business hours stays. The meal the time falls in limits the dishes only when the user named none: a dish they named (cà phê at 22:36,
+        // conversation 640) is what they want now, whatever meals its catalog tags list.
+        if (input.Now)
+        {
+            var (today, time) = VietnamNow();
+            filter = filter with { CompatibleMealTimeCode = NowMeal(input, time), OpenForMeal = null, OpenAtTime = time, OpenOnDays = [today] };
+        }
         var pool = await dishes.GetCandidateIdsAsync(filter, Math.Max(limits.MaxCandidates, CandidatePool), ct);
+        // Step 1 in the trace: the hard SQL filter, with how many dishes the business hours removed.
+        await RecordSqlStepAsync(context, "suggest", null, filter.CompatibleMealTimeCode, filter, pool.Count, catalogTags, ct);
         // STEP-03: Prepare cards from pool.ToArray, qualified through DistinctBy(filtered).ToArray, shown from context.History.Where and more.
         var cards = pool.Count == 0 ? new Dictionary<int, ANGI.Domain.Entities.Dish>() : (await dishes.GetCardDishesAsync(pool.ToArray(), ct)).ToDictionary(dish => dish.Id);
         bool Fits(ANGI.Domain.Entities.Dish dish) => required.All(id => dish.DishTags.Any(tag => tag.TagId == id)) && FitsMeal(dish, filter.CompatibleMealTimeCode) &&
@@ -1053,6 +1150,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             .Concat((context.Source?.Items ?? []).Select(item => item.DishName))))!;
         var fresh = qualified.Where(dish => !shown.Contains(AgentScopedPlanning.Normalize(dish.Name)!, StringComparison.Ordinal)).ToArray();
         var candidates = (fresh.Length > 0 ? fresh : qualified).Take(limits.MaxCandidates).ToArray();
+        // Step 2 in the trace: the name and tag check, the branch merge and the dishes already shown that are left out.
+        telemetry.Record("candidates_kept", context.ConversationId, context.TurnId, context.AttemptId, new { source = "suggest", meal = filter.CompatibleMealTimeCode,
+            fromSql = pool.Count, nameQuery, @checked = matching.Count(), distinct = qualified.Length, notShown = fresh.Length,
+            priceRule = input.MinPrice is not null || filter.MaxPrice is not null ? "price" : "none", kept = candidates.Length });
         // STEP-04: Return AgentDishSuggestionPolicy.Suggestion early when candidates.Length is 0.
         var aroundPin = named is null && area is not null && state.OriginMode == "pinned";
         var hasPlan = AgentIntakePolicy.HasPlan(context);
@@ -1263,10 +1364,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     }
 
     /// <summary>Names the filters that removed a dish the user asked for by name, so the reply can say why instead of "no suitable choice".</summary>
-    private static string NamedDishBlocked(string dishName, short? day, string? mealSlot, decimal? maxPrice, NearbyArea? area, string[] requiredTags, bool excluded)
+    private static string NamedDishBlocked(string dishName, short? day, string? mealSlot, decimal? maxPrice, NearbyArea? area, string[] requiredTags, bool excluded,
+        bool closed = false)
     {
         var reasons = new List<string>();
         if (excluded) reasons.Add("món này nằm trong danh sách loại trừ của lượt này (người dùng muốn món khác hoặc đã bỏ món này)");
+        if (closed && MealHours.For(mealSlot) is { } hours)
+            reasons.Add($"theo giờ mở cửa quán đã khai, quán không mở trong giờ {AgentReplyBuilder.Meal(mealSlot!)} ({hours.Start:HH\\:mm}–{hours.End:HH\\:mm}) của ngày đó");
         if (maxPrice is { } price) reasons.Add($"trần giá mỗi món {price.ToString("#,0", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"))} đồng");
         if (area is not null) reasons.Add($"bán kính {area.RadiusKm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} km quanh điểm đã chọn");
         if (requiredTags.Length > 0) reasons.Add($"yêu cầu loại món: {string.Join(", ", requiredTags.Select(AgentReplyBuilder.Safe))}");
@@ -1393,7 +1497,7 @@ public sealed record AgentRecommendationInput(AgentState? State = null, string? 
 
 /// <summary>What a dish suggestion is limited to; every value comes from the user's own request.</summary>
 public sealed record AgentSuggestionInput(string? Province = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MaxPrice = null, int Count = 1, AgentTasteTarget[]? TasteTargets = null, string? Area = null,
-    decimal? MinPrice = null, string? NameQuery = null, string? DishForm = null, bool BudgetShare = false, string? SortBy = null);
+    decimal? MinPrice = null, string? NameQuery = null, string? DishForm = null, bool BudgetShare = false, string? SortBy = null, bool Now = false);
 
 /// <summary>The places of a new trip as the model read them; a stop with no place is a day with no fixed place.</summary>
 public sealed record AgentLocateInput(string? TripArea = null, AgentLocateStop[]? Stops = null);

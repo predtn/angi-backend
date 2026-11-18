@@ -262,9 +262,12 @@ public sealed record AgentMealCoverage(short DayNumber, string MealSlot, int Ava
 /// <param name="Meals">The meals the dish fits, in words; null when it fits any meal or the user already named one.</param>
 public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal Price, string? Address, string? Meals = null, int DishId = 0, long RestaurantId = 0);
 
-/// <summary>The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget.</summary>
+/// <summary>
+/// The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget,
+/// Now means the user wants to eat right now, so the backend reads the time again on every refinement.
+/// </summary>
 public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
-    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null);
+    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false);
 
 /// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
 public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)

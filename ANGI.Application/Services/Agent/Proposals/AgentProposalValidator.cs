@@ -37,8 +37,11 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
 
     // The parts of this validator's own messages that mean a dish was made up rather than chosen badly: not in the catalog, not issued by a tool for that
     // day, meal and condition, or outside the trip's province or area. Budget, repeats and meal fit are soft and stay warnings (user decision 2026-11-12).
+    // A restaurant closed at that meal counts too (user decision 2026-11-16): candidates are filtered by business hours, so such a dish was never issued
+    // for that position, and one kept from the saved plan is swapped for a dish issued for its meal when the turn has one.
     private static readonly string[] FabricationMarkers = ["không còn khả dụng.", "cần nguồn ứng viên mới đúng phạm vi", "không đáp ứng ràng buộc chuyến đi.",
-        "được lấy theo khẩu vị khác", "không còn đáp ứng điều kiện lúc lấy ứng viên"];
+        "được lấy theo khẩu vị khác", "không còn đáp ứng điều kiện lúc lấy ứng viên", ClosedMarker];
+    private const string ClosedMarker = "thuộc quán không mở cửa vào bữa";
 
     /// <summary>The dish an error is about when it says the dish was made up (see <see cref="FabricationMarkers"/>); null for any other error.</summary>
     public static int? FabricatedDish(string error) =>
@@ -197,6 +200,9 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     errors.Add($"Món {item.DishId} không còn đáp ứng điều kiện lúc lấy ứng viên.");
             }
             if (!FitsMeal(dish, item.MealSlot)) errors.Add($"Món {item.DishId} không phù hợp bữa đã chọn.");
+            // Checked on the trip day's weekday once the start date is known, otherwise on any day of the week; a restaurant without hours passes.
+            if (!MealHours.IsOpen([.. dish.Restaurant.BusinessHours], item.MealSlot, MealHours.Weekdays(state.StartDate, [item.DayNumber])))
+                errors.Add($"Món {item.DishId} {ClosedMarker} {item.MealSlot} ngày {item.DayNumber} theo giờ mở cửa quán đã khai.");
             if (confirm && item.Price != dish.Price) errors.Add($"Giá món {item.DishId} đã thay đổi; cần xem đề xuất mới.");
             normalized.Add(item with { Price = dish.Price, DishName = dish.Name, RestaurantName = dish.Restaurant.Name,
                 Latitude = dish.Restaurant.Latitude, Longitude = dish.Restaurant.Longitude,
@@ -333,7 +339,10 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                 ? change with { Item = items.Single(x => x.ItemKey == item.ItemKey) } : change).ToArray() };
     }
 
-    /// <summary>Only active, available dishes of a verified, visible and open restaurant can enter a proposal.</summary>
+    /// <summary>
+    /// Only active, available dishes of a verified, visible and open restaurant can enter a proposal. OperatingStatus is the owner's
+    /// open / temporarily / permanently closed switch, not business hours, which are checked per meal through <see cref="MealHours"/>.
+    /// </summary>
     private static bool IsPublic(ANGI.Domain.Entities.Dish dish) => dish.Status == DishStatus.Active && dish.IsAvailable && dish.Restaurant is not null &&
         dish.Restaurant.DeletedAt is null && dish.Restaurant.VerificationStatus == RestaurantVerificationStatus.Verified &&
         dish.Restaurant.ModerationStatus == RestaurantModerationStatus.Visible && dish.Restaurant.OperatingStatus == RestaurantOperatingStatus.Open;

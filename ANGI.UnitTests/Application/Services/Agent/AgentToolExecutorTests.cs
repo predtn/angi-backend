@@ -1581,6 +1581,45 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion!.Dishes[0].Meals.Should().Be(meals);
     }
 
+    // TEST-46b: "Right now" searches restaurants open at the Vietnam time of today and the meal that time falls in, unless the user named a meal.
+    /// <summary>User decision 2026-11-16: the model only flags now; the backend reads the time, so 23:05 on a Monday is late night, open at 23:05 on day 1.</summary>
+    // A dish the user named keeps no meal of the time (conversation 640: cà phê at 22:36 was dropped as not late night); open now still applies.
+    [Theory]
+    [InlineData(null, null, "late_night")]
+    [InlineData("dinner", null, "dinner")]
+    [InlineData(null, "cà phê", null)]
+    public async Task ExecuteAsync_SuggestDishNow_FiltersOpenNowAndMeal(string? mealSlot, string? nameQuery, string? meal)
+    {
+        // STEP-01: 2026-11-16 16:05 UTC is Monday 23:05 in Vietnam; capture the candidate filter.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter)).ReturnsAsync(new[] { 221 });
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(),
+            Mock.Of<IAgentTelemetry>(), clock: new NowClock(new DateTimeOffset(2026, 11, 16, 16, 5, 0, TimeSpan.Zero)));
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(MealSlot: mealSlot, TagIds: [], ExcludeTagIds: [], TasteTargets: [], NameQuery: nameQuery, Now: true), AgentJson.Options));
+
+        // STEP-02: Run the call.
+        var result = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, call, CancellationToken.None), AgentJson.Options);
+
+        // STEP-03: Assert the filter is open at 23:05 on Monday with the meal, and the result tells the model the time and meal.
+        filters[0].OpenAtTime.Should().Be(new TimeOnly(23, 5));
+        filters[0].OpenOnDays.Should().Equal((short)1);
+        filters[0].CompatibleMealTimeCode.Should().Be(meal);
+        result.GetProperty("now").GetProperty("time").GetString().Should().Be("23:05");
+        result.GetProperty("now").GetProperty("meal").GetString().Should().Be(meal);
+        // The trace counts the dishes before and after business hours with its own count query, not a second search.
+        fixture.Dishes.Verify(x => x.CountCandidatesAsync(It.Is<DishCandidateFilter>(f => f.OpenAtTime == null), It.IsAny<CancellationToken>()), Times.Once);
+        context.Suggested!.Now.Should().BeTrue();
+    }
+
+    private sealed class NowClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     // TEST-47: locate_places stores what it found on the state, grows the trip for a later day, keeps the user's note for the next question and never takes coordinates from the model.
     /// <summary>The model reads the itinerary; where each place is stays the backend's.</summary>
     [Fact]
