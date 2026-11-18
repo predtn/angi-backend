@@ -21,6 +21,12 @@ public sealed record DishCandidateFilter
     public bool RequireAllTags { get; init; }
     /// <summary>Allows untagged dishes or dishes explicitly suitable for this meal.</summary>
     public string? CompatibleMealTimeCode { get; init; }
+    /// <summary>Leaves out restaurants whose business hours never reach this meal (see <see cref="MealHours"/>); restaurants without hours stay.</summary>
+    public string? OpenForMeal { get; init; }
+    /// <summary>Weekdays (0 = Sunday) the restaurant must serve <see cref="OpenForMeal"/> on, every one of them; empty means at least one day of the week.</summary>
+    public IReadOnlyList<short> OpenOnDays { get; init; } = [];
+    /// <summary>Keeps restaurants open at this moment of <see cref="OpenOnDays"/> and for <see cref="MealHours.MinOpenMinutes"/> more; replaces <see cref="OpenForMeal"/> when set. Restaurants without hours stay.</summary>
+    public TimeOnly? OpenAtTime { get; init; }
 
     /// <summary>A dish needs at least one of these tags, whatever their type (DISH-03 tagIds).</summary>
     public IReadOnlyList<short> AnyTagIds { get; init; } = [];

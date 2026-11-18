@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using ANGI.Application.Common.Models;
 using ANGI.Application.Common.Interfaces.Repositories.Discovery;
 using ANGI.Application.Common.Models.Discovery;
@@ -45,6 +46,41 @@ public sealed class DishRepository : IDishRepository
         DishCandidateFilter filter,
         int maxCount,
         CancellationToken ct)
+    {
+        if (await FilteredAsync(filter, ct) is not { } query) return [];
+        var ordered = query
+            .OrderByDescending(dish => dish.Restaurant.RatingAvg)
+            .ThenByDescending(dish => dish.LikeCount)
+            .ThenBy(dish => dish.Id);
+
+        if (filter.Area is null)
+        {
+            return await ordered.Select(dish => dish.Id).Take(maxCount).ToListAsync(ct);
+        }
+
+        // The bounding box keeps the rows few; the exact radius is checked here, keeping the order.
+        var inBox = await ordered
+            .Select(dish => new { dish.Id, dish.Restaurant.Latitude, dish.Restaurant.Longitude })
+            .ToListAsync(ct);
+        return inBox
+            .Where(row => filter.Area.Contains(row.Latitude, row.Longitude))
+            .Select(row => row.Id)
+            .Take(maxCount)
+            .ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountCandidatesAsync(DishCandidateFilter filter, CancellationToken ct)
+    {
+        if (await FilteredAsync(filter, ct) is not { } query) return 0;
+        if (filter.Area is null) return await query.CountAsync(ct);
+        // The exact radius is checked on the rows of the bounding box, as the candidate search does.
+        var inBox = await query.Select(dish => new { dish.Restaurant.Latitude, dish.Restaurant.Longitude }).ToListAsync(ct);
+        return inBox.Count(row => filter.Area.Contains(row.Latitude, row.Longitude));
+    }
+
+    /// <summary>The candidate query with every condition of the filter, the radius as a bounding box; null when a requested tag does not exist.</summary>
+    private async Task<IQueryable<Dish>?> FilteredAsync(DishCandidateFilter filter, CancellationToken ct)
     {
         var query = Candidates();
         if (filter.DishIds.Count > 0)
@@ -112,6 +148,12 @@ public sealed class DishRepository : IDishRepository
                 dish.DishTags.Any(tag => tag.Tag.TagType == TagType.MealTime && tag.Tag.Code == code));
         }
 
+        IEnumerable<short?> days = filter.OpenOnDays.Count > 0 ? filter.OpenOnDays.Distinct().Select(day => (short?)day) : [null];
+        IEnumerable<(MealHours.Window Window, short? Day)> hourChecks = filter.OpenAtTime is { } moment
+            ? days.SelectMany(day => MealHours.StaysOpen(moment, day))
+            : MealHours.For(filter.OpenForMeal) is { } mealWindow ? days.Select(day => (mealWindow, day)) : [];
+        foreach (var (window, day) in hourChecks) query = query.Where(OpenDuring(window, day));
+
         if (filter.ExcludeDishIds.Count > 0)
         {
             var excludedDishes = filter.ExcludeDishIds.ToArray();
@@ -129,7 +171,7 @@ public sealed class DishRepository : IDishRepository
             if (known.Count < requested.Length)
             {
                 // A tag that does not exist can match no dish.
-                return [];
+                return null;
             }
 
             // OR within a tag type, AND across types: [lunch, dinner, soup] = (lunch or dinner) and soup.
@@ -150,25 +192,7 @@ public sealed class DishRepository : IDishRepository
                                         dish.Restaurant.Longitude <= maxLongitude);
         }
 
-        var ordered = query
-            .OrderByDescending(dish => dish.Restaurant.RatingAvg)
-            .ThenByDescending(dish => dish.LikeCount)
-            .ThenBy(dish => dish.Id);
-
-        if (filter.Area is null)
-        {
-            return await ordered.Select(dish => dish.Id).Take(maxCount).ToListAsync(ct);
-        }
-
-        // The bounding box keeps the rows few; the exact radius is checked here, keeping the order.
-        var inBox = await ordered
-            .Select(dish => new { dish.Id, dish.Restaurant.Latitude, dish.Restaurant.Longitude })
-            .ToListAsync(ct);
-        return inBox
-            .Where(row => filter.Area.Contains(row.Latitude, row.Longitude))
-            .Select(row => row.Id)
-            .Take(maxCount)
-            .ToArray();
+        return query;
     }
 
     /// <inheritdoc />
@@ -210,10 +234,21 @@ public sealed class DishRepository : IDishRepository
             .Where(dish => ids.Contains(dish.Id))
             .Include(dish => dish.CoverMedia)
             .Include(dish => dish.Restaurant)
+                .ThenInclude(restaurant => restaurant.BusinessHours)
             .Include(dish => dish.DishTags)
                 .ThenInclude(dishTag => dishTag.Tag)
             .AsSplitQuery()
             .ToListAsync(ct);
+    }
+
+    /// <summary>dish =&gt; !dish.Restaurant.BusinessHours.Any() || dish.Restaurant.BusinessHours.Any(MealHours.Overlaps(window, day)), built so SQL runs the shared rule.</summary>
+    private static Expression<Func<Dish, bool>> OpenDuring(MealHours.Window window, short? day)
+    {
+        var dish = Expression.Parameter(typeof(Dish), "dish");
+        var hours = Expression.Property(Expression.Property(dish, nameof(Dish.Restaurant)), nameof(Dish.Restaurant.BusinessHours));
+        var none = Expression.Not(Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), [typeof(RestaurantBusinessHour)], hours));
+        var reaches = Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), [typeof(RestaurantBusinessHour)], hours, MealHours.Overlaps(window, day));
+        return Expression.Lambda<Func<Dish, bool>>(Expression.OrElse(none, reaches), dish);
     }
 
     /// <summary>
