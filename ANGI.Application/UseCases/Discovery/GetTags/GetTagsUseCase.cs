@@ -7,7 +7,10 @@ using FluentValidation;
 
 namespace ANGI.Application.UseCases.Discovery.GetTags;
 
-/// <summary>Implements CAT-02: the tag catalogue, sorted by type (meal_time, dietary, category), then name.</summary>
+/// <summary>
+/// Implements CAT-02: the tag catalogue, sorted by type (meal_time, dietary, category, meal_role, cooking_method,
+/// ingredient), then name.
+/// </summary>
 public sealed class GetTagsUseCase : IGetTagsUseCase
 {
     // Invariant rather than vi-VN: a container in globalization-invariant mode has no vi-VN culture.
