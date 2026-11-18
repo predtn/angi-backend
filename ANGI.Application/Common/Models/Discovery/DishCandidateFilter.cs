@@ -19,6 +19,8 @@ public sealed record DishCandidateFilter
     public IReadOnlyList<short> TagIds { get; init; } = [];
     /// <summary>Agent requires every tag before the candidate limit, unlike Discovery grouping.</summary>
     public bool RequireAllTags { get; init; }
+    /// <summary>Agent alternatives: a dish needs at least one tag of every group ("cơm hoặc bún").</summary>
+    public IReadOnlyList<IReadOnlyList<short>> TagAnyGroups { get; init; } = [];
     /// <summary>Allows untagged dishes or dishes explicitly suitable for this meal.</summary>
     public string? CompatibleMealTimeCode { get; init; }
     /// <summary>Leaves out restaurants whose business hours never reach this meal (see <see cref="MealHours"/>); restaurants without hours stay.</summary>

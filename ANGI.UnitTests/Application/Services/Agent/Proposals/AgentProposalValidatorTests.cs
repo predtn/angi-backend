@@ -322,6 +322,26 @@ public sealed class AgentProposalValidatorTests
         else result.Validation.Errors.Should().BeEmpty();
     }
 
+    // TEST-13b: A meal asked as "cơm hoặc bún" accepts a dish of either kind, and a dish of neither is still refused.
+    /// <summary>Reads several tags of one type in a meal request as alternatives.</summary>
+    [Theory]
+    [InlineData(31, true)][InlineData(33, false)]
+    public async Task ValidateAsync_MealRequestWithTagsOfOneType_AcceptsEitherTag(short dishTagId, bool accepted)
+    {
+        var tags = new[] { (Id: (short)31, Code: "form.mon_com_va_ngu_coc"), (Id: (short)32, Code: "form.mon_soi"), (Id: (short)33, Code: "form.lau") }
+            .Select(x => new ANGI.Domain.Entities.Tag { Id = x.Id, Code = x.Code, Name = x.Code, TagType = TagType.Category }).ToArray();
+        var dish = AgentTestData.Dish(); dish.DishTags.Add(new() { DishId = 1, TagId = dishTagId, Tag = tags.Single(x => x.Id == dishTagId) });
+        var fixture = AgentTestData.Validator(dish);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(tags);
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"], MealRequests = [new(1, "lunch", null, null, [31, 32])] };
+        var grant = new AgentCandidateGrant(1, "lunch", [1], Guid.NewGuid(), state);
+        var snapshot = new AgentSnapshot(state, [AgentTestData.Item(1, "a", 1, "lunch") with { Price = 50000 }], [grant]);
+
+        var result = await fixture.Validator.ValidateAsync(snapshot, null, false, false, default, [grant]);
+
+        result.Validation.Errors.Any(error => error.Contains("tag được yêu cầu")).Should().Be(!accepted);
+    }
+
     // TEST-14: A new item repeating an earlier dish name is flagged for backend replacement only when an unused authorized dish fits that position; the flag never becomes an error; covers with and without a spare dish.
     /// <summary>Lets the backend vary a multi-day plan while never blocking a plan whose catalog cannot avoid the repeat.</summary>
     [Theory]

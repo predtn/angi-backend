@@ -183,6 +183,12 @@ public sealed class DishRepository : IDishRepository
             }
         }
 
+        foreach (var group in filter.TagAnyGroups)
+        {
+            var ids = group.ToArray();
+            query = query.Where(dish => dish.DishTags.Any(dishTag => ids.Contains(dishTag.TagId)));
+        }
+
         if (filter.Area is { } area)
         {
             var (minLatitude, maxLatitude, minLongitude, maxLongitude) = area.BoundingBox();
