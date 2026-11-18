@@ -264,10 +264,12 @@ public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal 
 
 /// <summary>
 /// The suggest_dish conditions of the latest suggestion; BudgetShare means the price cap is the trip budget shared over every meal, worked out again from the current budget,
-/// Now means the user wants to eat right now, so the backend reads the time again on every refinement.
+/// Now means the user wants to eat right now, so the backend reads the time again on every refinement, and DishNames are the exact catalog names the model
+/// chose from near names, kept so "rẻ hơn" still searches the dish ANGI calls by that name.
 /// </summary>
 public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
-    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false);
+    int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false,
+    string[]? DishNames = null);
 
 /// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
 public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)

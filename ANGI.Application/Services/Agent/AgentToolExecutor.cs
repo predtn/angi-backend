@@ -15,6 +15,7 @@ using ANGI.Application.Common.Models.Roadmap;
 using ANGI.Application.Services.Agent.Constraints;
 using ANGI.Application.Services.Agent.Conversation;
 using ANGI.Application.Services.Agent.Intake;
+using ANGI.Application.Services.Agent.Catalog;
 using ANGI.Application.Services.Agent.Places;
 using ANGI.Application.Services.Agent.Proposals;
 using ANGI.Application.UseCases.Validators.Agent;
@@ -66,17 +67,35 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         });
     }
 
+    /// <summary>How many exact names a model may choose from nearNames for one suggestion.</summary>
+    private const int MaxChosenNames = 3;
+
     /// <summary>The dish name a suggestion searches on, or null when none was given or it only says "any dish".</summary>
     private static string? SuggestedName(AgentSuggestionInput input) =>
         string.IsNullOrWhiteSpace(input.NameQuery) || AgentDishSuggestionPolicy.IsGenericName(input.NameQuery) ? null : input.NameQuery.Trim();
 
+    /// <summary>The available dishes holding exactly the chosen names in the province; null when a name matches no dish, so a made-up name is refused.</summary>
+    private async Task<int[]?> ChosenDishIdsAsync(string[] names, string? province, CancellationToken ct)
+    {
+        if (catalogSearch is null) return null;
+        var ids = new List<int>();
+        foreach (var name in names.Select(name => name.Trim()).Distinct(StringComparer.Ordinal))
+        {
+            var exact = (await catalogSearch.SearchAsync("dish", name, province, 21, ct)).Where(x => x.Available && AgentNearDishes.SameName(x.Name, name))
+                .Select(x => checked((int)x.Id)).ToArray();
+            if (exact.Length == 0) return null;
+            ids.AddRange(exact);
+        }
+        return ids.Distinct().ToArray();
+    }
+
     /// <summary>
     /// The meal a "right now" suggestion keeps dishes to: the one the user named, or the one the time falls in when they named no dish;
-    /// null for a named dish without a meal, and between meals.
+    /// null for a named dish (or chosen near names) without a meal, and between meals.
     /// </summary>
     private static string? NowMeal(AgentSuggestionInput input, TimeOnly time) =>
         AgentStateValidator.Meals.Contains(input.MealSlot) ? input.MealSlot
-        : SuggestedName(input) is not null ? null : MealHours.MealAt(time);
+        : SuggestedName(input) is not null || input.DishNames is { Length: > 0 } ? null : MealHours.MealAt(time);
 
     /// <summary>The time a "right now" suggestion searched at, the meal it kept dishes to and that only open restaurants were kept, for the reply to state.</summary>
     private object NowFacts(AgentSuggestionInput input)
@@ -709,6 +728,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (mealRequest.DishName is { } dishName)
         {
             var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
+            if (lookup.Status == "near_names") return ScopedRanking.Stopped(scope, NearNotice(context, lookup));
             if (lookup.Status is not ("found" or "family")) return ScopedRanking.Stopped(scope, CatalogNotice(context, Describe(lookup), lookup.Status));
             namedDishIds = lookup.Matches.Where(x => x.Available && (!restaurantId.HasValue || x.RestaurantId == restaurantId))
                 .Select(x => checked((int)x.Id)).ToArray();
@@ -1031,13 +1051,32 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (input.MinPrice > input.MaxPrice || input.MinPrice > AgentStateValidator.MaxMoney || input.NameQuery?.Length > MaxPlaceName || input.DishForm is not (null or "dry" or "soup") ||
             input.SortBy is not (null or "likes" or "rating"))
             return ArgumentError(context, "minPrice phải nhỏ hơn hoặc bằng maxPrice, nameQuery là một tên món ngắn, dishForm là dry, soup hoặc null, sortBy là likes, rating hoặc null.");
+        if (input.DishNames is { Length: > 0 } names && (names.Length > MaxChosenNames || names.Any(name => string.IsNullOrWhiteSpace(name) || name.Length > MaxPlaceName)))
+            return ArgumentError(context, $"dishNames là tối đa {MaxChosenNames} tên món chính xác lấy từ nearNames.");
         // A price the trip budget gives is worked out by the backend from the current budget, so the model never divides it (conversation 586).
         if (input.BudgetShare) input = input with { MaxPrice = StarterMealBudget(context.State), MinPrice = null };
+        var province = !string.IsNullOrWhiteSpace(input.Province) && !ProvinceSearch.Same(input.Province, context.State.Province) ? input.Province.Trim() : context.State.Province;
+        // Names the model chose from nearNames must be dishes the catalog really holds under exactly that name, so it can never make one up.
+        int[]? chosen = null;
+        if (input.DishNames is { Length: > 0 } picked)
+        {
+            chosen = await ChosenDishIdsAsync(picked, province, ct);
+            if (chosen is null) return ArgumentError(context, "dishNames phải là tên món chính xác lấy từ nearNames của lượt trước, không tự đặt tên.");
+        }
         context.Suggested = new AgentLastSuggestion(input.MealSlot, input.TagIds, input.ExcludeTagIds, input.MinPrice, input.BudgetShare ? null : input.MaxPrice,
-            input.Count, input.NameQuery, input.DishForm, input.Area, input.BudgetShare, input.SortBy, input.Now);
+            input.Count, input.NameQuery, input.DishForm, input.Area, input.BudgetShare, input.SortBy, input.Now, input.DishNames is { Length: > 0 } ? input.DishNames : null);
         // STEP-02: Prepare suggestion, record what was searched and return the result.
-        var suggestion = context.DishSuggestion = await SuggestAsync(context, input, ct);
-        telemetry.Record("suggest_search", context.ConversationId, context.TurnId, context.AttemptId, new { input.MinPrice, input.MaxPrice, named = input.NameQuery is not null, tags = input.TagIds?.Length ?? 0, input.Count, found = suggestion.Dishes.Length });
+        var suggestion = context.DishSuggestion = await SuggestAsync(context, input, ct, chosen);
+        telemetry.Record("suggest_search", context.ConversationId, context.TurnId, context.AttemptId, new { input.MinPrice, input.MaxPrice, named = input.NameQuery is not null, tags = input.TagIds?.Length ?? 0, input.Count, found = suggestion.Dishes.Length, chosen = chosen?.Length });
+        // No dish holds the asked name at all (not just none within price, area or hours): the dishes sharing its words go to the model, which picks the same dish
+        // and calls again with dishNames, or says ANGI does not have it (user decision 2026-11-16). The suggestion is not final yet, so tools stay open.
+        if (suggestion.Dishes.Length == 0 && chosen is null && SuggestedName(input) is { } asked &&
+            await NearDishesAsync(province, asked, ct) is { Length: > 0 } near && !near.Any(x => HasEveryWord(x.Name, asked)))
+        {
+            context.DishSuggestion = null;
+            telemetry.Record("near_names", context.ConversationId, context.TurnId, context.AttemptId, new { asked, count = near.Length });
+            return new { status = "near_names", asked, nearNames = NearNames(near), instruction = NearSuggestInstruction };
+        }
         // Nothing at the asked price: the nearest prices below and above are facts the reply may state, so "không có món đúng 32k" is said for certain (conversation 582).
         return new { status = suggestion.Dishes.Length == 0 ? "nothing_found" : "suggested", suggestion.Personalized, suggestion.AroundPin, suggestion.HasPlan, suggestion.Area, suggestion.AreaNotFound,
             nearestPriceBelow = suggestion.PriceBelow, nearestPriceAbove = suggestion.PriceAbove,
@@ -1098,8 +1137,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// Picks dishes for "gợi ý một món": ranked by the user's taste around their area when one is known, across the catalog otherwise, because a place is not
     /// needed to name a dish. Nothing is granted and no state changes, and a dish already suggested in this conversation is left out so "món khác" moves on.
     /// </summary>
-    public async Task<AgentDishSuggestion> SuggestAsync(AgentContext context, AgentSuggestionInput input, CancellationToken ct)
+    public async Task<AgentDishSuggestion> SuggestAsync(AgentContext context, AgentSuggestionInput input, CancellationToken ct, IReadOnlyList<int>? chosenIds = null)
     {
+        // Dishes the model chose by exact name from nearNames replace the name search; like a named dish, they keep no default main-dish tag.
+        var chosen = chosenIds is { Count: > 0 };
         // STEP-01: Prepare state, locate the place the user named, then load catalogTags through tags.GetTagsAsync.
         var state = context.State;
         var (named, areaNotFound) = await SuggestionAreaAsync(context, input, ct);
@@ -1113,13 +1154,14 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var main = catalogTags.FirstOrDefault(tag => tag.TagType == ANGI.Domain.Enums.TagType.Category && tag.Code == AgentScopedPlanning.MainTagCode);
         // A kind of dish the user named ("phở khô") is matched on the dish name, which already says the kind: a category tag the model guessed beside it
         // (Mì, miến & hủ tiếu in conversation 585) would only drop the right dishes, and the main-dish default would drop a named drink.
-        var nameQuery = string.IsNullOrWhiteSpace(input.NameQuery) || AgentDishSuggestionPolicy.IsGenericName(input.NameQuery) ? null : input.NameQuery.Trim();
-        var required = nameQuery is not null ? wanted.Where(id => !categories.Contains(id)).ToArray()
+        var nameQuery = chosen ? null : SuggestedName(input);
+        var required = nameQuery is not null || chosen ? wanted.Where(id => !categories.Contains(id)).ToArray()
             : main is not null && !wanted.Any(categories.Contains) ? wanted.Append(main.Id).ToArray() : wanted;
         var otherProvince = !string.IsNullOrWhiteSpace(input.Province) && !ProvinceSearch.Same(input.Province, state.Province);
         // Nơi người dùng vừa nêu cho lần gợi ý này được ưu tiên hơn khu của chuyến đi.
         var area = named is not null ? new NearbyArea(named.Latitude, named.Longitude, named.RadiusKm) : otherProvince ? null : AgentScopedPlanning.Area(state, 0);
         var filter = new DishCandidateFilter { Province = named?.Province ?? (otherProvince ? input.Province!.Trim() : state.Province), TagIds = required,
+            DishIds = chosen ? chosenIds! : [],
             ExcludeTagIds = state.ExcludeTagIds.Concat((input.ExcludeTagIds ?? []).Where(known.Contains)).Distinct().ToArray(),
             MinPrice = input.MinPrice, MaxPrice = Min(state.MaxPricePerMeal, input.MaxPrice), Area = area, RequireAllTags = true,
             // "Phở khô" = nameQuery "phở" + dishForm dry: the catalog's own dish form decides soup or not, so phở trộn, cuốn and xào count as dry (conversation 585).
@@ -1152,7 +1194,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var candidates = (fresh.Length > 0 ? fresh : qualified).Take(limits.MaxCandidates).ToArray();
         // Step 2 in the trace: the name and tag check, the branch merge and the dishes already shown that are left out.
         telemetry.Record("candidates_kept", context.ConversationId, context.TurnId, context.AttemptId, new { source = "suggest", meal = filter.CompatibleMealTimeCode,
-            fromSql = pool.Count, nameQuery, @checked = matching.Count(), distinct = qualified.Length, notShown = fresh.Length,
+            fromSql = pool.Count, nameQuery, chosen = chosenIds?.Count, @checked = matching.Count(), distinct = qualified.Length, notShown = fresh.Length,
             priceRule = input.MinPrice is not null || filter.MaxPrice is not null ? "price" : "none", kept = candidates.Length });
         // STEP-04: Return AgentDishSuggestionPolicy.Suggestion early when candidates.Length is 0.
         var aroundPin = named is null && area is not null && state.OriginMode == "pinned";
@@ -1283,7 +1325,32 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // Nhóm món là dữ kiện cho model, không phải câu hỏi chọn món cho người dùng.
         else if (result.Status != "family") context.ToolNotice = context.CatalogNotice = Describe(result);
         // STEP-07: Return the anonymous result.
+        if (result.Status == "near_names") return new { result.Status, result.Message, result.Matches, nearNames = NearNames(result.Near), instruction = NearPlanInstruction };
         return new { result.Status, result.Message, result.Matches };
+    }
+
+    // The model reads the near names and decides which mean the dish the user asked for (user decision 2026-11-16); the backend only searched words.
+    private const string NearPlanInstruction = "ANGI has no dish with this name; nearNames are dishes whose names share words with it. When some of them are the same dish the user means " +
+        "(\"cà phê sữa đá\" is \"Cà Phê Nâu Đá\"; another regional or everyday name for the same drink or food counts as the same dish), put one exact name from nearNames in that meal's mealRequests.dishName and call the tool again, and say in the reply what ANGI calls it. " +
+        "When none is the same dish, never plan around it silently: tell the user ANGI does not have it and ask whether they want one of the close dishes or another choice.";
+    private const string NearSuggestInstruction = "ANGI has no dish with this name; nearNames are dishes whose names share words with it. Pick at most 3 that are the same dish the user means " +
+        "(\"cà phê sữa đá\" is \"Cà Phê Nâu Đá\"; another regional or everyday name for the same drink or food counts as the same dish) and call suggest_dish again with dishNames set to those exact names and the same other conditions; the reply says what ANGI calls it. " +
+        "When none is the same dish, call no more tools: tell the user ANGI does not have it and offer to suggest something close. Never present another dish as the one they asked for.";
+
+    /// <summary>The near names a model reads: name, a short description and the lowest price.</summary>
+    private static object[] NearNames(AgentNearDish[]? near) => (near ?? []).Select(x => (object)new { x.Name, x.Description, x.Price }).ToArray();
+
+    /// <summary>Dish names sharing words with a dish name the catalog does not hold, in the given province.</summary>
+    private async Task<AgentNearDish[]> NearDishesAsync(string? province, string name, CancellationToken ct) =>
+        catalogSearch is null ? [] : AgentNearDishes.Find(name, await catalogSearch.GetDishTextsAsync(province, ct) ?? []);
+
+    /// <summary>Stops a ranking on a dish name the catalog does not hold, handing the model the near names; the notice shown to the user states only facts.</summary>
+    private static object NearNotice(AgentContext context, CatalogLookup lookup)
+    {
+        var message = Describe(lookup);
+        context.ToolNotice = context.CatalogNotice = message;
+        return new { status = lookup.Status, rankingMode = "none", requestId = (Guid?)null, items = Array.Empty<object>(), warnings = new[] { message },
+            nearNames = NearNames(lookup.Near), instruction = NearPlanInstruction };
     }
 
     /// <summary>Remembers that this name needs a choice from the user, then returns the lookup unchanged.</summary>
@@ -1330,6 +1397,10 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                     : new("unavailable", "Món/quán có trong hệ thống nhưng hiện chưa khả dụng. Bạn có muốn xem lựa chọn khác không?", family);
             var elsewhere = input.Province is null ? [] : await catalogSearch.SearchAsync(input.Kind, input.Name, null, 21, ct);
             var outside = elsewhere.Any(x => AgentScopedPlanning.Normalize(x.Name) == AgentScopedPlanning.Normalize(input.Name));
+            // No dish holds the name at all: dishes sharing its words go to the model, which picks the one meaning the same ("cà phê sữa đá" = "Cà Phê Nâu Đá").
+            if (input.Kind == "dish" && !outside && matches.Length == 0 && await NearDishesAsync(input.Province, input.Name, ct) is { Length: > 0 } near)
+                return new("near_names", $"Chưa có món tên “{AgentReplyBuilder.Safe(input.Name)}” trên ANGI. Các món có tên gần giống: " +
+                    string.Join(", ", near.Take(6).Select(x => AgentReplyBuilder.Safe(x.Name))) + ".", [], near);
             if (!outside && matches.Length > 0) context.AmbiguousNames.Add(name);
             return new(outside ? "outside_province" : matches.Length > 0 ? "ambiguous" : "not_found",
                 outside ? "Có kết quả cùng tên trong hệ thống nhưng ngoài tỉnh đã chọn. Bạn muốn giữ địa điểm hay thay đổi?"
@@ -1391,7 +1462,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         !dish.DishTags.Any(x => x.Tag.TagType == ANGI.Domain.Enums.TagType.MealTime) ||
         dish.DishTags.Any(x => x.Tag.TagType == ANGI.Domain.Enums.TagType.MealTime && x.Tag.Code == meal);
 
-    private sealed record CatalogLookup(string Status, string Message, AgentCatalogMatch[] Matches);
+    private sealed record CatalogLookup(string Status, string Message, AgentCatalogMatch[] Matches, AgentNearDish[]? Near = null);
 
     /// <summary>
     /// Catalog dishes whose name holds every word of the requested name, in order ("cà ri" → "Cơm Cà Ri Nhật Gà Chiên"); accents are compared
@@ -1497,7 +1568,7 @@ public sealed record AgentRecommendationInput(AgentState? State = null, string? 
 
 /// <summary>What a dish suggestion is limited to; every value comes from the user's own request.</summary>
 public sealed record AgentSuggestionInput(string? Province = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MaxPrice = null, int Count = 1, AgentTasteTarget[]? TasteTargets = null, string? Area = null,
-    decimal? MinPrice = null, string? NameQuery = null, string? DishForm = null, bool BudgetShare = false, string? SortBy = null, bool Now = false);
+    decimal? MinPrice = null, string? NameQuery = null, string? DishForm = null, bool BudgetShare = false, string? SortBy = null, bool Now = false, string[]? DishNames = null);
 
 /// <summary>The places of a new trip as the model read them; a stop with no place is a day with no fixed place.</summary>
 public sealed record AgentLocateInput(string? TripArea = null, AgentLocateStop[]? Stops = null);

@@ -1615,6 +1615,45 @@ public sealed class AgentToolExecutorTests
         context.Suggested!.Now.Should().BeTrue();
     }
 
+    // TEST-46c: A dish name the catalog does not hold returns near names for the model to choose from, and the suggestion is not final yet.
+    /// <summary>User decision 2026-11-16: "cà phê sữa đá" lists Cà Phê Nâu Đá; a name the model makes up is refused; a chosen name searches that dish's ids.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestDishMissingName_ReturnsNearNamesThenSearchesChosen()
+    {
+        // STEP-01: The candidate search finds nothing by name; the catalog holds Cà Phê Nâu Đá as dish 221.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<DishCandidateFilter, int, CancellationToken>((filter, _, _) => filters.Add(filter))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.DishIds.Count > 0 ? new[] { 221 } : Array.Empty<int>());
+        var catalog = new Mock<IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetDishTextsAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new AgentDishText("Cà Phê Nâu Đá", "Cà phê phin pha sữa đặc, đá.", 30000, 1, ["Cà phê"])]);
+        catalog.Setup(x => x.SearchAsync("dish", It.IsAny<string>(), It.IsAny<string?>(), 21, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string name, string? _, int _, CancellationToken _) => name == "Cà Phê Nâu Đá"
+                ? [new AgentCatalogMatch(221, "Cà Phê Nâu Đá", 1, "Cafe", "Hà Nội", "21 Phan Bội Châu", true)] : []);
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(),
+            Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+        var context = AgentTestData.Context();
+        context.State = new AgentState { Province = "Hà Nội" };
+        AgentToolCall Call(string? nameQuery, string[]? dishNames) => new("s", "suggest_dish", JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], NameQuery: nameQuery, DishNames: dishNames), AgentJson.Options));
+
+        // STEP-02: The missing name gives near names and leaves the suggestion open.
+        var near = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call("cà phê sữa đá", null), CancellationToken.None), AgentJson.Options);
+        near.GetProperty("status").GetString().Should().Be("near_names");
+        near.GetProperty("nearNames")[0].GetProperty("name").GetString().Should().Be("Cà Phê Nâu Đá");
+        context.DishSuggestion.Should().BeNull();
+
+        // STEP-03: A made-up name is refused; the exact name searches its dish id and keeps it for refinements.
+        var invented = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call(null, ["Cà Phê Sữa Đá Ngon"]), CancellationToken.None), AgentJson.Options);
+        invented.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        var chosen = JsonSerializer.SerializeToElement(await tools.ExecuteAsync(context, Call(null, ["Cà Phê Nâu Đá"]), CancellationToken.None), AgentJson.Options);
+        chosen.GetProperty("status").GetString().Should().Be("suggested");
+        filters[^1].DishIds.Should().Equal(221);
+        context.Suggested!.DishNames.Should().Equal("Cà Phê Nâu Đá");
+    }
+
     private sealed class NowClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

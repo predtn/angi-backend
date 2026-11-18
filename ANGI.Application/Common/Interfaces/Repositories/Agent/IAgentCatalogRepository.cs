@@ -8,6 +8,9 @@ public interface IAgentCatalogRepository
     /// <summary>Returns literal name matches from public catalog data, with a caller-owned bound.</summary>
     Task<AgentCatalogMatch[]> SearchAsync(string kind, string name, string? province, int limit, CancellationToken ct);
 
+    /// <summary>Returns the name, description and tag names of every public, available dish of the province (or of all provinces), for a near-name search.</summary>
+    Task<AgentDishText[]> GetDishTextsAsync(string? province, CancellationToken ct);
+
     /// <summary>Returns the provinces that hold at least one public restaurant.</summary>
     Task<string[]> GetProvincesAsync(CancellationToken ct);
 
