@@ -602,6 +602,7 @@ public sealed class OpenAiAgentLlmServiceTests
                 .And.NotContain("because the backend asks for them when the user saves");
             using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
+            data.RootElement.GetProperty("maxTripDays").GetInt32().Should().Be(7);
             JsonDocument.Parse(messages[1].GetProperty("content").GetString()!).RootElement.GetProperty("catalogProvinces")[0].GetString().Should().Be("Hà Nội");
             data.RootElement.TryGetProperty("intakeAside", out _).Should().BeFalse();
             body.RootElement.GetProperty("tools").EnumerateArray().Select(tool => tool.GetProperty("function").GetProperty("name").GetString()).Should().Contain("locate_places");

@@ -136,7 +136,8 @@ public sealed record AgentCandidateGrant(short? DayNumber, string? MealSlot, int
 /// <summary>Full immutable itinerary and trusted provenance, independent of any saved roadmap.</summary>
 public sealed record AgentSnapshot(AgentState State, AgentItem[] Items, AgentCandidateGrant[] Grants,
     long? BaseRoadmapId = null, DateTime? BaseRoadmapUpdatedAt = null, AgentChange[]? Changes = null, AgentScope? Scope = null,
-    AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null, string[]? Notes = null);
+    AgentItem[]? RetainedItems = null, AgentDishNote[]? DishNotes = null, AgentDaySummary[]? DaySummaries = null, string[]? Notes = null,
+    short? BaseRoadmapNumDays = null);
 
 /// <summary>Model-worded text about one dish in a preview; shown as the model wrote it. Never saved to the roadmap.</summary>
 public sealed record AgentDishNote(int DishId, string? Intro, string? Reason);
@@ -393,5 +394,5 @@ public static class AgentJson
         roadmap.Days.SelectMany(day => day.Items.Select(item => new AgentItem(
             $"r{item.Id}", item.Id, day.DayNumber, Name(item.MealSlot), item.SortOrder, item.DishId,
             item.RecoRequestId, item.Dish.Price, item.Dish.Name, item.Dish.Restaurant?.Name,
-            item.Dish.Restaurant?.Latitude, item.Dish.Restaurant?.Longitude))).ToArray(), [], roadmap.Id, roadmap.UpdatedAt);
+            item.Dish.Restaurant?.Latitude, item.Dish.Restaurant?.Longitude))).ToArray(), [], roadmap.Id, roadmap.UpdatedAt, BaseRoadmapNumDays: roadmap.NumDays);
 }

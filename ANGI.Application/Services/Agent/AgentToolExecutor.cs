@@ -253,7 +253,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             var proposedState = AgentConstraintGuard.RetainPlacements(
                 AgentMealScopePolicy.Narrow(AgentConstraintGuard.WithoutErased(AgentIntakePolicy.WithCatalogProvince(AgentIntakePolicy.WithoutUnstatedProvince(AgentContextBuilder.KeepKnown(input.State, context.State), context), context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests);
-            try { context.State = statePolicy.Accept(context.State, proposedState, context.ConstraintBaseline); }
+            try { context.State = statePolicy.Accept(context.State, proposedState, context.ConstraintBaseline, context.Roadmap?.NumDays); }
             catch (AgentStateChangeRequiredException change)
             {
                 // Nới điều kiện (tăng ngân sách, bỏ yêu cầu món...) do model đọc được áp luôn như ở AcceptRaw của orchestrator:
@@ -1097,10 +1097,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var hasPlan = AgentIntakePolicy.HasPlan(context);
         var tripArea = string.IsNullOrWhiteSpace(input.TripArea) ? null : input.TripArea.Trim();
         var stops = input.Stops ?? [];
+        var maxDays = AgentStateValidator.AllowedDays(context.Roadmap?.NumDays);
         if (hasPlan && tripArea is not null)
             return ArgumentError(context, "Lịch đã có: dùng stops cho từng ngày cần đổi, kể cả khi đổi cả chuyến. Chưa rõ ngày nào thì hỏi lại bằng clarification=edit_scope.");
-        if (tripArea is null && stops.Length == 0 || tripArea?.Length > MaxPlaceName || stops.Length > AgentStateValidator.MaxDays ||
-            stops.Any(stop => stop.Days is not { Length: > 0 } || stop.Place?.Length > MaxPlaceName || stop.Days.Any(day => day is < 1 or > AgentStateValidator.MaxDays)))
+        if (tripArea is null && stops.Length == 0 || tripArea?.Length > MaxPlaceName || stops.Length > maxDays ||
+            stops.Any(stop => stop.Days is not { Length: > 0 } || stop.Place?.Length > MaxPlaceName || stop.Days.Any(day => day < 1 || day > maxDays)))
             return ArgumentError(context, "locate_places cần tripArea hoặc stops; mỗi stop có days từ 1 đến số ngày tối đa và tên nơi không quá dài.");
         // STEP-02: Over a plan, keep only the days it has, and name the others so the model can ask about extending the trip.
         var outsideTrip = hasPlan ? stops.SelectMany(stop => stop.Days!).Where(day => day > context.State.NumDays).Distinct().ToArray() : [];

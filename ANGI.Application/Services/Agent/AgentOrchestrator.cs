@@ -684,7 +684,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var spelled = AgentConstraintGuard.WithDailyBudget(AgentIntakePolicy.WithCatalogProvince(AgentContextBuilder.KeepKnown(proposed, context.State), context), context.State);
         context.UnknownPlace = null;
         var placed = AgentConstraintGuard.RetainPlacements(spelled, context.PlacedRequests);
-        try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline); }
+        try { return statePolicy.Accept(context.State, placed, context.ConstraintBaseline, context.Roadmap?.NumDays); }
         catch (AgentStateChangeRequiredException change)
         {
             telemetry.Record("state_change_unstaged", context.ConversationId, context.TurnId, context.AttemptId);

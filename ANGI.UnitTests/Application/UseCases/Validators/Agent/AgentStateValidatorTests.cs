@@ -120,4 +120,17 @@ public sealed class AgentStateValidatorTests
         new AgentStateValidator().Validate(shared).Errors.Should().ContainSingle().Which.ErrorMessage.Should().Contain("fromOffered=true");
         new AgentStateValidator().Validate(placed).IsValid.Should().BeTrue();
     }
+
+    // TEST-LONG-01: New trips stop at 7 days; a roadmap stored longer may keep its length or shrink, never grow.
+    /// <summary>Roadmaps created under the earlier 100-day limit stay editable without letting any trip get longer.</summary>
+    [Theory]
+    [InlineData(7, null, true)]
+    [InlineData(8, null, false)]
+    [InlineData(8, 5, false)]
+    [InlineData(10, 10, true)]
+    [InlineData(8, 10, true)]
+    [InlineData(11, 10, false)]
+    [InlineData(100, 100, true)]
+    public void Validate_NumDays_FollowsTheRoadmapBeingEdited(short days, int? roadmapDays, bool valid) =>
+        new AgentStateValidator(roadmapDays).Validate(new AgentState { NumDays = days }).IsValid.Should().Be(valid);
 }
