@@ -191,9 +191,9 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
                             prepared = await SaveTurnAsync(conversation, userId, context, AgentConfirmationPolicy.SaveWish(context, today), ct, prepared.Reply);
                         else telemetry.Record("save_skipped", id, message.TurnId, attemptId, new { reason = context.CurrentProposal?.Status == "ready" ? "plan_mismatch" : "no_ready_plan" });
                     }
-                    // Lời chào hay câu ngoài phạm vi không trả lời câu hỏi lưu nhưng cũng không hủy nó.
+                    // Lời chào, câu ngoài phạm vi hay một câu trả lời model chưa hiểu ("ok" cho câu hỏi ngày nào) không trả lời câu hỏi lưu nhưng cũng không hủy nó.
                     // Vừa gợi ý món thì khác: "ok" tiếp theo là đáp lời mời đó, không được hiểu thành đồng ý lưu lịch.
-                    else if (pendingSave is not null && prepared.State.DishOffered != true && prepared.Action is "chat" or "food_info" or "out_of_scope")
+                    else if (pendingSave is not null && prepared.State.DishOffered != true && prepared.Action is "chat" or "food_info" or "out_of_scope" or AgentOrchestrator.SaveUnclear)
                         prepared = prepared with { State = prepared.State with { PendingSave = pendingSave } };
                     // Lời mời gợi ý món cũng còn qua một câu chat, câu hỏi về món hay câu ngoài phạm vi chen giữa (hội thoại 220: "sở thích của tôi là gì"
                     // rồi "tôi thích ăn cay"), để khẩu vị nói sau đó vẫn là về món vừa gợi ý. Lập lịch hay sửa lịch thì lời mời kết thúc.

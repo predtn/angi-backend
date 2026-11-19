@@ -281,6 +281,21 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("pending_answer", context.ConversationId, context.TurnId, context.AttemptId, new { awaited = context.AwaitedAnswer, answer.Kind });
                     return new(output.Reply, turnState, null, null, Answer: answer);
                 }
+                // A save question is open and the model read the reply as neither yes, no nor "later" ("ok" to "which day?"): the question still stands,
+                // so a following "để sau" can answer it (pilot 2026-11-19, save-confirm). Nothing is changed or saved; the model's reply is shown as written.
+                if (context.AwaitedAnswer is AgentConfirmationPolicy.AwaitingSave or AgentConfirmationPolicy.AwaitingSaveDate &&
+                    output is { Action: "answer", PendingAnswer: "unclear", State: null, Items.Length: 0, Changes.Length: 0 })
+                {
+                    telemetry.Record("pending_answer", context.ConversationId, context.TurnId, context.AttemptId, new { awaited = context.AwaitedAnswer, Kind = "unclear" });
+                    return new(Raw(output.Reply), turnState, null, null, SaveUnclear);
+                }
+                // "Later" only answers the save-date question. With none open nothing is saved, though the model may have written that it saves the plan
+                // without a date: the user is told the truth instead of that claim (pilot 2026-11-19, V2 and V3 save-confirm).
+                if (output.PendingAnswer == AgentConfirmationPolicy.Defer)
+                {
+                    telemetry.Record("answer_without_question", context.ConversationId, context.TurnId, context.AttemptId, new { awaited = context.AwaitedAnswer, output.PendingAnswer });
+                    return new(AgentConfirmationPolicy.NotSaved, turnState, null, null, "answer");
+                }
                 // Đồng ý mà không có câu hỏi nào đang chờ: lối đi an toàn là hỏi lại về việc lưu, vì bước đó chưa ghi gì; câu model viết có thể đã nói như thể việc đã xong ("Chốt nhé!").
                 // Khi một câu hỏi làm rõ đang chờ, "đồng ý" là trả lời câu đó ("giữ nguyên" cho "muốn đổi món nào?"), không phải ý muốn lưu: câu model viết được hiện như thường.
                 if (output.Action == "request_save")
@@ -675,6 +690,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
 
     // Người dùng chỉ thấy câu model viết; backend không có câu thay thế.
     // A model sometimes escapes its line breaks twice, and the chat then shows "\n" as text (conversation 597): those become real line breaks.
+    /// <summary>The action of a turn that left an open save question unanswered; the use case keeps that question for the next turn.</summary>
+    public const string SaveUnclear = "save_unclear";
+
     private static string Raw(string? reply) => (reply ?? "").Replace("\\r\\n", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal).Trim();
 
     /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>

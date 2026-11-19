@@ -436,6 +436,38 @@ public sealed class SendAgentMessageUseCaseTests
         fixture.Conversation.RoadmapId.Should().BeNull();
     }
 
+    // TEST-18: An unclear reply to the save-date question keeps the question open; "later" with no question open saves nothing and says so.
+    /// <summary>Pilot 2026-11-19: "chốt lịch này", "ok", "để sau" ended with "mình lưu lịch không kèm ngày" while nothing was saved.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_SaveDateQuestion_SurvivesUnclearReplyAndLaterNeedsIt(bool questionOpen)
+    {
+        // STEP-01: Create fixture with a ready proposal and, when questionOpen, an open question about the start date.
+        var fixture = new AgentUseCaseFixture(); fixture.Conversation.CurrentProposalId = 9;
+        var snapshot = AgentTestData.Snapshot(AgentTestData.Item());
+        fixture.Conversation.State = AgentJson.Write(snapshot.State with { PendingSave = questionOpen ? new(9, 1, AgentConfirmationPolicy.StageDate) : null });
+        var proposal = ReadyProposal(9, snapshot);
+        fixture.Repository.Setup(repo => repo.GetProposalSnapshotAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        fixture.Repository.Setup(repo => repo.GetProposalAsync(7, 9, It.IsAny<CancellationToken>())).ReturnsAsync(proposal);
+        // STEP-02: Stub the model with an unclear reading when the question is open, otherwise with "later" and a claim that the plan is saved.
+        var output = questionOpen
+            ? new AgentOutput { Action = "answer", PendingAnswer = "unclear", Reply = "Bạn cho mình biết ngày đi nhé, chưa biết thì nói “để sau”." }
+            : new AgentOutput { Action = "answer", PendingAnswer = AgentConfirmationPolicy.Defer, Reply = "Ừ, mình lưu lịch không kèm ngày nhé." };
+        fixture.Llm.Setup(llm => llm.RunAsync(It.IsAny<AgentContext>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([], output));
+        var request = Request(); request.Content = questionOpen ? "ok" : "để sau";
+
+        // STEP-03: Run Create().ExecuteAsync with request.
+        var turn = await Create(fixture).ExecuteAsync(7, request, CancellationToken.None);
+
+        // STEP-04: Assert nothing is saved, the open question is kept for the next turn, and a claim of saving never reaches the user.
+        turn.Commit.Should().BeNull();
+        proposal.Status.Should().Be(ANGI.Domain.Enums.AgentProposalStatus.Ready);
+        var state = AgentJson.Read<AgentState>(fixture.Conversation.State);
+        state.PendingSave.Should().Be(questionOpen ? new AgentPendingSave(9, 1, AgentConfirmationPolicy.StageDate) : null);
+        turn.Reply.Should().Be(questionOpen ? output.Reply : AgentConfirmationPolicy.NotSaved);
+    }
+
     private static SendAgentMessageUseCase Create(AgentUseCaseFixture fixture) => new(new SendAgentMessageRequestDtoValidator(fixture.Limits),
         fixture.Repository.Object, fixture.Roadmaps.Object, fixture.User.Object, fixture.UnitOfWork.Object, fixture.Clock, fixture.Limits,
         new AgentContextBuilder(fixture.Repository.Object, fixture.Roadmaps.Object, fixture.Limits, fixture.Clock, AgentTestData.Validator().Tags.Object), fixture.Orchestrator(), fixture.Telemetry, fixture.Committer());
