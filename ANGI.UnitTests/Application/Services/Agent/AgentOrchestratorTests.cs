@@ -586,7 +586,8 @@ public sealed class AgentOrchestratorTests
     {
         // STEP-01: Get result from a model that read the answer.
         var state = new AgentState { NumDays = 3, PlanningIntake = AgentIntakePolicy.Details };
-        var result = await Create(Scripted(Asks("trip_details", "Bạn cho mình biết thêm được không?", state with { Province = "Hà Nội", NumDays = numDays, BudgetUnrestricted = unrestricted })).Object, intakeCatalog: IntakeCatalog())
+        // A trip-details question about a known trip now leads to planning (TEST-34b), so the model asks about taste here.
+        var result = await Create(Scripted(Asks("preferences", "Bạn thích khẩu vị nào?", state with { Province = "Hà Nội", NumDays = numDays, BudgetUnrestricted = unrestricted })).Object, intakeCatalog: IntakeCatalog())
             .RunAsync(IntakeContext(content, state), default);
 
         // STEP-02: Assert result.State.PendingStateChange is null, result.State.NumDays is numDays, result.State.BudgetUnrestricted is unrestricted and 1 more.
@@ -814,6 +815,31 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Assert the phases of the three calls and that the tool ran.
         seen.Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "locate_places"), (AgentTurnPhase.Act, null));
         context.Exchanges.Should().ContainSingle();
+    }
+
+    // TEST-34b: A trip-details question about a trip whose place, duration and budget are known is dropped and the turn plans; with the budget not yet asked it is shown.
+    /// <summary>After "lập lịch luôn" the model kept asking for the start date, so no plan was made (AI-D04, AI-D05).</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunAsync_TripDetailsQuestionOnKnownTrip_PlansInstead(bool budgetKnown)
+    {
+        // STEP-01: Script a read that asks for the start date of a 2-day Hà Nội trip, then a final question, recording each call's phase.
+        var context = IntakeContext("không, lập lịch luôn nhé", new AgentState());
+        var read = new AgentState { Province = "Hà Nội", NumDays = 2, BudgetAmount = budgetKnown ? 1000000 : null };
+        var seen = new List<(AgentTurnPhase Phase, string? Tool)>();
+        var llm = Phases(seen, Asks("trip_details", "Bạn muốn bắt đầu ngày nào?", read), Asks("preferences", "Bạn thích vị gì?"));
+
+        // STEP-02: Run the turn.
+        var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(context, default);
+
+        // STEP-03: Assert the known trip goes on to a forced get_recommendation call, and the open budget keeps the question.
+        if (budgetKnown) seen.Take(2).Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "get_recommendation"));
+        else
+        {
+            seen.Should().Equal((AgentTurnPhase.Read, null));
+            result.Reply.Should().Be("Bạn muốn bắt đầu ngày nào?");
+        }
     }
 
     // TEST-56: The state the read step gave reaches the forced call and is gone once the tool has run.
