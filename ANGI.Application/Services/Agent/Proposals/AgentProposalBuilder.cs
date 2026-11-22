@@ -144,7 +144,15 @@ public sealed class AgentProposalBuilder
                 if (change.Type == "add")
                 {
                     if (context.Request.SelectedItemKey is not null || change.TargetItemKey is not null || change.Item is null || !output.Scope.Contains(change.Item)) throw Invalid("Món thêm không hợp lệ.");
-                    items.Add(Clean(change.Item, null));
+                    // A new dish has no key or place in its meal yet, and the model often sends none (tripfix-1: "thêm một bữa ăn vặt" failed twice
+                    // on a missing itemKey and the turn ended in 503). The backend gives it a free key and the next position in that meal.
+                    var addition = change.Item;
+                    if (string.IsNullOrWhiteSpace(addition.ItemKey))
+                        addition = addition with { ItemKey = Enumerable.Range(1, int.MaxValue - 1).Select(n => $"{addition.DayNumber}-{addition.MealSlot}-add{n}")
+                            .First(key => items.All(item => item.ItemKey != key)) };
+                    var meal = items.Where(item => item.DayNumber == addition.DayNumber && item.MealSlot == addition.MealSlot).ToArray();
+                    if (meal.Any(item => item.SortOrder == addition.SortOrder)) addition = addition with { SortOrder = (short)(meal.Max(item => item.SortOrder) + 1) };
+                    items.Add(Clean(addition, null));
                     continue;
                 }
                 if (target is null || !output.Scope.Contains(target) || !touched.Add(target.ItemKey)) throw Invalid("Tham chiếu món không rõ hoặc ngoài phạm vi.");

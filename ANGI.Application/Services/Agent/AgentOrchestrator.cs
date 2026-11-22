@@ -46,6 +46,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         // Đề xuất rỗng có lượt sửa riêng để không tiêu mất lượt sửa lỗi validation của lịch đủ món sau đó.
         var emptyRepaired = false;
         var coverageRepaired = false;
+        var tripRepaired = false;
         var transientRetries = 0;
         var executedTools = new HashSet<string>(StringComparer.Ordinal);
         var turnStarted = Stopwatch.GetTimestamp();
@@ -249,6 +250,29 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 // Chỉ ghi lựa chọn và độ dài, không ghi nội dung: để biết model đã đọc ra gì khi một lượt đi sai.
                 telemetry.Record("model_output", context.ConversationId, context.TurnId, context.AttemptId, new { phase = phase.ToString(), output.Action, output.Clarification, output.Tool, output.PendingAnswer, replyLength = output.Reply.Length });
+                // Place, duration and budget are known and no plan exists, yet the model asks for trip details again, mostly the start date
+                // (AI-D04, AI-D05: about a third of V3.x runs in the 2026-11-19 and 2026-11-22 evaluations stopped at such a question).
+                // The start date is asked when saving, so the question is dropped: after reading, the turn plans; after a tool result, the model is asked once for the plan.
+                if (output is { Action: "clarify", Clarification: "trip_details" } && !AgentIntakePolicy.HasPlan(context) && TripKnown(context, output.State))
+                {
+                    telemetry.Record("trip_details_known", context.ConversationId, context.TurnId, context.AttemptId, new { phase = phase.ToString() });
+                    if (phase == AgentTurnPhase.Read)
+                    {
+                        phase = AgentTurnPhase.Forced;
+                        context.ForcedTool = "get_recommendation";
+                        context.ReadState = output.State;
+                        repaired = false;
+                        continue;
+                    }
+                    if (phase == AgentTurnPhase.Act && context.Exchanges.Count > 0 && !tripRepaired && calls + 1 < limits.MaxLlmCalls)
+                    {
+                        context.RejectedOutput = output;
+                        context.RepairFeedback = "Place, duration and budget are already known, so do not ask about them, the start date or the meals. " +
+                            "Return create_proposal from the candidates above now; the start date is asked when the user saves.";
+                        tripRepaired = repaired = sameRead = true;
+                        continue;
+                    }
+                }
                 // Model đọc xong và cần một tool: lần gọi sau chỉ có đúng tool đó, nên không thể chọn nhầm. Các kiểm tra của từng tool vẫn chạy như cũ.
                 if (output.Action == "use_tool")
                 {
@@ -696,6 +720,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     private static string Raw(string? reply) => (reply ?? "").Replace("\\r\\n", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal).Trim();
 
     /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
+    /// <summary>
+    /// True when the trip has a place and a duration, and its budget is known or was already asked for: nothing a trip-details question asks is still needed.
+    /// The model's own reading of this message counts, so "2 ngày ở Hà Nội, 1 triệu" in the first message is known before the state is accepted.
+    /// </summary>
+    private static bool TripKnown(AgentContext context, AgentState? read)
+    {
+        var state = AgentContextBuilder.KeepKnown(read, context.State) ?? context.State;
+        return !string.IsNullOrWhiteSpace(state.Province) && state.NumDays.HasValue &&
+            (state.BudgetAmount.HasValue || state.BudgetUnrestricted || context.State.PlanningIntake == AgentIntakePolicy.Details);
+    }
+
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
         // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
