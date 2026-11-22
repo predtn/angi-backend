@@ -547,4 +547,28 @@ public sealed class AgentProposalValidatorTests
         var errors = await fixture.Validator.IntegrityErrorsAsync(draft, null, default);
         errors.Any(error => error.StartsWith("Số ngày phải", StringComparison.Ordinal)).Should().Be(blocked);
     }
+
+    // TEST-21: A dish added beside a kept one keeps the kept dish, even though the meal request now names the added dish.
+    /// <summary>"Thêm món bún chả vào bữa trưa ngày 1" swapped the lunch dish: the new request made the kept dish look stale (AI-D07).</summary>
+    [Theory]
+    [InlineData("add", false)]
+    [InlineData("add-and-remove", true)]
+    public async Task ValidateAsync_DishAddedBesideKeptDish_KeepsItUnlessTheMealAlsoLostOne(string area, bool refreshed)
+    {
+        // STEP-01: Prepare a source lunch of dishes 1 and 3, and a draft that keeps dish 1 and adds dish 2 named by the new meal request.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3));
+        var before = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var after = before with { MealRequests = [new(1, "lunch", "Dish 2", null, [])] };
+        var kept = AgentTestData.Item(1, "a");
+        var other = AgentTestData.Item(3, "c") with { SortOrder = 1 };
+        var added = AgentTestData.Item(2, "b") with { SortOrder = 1 };
+        var source = new AgentSnapshot(before, area == "add" ? [kept] : [kept, other], [new(1, "lunch", [1, 3], Guid.NewGuid(), before)]);
+        var fresh = new AgentCandidateGrant(1, "lunch", [2], Guid.NewGuid(), after);
+        AgentChange[] changes = area == "add" ? [new("add", null, added)] : [new("remove", "c", null), new("add", null, added)];
+        var draft = new AgentSnapshot(after, [kept, added], [.. source.Grants, fresh], Changes: changes, Scope: new(1, "lunch"), RetainedItems: [kept]);
+
+        // STEP-02: Assert the kept dish is asked to be refreshed only when the meal also lost a dish.
+        var result = await fixture.Validator.ValidateAsync(draft, source, false, false, default, [fresh]);
+        result.Validation.Errors.Any(error => error.StartsWith("Món 1 cần nguồn ứng viên mới", StringComparison.Ordinal)).Should().Be(refreshed, string.Join(" / ", result.Validation.Errors));
+    }
 }
