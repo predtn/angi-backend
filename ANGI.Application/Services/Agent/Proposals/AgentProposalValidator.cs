@@ -118,6 +118,19 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
         return errors;
     }
 
+    /// <summary>
+    /// True when the item's meal only gained dishes in this draft: nothing in it was replaced, moved or removed.
+    /// The meal request then names the added dish ('thêm món bún chả vào bữa trưa'), not the kept one, so it gives no reason to swap the kept dish.
+    /// </summary>
+    private static bool OnlyGained(AgentSnapshot snapshot, IReadOnlyDictionary<string, AgentItem> original, AgentItem item)
+    {
+        bool Here(AgentItem? other) => other is not null && other.DayNumber == item.DayNumber && other.MealSlot == item.MealSlot;
+        var changes = snapshot.Changes ?? [];
+        return changes.Any(change => change.Type == "add" && Here(change.Item)) &&
+            !changes.Any(change => change.Type != "add" && (Here(change.Item) ||
+                change.TargetItemKey is not null && original.TryGetValue(change.TargetItemKey, out var target) && Here(target)));
+    }
+
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
@@ -148,7 +161,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             var unchanged = kept?.DishId == item.DishId || retained is not null;
             var refreshed = !confirm && kept?.DishId == item.DishId && source is not null &&
                 (snapshot.RetainedItems is not null && !snapshot.RetainedItems.Any(old => old.ItemKey == item.ItemKey && old.DishId == item.DishId) ||
-                    AgentScopedPlanning.RequiresRefresh(source.State, state, item) ||
+                    AgentScopedPlanning.RequiresRefresh(source.State, OnlyGained(snapshot, original, item) ? state with { MealRequests = source.State.MealRequests } : state, item) ||
                     (kept.DayNumber != item.DayNumber || kept.MealSlot != item.MealSlot) &&
                     AgentScopedPlanning.Fingerprint(source.State, kept.DayNumber, kept.MealSlot) != AgentScopedPlanning.Fingerprint(state, item.DayNumber, item.MealSlot));
             if (!unchanged || refreshed) changed.Add(item.ItemKey);
