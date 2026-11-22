@@ -464,6 +464,27 @@ public sealed class AgentProposalBuilderTests
     }
 
     /// <summary>A plan of three dishes a day, named in order.</summary>
+    // TEST-22: An added dish sent with no key gets a free key, one placed on a used position gets the next one; a proper key and position are kept.
+    /// <summary>"Thêm một bữa ăn vặt" failed with "Có món thiếu itemKey" twice and the user got a 503 (tripfix-1).</summary>
+    [Theory]
+    [InlineData("", 0, "1-lunch-add1", 1)]
+    [InlineData("new", 5, "new", 5)]
+    public void Build_PatchAdd_GivesTheNewDishAFreeKeyAndPosition(string sentKey, short sentOrder, string key, short order)
+    {
+        // STEP-01: Prepare a source lunch with one dish and a patch that adds dish 2 to the same lunch.
+        var source = AgentTestData.Snapshot(AgentTestData.Item());
+        var context = AgentTestData.Context(source); context.ProposalVersion = 1;
+        var added = AgentTestData.Item(2, sentKey) with { SortOrder = sentOrder };
+
+        // STEP-02: Build the draft.
+        var result = new AgentProposalBuilder().Build(context, new AgentOutput { Action = "patch_proposal", Reply = "Added",
+            BaseProposalVersion = 1, Scope = new(1, "lunch"), Changes = [new("add", null, added)] });
+
+        // STEP-03: Assert the kept dish is unchanged and the added one has the expected key and position.
+        result.Items.Single(x => x.DishId == 1).Should().Be(source.Items[0]);
+        result.Items.Single(x => x.DishId == 2).Should().Match<AgentItem>(x => x.ItemKey == key && x.SortOrder == order);
+    }
+
     private static AgentSnapshot Long(int days)
     {
         var state = AgentTestData.State() with { NumDays = (short)days, MealSlots = ["breakfast", "lunch", "dinner"] };
