@@ -48,23 +48,6 @@ public sealed class AgentItineraryPolicyTests
         applied.Should().Match<AgentState>(x => x.OriginMode == "pinned" && x.OriginLabel == "Cầu Giấy" && x.OriginLatitude == 21.03m && x.RadiusKm == 3m && x.Province == "Hà Nội" && x.NamedAreaLabel == "Cầu Giấy");
     }
 
-    // TEST-04: The note states each day, a wide search, days left to the whole province and places not found; with no province it does not name one.
-    /// <summary>Ensures the user sees how the message was read before dishes are chosen, including what could not be honoured.</summary>
-    [Fact]
-    public void Note_StatesEachDayAndWhatCouldNotBeFound()
-    {
-        // STEP-01: Create state as AgentState and get note from AgentPlaceResolver.Note.
-        var state = new AgentState { Province = "Hà Nội", NumDays = 4, DayAreas = [Area(1, "Hoàn Kiếm"), Area(3, "Hòa Lạc") with { RadiusKm = 30m }] };
-
-        var note = AgentPlaceResolver.Note(state, new("Hà Nội", state.DayAreas!, null, [], ["Đảo Xa"], 3));
-
-        // STEP-02: Assert note contains the expected text, AgentPlaceResolver.Note() is the expected text and AgentPlaceResolver.Note() is null.
-        note.Should().Contain("ngày 1 quanh Hoàn Kiếm").And.Contain("ngày 3 quanh Hòa Lạc (quanh đó còn ít quán").And.Contain("30 km")
-            .And.Contain("“Đảo Xa”").And.Contain("toàn Hà Nội").And.Contain("Những ngày còn lại trong 4 ngày");
-        AgentPlaceResolver.Note(new AgentState(), new(null, [], null, [], ["Đảo Xa"], 0)).Should().Be("Mình chưa tìm được quán quanh “Đảo Xa”.");
-        AgentPlaceResolver.Note(new AgentState(), new(null, [], null, [], [], 0)).Should().BeNull();
-    }
-
     // TEST-05: A known place is recognized without case or accents, from a day or the trip origin; other names are not.
     /// <summary>Ensures the catalog search guard only stops names the itinerary already holds.</summary>
     [Theory]

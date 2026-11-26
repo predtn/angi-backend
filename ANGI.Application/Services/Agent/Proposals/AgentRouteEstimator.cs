@@ -18,7 +18,8 @@ public sealed class AgentRouteEstimator(IRouteService routes)
             x.Latitude < -90 || x.Latitude > 90 || x.Longitude < -180 || x.Longitude > 180))
             throw new ConflictException("PROPOSAL_NOT_COMMITTABLE", "Tuyến thiếu tọa độ hợp lệ hoặc vượt giới hạn điểm.");
         // STEP-02: Prepare origin and skipped from NearbyArea.DistanceKm.
-        RouteCoordinate? origin = state.OriginLatitude is { } lat && state.OriginLongitude is { } lng
+        // A zone of several places has no single start: its first place is only where its circles are listed from.
+        RouteCoordinate? origin = state.OriginLatitude is { } lat && state.OriginLongitude is { } lng && !AgentScopedPlanning.HasZoneOrigin(state)
             ? new(lat, lng) : null;
         var skipped = origin is not null && items.Length > 0 && NearbyArea.DistanceKm(origin.Latitude, origin.Longitude,
             items[0].Latitude!.Value, items[0].Longitude!.Value) > 30;

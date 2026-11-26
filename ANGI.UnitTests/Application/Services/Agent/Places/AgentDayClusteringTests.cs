@@ -134,7 +134,8 @@ public sealed class AgentDayClusteringTests
         ordered.Select(option => option.DishId).Should().Equal(2, 3, 1);
     }
 
-    // TEST-06: A family name fits its members with or without accents; a different dish or a too-short word does not.
+    // TEST-06: A family name fits its members with or without accents; a different dish does not. A short word fits as a whole word with its accents ("gà" is every
+    // chicken dish, conversation 15), never without them ("ca" would be in "cà phê") or inside another word.
     /// <summary>"cà ri" stands for every curry dish in the catalog.</summary>
     [Theory]
     [InlineData("cà ri", "Cơm Cà Ri Nhật Gà Chiên", true)]
@@ -142,6 +143,10 @@ public sealed class AgentDayClusteringTests
     [InlineData("Cà Ri Chay Khoai Môn", "Cà Ri Chay Khoai Môn", true)]
     [InlineData("phở bò", "Phở Gà Bờ Hồ", false)]
     [InlineData("cá", "Cà Ri Xanh Gà", false)]
+    [InlineData("gà", "Lẩu gà lá é", true)]
+    [InlineData("bò", "Phở Bò Tái", true)]
+    [InlineData("ga", "Lẩu gà lá é", false)]
+    [InlineData("gà", "Gạo lứt", false)]
     public void FitsName_MatchesFamilyMembers(string requested, string dish, bool fits) =>
         AgentScopedPlanning.FitsName(requested, dish).Should().Be(fits);
 }

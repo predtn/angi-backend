@@ -35,12 +35,12 @@ public static class AgentDishSuggestionPolicy
         Func<Dish, double>? distanceKm = null)
     {
         string AddressNote(Dish dish) => Address(dish, area, distanceKm) is { } address ? $" Địa chỉ: {address}." : "";
-        // STEP-01: Return NothingFound early when dishes.Count is 0.
+        // STEP-01: Return NothingFound early when dishes.Count is 0. This fixed text is only the fallback when the model's own reply cannot be used; what the
+        // search found or could not locate reaches the model as facts in the tool result, and the model words it.
         if (dishes.Count == 0) return NothingFound;
-        // STEP-02: Prepare near, start and next.
+        // STEP-02: Prepare near, start and next. A place that was not located searches nothing, so no dish ever comes with areaNotFound.
         var near = area is not null ? $" quanh {AgentReplyBuilder.Safe(area)}" : aroundPin ? " quanh điểm bạn đã chấm trên bản đồ" : "";
-        var unknown = areaNotFound is null ? "" : $"Mình chưa định vị được “{AgentReplyBuilder.Safe(areaNotFound)}” nên chưa lọc theo khu đó. ";
-        var start = unknown + (personalized ? "Theo khẩu vị của bạn, mình gợi ý" : "Mình gợi ý");
+        var start = personalized ? "Theo khẩu vị của bạn, mình gợi ý" : "Mình gợi ý";
         var next = hasPlan ? "Muốn cho vào lịch thì nhắn mình ngày và bữa nhé." : "Muốn món khác cứ nhắn mình nhé.";
         // STEP-03: When dishes.Count is 1, return the sentence with its address and meals.
         if (dishes.Count == 1)
@@ -73,8 +73,7 @@ public static class AgentDishSuggestionPolicy
         if (withDishes.Length == 0) return first;
         var personalized = withDishes.All(meal => meal.Found.Personalized);
         var near = first.Area is not null ? $" quanh {AgentReplyBuilder.Safe(first.Area)}" : first.AroundPin ? " quanh điểm bạn đã chấm trên bản đồ" : "";
-        var unknown = first.AreaNotFound is null ? "" : $"Mình chưa định vị được “{AgentReplyBuilder.Safe(first.AreaNotFound)}” nên chưa lọc theo khu đó. ";
-        var start = unknown + (personalized ? "Theo khẩu vị của bạn, mình gợi ý" : "Mình gợi ý") + $" các món cho một ngày{near} nhé:";
+        var start = (personalized ? "Theo khẩu vị của bạn, mình gợi ý" : "Mình gợi ý") + $" các món cho một ngày{near} nhé:";
         var groups = meals.Select(meal =>
         {
             var label = AgentReplyBuilder.Meal(meal.Meal);
@@ -100,7 +99,7 @@ public static class AgentDishSuggestionPolicy
     }
 
     /// <summary>Điền các ô của model bằng dữ kiện món; ô trỏ tới món không có thì để nguyên.</summary>
-    public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(WithAddresses(Template(reply), suggestion), slot =>
+    public static string FillSlots(string? reply, AgentDishSuggestion suggestion) => Slot.Replace(WithAddresses(AsList(Template(reply), suggestion), suggestion), slot =>
     {
         var index = int.Parse(slot.Groups["dish"].Value) - 1;
         if (index < 0 || index >= suggestion.Dishes.Length) return slot.Value;
@@ -111,6 +110,32 @@ public static class AgentDishSuggestionPolicy
             "meals" => dish.Meals ?? slot.Value, _ => dish.Address ?? slot.Value
         };
     });
+
+    /// <summary>
+    /// Several dishes are always one line each, starting with "- ", so the chat shows them as a list: the model was asked to write them that way and still
+    /// joined them with ";" on one line (conversations 11 and 12). The model writes {dishes} where the list goes; when it wrote the dishes' own slots instead,
+    /// the stretch from the first slot to the last becomes the list. Only the dish facts are laid out here: the model's opening and closing words stay as written.
+    /// </summary>
+    private static string AsList(string template, AgentDishSuggestion suggestion)
+    {
+        const string ListSlot = "{dishes}";
+        // STEP-01: One dish stays in the sentence; {dishes} for it is its own slots.
+        if (suggestion.Dishes.Length < 2) return template.Replace(ListSlot, "{name1} ở {restaurant1}, khoảng {price1}", StringComparison.Ordinal);
+        // STEP-02: Prepare the list, one line per dish; WithAddresses adds each address after its restaurant.
+        var lines = string.Join('\n', suggestion.Dishes.Select((dish, index) =>
+            $"- {{name{index + 1}}}{(dish.Meals is not null ? $" (hợp {{meals{index + 1}}})" : "")} ở {{restaurant{index + 1}}}, khoảng {{price{index + 1}}}"));
+        // STEP-03: Find where the list goes: the {dishes} slot, else the stretch of the dishes' slots, else after the words.
+        int start, end;
+        if (template.IndexOf(ListSlot, StringComparison.Ordinal) is var at and >= 0) (start, end) = (at, at + ListSlot.Length);
+        else if (Slot.Matches(template).Where(slot => int.Parse(slot.Groups["dish"].Value) is var number && number >= 1 && number <= suggestion.Dishes.Length).ToArray() is { Length: > 0 } slots)
+            (start, end) = (slots[0].Index, slots[^1].Index + slots[^1].Length);
+        else (start, end) = (template.Length, template.Length);
+        // STEP-04: Return the opening words, the list and the closing words, each on its own line.
+        var opening = template[..start].TrimEnd();
+        if (opening.Length > 0 && !".:!?…".Contains(opening[^1])) opening += ":";
+        var closing = template[end..].TrimStart(' ', ';', ',', '.', ')').Trim();
+        return (opening.Length > 0 ? opening + "\n" : "") + lines + (closing.Length > 0 ? "\n" + closing : "");
+    }
 
     /// <summary>
     /// The prompt promises that a dish's address is added when the model leaves out {addressN}, because the user must know where to go
@@ -130,7 +155,9 @@ public static class AgentDishSuggestionPolicy
     }
 
     // Backend điền giá kèm đơn vị, nên bỏ đơn vị model viết thêm để không thành "45.000 đồng đồng".
-    private static string Template(string? reply) => PriceUnit.Replace((reply ?? "").Trim(), "$1");
+    // Ô model viết có dấu cách ("{ name1 }", đo trên model thật 2026-11-26) được đưa về dạng chuẩn trước, để không lộ ô trống cho người dùng.
+    private static string Template(string? reply) => PriceUnit.Replace(LooseSlot.Replace((reply ?? "").Trim(), "{${field}${dish}}"), "$1");
+    private static readonly Regex LooseSlot = new(@"\{\s*(?<field>name|restaurant|price|address|meals)\s*(?<dish>\d{1,2})\s*\}", RegexOptions.CultureInvariant);
 
     private static string Named(Dish dish, bool mealAsked) =>
         AgentReplyBuilder.Safe(dish.Name) + (!mealAsked && Meals(dish) is { } meals ? $" (hợp {meals})" : "");

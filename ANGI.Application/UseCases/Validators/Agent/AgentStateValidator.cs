@@ -34,12 +34,18 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
             .WithMessage("Khẩu vị theo ngày/bữa không hợp lệ hoặc trùng phạm vi.");
         RuleFor(x => x.MealRequests).NotNull().Must((state, values) => values is null || values.Length <= maxDays * 6 + 1 &&
             values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) && ValidName(x.DishName) && ValidName(x.RestaurantName) &&
-                (!x.RestaurantId.HasValue || x.RestaurantId > 0 && x.RestaurantName is not null) &&
+                // A picked dish already names its restaurant, so its restaurantId needs no restaurantName (replay of conversation 13: the add was refused and became a replace).
+                (!x.RestaurantId.HasValue || x.RestaurantId > 0 && (x.RestaurantName is not null || x.DishId.HasValue)) && (!x.DishId.HasValue || x.DishId > 0) &&
                 x.TagIds is not null && x.TagIds.Length <= 100 && x.TagIds.All(id => id > 0) && x.TagIds.Distinct().Count() == x.TagIds.Length))
             .WithMessage("Yêu cầu món/quán theo phạm vi không hợp lệ.");
         // Lỗi riêng cho trùng phạm vi: model đọc câu này để sửa state. Câu chung ở trên khiến nó đoán sai nguyên nhân (hội thoại 560).
-        RuleFor(x => x.MealRequests).Must(values => values is null || values.Any(x => x is null) || values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
-            .WithMessage("Mỗi phạm vi (cả chuyến, một ngày hoặc một bữa) chỉ có một yêu cầu món/quán. Muốn lập lịch từ các món vừa gợi ý thì gọi get_recommendation với fromOffered=true, không ghi các món đó vào mealRequests.");
+        // Several dishes or restaurants the user named with no day or meal ("lập lịch có 2 món trên", "trong lịch có cơm rang thập cẩm với cơm bò bát đá",
+        // conversations 11 and 12) are one entry each: the backend places each on a meal of its own, so they do not compete for one scope. The model asked
+        // "món nào vào bữa nào?" again and again while two such entries were refused.
+        RuleFor(x => x.MealRequests).Must(values => values is null || values.Any(x => x is null) || values.GroupBy(x => (x.DayNumber, x.MealSlot)).All(group => group.Count() == 1 ||
+                group.Key == (null, null) && group.All(x => x.DishId.HasValue || (x.DishName ?? x.RestaurantName) is not null) &&
+                group.Select(x => x.DishId?.ToString() ?? AgentScopedPlanning.Normalize(x.DishName ?? x.RestaurantName)).Distinct().Count() == group.Count()))
+            .WithMessage("Mỗi phạm vi (một ngày hoặc một bữa) chỉ có một yêu cầu món/quán. Các món hoặc quán người dùng nêu mà chưa nói ngày, bữa thì ghi mỗi món một mục (dayNumber và mealSlot đều null), backend đặt mỗi món vào một bữa riêng. Muốn lập lịch chọn trong các món vừa gợi ý thì dùng fromOffered.");
         RuleFor(x => x.TasteTargets).NotNull().Must(x => x is null || x.Length <= 12 &&
             x.All(t => t is not null && AgentTasteOntology.Dimensions.Contains(t.Dimension) && AgentTasteOntology.Scale.Contains(t.Target)) &&
             x.Select(t => t.Dimension).Distinct().Count() == x.Length).WithMessage("Mức khẩu vị phải thuộc ontology và không trùng chiều.");
@@ -75,9 +81,11 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
         RuleFor(x => x).Must(x => !x.RadiusKm.HasValue || x.OriginLatitude.HasValue)
             .WithMessage("Bán kính cần một điểm xuất phát.");
         RuleFor(x => x.DayAreas).Must((state, values) => values is null || values.Length <= maxDays && values.All(x => x is not null && ValidScope(state, x.DayNumber, null) &&
-                !string.IsNullOrWhiteSpace(x.Label) && x.Label.Length <= 200 && x.Latitude is >= -90m and <= 90m && x.Longitude is >= -180m and <= 180m && x.RadiusKm is >= 1m and <= 50m) &&
+                !string.IsNullOrWhiteSpace(x.Label) && x.Label.Length <= 200 && x.Latitude is >= -90m and <= 90m && x.Longitude is >= -180m and <= 180m && x.RadiusKm is >= 1m and <= 50m &&
+                ValidZone(x.Zone)) &&
             values.Select(x => x.DayNumber).Distinct().Count() == values.Length)
             .WithMessage("Nơi đến theo ngày không hợp lệ.");
+        RuleFor(x => x.OriginZone).Must(ValidZone).WithMessage("Khu vực gồm nhiều nơi không hợp lệ.");
         RuleFor(x => x.WidenedMeals).Must((state, values) => values is null || values.Length <= maxDays * 5 && values.All(x => x is not null && ValidScope(state, x.DayNumber, x.MealSlot) &&
                 x.RadiusKm is >= 1m and <= 50m) && values.Select(x => (x.DayNumber, x.MealSlot)).Distinct().Count() == values.Length)
             .WithMessage("Bữa được nới phạm vi tìm quán không hợp lệ.");
@@ -93,6 +101,11 @@ public sealed class AgentStateValidator : AbstractValidator<AgentState>
 
     /// <summary>Accepts only database-representable nonnegative integer VND amounts.</summary>
     private static bool ValidMoney(decimal? value) => !value.HasValue || value >= 0 && value <= MaxMoney && decimal.Truncate(value.Value) == value;
+
+    /// <summary>A zone holds at most a few located circles, each a real point with a radius the searches allow.</summary>
+    private static bool ValidZone(AgentZoneCircle[]? zone) => zone is null || zone.Length is > 0 and <= 12 && zone.All(circle => circle is not null &&
+        !string.IsNullOrWhiteSpace(circle.Label) && circle.Label.Length <= 200 && circle.Latitude is >= -90m and <= 90m && circle.Longitude is >= -180m and <= 180m &&
+        circle.RadiusKm is >= 1m and <= 50m);
 
     private static bool ValidScope(AgentState state, short? day, string? meal) =>
         (!day.HasValue || day >= 1 && day <= state.NumDays) && (meal is null || day.HasValue && Meals.Contains(meal));

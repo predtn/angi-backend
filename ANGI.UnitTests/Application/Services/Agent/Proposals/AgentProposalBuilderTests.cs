@@ -40,6 +40,43 @@ public sealed class AgentProposalBuilderTests
         result.Items.Select(item => item.ItemKey).Should().OnlyHaveUniqueItems().And.OnlyContain(key => !string.IsNullOrWhiteSpace(key) && key.Length <= 100);
     }
 
+    // TEST-00c: With no plan yet, a first draft of one meal of a longer trip is sent back for the whole trip; a whole-trip first draft builds.
+    /// <summary>Conversation 12 showed a three-day trip as a plan of one lunch.</summary>
+    [Fact]
+    public void Build_FirstDraftOfOneMeal_IsSentBackForTheWholeTrip()
+    {
+        // STEP-01: A two-day trip with no plan.
+        var context = AgentTestData.Context();
+
+        // STEP-02: Assert a one-meal first draft is refused and a whole-trip one builds.
+        FluentActions.Invoking(() => new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
+                Scope = new(1, "lunch"), Items = [AgentTestData.Item(1, "a", 1, "lunch")] }))
+            .Should().Throw<ConflictException>().WithMessage("*cả chuyến*");
+        new AgentProposalBuilder().Build(context, new AgentOutput { Action = "create_proposal", Reply = "Selection",
+            Items = [AgentTestData.Item(1, "a", 1, "lunch"), AgentTestData.Item(2, "b", 2, "lunch")] }).Items.Should().HaveCount(2);
+    }
+
+    // TEST-00d: The draft add_dishes prepares (one "add" change per placed dish, with a blank key) keeps every dish of the plan: the new dish joins the meal.
+    /// <summary>"Thêm cơm thố vào ngày 3" replaced the lunch in the replays of conversations 13–15; an add change never takes a kept dish's place.</summary>
+    [Fact]
+    public void Build_PreparedAddition_KeepsEveryDishAndAddsTheNewOne()
+    {
+        // STEP-01: A plan with lunch dish 1 and dinner dish 2 on day 1, and the patch the orchestrator makes from add_dishes: dish 5 at lunch.
+        var lunch = AgentTestData.Item(1, "l1", 1, "lunch") with { SourceItemId = 10 };
+        var dinner = AgentTestData.Item(2, "d1", 1, "dinner") with { SourceItemId = 11 };
+        var context = AgentTestData.Context(AgentTestData.Snapshot(lunch, dinner));
+        context.ProposalVersion = 1;
+        var patch = new AgentOutput { Action = "patch_proposal", Reply = "Selection", BaseProposalVersion = 1, Scope = new(),
+            Changes = [new("add", null, new AgentItem("", null, 1, "lunch", 1, 5))] };
+
+        // STEP-02: Build it.
+        var result = new AgentProposalBuilder().Build(context, patch);
+
+        // STEP-03: Assert both kept dishes stay and dish 5 is added at lunch.
+        result.Items.Select(item => item.DishId).Should().BeEquivalentTo(new[] { 1, 2, 5 });
+        result.Items.Where(item => item.MealSlot == "lunch").Select(item => item.DishId).Should().BeEquivalentTo(new[] { 1, 5 });
+    }
+
     // TEST-01: A complete selection over a source roadmap merges into its scope, keeps items outside the scope and retains stable item keys.
     /// <summary>Ensures a scoped rebuild changes only its scope and keeps item identities stable for later edits.</summary>
     [Fact]

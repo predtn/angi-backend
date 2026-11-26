@@ -5,6 +5,9 @@ namespace ANGI.Application.Common.Models.Agent;
 /// <summary>Defines the strict provider-independent output and tool allowlist contracts.</summary>
 public static class AgentLlmSchema
 {
+    /// <summary>How the model read a place: a street, a ward or district, a landmark, a whole province or city, or a zone it lists as several places. Declared first: static fields start in order.</summary>
+    private static readonly string[] PlaceKinds = ["street", "ward", "landmark", "province", "zone"];
+
     private static readonly object TasteTarget = Obj(new()
     {
         ["dimension"] = Choice(AgentTasteOntology.Dimensions), ["target"] = Scalar("number"), ["levelQuote"] = Nullable(Scalar("string"))
@@ -30,7 +33,7 @@ public static class AgentLlmSchema
         {
             ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
             ["dishName"] = Nullable(Scalar("string")), ["restaurantName"] = Nullable(Scalar("string")),
-            ["restaurantId"] = Nullable(Scalar("integer")),
+            ["restaurantId"] = Nullable(Scalar("integer")), ["dishId"] = Nullable(Scalar("integer")),
             ["tagIds"] = ArrayOf(Scalar("integer")), ["differentFromPlan"] = Scalar("boolean")
         })),
         ["preferenceApplication"] = Choice("replan", "future"),
@@ -53,7 +56,7 @@ public static class AgentLlmSchema
     public static readonly object Output = Obj(new()
     {
         ["action"] = Choice("clarify", "answer", "create_proposal", "patch_proposal", "discard_proposal", "reset_conversation", "request_save", "use_tool", "chat", "food_info", "out_of_scope"), ["reply"] = Scalar("string"),
-        ["tool"] = Nullable(Choice("search_catalog", "get_recommendation", "estimate_day_route", "suggest_dish", "locate_places")),
+        ["tool"] = Nullable(Choice("search_catalog", "get_recommendation", "estimate_day_route", "suggest_dish", "locate_places", "edit_plan")),
         ["pendingAnswer"] = Nullable(Choice("accept", "decline", "defer", "unclear")),
         ["answerStartDate"] = Nullable(Scalar("string")), ["answerEndDate"] = Nullable(Scalar("string")),
         ["suggestedDish"] = Nullable(Scalar("string")),
@@ -81,7 +84,7 @@ public static class AgentLlmSchema
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
             ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
             ["alternative"] = Scalar("boolean"), ["maxLegKm"] = Nullable(Scalar("number")), ["fromOffered"] = Scalar("boolean"),
-            ["priceTier"] = Nullable(Choice("high", "low")), ["offeredListIds"] = Nullable(ArrayOf(Scalar("integer")))
+            ["priceTier"] = Nullable(Choice("high", "low")), ["offeredListIds"] = Nullable(ArrayOf(Scalar("integer"))), ["offeredMeals"] = Nullable(ArrayOf(Scope))
         }),
         ["estimate_day_route"] = Obj(new()
         {
@@ -97,12 +100,28 @@ public static class AgentLlmSchema
             ["minPrice"] = Nullable(Scalar("number")), ["nameQuery"] = Nullable(Scalar("string")), ["dishForm"] = Nullable(Choice("dry", "soup")),
             ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating")), ["now"] = Scalar("boolean"),
             ["dishNames"] = Nullable(ArrayOf(Scalar("string"))),
-            ["mealSlots"] = Nullable(ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night")))
+            ["mealSlots"] = Nullable(ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night"))),
+            ["areaKind"] = Nullable(Choice(PlaceKinds)), ["areaParts"] = Nullable(ArrayOf(Scalar("string")))
+        }),
+        // Adds, replaces or removes dishes of the plan. Each op targets a dish by itemKey or by day and meal, and names the new dish (add: exactly one,
+        // replace: at most one) by id from a list the chat showed, by name, or as a kind by catalog tags. The backend finds and checks every dish.
+        ["edit_plan"] = Obj(new()
+        {
+            ["ops"] = ArrayOf(Obj(new()
+            {
+                ["op"] = Choice("add", "replace", "remove"), ["targetItemKey"] = Nullable(Scalar("string")),
+                ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
+                ["dishId"] = Nullable(Scalar("integer")), ["dishName"] = Nullable(Scalar("string")), ["kindTagIds"] = ArrayOf(Scalar("integer"))
+            }))
         }),
         ["locate_places"] = Obj(new()
         {
-            ["tripArea"] = Nullable(Scalar("string")),
-            ["stops"] = ArrayOf(Obj(new() { ["days"] = ArrayOf(Scalar("integer")), ["place"] = Nullable(Scalar("string")) }))
+            ["tripArea"] = Nullable(Scalar("string")), ["tripAreaKind"] = Nullable(Choice(PlaceKinds)), ["tripAreaParts"] = Nullable(ArrayOf(Scalar("string"))),
+            ["stops"] = ArrayOf(Obj(new()
+            {
+                ["days"] = ArrayOf(Scalar("integer")), ["place"] = Nullable(Scalar("string")),
+                ["kind"] = Nullable(Choice(PlaceKinds)), ["parts"] = Nullable(ArrayOf(Scalar("string")))
+            }))
         })
     };
 

@@ -7,6 +7,26 @@ namespace ANGI.UnitTests.Application.UseCases.Validators.Agent;
 /// <summary>Exercises every structured trip boundary before it can reach tools or the database.</summary>
 public sealed class AgentStateValidatorTests
 {
+    // TEST-00: Several dishes named with no day or meal are one entry each, with or without a picked dishId, which the backend places on meals of their own;
+    // the same dish twice still competes for one scope (conversations 11 and 12: "lập lịch có 2 món trên", "có cơm rang thập cẩm với cơm bò bát đá").
+    /// <summary>Two picked dishes were refused as two requests for one scope, and the plan then left both out.</summary>
+    [Theory]
+    [InlineData(126, 127, true)]
+    [InlineData(126, 126, false)]
+    [InlineData(null, null, true)]
+    public void Validate_PickedDishesWithoutMeal_AreOneEntryEach(int? first, int? second, bool valid)
+    {
+        var state = new AgentState { NumDays = 3, MealRequests = [new(null, null, "Cơm Rang Thập Cẩm", "Phở Thúy", [], false, 66, first),
+            new(null, null, "Cơm Rang Dưa Bò", "Phở Thúy", [], false, 66, second)] };
+
+        new AgentStateValidator().Validate(state).IsValid.Should().Be(valid);
+        // A picked dish with its restaurant id but no restaurant name is valid: the dish names its restaurant.
+        new AgentStateValidator().Validate(state with { MealRequests = [new(3, "dinner", "Cơm thố sườn nướng", null, [], false, 149, 990)] }).IsValid.Should().BeTrue();
+        // The same name twice, or a request without any name beside a named one, is still one scope asked twice.
+        new AgentStateValidator().Validate(state with { MealRequests = [new(null, null, "Phở", null, []), new(null, null, "phở", null, [])] }).IsValid.Should().BeFalse();
+        new AgentStateValidator().Validate(state with { MealRequests = [new(null, null, "Phở", null, []), new(null, null, null, null, [1])] }).IsValid.Should().BeFalse();
+    }
+
     // TEST-01: Reject invalid trip fields, monetary precision, lists, focus and coordinate combinations.
     /// <summary>Verifies all invalid structured-state equivalence classes.</summary>
     [Theory]
@@ -107,17 +127,19 @@ public sealed class AgentStateValidatorTests
         new AgentStateValidator().Validate(new AgentState { NumDays = 2, DayAreas = [area with { Label = new('x', 200) }] }).IsValid.Should().BeTrue();
     }
 
-    // TEST-05: Two dish requests on one scope are refused with a message that names the cause and points to fromOffered; the same dishes on their own meals pass.
+    // TEST-05: Two dish requests on one meal are refused with a message that names the cause and points to fromOffered; different dishes with no day or meal are one entry each (the backend places each on its own meal); the same dishes on their own meals pass.
     /// <summary>Conversations 558 and 560: ten trip-wide dishes got the general message, and the model guessed the wrong fix three times.</summary>
     [Fact]
     public void Validate_MealRequests_OneEntryPerScope()
     {
-        // STEP-01: Create a state with two trip-wide dishes and one with the same dishes on their own meals.
-        var shared = new AgentState { NumDays = 2, MealRequests = [new(null, null, "Món A", null, []), new(null, null, "Món B", null, [])] };
+        // STEP-01: Create a state with two dishes on one meal, the same dishes for the whole trip, and the same dishes on their own meals.
+        var shared = new AgentState { NumDays = 2, MealRequests = [new(1, "lunch", "Món A", null, []), new(1, "lunch", "Món B", null, [])] };
+        var wide = shared with { MealRequests = [new(null, null, "Món A", null, []), new(null, null, "Món B", null, [])] };
         var placed = shared with { MealRequests = [new(1, "breakfast", "Món A", null, []), new(1, "lunch", "Món B", null, [])] };
 
-        // STEP-02: Assert the shared scope fails with the scope message only, and the placed one passes.
-        new AgentStateValidator().Validate(shared).Errors.Should().ContainSingle().Which.ErrorMessage.Should().Contain("fromOffered=true");
+        // STEP-02: Assert the shared meal fails with the scope message only, and the whole-trip and placed ones pass.
+        new AgentStateValidator().Validate(shared).Errors.Should().ContainSingle().Which.ErrorMessage.Should().Contain("fromOffered");
+        new AgentStateValidator().Validate(wide).IsValid.Should().BeTrue("different dishes with no day or meal are one entry each, placed on meals of their own");
         new AgentStateValidator().Validate(placed).IsValid.Should().BeTrue();
     }
 

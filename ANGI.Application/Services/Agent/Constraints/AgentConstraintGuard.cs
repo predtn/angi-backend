@@ -81,8 +81,13 @@ public sealed class AgentConstraintGuard
         // STEP-11: When widened.SequenceEqual(...) does not hold, set proposed.
         if (!widened.SequenceEqual(proposed.WidenedMeals ?? [])) proposed = proposed with { WidenedMeals = widened.Length > 0 ? widened : null };
         // STEP-12: When proposed.PendingDayArea is not current.PendingDayArea or proposed.NamedAreaLabel is not current.NamedAreaLabel, set proposed.
-        if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel)
-            proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel };
+        if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel || !ReferenceEquals(proposed.OriginZone, current.OriginZone))
+            proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel, OriginZone = current.OriginZone };
+        // STEP-12b: The point of a zone the backend located is the backend's: a model copying it back rounded (21.0287 → 21.03) would silently drop the
+        // zone to one circle. Its radius stays the model's to narrow, and leaving the pin (none or gps) stays possible.
+        if (AgentScopedPlanning.HasZoneOrigin(current) && proposed.OriginMode == "pinned" &&
+            (proposed.OriginLatitude != current.OriginLatitude || proposed.OriginLongitude != current.OriginLongitude || proposed.OriginLabel != current.OriginLabel))
+            proposed = proposed with { OriginLatitude = current.OriginLatitude, OriginLongitude = current.OriginLongitude, OriginLabel = current.OriginLabel };
         // STEP-13: Validate proposed.
         new AgentStateValidator(roadmapDays).ValidateAndThrow(proposed);
         // STEP-14: When proposed.Preferences.Initialized is true, set proposed.
@@ -245,7 +250,7 @@ public sealed class AgentConstraintGuard
         {
             if (request.DishName is null && request.RestaurantName is null || baseline.MealRequests.Any(previous => SameRequestNames(previous, request)))
             { requests.Add(request); continue; }
-            var unnamed = request with { DishName = null, RestaurantName = null, RestaurantId = null };
+            var unnamed = request with { DishName = null, RestaurantName = null, RestaurantId = null, DishId = null };
             if (unnamed.TagIds.Length > 0 || unnamed.DifferentFromPlan) requests.Add(unnamed);
         }
         // STEP-03: Return a copy of state with updated fields.
@@ -254,7 +259,7 @@ public sealed class AgentConstraintGuard
 
     private static bool SameRequestNames(AgentMealRequest previous, AgentMealRequest current) => previous.DayNumber == current.DayNumber &&
         previous.MealSlot == current.MealSlot && previous.DishName == current.DishName && previous.RestaurantName == current.RestaurantName &&
-        previous.RestaurantId == current.RestaurantId;
+        previous.RestaurantId == current.RestaurantId && previous.DishId == current.DishId;
 
     // Removed meals
 
@@ -312,7 +317,7 @@ public sealed class AgentConstraintGuard
     {
         // STEP-01: Prepare requests through state.MealRequests.Where(filtered).ToList and remainder.
         var requests = state.MealRequests.Where(other => !(other.DayNumber == request.DayNumber && other.MealSlot == request.MealSlot && SameNames(other, request))).ToList();
-        var remainder = request with { DishName = null, RestaurantName = null, RestaurantId = null };
+        var remainder = request with { DishName = null, RestaurantName = null, RestaurantId = null, DishId = null };
         // STEP-02: When remainder.TagIds.Length > 0 or remainder.DifferentFromPlan is true, call requests.Add.
         if (remainder.TagIds.Length > 0 || remainder.DifferentFromPlan) requests.Add(remainder);
         // STEP-03: Add a copy of request to requests.

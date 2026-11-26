@@ -250,6 +250,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 // Chỉ ghi lựa chọn và độ dài, không ghi nội dung: để biết model đã đọc ra gì khi một lượt đi sai.
                 telemetry.Record("model_output", context.ConversationId, context.TurnId, context.AttemptId, new { phase = phase.ToString(), output.Action, output.Clarification, output.Tool, output.PendingAnswer, replyLength = output.Reply.Length });
+                // edit_plan resolved every change of this turn: the draft is exactly those changes, whatever the model returned.
+                // The model only words the reply. Before, the model redrafted the meals itself and the backend guessed from the draft whether it meant to add
+                // or replace, which went wrong one way or another in conversations 13 to 20.
+                if (context.PreparedChanges is { Count: > 0 } prepared && output.Action != "use_tool" && phase != AgentTurnPhase.Read)
+                {
+                    telemetry.Record("prepared_changes", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, changes = prepared.Count });
+                    output = output with { Action = "patch_proposal", Clarification = null, State = null, Items = [], EditMeals = [], Scope = new AgentScope(),
+                        BaseProposalVersion = context.ProposalVersion, Changes = [.. prepared] };
+                }
                 // Place, duration and budget are known and no plan exists, yet the model asks for trip details again, mostly the start date
                 // (AI-D04, AI-D05: about a third of V3.x runs in the 2026-11-19 and 2026-11-22 evaluations stopped at such a question).
                 // The start date is asked when saving, so the question is dropped: after reading, the turn plans; after a tool result, the model is asked once for the plan.
@@ -464,7 +473,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     snapshot = snapshot with { State = snapshot.State with { SkippedMeals = context.State.SkippedMeals } };
                 }
                 // STEP-40: Run validator.ValidateAsync and keep validated.
-                var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
+                var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants, context.PreparedChanges?.Select(change => change.Item).OfType<AgentItem>().ToArray());
                 // STEP-41: Call telemetry.Record.
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 // A broken plan shape (conversation 593: ten meals sent as day 0) is never shown as a draft, because it could not be saved: the model fixes it once
@@ -523,7 +532,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     if (replaced + restored + dropped + refreshed > 0)
                     {
                         snapshot = snapshot with { Items = [.. items] };
-                        validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants);
+                        validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants, context.PreparedChanges?.Select(change => change.Item).OfType<AgentItem>().ToArray());
                     }
                     if (replaced + restored + dropped > 0) telemetry.Record("fabrication_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { replaced, restored, dropped });
                     if (refreshed > 0) telemetry.Record("stale_replaced", context.ConversationId, context.TurnId, context.AttemptId, new { refreshed });
@@ -670,12 +679,11 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         // STEP-03: Stop here when places.AroundPointAsync() is not { } area.
         if (await places.AroundPointAsync(latitude, longitude, ct) is not { } area)
         {
-            context.PlaceNote = "Quanh điểm bạn chấm trên bản đồ chưa có quán nào trên ANGI.";
+            context.PinnedAreaEmpty = true;
             return;
         }
-        // STEP-04: Update context: State and PlaceNote.
+        // STEP-04: Update context: State. The model reads the circle from state.radiusKm and tells the user itself.
         context.State = state with { Province = area.Province, RadiusKm = state.RadiusKm ?? area.RadiusKm };
-        context.PlaceNote = $"Mình sẽ tìm quán trong khoảng {context.State.RadiusKm:0} km quanh điểm bạn đã chấm trên bản đồ.";
         // STEP-05: Call telemetry.Record.
         telemetry.Record("pinned_area", context.ConversationId, context.TurnId, context.AttemptId, new { context.State.RadiusKm });
     }
@@ -761,7 +769,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var lists = turnState.OfferedLists ?? [];
         if (offered.Length > 0)
             lists = [.. lists, new AgentOfferedList(lists.Length == 0 ? 1 : lists.Max(list => list.Id) + 1, context.Suggested, offered)];
-        return new(reply, turnState with { DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes,
+        // A trip with no province yet takes the catalog province the suggestion was located in: the user already said where they are eating.
+        var province = string.IsNullOrWhiteSpace(turnState.Province) && !AgentIntakePolicy.HasPlan(context) ? context.SuggestionProvince ?? turnState.Province : turnState.Province;
+        return new(reply, turnState with { Province = province, DishOffered = true, PendingQuestion = null, OfferedDishes = offered.Length > 0 ? offered : turnState.OfferedDishes,
             LastSuggestion = context.Suggested ?? turnState.LastSuggestion, OfferedLists = lists.Length > 0 ? lists.TakeLast(AgentOfferedList.MaxKept).ToArray() : null }, null, null, "chat");
     }
 
