@@ -133,6 +133,17 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
                 });
     }
 
+    /// <summary>
+    /// The origin a roadmap saves: a pinned point with its coordinates, GPS without them, or none. A zone of several places is no single point: saving
+    /// its first place as the pin would show "Nội Đô Hà Nội" at one ward and start routes there, so the roadmap keeps no origin and the conversation keeps the zone.
+    /// </summary>
+    public static (RoadmapOriginMode Mode, decimal? Latitude, decimal? Longitude, string? Label) RoadmapOrigin(AgentState state)
+    {
+        var pinned = state.OriginMode == "pinned" && !AgentScopedPlanning.HasZoneOrigin(state);
+        var mode = state.OriginMode switch { "pinned" when pinned => RoadmapOriginMode.Pinned, "gps" => RoadmapOriginMode.Gps, _ => RoadmapOriginMode.None };
+        return pinned ? (mode, state.OriginLatitude, state.OriginLongitude, state.OriginLabel) : (mode, null, null, null);
+    }
+
     /// <summary>Retains item identity only for unchanged dishes so replacement never transfers earlier feedback.</summary>
     private Dictionary<string, RoadmapItem> Apply(Domain.Entities.Roadmap roadmap, AgentSnapshot snapshot)
     {
@@ -143,10 +154,7 @@ public sealed class AgentProposalCommitter(IAgentRepository repository, IRoadmap
         roadmap.StartDate = state.StartDate;
         roadmap.NumDays = state.NumDays!.Value;
         roadmap.BudgetAmount = state.BudgetAmount;
-        roadmap.OriginMode = state.OriginMode switch { "pinned" => RoadmapOriginMode.Pinned, "gps" => RoadmapOriginMode.Gps, _ => RoadmapOriginMode.None };
-        roadmap.OriginLatitude = state.OriginMode == "pinned" ? state.OriginLatitude : null;
-        roadmap.OriginLongitude = state.OriginMode == "pinned" ? state.OriginLongitude : null;
-        roadmap.OriginLabel = state.OriginMode == "pinned" ? state.OriginLabel : null;
+        (roadmap.OriginMode, roadmap.OriginLatitude, roadmap.OriginLongitude, roadmap.OriginLabel) = RoadmapOrigin(state);
         // A province settled in the conversation becomes the roadmap's destination; none keeps the saved one.
         if (!string.IsNullOrWhiteSpace(state.Province))
             roadmap.DestinationProvince = state.Province.Trim();

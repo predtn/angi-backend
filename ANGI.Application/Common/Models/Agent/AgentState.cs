@@ -59,6 +59,12 @@ public sealed record AgentState
     /// <summary>Backend-owned label of a whole-trip area the user named; it tells that area apart from an origin picked on the map or by GPS.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? NamedAreaLabel { get; init; }
+    /// <summary>
+    /// Backend-owned circles of a whole-trip zone read as several places ("nội đô"); the first equals the origin and radius. It counts only while it
+    /// still matches the origin, so a point picked on the map or by GPS later replaces it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentZoneCircle[]? OriginZone { get; init; }
     /// <summary>Backend-owned meals with no dish inside their named place, searched further out; only these meals may use the wider radius.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentWidenedMeal[]? WidenedMeals { get; init; }
@@ -111,7 +117,18 @@ public sealed record AgentState
 
 /// <summary>Where the traveler is on one day; that day's dishes are searched within the radius around this point.</summary>
 /// <param name="District">The district around that point, shown to the user so a wrongly located place is noticed before any dish is chosen.</param>
-public sealed record AgentDayArea(short DayNumber, string Label, decimal Latitude, decimal Longitude, decimal RadiusKm, string? District = null);
+/// <param name="Zone">For a zone read as several places: every circle of the day's area, the first one equal to this point and radius; null for one place.</param>
+public sealed record AgentDayArea(short DayNumber, string Label, decimal Latitude, decimal Longitude, decimal RadiusKm, string? District = null, AgentZoneCircle[]? Zone = null)
+{
+    /// <summary>Equal when every field and every zone circle match, so a day read back from storage equals the day it was saved from.</summary>
+    public bool Equals(AgentDayArea? other) => other is not null && DayNumber == other.DayNumber && Label == other.Label && Latitude == other.Latitude &&
+        Longitude == other.Longitude && RadiusKm == other.RadiusKm && District == other.District && (Zone ?? []).SequenceEqual(other.Zone ?? []);
+
+    public override int GetHashCode() => HashCode.Combine(DayNumber, Label, Latitude, Longitude, RadiusKm, District, Zone?.Length ?? 0);
+}
+
+/// <summary>One located place of a zone: a circle the zone's dishes may fall in.</summary>
+public sealed record AgentZoneCircle(string Label, decimal Latitude, decimal Longitude, decimal RadiusKm);
 
 /// <summary>One meal whose search reached this radius around its named place, because nearer restaurants have nothing for it.</summary>
 public sealed record AgentWidenedMeal(short DayNumber, string MealSlot, decimal RadiusKm);
@@ -234,8 +251,29 @@ public sealed class AgentContext
     /// <summary>Days this message moved to another place on an existing plan; they need new dishes.</summary>
     public short[] MovedDays { get; set; } = [];
     public bool ItineraryChanged => MovedDays.Length > 0;
-    /// <summary>How the backend read the place of this turn (a pinned point, shared coordinates, located names); told to the user once, above the next question.</summary>
-    public string? PlaceNote { get; set; }
+    /// <summary>
+    /// True when ANGI has no restaurant around the point the user pinned on the map. A fact for the model to tell; the backend writes no place sentence of its own
+    /// (its old place note was no longer shown since PR #123 while the prompt still told the model not to repeat it).
+    /// </summary>
+    public bool PinnedAreaEmpty { get; set; }
+    /// <summary>The zone a suggestion of this turn was asked around, with what was located; returned to the model to word.</summary>
+    public AgentZoneReport? SuggestionZone { get; set; }
+    /// <summary>How far, in km, a suggestion around a named place searched; null when no place was named.</summary>
+    public decimal? SuggestionSearchedKm { get; set; }
+    /// <summary>Set when nothing fitted within the named place's own radius and the suggestion found dishes further out, at this many km.</summary>
+    public decimal? SuggestionWidenedKm { get; set; }
+    /// <summary>
+    /// The changes edit_plan resolved in this turn (additions next to what meals have, replacements of named dishes, removals). The turn's draft is these
+    /// changes, whatever shape the model's output takes: the model only words the reply.
+    /// </summary>
+    public List<AgentChange>? PreparedChanges { get; set; }
+    /// <summary>True when the suggestion was asked in a province or city the model read as one and ANGI has no restaurant there.</summary>
+    public bool SuggestionNoDataProvince { get; set; }
+    /// <summary>
+    /// The catalog province of the place a suggestion was located around. A trip with no province yet takes it, so "lập lịch 3 ngày" after searching
+    /// "nội thành Hà Nội" is planned in Hà Nội instead of asking the province three times (replay of conversation 10).
+    /// </summary>
+    public string? SuggestionProvince { get; set; }
     /// <summary>What suggest_dish found; the turn ends once the model has worded it, because no plan is involved.</summary>
     public AgentDishSuggestion? DishSuggestion { get; set; }
     /// <summary>A long plan cut to the days this message names, sent to the model instead of Source; null sends Source whole.</summary>
@@ -270,7 +308,7 @@ public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal 
 /// </summary>
 public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
     int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false,
-    string[]? DishNames = null, string[]? MealSlots = null);
+    string[]? DishNames = null, string[]? MealSlots = null, string? AreaKind = null, string[]? AreaParts = null);
 
 /// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
 public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)

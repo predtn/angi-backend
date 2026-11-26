@@ -43,49 +43,91 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         "ben xe", "cong vien", "bao tang", "chua", "den", "nha tho", "khach san", "cong ty", "khu cong nghiep", "khu cong nghe cao", "san van dong",
         "nha van hoa", "thu vien"
     ];
-    // Nơi ngoài dữ liệu ANGI. Bản đồ được hỏi "Đà Nẵng, Hà Nội" sẽ trả một địa điểm ở Hà Nội có tên chứa chữ đó, nên phải chặn trước khi hỏi bản đồ.
-    // Tỉnh đã có quán được nhận ra sớm hơn ở IsProvince, nên khi dữ liệu mở rộng thì danh sách này không cản.
-    private static readonly HashSet<string> Elsewhere = new(StringComparer.Ordinal)
-    {
-        "an giang", "ba ria vung tau", "bac giang", "bac kan", "bac lieu", "bac ninh", "ben tre", "binh dinh", "binh duong", "binh phuoc", "binh thuan", "ca mau", "can tho",
-        "cao bang", "da nang", "dak lak", "dak nong", "dien bien", "dong nai", "dong thap", "gia lai", "ha giang", "ha nam", "ha tinh", "hai duong", "hai phong", "hau giang",
-        "ho chi minh", "sai gon", "tphcm", "hoa binh", "hung yen", "khanh hoa", "kien giang", "kon tum", "lai chau", "lam dong", "lang son", "lao cai", "long an", "nam dinh",
-        "nghe an", "ninh binh", "ninh thuan", "phu tho", "phu yen", "quang binh", "quang nam", "quang ngai", "quang ninh", "quang tri", "soc trang", "son la", "tay ninh",
-        "thai binh", "thai nguyen", "thanh hoa", "thua thien hue", "hue", "tien giang", "tra vinh", "tuyen quang", "vinh long", "vinh phuc", "yen bai",
-        "sa pa", "sapa", "nha trang", "phu quoc", "da lat", "hoi an", "ha long", "vung tau", "mui ne", "phan thiet", "quy nhon", "cat ba", "tam dao", "moc chau", "con dao", "ly son", "buon ma thuot", "pleiku", "vinh"
-    };
     private static readonly string[] StreetWords = ["phố ", "pho ", "đường ", "duong "];
     // Bản đồ trả các loại này cho cả chuỗi vô nghĩa ("asdkjh, Hà Nội" ra "Hà Nội"): chúng không chỉ một nơi cụ thể.
     private static readonly HashSet<string> TooBroad = new(["place", "region", "country", "district"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Locates the places as the model read them from the user's words; what cannot be located is returned as unresolved.</summary>
-    public async Task<AgentTripPlaces> LocateAsync(string? tripArea, AgentLocateStop[] stops, AgentState state, IReadOnlyCollection<string> provinces, CancellationToken ct)
+    /// <param name="trip">The area of the whole trip (no days), with the kind and parts the model read; null when stops are given.</param>
+    public async Task<AgentTripPlaces> LocateAsync(AgentLocateStop? trip, AgentLocateStop[] stops, AgentState state, IReadOnlyCollection<string> provinces, CancellationToken ct)
     {
         // STEP-01: Load restaurants.
         var restaurants = await catalog.GetPublicPlacesAsync(ct);
         // STEP-02: When stops were read, return them located; a stop with no place is a day with no fixed place.
         if (stops.Length > 0)
         {
-            var read = stops.Select(stop => new AgentItineraryStop(stop.Days ?? [], stop.Place?.Trim() ?? "", !string.IsNullOrWhiteSpace(stop.Place))).ToArray();
+            var read = stops.Select(stop => new AgentItineraryStop(stop.Days ?? [], stop.Place?.Trim() ?? "", !string.IsNullOrWhiteSpace(stop.Place), stop.Kind, stop.Parts)).ToArray();
             return await LocateStopsAsync(read, state.Province, provinces, restaurants, ct) ?? new(state.Province, [], null, [], [], 0);
         }
+        var tripArea = trip!.Place!.Trim();
         // STEP-03: Return the province alone when the area named is the province itself.
-        if (IsProvince(tripArea!, provinces)) return new(AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(tripArea!), provinces), [], null, [], [], 0);
-        // STEP-04: Return the located area, or the name as unresolved.
-        var area = await ResolveAsync(tripArea!, state.Province, true, restaurants, ct);
-        return area is null ? new(state.Province, [], null, [], [tripArea!], 0) : new(area.Province, [], area, [], [], 0);
+        if (IsProvince(tripArea, provinces)) return new(AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(tripArea), provinces), [], null, [], [], 0);
+        // STEP-04: Keep the province named with the area, even when the area itself is not found ("nội đô Hà Nội" on the first message).
+        var province = state.Province ?? AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(tripArea), provinces);
+        // STEP-05: A zone the model read as several places is located place by place; when none is found the trip keeps the whole province.
+        if (IsZone(trip.Kind, trip.Parts))
+        {
+            var (zone, report) = await ZoneAsync(tripArea, trip.Parts!, [], province, provinces, restaurants, ct);
+            return zone is null ? new(province, [], null, [], [], 0, [report], TripAreaMissed: true) : new(zone.Province, [], zone, [], [], 0, [report]);
+        }
+        // STEP-06: Return the located area, or the name as unresolved.
+        var area = await ResolveAsync(tripArea, province, true, restaurants, ct, trip.Kind);
+        return area is null ? new(province, [], null, [], [tripArea], 0, TripAreaMissed: true) : new(area.Province, [], area, [], [], 0);
     }
+
+    /// <summary>Locates a zone the model read as several places, for a dish suggestion; the report says what was located.</summary>
+    public async Task<(AgentPlaceMatch? Match, AgentZoneReport Report)> LocateZoneAsync(string label, string[] parts, string? province, IReadOnlyCollection<string> provinces, CancellationToken ct) =>
+        await ZoneAsync(label, parts, [], province ?? AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(label), provinces), provinces, await catalog.GetPublicPlacesAsync(ct), ct);
+
+    /// <summary>True when the model read the place as a zone and listed its places.</summary>
+    public static bool IsZone(string? kind, string[]? parts) => kind == "zone" && parts?.Any(part => !string.IsNullOrWhiteSpace(part)) == true;
+
+    /// <summary>How many places of one zone are located.</summary>
+    public const int MaxZoneParts = 12;
+    /// <summary>The widest circle one place of a zone gets; the zone is the places together, so one thin place does not pull in far restaurants.</summary>
+    public const decimal ZonePartKm = 5m;
+
+    /// <summary>
+    /// Locates each place the model listed for a zone (catalog addresses and wards first, the map for the rest) and joins them into one area of several circles.
+    /// The backend never reads the zone's name: the model said which places it holds.
+    /// </summary>
+    private async Task<(AgentPlaceMatch? Match, AgentZoneReport Report)> ZoneAsync(string label, string[] parts, short[] days, string? province,
+        IReadOnlyCollection<string> provinces, AgentCatalogPlace[] restaurants, CancellationToken ct)
+    {
+        // STEP-01: Keep the distinct named places, leaving out the province itself, which is not a part of a zone inside it.
+        var names = parts.Select(part => part?.Trim() ?? "").Where(part => part.Length > 0 && part.Length <= 100 && !IsProvince(part, provinces))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxZoneParts).ToArray();
+        // STEP-02: Locate them together; the map service caches answers and is safe to call at once.
+        var found = await Task.WhenAll(names.Select(name => ResolveAsync(name, province, true, restaurants, ct)));
+        var located = names.Zip(found, (name, match) => (Name: name, Match: match)).ToArray();
+        var circles = located.Where(x => x.Match is not null)
+            .Select(x => new AgentZoneCircle(x.Match!.Label, x.Match.Latitude, x.Match.Longitude, Math.Min(x.Match.RadiusKm, ZonePartKm)))
+            .DistinctBy(circle => (circle.Latitude, circle.Longitude)).ToArray();
+        var missed = located.Where(x => x.Match is null).Select(x => x.Name).ToArray();
+        // STEP-03: Return the zone with its report, or no zone when none of its places was found.
+        var title = Label(label);
+        var report = new AgentZoneReport(title, days, circles.Select(circle => circle.Label).ToArray(), missed, circles.Length > 0 ? "zone" : "province");
+        if (circles.Length == 0) return (null, report);
+        var first = circles[0];
+        return (new AgentPlaceMatch(located.First(x => x.Match is not null).Match!.Province, title, first.Latitude, first.Longitude, first.RadiusKm, null, circles, missed), report);
+    }
+
+    private static string Label(string place) => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(place.Trim().ToLowerInvariant());
 
     private async Task<AgentTripPlaces?> LocateStopsAsync(AgentItineraryStop[] stops, string? province, IReadOnlyCollection<string> provinces, AgentCatalogPlace[] restaurants, CancellationToken ct)
     {
         // STEP-01: For each stop in stops.Where(filtered), leave the loop when ResolveAsync() exists.
+        // Tỉnh nêu kèm nơi đến ("nội đô Hà Nội") được giữ trước tiên, kể cả khi nơi đó không tìm được.
+        province ??= stops.Select(stop => AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(stop.Place), provinces)).FirstOrDefault(found => found is not null);
         // Xác định tỉnh trước từ các nơi có trong địa chỉ quán, để kết quả không phụ thuộc thứ tự: "Ngày 1 Hòa Lạc, ngày 2 Hoàn Kiếm" cũng tra Hòa Lạc trong Hà Nội.
-        foreach (var stop in stops.Where(stop => province is null && stop.Place.Length > 0 && !IsProvince(stop.Place, provinces)))
+        foreach (var stop in stops.Where(stop => province is null && stop.Place.Length > 0 && !IsProvince(stop.Place, provinces) && !IsZone(stop.Kind, stop.Parts)))
             if (await ResolveAsync(stop.Place, null, false, restaurants, ct) is { } local) { province = local.Province; break; }
-        // STEP-02: Prepare dayAreas as List<AgentDayArea>, wholeProvince as List<short> and unresolved as List<string>.
+        // STEP-02: Prepare dayAreas as List<AgentDayArea>, wholeProvince as List<short>, unresolved as List<string> and zones as List<AgentZoneReport>.
         var dayAreas = new List<AgentDayArea>();
         var wholeProvince = new List<short>();
         var unresolved = new List<string>();
+        var zones = new List<AgentZoneReport>();
+        var missed = new List<short>();
         // STEP-03: Go through each stop in stops.
         foreach (var stop in stops)
         {
@@ -96,13 +138,23 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
                 wholeProvince.AddRange(stop.Days);
                 continue;
             }
+            // STEP-05a: A zone read as several places: its days search every located place, or the whole province when none was found.
+            if (IsZone(stop.Kind, stop.Parts))
+            {
+                var (zone, report) = await ZoneAsync(stop.Place, stop.Parts!, stop.Days, province, provinces, restaurants, ct);
+                zones.Add(report);
+                if (zone is null) { missed.AddRange(stop.Days); continue; }
+                province ??= zone.Province;
+                dayAreas.AddRange(stop.Days.Select(day => new AgentDayArea(day, zone.Label, zone.Latitude, zone.Longitude, zone.RadiusKm, null, zone.Zone)));
+                continue;
+            }
             // STEP-05: Call ResolveAsync and keep match.
-            var match = await ResolveAsync(stop.Place, province, stop.Explicit, restaurants, ct);
+            var match = await ResolveAsync(stop.Place, province, stop.Explicit, restaurants, ct, stop.Kind);
             // STEP-06: Skip this round when match is missing.
             if (match is null)
             {
                 // "ngày 1 cay nhẹ" không có động từ đi lại và không phải địa điểm: để luồng thường đọc, không báo là địa danh lạ.
-                if (stop.Explicit) unresolved.Add(stop.Place);
+                if (stop.Explicit) { unresolved.Add(stop.Place); missed.AddRange(stop.Days); }
                 continue;
             }
             // STEP-07: Set province.
@@ -111,7 +163,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
             dayAreas.AddRange(stop.Days.Select(day => new AgentDayArea(day, match.Label, match.Latitude, match.Longitude, match.RadiusKm, match.District)));
         }
         // STEP-09: Return null early when dayAreas.Count is 0, wholeProvince.Count is 0 and unresolved.Count is 0.
-        if (dayAreas.Count == 0 && wholeProvince.Count == 0 && unresolved.Count == 0) return null;
+        if (dayAreas.Count == 0 && wholeProvince.Count == 0 && unresolved.Count == 0 && zones.Count == 0) return null;
         // STEP-10: Prepare byDay through GroupBy(filtered).Select(filtered).ToArray and lastDay through DefaultIfEmpty().Max.
         // Mỗi ngày một nơi: tên nêu sau cùng là tên người dùng chốt.
         var byDay = dayAreas.GroupBy(x => x.DayNumber).Select(group => group.Last()).ToArray();
@@ -119,7 +171,10 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         var lastDay = stops.Where(stop => stop.Explicit || stop.Days.Any(day => byDay.Any(x => x.DayNumber == day) || wholeProvince.Contains(day)))
             .SelectMany(stop => stop.Days).DefaultIfEmpty((short)0).Max();
         // STEP-11: Return the new result.
-        return new(province, byDay, null, wholeProvince.Distinct().ToArray(), unresolved.Distinct().ToArray(), lastDay);
+        // A day both named and missed keeps the place found for it (the name given last wins, as for byDay).
+        var missedDays = missed.Distinct().Where(day => byDay.All(x => x.DayNumber != day)).ToArray();
+        return new(province, byDay, null, wholeProvince.Distinct().ToArray(), unresolved.Distinct().ToArray(), lastDay, zones.Count > 0 ? zones.ToArray() : null,
+            missedDays.Length > 0 ? missedDays : null);
     }
 
     /// <summary>The area around a point pinned on the map, at least the default radius wide; null when no restaurant lies within the largest radius.</summary>
@@ -127,26 +182,29 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         Sized("", latitude, longitude, await catalog.GetPublicPlacesAsync(ct)) is { } area ? area with { RadiusKm = Math.Max(area.RadiusKm, AgentIntakePolicy.DefaultRadiusKm) } : null;
 
     /// <summary>Locates one named area inside the trip's province; null when it cannot be located or is the whole province.</summary>
-    public async Task<AgentPlaceMatch?> LocateAsync(string place, string? province, bool searchMap, IReadOnlyCollection<string> provinces, CancellationToken ct) =>
-        IsProvince(place, provinces) ? null : await ResolveAsync(place, province, searchMap, await catalog.GetPublicPlacesAsync(ct), ct);
+    /// <param name="kind">How the model read the place: street, ward, landmark or zone; null when it did not say.</param>
+    public async Task<AgentPlaceMatch?> LocateAsync(string place, string? province, bool searchMap, IReadOnlyCollection<string> provinces, CancellationToken ct, string? kind = null) =>
+        IsProvince(place, provinces) ? null : await ResolveAsync(place, province ?? AgentIntakePolicy.FindProvince(AgentIntakePolicy.Plain(place), provinces), searchMap,
+            await catalog.GetPublicPlacesAsync(ct), ct, kind);
 
-    private async Task<AgentPlaceMatch?> ResolveAsync(string place, string? province, bool searchMap, AgentCatalogPlace[] restaurants, CancellationToken ct)
+    private async Task<AgentPlaceMatch?> ResolveAsync(string place, string? province, bool searchMap, AgentCatalogPlace[] restaurants, CancellationToken ct, string? kind = null)
     {
         // STEP-01: Prepare term through WithoutProvince.
         var term = WithoutProvince(AgentIntakePolicy.Plain(place), province);
         // STEP-02: Return null early when term.Length < MinPlaceLength or IsOpenDay(place) holds.
         if (term.Length < MinPlaceLength || IsOpenDay(place)) return null;
+        // A whole province or city the model recognized ("Đà Nẵng") is never searched as a place inside the trip's province, where the map offers any business
+        // carrying its name. A catalog province was already taken as the whole province before this; any other has no data on ANGI.
+        if (kind == "province") return null;
         // STEP-03: Prepare inProvince from restaurants.Where and label through InvariantCulture.TextInfo.ToTitleCase.
         var inProvince = province is null ? restaurants : restaurants.Where(x => ProvinceSearch.Same(x.Province, province)).ToArray();
-        var label = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(place.Trim().ToLowerInvariant());
+        var label = Label(place);
         // STEP-04: Return the result of Sized early when Landmarks has an entry for term.
         if (Landmarks.TryGetValue(term, out var landmark)) return Sized(label, landmark.Latitude, landmark.Longitude, inProvince);
         // STEP-05: Prepare lowered through place.Trim().ToLowerInvariant and street through StreetWords.FirstOrDefault.
         // "phố Huế" là con đường ở Hà Nội; "Huế" là thành phố khác.
         var lowered = place.Trim().ToLowerInvariant();
         var street = StreetWords.FirstOrDefault(word => lowered.StartsWith(word, StringComparison.Ordinal));
-        // STEP-06: Return null early when street is missing and Elsewhere contains the conditional value.
-        if (street is null && Elsewhere.Contains(term.StartsWith("thanh pho ", StringComparison.Ordinal) ? term["thanh pho ".Length..] : term.StartsWith("tinh ", StringComparison.Ordinal) ? term["tinh ".Length..] : term)) return null;
         // STEP-07: Prepare addressed through AddressMatches.
         var addressed = AddressMatches(term, inProvince);
         // STEP-08: When addressed.Length is 0 and street exists, set addressed.
@@ -166,10 +224,16 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         // ANGI chỉ có dữ liệu ở một tỉnh thì tra trong tỉnh đó: "Hòa Lạc, Việt Nam" có thể ra nơi trùng tên ở tỉnh khác.
         var catalogProvinces = restaurants.Select(x => x.Province.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToArray();
         var searchIn = province ?? (catalogProvinces.Length == 1 ? catalogProvinces[0] : "Việt Nam");
-        var candidates = await search.SearchAsync($"{place.Trim()}, {searchIn}", nearLatitude, nearLongitude, ct);
-        // STEP-12: Return one of two results depending on Verified() exists.
-        // Bản đồ luôn trả về thứ gì đó; chỉ tin khi tên hoặc địa chỉ chứa nguyên cụm người dùng viết.
-        return Verified(candidates, term, province) is { } found ? Sized(label, found.Latitude, found.Longitude, inProvince) : null;
+        // A street the model recognized is asked as a street first: "Xã Đàn, Hà Nội" alone makes the map look for a commune ("xã") and miss Phố Xã Đàn.
+        string[] queries = kind == "street" && street is null ? [$"Phố {place.Trim()}", $"Đường {place.Trim()}", place.Trim()] : [place.Trim()];
+        foreach (var query in queries)
+        {
+            var candidates = await search.SearchAsync($"{query}, {searchIn}", nearLatitude, nearLongitude, ct);
+            // STEP-12: Return the located place when Verified() exists.
+            // Bản đồ luôn trả về thứ gì đó; chỉ tin khi tên hoặc địa chỉ chứa nguyên cụm người dùng viết.
+            if (Verified(candidates, term, province) is { } found) return Sized(label, found.Latitude, found.Longitude, inProvince);
+        }
+        return null;
     }
 
     /// <summary>
@@ -231,24 +295,29 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     }
 
     /// <summary>Prefers a whole address part ("..., Hoàn Kiếm, Hà Nội"); a name found inside a longer part, such as a street, is the fallback.</summary>
+    /// <remarks>The ward is a part too: production addresses hold only the street, and the ward ("Phường Kim Liên") is stored apart.</remarks>
     private static AgentCatalogPlace[] AddressMatches(string term, AgentCatalogPlace[] restaurants)
     {
-        // STEP-01: Prepare addressed through Where(filtered).Select(filtered).ToArray and whole through Where(filtered).Select(filtered).ToArray.
-        var addressed = restaurants.Where(x => !string.IsNullOrWhiteSpace(x.Address)).Select(x => (Place: x, Parts: x.Address!.Split(',').Select(AddressPart).ToArray())).ToArray();
+        // STEP-01: Prepare addressed through Select(filtered).Where(filtered).ToArray and whole through Where(filtered).Select(filtered).ToArray.
+        var addressed = restaurants.Select(x => (Place: x, Parts: (x.Address ?? "").Split(',').Append(x.Ward ?? "").Where(part => !string.IsNullOrWhiteSpace(part))
+            .SelectMany(AddressPart).ToArray())).Where(x => x.Parts.Length > 0).ToArray();
         var whole = addressed.Where(x => x.Parts.Contains(term)).Select(x => x.Place).ToArray();
         // STEP-02: Return one of two results depending on whole.Length > 0.
         return whole.Length > 0 ? whole : addressed.Where(x => x.Parts.Any(part => $" {part} ".Contains($" {term} ", StringComparison.Ordinal))).Select(x => x.Place).ToArray();
     }
 
-    private static string AddressPart(string part)
+    /// <summary>
+    /// One address part as written and without its administrative word, so "Phường Hoàn Kiếm" matches "Hoàn Kiếm" while a street that only
+    /// starts like one ("Xã Đàn") still matches its whole name.
+    /// </summary>
+    private static IEnumerable<string> AddressPart(string part)
     {
-        // STEP-01: Prepare words through AgentIntakePolicy.Plain.
+        // STEP-01: Prepare words through AgentIntakePolicy.Plain and return them.
         var words = AgentIntakePolicy.Plain(part);
-        // STEP-02: For each prefix in the computed value, return words[prefix.Length..] early when words starts with prefix.
-        foreach (var prefix in new[] { "p ", "q ", "x ", "tt ", "phuong ", "quan ", "xa ", "huyen ", "thi tran " })
-            if (words.StartsWith(prefix, StringComparison.Ordinal)) return words[prefix.Length..];
-        // STEP-03: Return words.
-        return words;
+        yield return words;
+        // STEP-02: Return the words without the first administrative prefix they start with.
+        if (new[] { "p ", "q ", "x ", "tt ", "phuong ", "quan ", "xa ", "huyen ", "thi tran " }.FirstOrDefault(prefix => words.StartsWith(prefix, StringComparison.Ordinal)) is { } found)
+            yield return words[found.Length..];
     }
 
     private static decimal Median(IEnumerable<decimal> values)
@@ -261,12 +330,22 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     public static bool IsProvince(string place, IReadOnlyCollection<string> provinces)
     {
         var words = AgentIntakePolicy.Plain(place);
-        return AgentIntakePolicy.FindProvince(words, provinces) is { } province && (words == AgentIntakePolicy.Plain(province) || words.Length <= MaxProvinceAlias);
+        // "Hà Nội" is the catalog's "Thành phố Hà Nội": the name without its administrative prefix counts too. Its 6 letters were over the short-alias limit,
+        // so a province read as "Hà Nội" was taken for a province without data (replay of conversation 16: "ANGI chưa có nhà hàng ở Hà Nội").
+        return AgentIntakePolicy.FindProvince(words, provinces) is { } province && (words == AgentIntakePolicy.Plain(province) ||
+            AgentIntakePolicy.Bare(words) == AgentIntakePolicy.Bare(AgentIntakePolicy.Plain(province)) || words.Length <= MaxProvinceAlias);
     }
 
-    /// <summary>Drops a trailing province, so "Hoàn Kiếm Hà Nội" is looked up as "Hoàn Kiếm".</summary>
-    private static string WithoutProvince(string words, string? province) =>
-        province is not null && AgentIntakePolicy.Plain(province) is var name && words.EndsWith($" {name}", StringComparison.Ordinal) ? words[..^(name.Length + 1)] : words;
+    /// <summary>Drops a trailing province, full or short ("Thành phố Hà Nội" or "Hà Nội"), so "Hoàn Kiếm Hà Nội" is looked up as "Hoàn Kiếm".</summary>
+    private static string WithoutProvince(string words, string? province)
+    {
+        if (province is null) return words;
+        var full = AgentIntakePolicy.Plain(province);
+        var prefix = new[] { "thanh pho ", "tinh " }.FirstOrDefault(value => full.StartsWith(value, StringComparison.Ordinal));
+        foreach (var name in prefix is null ? [full] : new[] { full, full[prefix.Length..] })
+            if (words.EndsWith($" {name}", StringComparison.Ordinal)) return words[..^(name.Length + 1)];
+        return words;
+    }
 
     // Applying places to the trip
 
@@ -280,7 +359,8 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
     public static AgentState Apply(AgentState state, AgentTripPlaces trip)
     {
         // STEP-01: Prepare stated through DayAreas.Select(filtered).Concat().ToHashSet, areas through Concat().OrderBy(filtered).ToArray and more.
-        var stated = trip.DayAreas.Select(x => x.DayNumber).Concat(trip.WholeProvinceDays).ToHashSet();
+        // A day whose new place was not found uses the whole province, as the note says, so its earlier place goes too (feedback 2026-11-25).
+        var stated = trip.DayAreas.Select(x => x.DayNumber).Concat(trip.WholeProvinceDays).Concat(trip.MissedDays ?? []).ToHashSet();
         var areas = (state.DayAreas ?? []).Where(x => !stated.Contains(x.DayNumber)).Concat(trip.DayAreas).OrderBy(x => x.DayNumber).ToArray();
         // Ngày đã chuyển nơi thì tìm lại từ đầu, bán kính đã nới cho nơi cũ không còn giá trị.
         var widened = trip.TripArea is not null ? [] : (state.WidenedMeals ?? []).Where(x => !stated.Contains(x.DayNumber)).ToArray();
@@ -292,39 +372,19 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
             WidenedMeals = widened.Length > 0 ? widened : null
         };
         // STEP-02: Return one of two results depending on trip.TripArea exists.
+        // A whole-trip area that was not found replaces an earlier area the backend located from the user's words with the whole province, as the note
+        // says; a point picked on the map or GPS is the user's own choice and stays.
+        if (trip.TripAreaMissed && state.OriginMode == "pinned" && state.NamedAreaLabel is not null && state.NamedAreaLabel == state.OriginLabel)
+            applied = applied with { OriginMode = "none", OriginLatitude = null, OriginLongitude = null, OriginLabel = null, RadiusKm = null, NamedAreaLabel = null,
+                OriginZone = null, WidenedMeals = null };
+        // Một vùng nhiều nơi lưu đủ các vòng tròn; một nơi thì xóa vùng cũ.
         return trip.TripArea is { } area ? applied with { OriginMode = "pinned", OriginLatitude = area.Latitude, OriginLongitude = area.Longitude,
-            OriginLabel = area.Label, RadiusKm = area.RadiusKm, NamedAreaLabel = area.Label } : applied;
-    }
-
-    /// <summary>Tells the user how the message was understood, so a wrong reading or an unknown place shows before any dish is chosen.</summary>
-    public static string? Note(AgentState state, AgentTripPlaces trip)
-    {
-        // STEP-01: Prepare known, province through AgentReplyBuilder.Safe and parts as List<string>.
-        var known = state.Province ?? trip.Province;
-        var province = AgentReplyBuilder.Safe(known);
-        var parts = new List<string>();
-        // STEP-02: When trip.TripArea exists, call parts.Add.
-        if (trip.TripArea is { } area)
-            parts.Add($"Mình ghi nhận khu vực {AgentReplyBuilder.Safe(area.Label)}{(area.District is { } district ? $" (khu {AgentReplyBuilder.Safe(district)})" : "")}, mình sẽ ưu tiên quán trong khoảng {area.RadiusKm:0} km quanh đó.");
-        // STEP-03: When state.DayAreas has the expected shape and trip.DayAreas.Length > 0, call parts.Add.
-        if (state.DayAreas is { Length: > 0 } areas && trip.DayAreas.Length > 0)
-            parts.Add($"Mình ghi nhận hành trình ở {province}: {string.Join("; ", areas.Select(Describe))}.");
-        // STEP-04: When trip.Unresolved.Length > 0, prepare unknown through string.Join and call parts.Add.
-        if (trip.Unresolved.Length > 0)
-        {
-            var unknown = string.Join(", ", trip.Unresolved.Select(place => $"“{AgentReplyBuilder.Safe(place)}”"));
-            parts.Add(known is null ? $"Mình chưa tìm được quán quanh {unknown}."
-                : $"Mình chưa tìm được quán quanh {unknown} nên phần đó sẽ chọn trong toàn {province}; bạn có thể nhắn lại tên khu khác.");
-        }
-        // STEP-05: When state.DayAreas has the expected shape, state.NumDays exists and named.Length < total, call parts.Add.
-        if (state.DayAreas is { Length: > 0 } named && state.NumDays is { } total && named.Length < total)
-            parts.Add($"Những ngày còn lại trong {total} ngày, mình chọn trong toàn {province}.");
-        // STEP-06: Return one of two results depending on parts.Count is 0.
-        return parts.Count == 0 ? null : string.Join(' ', parts);
+            OriginLabel = area.Label, RadiusKm = area.RadiusKm, NamedAreaLabel = area.Label, OriginZone = area.Zone } : applied;
     }
 
     /// <summary>One day of the itinerary for chat; says how far the search reaches when the place has few restaurants nearby.</summary>
-    public static string Describe(AgentDayArea area) => $"ngày {area.DayNumber} quanh {AgentReplyBuilder.Safe(area.Label)}" +
+    public static string Describe(AgentDayArea area) => area.Zone is { Length: > 1 } ? $"ngày {area.DayNumber} trong khu {AgentReplyBuilder.Safe(area.Label)}" :
+        $"ngày {area.DayNumber} quanh {AgentReplyBuilder.Safe(area.Label)}" +
         (area.District is { } district ? $" (khu {AgentReplyBuilder.Safe(district)})" : "") +
         (area.RadiusKm > WideRadiusKm ? $" (quanh đó còn ít quán nên mình chọn quán gần nhất, trong khoảng {area.RadiusKm:0} km)" : "");
 

@@ -640,6 +640,10 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("items").GetArrayLength().Should().Be(0);
         context.Grants.Should().BeEmpty(); context.ToolNotice.Should().Contain("ngày 1, bữa sáng");
         context.MealCoverage.Should().HaveCount(4).And.OnlyContain(meal => meal.AvailableCount == 0);
+        // The result names what emptied the meals: no trip budget cap here, so the model is told the budget is not the cause (conversation 17).
+        result.GetProperty("emptyMeals").GetArrayLength().Should().Be(4);
+        result.GetProperty("budgetRemovesDishes").GetBoolean().Should().BeFalse();
+        result.GetProperty("warnings")[1].GetString().Should().Contain("không phải do ngân sách");
         // STEP-06: Verify reco receives no other calls.
         reco.VerifyNoOtherCalls();
     }
@@ -726,6 +730,95 @@ public sealed class AgentToolExecutorTests
         // STEP-05: Assert result.items.EnumerateArray().Select(filtered) equals 1 and context.Grants.Single().DishIds equals 1.
         result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().Equal(1, 2);
         context.Grants.Single().DishIds.Should().Equal(1, 2);
+    }
+
+    // TEST-14a: A dish picked from the chat's own suggestion by its dishId is that exact dish at that restaurant, never another branch of the same name;
+    // an id of a real catalog dish picked from a catalog search counts too (conversation 14 refused "lẩu gà lá é" picked from such a list), and an id the catalog
+    // does not hold goes back to the model. Feedback 2026-11-25: the plan took another "cơm rang" than the one the list showed.
+    /// <summary>The name is not searched at all when the dish was picked by id.</summary>
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(1, true)]
+    [InlineData(99, false)]
+    public async Task ExecuteAsync_PickedDishId_IsThatExactDish(int dishId, bool offered)
+    {
+        // STEP-01: Two branches of "Cơm rang"; the suggestion showed the second one, at Quán B.
+        var first = Named(1, "Cơm rang"); first.RestaurantId = 10;
+        var second = Named(2, "Cơm rang"); second.RestaurantId = 11;
+        var fixture = AgentTestData.Validator(first, second);
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(Capture.In(filters), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 2 });
+        var catalog = new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>();
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch"], OfferedDishes = [new AgentOfferedDish(2, "Cơm rang", 11, "Quán B")],
+            MealRequests = [new(1, "lunch", "Cơm rang", "Quán B", [], false, 11, dishId)] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
+
+        // STEP-02: Run tools.ExecuteAsync with the plan call.
+        var result = await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        // STEP-03: Assert the offered dish alone was searched at its own restaurant, or that an unknown id was sent back.
+        catalog.Verify(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        if (!offered) { result.GetProperty("status").GetString().Should().Be("invalid_arguments"); return; }
+        // Day 2's lunch has no request, so it is searched as usual; day 1's lunch searches only the picked dish.
+        var restaurant = dishId == 2 ? 11 : 10;
+        filters.Should().Contain(filter => filter.DishIds.SequenceEqual(new[] { dishId }) && filter.RestaurantId == restaurant);
+        filters.Should().NotContain(filter => filter.DishIds.Contains(3 - dishId));
+    }
+
+    // TEST-14a2: Two dishes picked from a suggestion with no day or meal ("lập lịch có 2 món trên") each get a meal of their own and are both in the plan;
+    // conversation 11 left both out after its two requests were refused as one scope.
+    /// <summary>Each picked dish is placed on its own meal and granted there.</summary>
+    [Fact]
+    public async Task ExecuteAsync_TwoPickedDishesWithoutMeal_EachGetsAMeal()
+    {
+        // STEP-01: Two offered dishes of Phở Thúy and an ordinary dish for the other meals.
+        var first = Named(126, "Cơm Rang Thập Cẩm"); first.RestaurantId = 66;
+        var second = Named(127, "Cơm Rang Dưa Bò"); second.RestaurantId = 66;
+        var fixture = AgentTestData.Validator(first, second, AgentTestData.Dish(1));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.DishIds.Count > 0 ? filter.DishIds.ToArray() : new[] { 1 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch", "dinner"],
+            OfferedDishes = [new AgentOfferedDish(126, "Cơm Rang Thập Cẩm", 66, "Phở Thúy"), new AgentOfferedDish(127, "Cơm Rang Dưa Bò", 66, "Phở Thúy")],
+            MealRequests = [new(null, null, "Cơm Rang Thập Cẩm", "Phở Thúy", [], false, 66, 126), new(null, null, "Cơm Rang Dưa Bò", "Phở Thúy", [], false, 66, 127)] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>().Object);
+
+        // STEP-02: Run tools.ExecuteAsync with the plan call.
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+
+        // STEP-03: Assert each picked dish sits on a different meal and is granted.
+        var placed = context.State.MealRequests.Where(request => request.DishId is not null).ToArray();
+        placed.Should().HaveCount(2).And.OnlyContain(request => request.DayNumber != null && request.MealSlot != null);
+        placed.Select(request => (request.DayNumber, request.MealSlot)).Distinct().Should().HaveCount(2);
+        context.Grants.SelectMany(grant => grant.DishIds).Should().Contain(new[] { 126, 127 });
+    }
+
+    // TEST-14a3: fromOffered with offeredMeals keeps the suggested dishes to those meals only; every other meal is searched over the whole catalog
+    // (conversation 15: "bữa trưa ngày 1 có món trong danh sách gợi ý, còn lại theo đề xuất của bạn" made the whole trip from the list).
+    /// <summary>Day 1 lunch searches only the offered dishes; the other meals search everything.</summary>
+    [Fact]
+    public async Task ExecuteAsync_FromOfferedForSomeMeals_LimitsOnlyThoseMeals()
+    {
+        // STEP-01: Two offered dishes and an ordinary one; capture every search.
+        var fixture = AgentTestData.Validator(Named(126, "Cơm A"), Named(127, "Cơm B"), AgentTestData.Dish(1));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(Capture.In(filters), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => filter.DishIds.Count > 0 ? filter.DishIds.ToArray() : new[] { 1 });
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch", "dinner"],
+            OfferedDishes = [new AgentOfferedDish(126, "Cơm A", 1, "Real restaurant"), new AgentOfferedDish(127, "Cơm B", 1, "Real restaurant")] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+
+        // STEP-02: Plan the trip with only day 1 lunch from the offered dishes.
+        await tools.ExecuteAsync(context, Call(Input() with { Province = null, FromOffered = true, OfferedMeals = [new AgentScope(1, "lunch")] }), CancellationToken.None);
+
+        // STEP-03: Assert only the day 1 lunch search was limited to the offered dishes.
+        filters.Where(filter => filter.DishIds.Count > 0).Should().NotBeEmpty().And.OnlyContain(filter => filter.DishIds.OrderBy(id => id).SequenceEqual(new[] { 126, 127 }));
+        filters.Should().Contain(filter => filter.DishIds.Count == 0, "the other meals search the whole catalog");
+        context.Grants.Single(grant => grant.DayNumber == 1 && grant.MealSlot == "lunch").DishIds.Should().OnlyContain(id => id == 126 || id == 127);
     }
 
     // TEST-14b: A dish the user names for a meal stays a candidate even when the plan already has it at another meal:
@@ -1726,14 +1819,15 @@ public sealed class AgentToolExecutorTests
         context.DishSuggestion.FixedReply.Should().Contain("quanh Cầu Giấy");
     }
 
-    // TEST-45: A place that cannot be located is reported rather than ignored in silence, and a province is no place to search around.
-    /// <summary>The user must be told the dish is not filtered by what they said.</summary>
+    // TEST-45: A place that cannot be located searches nothing and is reported, so no dish of the trip's earlier area or of anywhere comes back as if it were
+    // there (feedback 2026-11-25); a province is no place to search around, so it searches the province as before.
+    /// <summary>The user is asked for the place another way instead of getting dishes from somewhere else.</summary>
     [Theory]
     [InlineData("abcde xyz", "abcde xyz")]
     [InlineData("Hà Nội", null)]
-    public async Task ExecuteAsync_SuggestDishAreaNotLocated_SearchesWithoutIt(string area, string? notFound)
+    public async Task ExecuteAsync_SuggestDishAreaNotLocated_SearchesNothing(string area, string? notFound)
     {
-        // STEP-01: Create fixture through AgentTestData.Validator and capture the filter of GetCandidateIdsAsync.
+        // STEP-01: Create fixture, capture the filter of GetCandidateIdsAsync, and give the trip an earlier area that must not be used.
         var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
         var filters = new List<DishCandidateFilter>();
         fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(Capture.In(filters), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
@@ -1741,12 +1835,14 @@ public sealed class AgentToolExecutorTests
         context.State = new AgentState();
 
         // STEP-02: Run tools.ExecuteAsync with a suggest_dish call naming the area.
-        await PlaceTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, SuggestCallIn(area), CancellationToken.None);
+        var result = await PlaceTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, SuggestCallIn(area), CancellationToken.None);
 
-        // STEP-03: Assert the search has no circle and the suggestion reports what was not found.
-        filters.Single().Area.Should().BeNull();
-        context.DishSuggestion!.Area.Should().BeNull();
-        context.DishSuggestion.AreaNotFound.Should().Be(notFound);
+        // STEP-03: Assert an unknown place searched nothing and says so, while a province searched without a circle.
+        context.DishSuggestion!.AreaNotFound.Should().Be(notFound);
+        if (notFound is null) { filters.Single().Area.Should().BeNull(); return; }
+        filters.Should().BeEmpty();
+        result.GetProperty("status").GetString().Should().Be("area_not_found");
+        context.DishSuggestion.Dishes.Should().BeEmpty();
     }
 
     // TEST-46: A dish tagged for one meal says so when the user named no meal, and stays quiet when they named one.
@@ -1868,7 +1964,8 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("status").GetString().Should().Be("located");
         context.State.Should().Match<AgentState>(x => x.Province == "Hà Nội" && x.NumDays == 3 && x.DayAreas!.Length == 1 && x.DayAreas[0].Label == "Cầu Giấy");
         result.GetProperty("wholeProvinceDays")[0].GetInt16().Should().Be(3);
-        context.PlaceNote.Should().Contain("ngày 1 quanh Cầu Giấy");
+        context.PinnedAreaEmpty.Should().BeFalse();
+        result.GetProperty("dayAreas")[0].GetProperty("label").GetString().Should().Be("Cầu Giấy", "the model tells the user from these facts");
     }
 
     // TEST-48: A whole-trip area becomes the search circle; a name nowhere on ANGI is reported as not found and changes nothing.
@@ -1923,6 +2020,183 @@ public sealed class AgentToolExecutorTests
         context.State.DayAreas.Should().BeNull();
     }
 
+    // TEST-49f: A province the model read as one that ANGI has no restaurant in is its own status, not "place not found", searches nothing, and the place is not
+    // kept in the suggestion's conditions, so the next request does not carry it (conversation 10: "Hưng Yên" came back on "tìm giúp tôi").
+    /// <summary>Hà Nam and Hưng Yên were answered "chưa xác định được", then stuck to later requests.</summary>
+    [Theory]
+    [InlineData("province", "province_without_data")]
+    [InlineData(null, "area_not_found")]
+    public async Task ExecuteAsync_SuggestInProvinceWithoutData_IsToldApartAndNotCarried(string? kind, string status)
+    {
+        // STEP-01: Create fixture, capture searches, and a suggestion in Hưng Yên.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(Capture.In(filters), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [],
+            Area: "Hưng Yên", AreaKind: kind, NameQuery: "phở"), AgentJson.Options));
+
+        // STEP-02: Run tools.ExecuteAsync with the call.
+        var result = await PlaceTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, call, CancellationToken.None);
+
+        // STEP-03: Assert the status, that nothing was searched and that the place is not a condition to keep.
+        result.GetProperty("status").GetString().Should().Be(status);
+        filters.Should().BeEmpty();
+        context.Suggested!.Area.Should().BeNull();
+        context.Suggested.NameQuery.Should().Be("phở");
+    }
+
+    // TEST-49g: A suggestion around a located place gives the trip its province; a province outside the catalog sent as the province is "no data", not a search.
+    /// <summary>Replay of conversation 10 asked the province three times after "nội thành Hà Nội", and answered bare "Hưng Yên" with "không tìm thấy món".</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestionProvince_IsKeptOrToldWithoutData()
+    {
+        // STEP-01: Create fixture and two suggestions: one around Cầu Giấy, one with the province Hưng Yên.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var tools = PlaceTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object);
+        var around = AgentTestData.Context(); around.State = new AgentState();
+        var elsewhere = AgentTestData.Context(); elsewhere.State = new AgentState();
+
+        // STEP-02: Run both suggestions.
+        await tools.ExecuteAsync(around, SuggestCallIn("Cầu Giấy"), CancellationToken.None);
+        var result = await tools.ExecuteAsync(elsewhere, new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(
+            new AgentSuggestionInput(Province: "Hưng Yên", TagIds: [], ExcludeTagIds: [], TasteTargets: [], NameQuery: "phở"), AgentJson.Options)), CancellationToken.None);
+
+        // STEP-03: Assert the located province is kept for the trip and the unknown province is told as having no data.
+        around.SuggestionProvince.Should().Be("Hà Nội");
+        result.GetProperty("status").GetString().Should().Be("province_without_data");
+    }
+
+    // TEST-49e: Around a named place with nothing that fits, the suggestion reaches further step by step, never past WideRadiusKm, and says how far it went;
+    // a sparse place starts at WideRadiusKm instead of the 50 km it needs for 20 restaurants (feedback 2026-11-25: "buffet ở Xã Đàn", Sóc Sơn).
+    /// <summary>Dishes from 30 km away were shown as "quanh" a place before.</summary>
+    [Theory]
+    [InlineData(25, 8, new[] { 3.0, 5.0, 8.0 }, "suggested")]
+    [InlineData(25, 99, new[] { 3.0, 5.0, 8.0, 12.0 }, "nothing_found")]
+    [InlineData(5, 99, new[] { 12.0 }, "nothing_found")]
+    public async Task ExecuteAsync_SuggestAroundPlace_ReachesNoFurtherThanWideRadius(int restaurants, double foundFromKm, double[] searched, string status)
+    {
+        // STEP-01: Restaurants at Cầu Giấy, and dishes that only appear once the circle is wide enough.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var radii = new List<decimal>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DishCandidateFilter filter, int _, CancellationToken _) => { radii.Add(filter.Area!.RadiusKm); return filter.Area.RadiusKm >= (decimal)foundFromKm ? new[] { 221 } : Array.Empty<int>(); });
+        var catalog = new Mock<IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetProvincesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(["Hà Nội"]);
+        catalog.Setup(x => x.GetPublicPlacesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Range(0, restaurants)
+            .Select(_ => new AgentCatalogPlace("Hà Nội", "1 Trần Thái Tông, P. Dịch Vọng, Cầu Giấy, Hà Nội", 21.03m, 105.79m)).ToArray());
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(),
+            Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object, places: new AgentPlaceResolver(catalog.Object));
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+
+        // STEP-02: Run tools.ExecuteAsync with a suggest_dish call around Cầu Giấy.
+        var result = await tools.ExecuteAsync(context, SuggestCallIn("Cầu Giấy"), CancellationToken.None);
+
+        // STEP-03: Assert the radii searched, the status and how far the result says it reached.
+        radii.Distinct().Select(radius => (double)radius).Should().Equal(searched);
+        result.GetProperty("status").GetString().Should().Be(status);
+        // searchedKm only when nothing fitted, widenedKm only when the search had to reach further: sent on every success, the model repeated the radius each time.
+        if (status == "suggested")
+        {
+            result.GetProperty("widenedKm").GetDecimal().Should().Be(8m);
+            result.GetProperty("searchedKm").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        else
+        {
+            result.GetProperty("searchedKm").GetDecimal().Should().Be((decimal)searched[^1]);
+            result.GetProperty("widenedKm").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+    }
+
+    // TEST-49b: A whole-trip zone stores all its circles and leaves the wording to the model; a zone with no place found keeps the province it named.
+    /// <summary>"Nội đô Hà Nội" read as several places searches all of them; when none is found the trip still knows it is in Hà Nội.</summary>
+    [Theory]
+    [InlineData(new[] { "Cầu Giấy", "Hoàn Kiếm" }, "located")]
+    [InlineData(new[] { "abcde xyz" }, "zone_unresolved")]
+    public async Task ExecuteAsync_LocatePlacesZone_StoresCirclesOrKeepsProvince(string[] parts, string status)
+    {
+        // STEP-01: Create fixture and context with no plan, and the call of a zone.
+        var fixture = AgentTestData.Validator();
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var call = new AgentToolCall("l", "locate_places", JsonSerializer.SerializeToElement(new AgentLocateInput("nội đô Hà Nội", [], "zone", parts), AgentJson.Options));
+
+        // STEP-02: Run tools.ExecuteAsync with the call.
+        var result = await ZoneTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, call, CancellationToken.None);
+
+        // STEP-03: Assert the status, the stored zone and the report the model words.
+        result.GetProperty("status").GetString().Should().Be(status);
+        context.State.Province.Should().Be("Hà Nội");
+        var zone = result.GetProperty("zones")[0];
+        zone.GetProperty("searchScope").GetString().Should().Be(status == "located" ? "zone" : "province");
+        context.State.OriginZone?.Length.Should().Be(status == "located" ? 2 : null);
+        context.State.OriginMode.Should().Be(status == "located" ? "pinned" : "none");
+    }
+
+    // TEST-49c: A suggestion around a zone searches every located place of it and reports them for the reply.
+    /// <summary>The model listed the places of the zone; the filter holds one circle per place.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestDishInZone_SearchesEveryPlace()
+    {
+        // STEP-01: Create fixture and capture the filter of GetCandidateIdsAsync.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var filters = new List<DishCandidateFilter>();
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(Capture.In(filters), It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 221 });
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [],
+            Area: "trung tâm", AreaKind: "zone", AreaParts: ["Cầu Giấy", "Hoàn Kiếm"]), AgentJson.Options));
+
+        // STEP-02: Run tools.ExecuteAsync with the call.
+        var result = await ZoneTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object).ExecuteAsync(context, call, CancellationToken.None);
+
+        // STEP-03: Assert the filter holds both places and the result reports them.
+        filters.Single().Area!.Circles().Should().HaveCount(2);
+        result.GetProperty("zone").GetProperty("located").GetArrayLength().Should().Be(2);
+        (context.DishSuggestion!.Dishes.Single().Address ?? "").Should().NotContain("cách", "a distance from a zone means nothing to the user");
+    }
+
+    // TEST-49d: A zone sent with no places goes back to the model to list them, for a suggestion and for a trip, and changes nothing.
+    /// <summary>On the real model "nội đô Hà Nội" came as kind=zone with areaParts=[], which searched nowhere and said it could not find the place.</summary>
+    [Theory]
+    [InlineData("suggest_dish")]
+    [InlineData("locate_places")]
+    public async Task ExecuteAsync_ZoneWithoutParts_IsSentBack(string tool)
+    {
+        // STEP-01: Create fixture and context, and the call of a zone with no places.
+        var fixture = AgentTestData.Validator(AgentTestData.Dish(221));
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        object input = tool == "suggest_dish"
+            ? new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Area: "nội đô Hà Nội", AreaKind: "zone", AreaParts: [])
+            : new AgentLocateInput("nội đô Hà Nội", [], "zone", []);
+
+        // STEP-02: Run tools.ExecuteAsync with the call.
+        var result = await ZoneTools(fixture.Dishes.Object, fixture.Tags.Object, fixture.Routes.Object)
+            .ExecuteAsync(context, new AgentToolCall("z", tool, JsonSerializer.SerializeToElement(input, AgentJson.Options)), CancellationToken.None);
+
+        // STEP-03: Assert the model is asked for the places and nothing was searched or stored.
+        result.GetProperty("status").GetString().Should().Be("invalid_arguments");
+        result.GetProperty("warnings")[0].GetString().Should().Contain("parts");
+        context.DishSuggestion.Should().BeNull();
+        context.State.Province.Should().BeNull();
+    }
+
+    /// <summary>Builds tools over a catalog with restaurants in Cầu Giấy and in Hoàn Kiếm, whose ward is stored apart from a street-only address.</summary>
+    private static AgentToolExecutor ZoneTools(IDishRepository dishes, ITagRepository tags, IRouteService routes)
+    {
+        var catalog = new Mock<IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetProvincesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(["Hà Nội"]);
+        catalog.Setup(x => x.GetPublicPlacesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Range(0, 25)
+            .Select(_ => new AgentCatalogPlace("Hà Nội", "1 Trần Thái Tông, P. Dịch Vọng, Cầu Giấy, Hà Nội", 21.03m, 105.79m))
+            .Concat(Enumerable.Range(0, 25).Select(_ => new AgentCatalogPlace("Hà Nội", "Phố Hàng Khay", 21.025m, 105.852m, "Phường Hoàn Kiếm"))).ToArray());
+        return new AgentToolExecutor(dishes, tags, Mock.Of<IRecommendationService>(), new(), new(routes), new(), Mock.Of<IAgentTelemetry>(),
+            catalogSearch: catalog.Object, places: new AgentPlaceResolver(catalog.Object));
+    }
+
     /// <summary>Builds tools over a catalog with enough restaurants in Cầu Giấy, Hà Nội, and no map service.</summary>
     private static AgentToolExecutor PlaceTools(IDishRepository dishes, ITagRepository tags, IRouteService routes)
     {
@@ -1946,7 +2220,14 @@ public sealed class AgentToolExecutorTests
     /// <summary>Returns valid strict recommendation arguments with explicit empty lists.</summary>
     private static AgentRecommendationInput Input() => new(null, "Da Nang", "full", null, null, [], [], []);
     /// <summary>Serializes a complete strict tool call using the public camel-case contract.</summary>
-    private static AgentToolCall Call(AgentRecommendationInput input) => new("c", "get_recommendation", JsonSerializer.SerializeToElement(input, AgentJson.Options));
+    /// <remarks>A null dishId is left out of stored JSON, so it is added back here as the model, bound by the strict schema, always sends it.</remarks>
+    private static AgentToolCall Call(AgentRecommendationInput input)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(input, AgentJson.Options))!;
+        foreach (var request in node["state"]?["mealRequests"]?.AsArray() ?? [])
+            if (request is System.Text.Json.Nodes.JsonObject entry && !entry.ContainsKey("dishId")) entry["dishId"] = null;
+        return new("c", "get_recommendation", JsonSerializer.SerializeToElement(node, AgentJson.Options));
+    }
 
     private static readonly NearbyArea Center = new(21.03m, 105.85m, 5m);
 

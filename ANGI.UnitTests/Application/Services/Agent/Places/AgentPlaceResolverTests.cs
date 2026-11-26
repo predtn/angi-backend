@@ -14,6 +14,17 @@ public sealed class AgentPlaceResolverTests
 {
     private static readonly string[] Provinces = ["Hà Nội"];
 
+    // TEST-00: A province named without its administrative prefix is the catalog province ("Hà Nội" is "Thành phố Hà Nội"); a province not in the catalog is not.
+    /// <summary>The replay of conversation 16 answered "ANGI chưa có nhà hàng ở Hà Nội" because the 6-letter short name was over the alias limit.</summary>
+    [Theory]
+    [InlineData("Hà Nội", true)]
+    [InlineData("thành phố Hà Nội", true)]
+    [InlineData("TP Hà Nội", true)]
+    [InlineData("Hà Nam", false)]
+    [InlineData("Hoàn Kiếm", false)]
+    public void IsProvince_NameWithoutPrefix_IsTheCatalogProvince(string place, bool expected) =>
+        AgentPlaceResolver.IsProvince(place, ["Thành phố Hà Nội", "Tỉnh Lào Cai"]).Should().Be(expected);
+
     // TEST-01: The reported itinerary resolves without asking for the province; districts come from addresses, the landmark from its alias, and the far place from the map with a wider radius.
     /// <summary>Ensures the failed test message now yields a place for each day, the map being called only for the name addresses cannot answer.</summary>
     [Fact]
@@ -139,9 +150,9 @@ public sealed class AgentPlaceResolverTests
     public async Task LocateAsync_TripArea_LocatesOrReportsIt()
     {
         // STEP-01: Locate an area, the province and an unknown name.
-        var area = await Resolver(null).LocateAsync("Hai bà trưng", [], new AgentState(), Provinces, default);
-        var province = await Resolver(null).LocateAsync("Hà Nội", [], new AgentState(), Provinces, default);
-        var unknown = await Resolver(null).LocateAsync("abcde xyz", [], new AgentState { Province = "Hà Nội" }, Provinces, default);
+        var area = await Resolver(null).LocateAsync(new AgentLocateStop(null, "Hai bà trưng"), [], new AgentState(), Provinces, default);
+        var province = await Resolver(null).LocateAsync(new AgentLocateStop(null, "Hà Nội"), [], new AgentState(), Provinces, default);
+        var unknown = await Resolver(null).LocateAsync(new AgentLocateStop(null, "abcde xyz"), [], new AgentState { Province = "Hà Nội" }, Provinces, default);
 
         // STEP-02: Assert what each one found.
         area.TripArea!.Label.Should().Be("Hai Bà Trưng");
@@ -201,7 +212,8 @@ public sealed class AgentPlaceResolverTests
         (await Resolver(search.Object).LocateAsync("Cầu Giấy", "Hà Nội", false, Provinces, default))!.Label.Should().Be("Cầu Giấy");
     }
 
-    // TEST-11: Other provinces and well-known destinations are never located inside the trip's province, even though the map offers a business with that name; covers accents, no accents and a "thành phố" prefix.
+    // TEST-11: A province or city the model read as one (kind=province) is never located inside the trip's province, even though the map offers a business with that name;
+    // the model, not a backend list of names, says it is a province. Covers accents, no accents and a "thành phố" prefix.
     /// <summary>Reproduces "Đà Nẵng, Hà Nội" returning a Hà Nội place, which would have planned the day in the wrong city.</summary>
     [Theory]
     [InlineData("Đà Nẵng")]
@@ -215,7 +227,7 @@ public sealed class AgentPlaceResolverTests
         var search = new Mock<IPlaceSearchService>(MockBehavior.Strict);
 
         // STEP-02: Locate the stops; assert trip.DayAreas is empty and trip.Unresolved equals place.
-        var trip = await Locate(Resolver(search.Object), "Hà Nội", (1, place));
+        var trip = await Locate(Resolver(search.Object), "Hà Nội", "province", place);
 
         trip!.DayAreas.Should().BeEmpty();
         trip.Unresolved.Should().Equal(place);
@@ -366,6 +378,143 @@ public sealed class AgentPlaceResolverTests
         landmark!.DayAreas.Single().District.Should().Be("Ba Đình");
         district!.DayAreas.Single().District.Should().BeNull();
     }
+
+    // TEST-19: A zone the model read as several places becomes one area of several circles; a restaurant in any of them is inside, one between them is not.
+    /// <summary>"Trung tâm" read as Hoàn Kiếm and Cầu Giấy searches both, never the middle; the model, not the backend, decided which places the zone holds.</summary>
+    [Fact]
+    public async Task LocateAsync_Zone_IsEveryLocatedPlace()
+    {
+        // STEP-01: Locate a whole-trip zone of two districts and an unknown name, with no map service.
+        var trip = await Resolver(null).LocateAsync(new AgentLocateStop(null, "trung tâm", "zone", ["Hoàn Kiếm", "Cầu Giấy", "abcde xyz"]), [], new AgentState { Province = "Hà Nội" }, Provinces, default);
+
+        // STEP-02: Assert the zone holds both districts, reports the unknown name and is not an unresolved single place.
+        trip.TripArea!.Zone!.Select(circle => circle.Label).Should().Equal("Hoàn Kiếm", "Cầu Giấy");
+        trip.TripArea.Zone.Should().OnlyContain(circle => circle.RadiusKm <= AgentPlaceResolver.ZonePartKm);
+        trip.Unresolved.Should().BeEmpty();
+        trip.Zones!.Single().Should().Match<AgentZoneReport>(x => x.SearchScope == "zone" && x.Missed.SequenceEqual(new[] { "abcde xyz" }));
+
+        // STEP-03: Apply it; assert the stored area holds both circles and leaves out the point between them.
+        var state = AgentPlaceResolver.Apply(new AgentState { Province = "Hà Nội" }, trip);
+        var area = AgentScopedPlanning.Area(state, 1)!;
+        area.Contains(21.03m, 105.85m).Should().BeTrue("Hoàn Kiếm is in the zone");
+        area.Contains(21.03m, 105.79m).Should().BeTrue("Cầu Giấy is in the zone");
+        area.Contains(21.03m, 105.82m).Should().BeFalse("the zone is its places, not one circle around them");
+    }
+
+    // TEST-20: When no place of a zone is found the province named with it stays, so the trip searches the whole province instead of asking where again.
+    /// <summary>"Nội đô Hà Nội" on the first message used to drop Hà Nội along with the zone.</summary>
+    [Theory]
+    [InlineData("zone")]
+    [InlineData(null)]
+    public async Task LocateAsync_AreaNotFound_KeepsTheProvinceItNamed(string? kind)
+    {
+        // STEP-01: Locate an unknown area that names the province, on a state with no province yet.
+        var trip = await Resolver(null).LocateAsync(new AgentLocateStop(null, "nội đô Hà Nội", kind, kind is null ? null : ["abcde xyz"]), [], new AgentState(), Provinces, default);
+
+        // STEP-02: Assert the province is kept and nothing was located.
+        trip.Province.Should().Be("Hà Nội");
+        trip.TripArea.Should().BeNull();
+        if (kind is null) trip.Unresolved.Should().Equal("nội đô Hà Nội");
+        else trip.Zones!.Single().SearchScope.Should().Be("province");
+    }
+
+    // TEST-21: A zone named for some days of an itinerary is stored on those days with all its circles, and the note says the day is in that zone.
+    /// <summary>"Ngày 2 ăn ở khu trung tâm" searches each place of the zone on day 2 only.</summary>
+    [Fact]
+    public async Task LocateAsync_ZoneStop_StoresTheDayWithItsCircles()
+    {
+        // STEP-01: Locate day 1 in Cầu Giấy and day 2 in a zone of two districts.
+        var trip = await Resolver(null).LocateAsync(null, [new AgentLocateStop([1], "Cầu Giấy"), new AgentLocateStop([2], "trung tâm", "zone", ["Hoàn Kiếm", "Ba Đình"])],
+            new AgentState { Province = "Hà Nội" }, Provinces, default);
+        var state = AgentPlaceResolver.Apply(new AgentState { Province = "Hà Nội" }, trip);
+
+        // STEP-02: Assert day 2 holds both circles and day 1 a single one.
+        state.DayAreas!.Single(x => x.DayNumber == 2).Zone!.Length.Should().Be(2);
+        state.DayAreas!.Single(x => x.DayNumber == 1).Zone.Should().BeNull();
+        AgentScopedPlanning.Area(state, 2)!.Contains(21.04m, 105.83m).Should().BeTrue("Ba Đình is part of day 2");
+        AgentPlaceResolver.Describe(state.DayAreas!.Single(x => x.DayNumber == 2)).Should().Be("ngày 2 trong khu Trung Tâm");
+    }
+
+    // TEST-22: A ward stored apart from the street is found without the map, as production addresses hold only the street.
+    /// <summary>"Kim Liên" matches restaurants whose address is "Phố Hoàng Cầu" and whose ward is "Phường Kim Liên".</summary>
+    [Fact]
+    public async Task LocateAsync_WardStoredApart_IsFoundWithoutTheMap()
+    {
+        // STEP-01: Build a catalog with street-only addresses and a ward field, and a map that must not be called.
+        var places = Enumerable.Range(0, 25).Select(_ => new AgentCatalogPlace("Thành phố Hà Nội", "Phố Lương Định Của", 21.0076m, 105.8348m, "Phường Kim Liên")).ToArray();
+        var catalog = new Mock<IAgentCatalogRepository>();
+        catalog.Setup(x => x.GetPublicPlacesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(places);
+        var resolver = new AgentPlaceResolver(catalog.Object, new Mock<IPlaceSearchService>(MockBehavior.Strict).Object);
+
+        // STEP-02: Locate day 1 at Kim Liên.
+        var trip = await resolver.LocateAsync(null, [new AgentLocateStop([1], "Kim Liên")], new AgentState { Province = "Thành phố Hà Nội" }, ["Thành phố Hà Nội"], default);
+
+        // STEP-03: Assert it was located at the restaurants of that ward.
+        trip.DayAreas.Single().Latitude.Should().Be(21.0076m);
+    }
+
+    // TEST-23: A street the model recognized is asked to the map as a street first, so a name starting like an administrative word is not read as a commune.
+    /// <summary>The map answers "Xã Đàn, Hà Nội" with communes, and "Phố Xã Đàn, Hà Nội" with the street.</summary>
+    [Fact]
+    public async Task LocateAsync_StreetKind_AsksTheMapForTheStreet()
+    {
+        // STEP-01: Mock the map: the plain name gives an unrelated business, the street form gives the street.
+        var search = new Mock<IPlaceSearchService>();
+        search.Setup(x => x.SearchAsync("Xã Đàn, Hà Nội", It.IsAny<decimal?>(), It.IsAny<decimal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new AgentPlaceCandidate("số 4 xã đan phượng", "Hà Nội", "poi", 21.08m, 105.66m)]);
+        search.Setup(x => x.SearchAsync("Phố Xã Đàn, Hà Nội", It.IsAny<decimal?>(), It.IsAny<decimal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new AgentPlaceCandidate("Phố Xã Đàn", "Phương Liên, Kim Liên, Hà Nội, Việt Nam", "street", 21.0125m, 105.8355m)]);
+
+        // STEP-02: Locate the street read as a street, and the same name with no kind.
+        var street = await Locate(Resolver(search.Object), "Hà Nội", "street", "Xã Đàn");
+        var plain = await Locate(Resolver(search.Object), "Hà Nội", null, "Xã Đàn");
+
+        // STEP-03: Assert only the street reading finds it.
+        street.DayAreas.Single().Latitude.Should().Be(21.0125m);
+        plain.Unresolved.Should().Equal("Xã Đàn");
+    }
+
+    // TEST-24: The full province name is dropped from the end of a place too, so "Cầu Giấy Hà Nội" in "Thành phố Hà Nội" is looked up as "Cầu Giấy".
+    /// <summary>Production names the province "Thành phố Hà Nội"; only the exact full spelling was dropped before.</summary>
+    [Fact]
+    public async Task LocateAsync_PlaceEndingWithShortProvince_IsFoundInFullProvince()
+    {
+        // STEP-01: Locate "Cầu Giấy Hà Nội" on a trip in "Thành phố Hà Nội", with no map service.
+        var trip = await Resolver(null).LocateAsync(null, [new AgentLocateStop([1], "Cầu Giấy Hà Nội")], new AgentState { Province = "Thành phố Hà Nội" }, ["Thành phố Hà Nội"], default);
+
+        // STEP-02: Assert it was located at Cầu Giấy.
+        trip.DayAreas.Single().Longitude.Should().Be(105.79m);
+    }
+
+    // TEST-25: A new place that is not found drops the earlier one, so the search is the whole province the note promises, not the old place in silence;
+    // a point picked by GPS is the user's own and stays.
+    /// <summary>Feedback 2026-11-25: moving to an area with no data kept returning the previous area's dishes.</summary>
+    [Theory]
+    [InlineData("pinned", false)]
+    [InlineData("gps", true)]
+    public async Task Apply_NewPlaceNotFound_DropsTheEarlierNamedPlace(string originMode, bool originKept)
+    {
+        // STEP-01: A trip around Cầu Giấy (named, or a GPS point there) with day 2 at Hoàn Kiếm.
+        var state = new AgentState { Province = "Hà Nội", NumDays = 2, OriginMode = originMode, OriginLatitude = 21.03m, OriginLongitude = 105.79m, RadiusKm = 3m,
+            OriginLabel = originMode == "pinned" ? "Cầu Giấy" : null, NamedAreaLabel = originMode == "pinned" ? "Cầu Giấy" : null,
+            DayAreas = [new AgentDayArea(2, "Hoàn Kiếm", 21.03m, 105.85m, 3m)] };
+
+        // STEP-02: The user moves day 2, then the whole trip, to places ANGI cannot locate.
+        var day = await Resolver(null).LocateAsync(null, [new AgentLocateStop([2], "abcde xyz")], state, Provinces, default);
+        var trip = await Resolver(null).LocateAsync(new AgentLocateStop(null, "abcde xyz"), [], state, Provinces, default);
+
+        // STEP-03: Assert day 2 lost its place and the trip lost the named area, but not the GPS point.
+        day.MissedDays.Should().Equal((short)2);
+        AgentPlaceResolver.Apply(state, day).DayAreas.Should().BeNull();
+        var moved = AgentPlaceResolver.Apply(state, trip);
+        trip.TripAreaMissed.Should().BeTrue();
+        moved.OriginMode.Should().Be(originKept ? "gps" : "none");
+        AgentScopedPlanning.Area(moved, 1).Should().Match<object?>(area => (area != null) == originKept);
+    }
+
+    /// <summary>Locates day 1 at a place read with the given kind.</summary>
+    private static Task<AgentTripPlaces> Locate(AgentPlaceResolver resolver, string? province, string? kind, string place) =>
+        resolver.LocateAsync(null, [new AgentLocateStop([1], place, kind)], new AgentState { Province = province }, Provinces, default);
 
     /// <summary>Builds a catalog of dense Hoàn Kiếm, Ba Đình and Cầu Giấy areas and a thin Hoàng Mai, with addresses in the real format.</summary>
     private static AgentPlaceResolver Resolver(IPlaceSearchService? search)

@@ -107,13 +107,17 @@ public static class AgentIntakePolicy
         foreach (var province in provinces)
         {
             var name = Plain(province);
-            if (name.Length > 0 && (text.Contains($" {name} ", StringComparison.Ordinal) ||
+            // The catalog name without its administrative prefix counts too: "Hà Nội" is "Thành phố Hà Nội" (replay of conversation 16 took it for a province without data).
+            if (name.Length > 0 && (text.Contains($" {name} ", StringComparison.Ordinal) || Bare(name) is var bare && bare != name && text.Contains($" {bare} ", StringComparison.Ordinal) ||
                 Aliases.Any(alias => $" {name} ".Contains($" {alias.Name} ", StringComparison.Ordinal) && text.Contains($" {alias.Alias} ", StringComparison.Ordinal))))
                 return province;
         }
         // STEP-03: Return null.
         return null;
     }
+
+    /// <summary>A plain province name without its administrative prefix ("thanh pho ha noi" gives "ha noi"); compares catalog names, never the user's wording.</summary>
+    internal static string Bare(string plain) => Regex.Replace(plain, "^(thanh pho|tinh|tp) ", "");
 
     internal static string Plain(string text)
     {

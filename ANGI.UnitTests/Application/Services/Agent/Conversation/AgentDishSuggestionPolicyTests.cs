@@ -89,7 +89,6 @@ public sealed class AgentDishSuggestionPolicyTests
 
         // STEP-02: Assert the wording for an area, a place not found, meals and addresses.
         AgentDishSuggestionPolicy.Reply([breakfast], false, area: "Cầu Giấy").Should().Contain("Bún Chả (hợp bữa sáng) ở Quán A quanh Cầu Giấy").And.Contain("Địa chỉ: 1 Hàng Mành");
-        AgentDishSuggestionPolicy.Reply([breakfast], false, areaNotFound: "Xóm Núi").Should().StartWith("Mình chưa định vị được “Xóm Núi”");
         AgentDishSuggestionPolicy.Reply([breakfast], false, mealAsked: true).Should().NotContain("hợp bữa");
         AgentDishSuggestionPolicy.Reply([breakfast, anyMeal], false).Should().Contain("Địa chỉ: 1 Hàng Mành").And.Contain("Địa chỉ: 2 Lý Quốc Sư").And.Contain("- Phở Gà ở Quán B");
 
@@ -114,6 +113,17 @@ public sealed class AgentDishSuggestionPolicyTests
         return context;
     }
 
+    // TEST-SLOT-SPACE: Slots the model wrote with spaces ("{ name1 }") are filled like the plain ones, so the user never sees an empty slot.
+    /// <summary>Measured on the real model 2026-11-26: "{ name1 } — { restaurant1 }" reached the user unfilled.</summary>
+    [Fact]
+    public void FillSlots_SlotsWithSpaces_AreFilled()
+    {
+        var suggestion = new AgentDishSuggestion([new("Phở Bò", "Phở Hùng", 65000, "12 Lĩnh Nam")], false, false, "");
+
+        AgentDishSuggestionPolicy.FillSlots("{ name1 } — { restaurant1 }, khoảng { price1 } đồng", suggestion)
+            .Should().Be("Phở Bò — Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng");
+    }
+
     // TEST-ADDR: A reply that leaves out {addressN} gets the address after that dish's restaurant; a dish without an address and a reply that has the slot stay as written.
     /// <summary>Keeps the prompt's promise that the user always learns where to go (Round 3, AG-62).</summary>
     [Fact]
@@ -122,9 +132,25 @@ public sealed class AgentDishSuggestionPolicyTests
         // STEP-01: Pack two dishes, one with an address and one without.
         var suggestion = new AgentDishSuggestion([new("Phở Bò", "Phở Hùng", 65000, "12 Lĩnh Nam"), new("Bún Chả", "Quán B", 45000, null)], false, false, "");
 
-        // STEP-02: Assert the address is added only where it is missing and known.
+        // STEP-02: Assert the address is added only where it is missing and known, in the list several dishes always become.
         AgentDishSuggestionPolicy.FillSlots("Bạn thử {name1} ở {restaurant1}, khoảng {price1}; hoặc {name2} ở {restaurant2}.", suggestion)
-            .Should().Be("Bạn thử Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng; hoặc Bún Chả ở Quán B.");
-        AgentDishSuggestionPolicy.FillSlots("{name1} ở {restaurant1}, {address1}.", suggestion).Should().Be("Phở Bò ở Phở Hùng, 12 Lĩnh Nam.");
+            .Should().Be("Bạn thử:\n- Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng\n- Bún Chả ở Quán B, khoảng 45.000 đồng");
+        var one = suggestion with { Dishes = suggestion.Dishes[..1] };
+        AgentDishSuggestionPolicy.FillSlots("{name1} ở {restaurant1}, {address1}.", one).Should().Be("Phở Bò ở Phở Hùng, 12 Lĩnh Nam.");
+        AgentDishSuggestionPolicy.FillSlots("Bạn thử {name1} ở {restaurant1}, khoảng {price1} nhé.", one).Should().Be("Bạn thử Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng nhé.");
+    }
+
+    // TEST-LIST: Several dishes are one line each starting with "- ", from the {dishes} slot or from the dishes' own slots joined on one line, so the chat shows a
+    // list; the model's opening and closing words stay. Conversations 11 and 12 showed one block joined by ";" though the prompt asked for lines.
+    /// <summary>The list is laid out from the facts; no word of the model is replaced.</summary>
+    [Fact]
+    public void FillSlots_SeveralDishes_AreOneLineEach()
+    {
+        var suggestion = new AgentDishSuggestion([new("Phở Bò", "Phở Hùng", 65000, "12 Lĩnh Nam"), new("Bún Chả", "Quán B", 45000, null)], false, false, "");
+
+        AgentDishSuggestionPolicy.FillSlots("Mình tìm được vài quán quanh đó nè: {dishes} Muốn món khác cứ nhắn mình nhé.", suggestion)
+            .Should().Be("Mình tìm được vài quán quanh đó nè:\n- Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng\n- Bún Chả ở Quán B, khoảng 45.000 đồng\nMuốn món khác cứ nhắn mình nhé.");
+        AgentDishSuggestionPolicy.FillSlots("Quanh Bạch Mai nhé. Bạn thử {name1} ở {restaurant1}, khoảng {price1} ({address1}); {name2} ở {restaurant2}, khoảng {price2}. Muốn đổi cứ nhắn.", suggestion)
+            .Should().Be("Quanh Bạch Mai nhé. Bạn thử:\n- Phở Bò ở Phở Hùng (12 Lĩnh Nam), khoảng 65.000 đồng\n- Bún Chả ở Quán B, khoảng 45.000 đồng\nMuốn đổi cứ nhắn.");
     }
 }

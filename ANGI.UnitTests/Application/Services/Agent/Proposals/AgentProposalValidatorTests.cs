@@ -515,6 +515,26 @@ public sealed class AgentProposalValidatorTests
         return (new AgentSnapshot(state, items, grants.ToArray(), Scope: new()), grants, catalog);
     }
 
+    // TEST-20b: A dish the user put on a meal is not flagged as unfit for it, even when its tags list another meal; a dish the backend picked still is.
+    /// <summary>"Iced tea vào bữa sáng" showed "không phù hợp bữa đã chọn" on the card although the user chose that meal (conversation 16).</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ValidateAsync_DishTheUserPutOnAMeal_IsNotFlaggedAsUnfit(bool asked, bool flagged)
+    {
+        // STEP-01: A drink tagged only for snacks, put on breakfast, with or without a meal request naming it.
+        var drink = AgentTestData.Dish(335); drink.Name = "Iced tea";
+        drink.DishTags.Add(new() { TagId = 4, Tag = new() { Id = 4, TagType = ANGI.Domain.Enums.TagType.MealTime, Code = "snack", Name = "Ăn vặt" } });
+        var fixture = AgentTestData.Validator(drink);
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["breakfast"], MealRequests = asked ? [new(1, "breakfast", "Iced tea", null, [])] : [] };
+        var grant = new AgentCandidateGrant(1, "breakfast", [335], Guid.NewGuid(), state);
+        var draft = new AgentSnapshot(state, [AgentTestData.Item(335, "a", 1, "breakfast")], [grant], Scope: new(1, "breakfast"));
+
+        // STEP-02: Assert the meal-fit error appears only for a dish nobody asked for at that meal.
+        var result = await fixture.Validator.ValidateAsync(draft, null, false, false, default, [grant]);
+        result.Validation.Errors.Any(error => error.Contains("không phù hợp bữa đã chọn", StringComparison.Ordinal)).Should().Be(flagged, string.Join(" / ", result.Validation.Errors));
+    }
+
     // TEST-20: Only errors saying a dish was made up name it as fabricated; covers a dish not in the catalog, one not issued, one outside the trip's area or province,
     // a stale grant, and the soft errors (budget, repeat, meal fit, a missing meal) that stay warnings.
     /// <summary>The orchestrator blocks a made-up dish and lets the model correct it once; soft rule errors keep showing the draft (user decision 2026-11-12).</summary>
@@ -570,5 +590,7 @@ public sealed class AgentProposalValidatorTests
         // STEP-02: Assert the kept dish is asked to be refreshed only when the meal also lost a dish.
         var result = await fixture.Validator.ValidateAsync(draft, source, false, false, default, [fresh]);
         result.Validation.Errors.Any(error => error.StartsWith("Món 1 cần nguồn ứng viên mới", StringComparison.Ordinal)).Should().Be(refreshed, string.Join(" / ", result.Validation.Errors));
+        // The kept dish is not what the request names, yet it is no fault when the meal only gained a dish (conversation 13 showed "Món 956 không đáp ứng…").
+        result.Validation.Errors.Any(error => error.StartsWith("Món 1 không đáp ứng", StringComparison.Ordinal)).Should().Be(refreshed, string.Join(" / ", result.Validation.Errors));
     }
 }
