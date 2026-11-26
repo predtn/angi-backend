@@ -88,7 +88,7 @@ public sealed class OpenAiAgentLlmServiceTests
         result!.Output!.Action.Should().Be("answer"); result.Tokens.Should().Be(123);
         // STEP-05: Read sent from the response; assert sent.RootElement.tools.length is 5, RootElement.response_format.json_schema.strict is true and 2 more.
         using var sent = JsonDocument.Parse(body!);
-        sent.RootElement.GetProperty("tools").GetArrayLength().Should().Be(6);
+        sent.RootElement.GetProperty("tools").GetArrayLength().Should().Be(7);
         sent.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("strict").GetBoolean().Should().BeTrue();
         sent.RootElement.GetProperty("max_completion_tokens").GetInt32().Should().Be(16000);
         sent.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
@@ -139,7 +139,7 @@ public sealed class OpenAiAgentLlmServiceTests
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             body.RootElement.GetProperty("model").GetString().Should().Be("gpt-6-luna");
             body.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("none");
-            body.RootElement.GetProperty("tools").GetArrayLength().Should().Be(6);
+            body.RootElement.GetProperty("tools").GetArrayLength().Should().Be(7);
             return Response(new { choices = new[] { new { finish_reason = "stop", message = new { content = Output() } } } });
         });
         // STEP-02: Get result from Service().RunAsync.

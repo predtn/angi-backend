@@ -86,7 +86,7 @@ public sealed class AgentCatalogRepository(ANGIContext context) : IAgentCatalogR
     /// <inheritdoc />
     public async Task<AgentCatalogPlace[]> GetPublicPlacesAsync(CancellationToken ct) =>
         await Public().Where(x => x.ProvinceName != null)
-            .Select(x => new AgentCatalogPlace(x.ProvinceName!, x.AddressLine, x.Latitude, x.Longitude)).ToArrayAsync(ct);
+            .Select(x => new AgentCatalogPlace(x.ProvinceName!, x.AddressLine, x.Latitude, x.Longitude, x.Ward)).ToArrayAsync(ct);
 
     /// <inheritdoc />
     public async Task<string[]> GetDishNamesAsync(CancellationToken ct) =>

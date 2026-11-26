@@ -177,13 +177,13 @@ public sealed class AgentScopedPlanningTests
         var fixture = AgentTestData.Validator(); var catalog = new Mock<IAgentCatalogRepository>();
         catalog.Setup(x => x.SearchAsync("restaurant", "Quán A", "Da Nang", 21, It.IsAny<CancellationToken>()))
             .ReturnsAsync([new(11, "Quán A", 11, "Quán A", "Da Nang", "A", true)]);
-        catalog.Setup(x => x.SearchAsync("dish", "Món X", "Da Nang", 21, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new(7, "Món X", 11, "Quán A", "Da Nang", "A", true), new(8, "Món X", 12, "Quán B", "Da Nang", "B", true)]);
+        catalog.Setup(x => x.SearchAsync("dish", "Phở X", "Da Nang", 21, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new(7, "Phở X", 11, "Quán A", "Da Nang", "A", true), new(8, "Phở X", 12, "Quán B", "Da Nang", "B", true)]);
         DishCandidateFilter? filter = null;
         fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>()))
             .Callback<DishCandidateFilter, int, CancellationToken>((value, _, _) => filter = value).ReturnsAsync(Array.Empty<int>());
         // STEP-03: Get context from AgentTestData.Context, set context.Request.Content to a test text, set context.State to a copy of context.State and 1 more.
-        var context = AgentTestData.Context(); context.Request.Content = "mọi bữa đều ăn Món X"; context.State = context.State with { MealRequests = [new(null, null, "Món X", "Quán A", [])] };
+        var context = AgentTestData.Context(); context.Request.Content = "mọi bữa đều ăn Phở X"; context.State = context.State with { MealRequests = [new(null, null, "Phở X", "Quán A", [])] };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: catalog.Object);
         // STEP-04: Run tools.ExecuteAsync with context.
         await tools.ExecuteAsync(context, Recommend(new(TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [])), default);

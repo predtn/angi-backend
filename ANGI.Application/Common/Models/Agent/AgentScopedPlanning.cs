@@ -8,8 +8,13 @@ namespace ANGI.Application.Common.Models.Agent;
 public sealed record AgentTasteOverride(short DayNumber, string? MealSlot, AgentTasteTarget[] Targets);
 
 /// <summary>Catalog selectors for a trip, day or meal; not additional taste dimensions.</summary>
+/// <param name="DishId">
+/// The exact dish of a suggestion the user picked from offeredDishes, so the plan gets that dish at that restaurant rather than another one of the same name;
+/// the backend accepts only an id the chat's suggestions showed. Left out of the JSON when null, so fingerprints of earlier drafts stay the same.
+/// </param>
 public sealed record AgentMealRequest(short? DayNumber, string? MealSlot, string? DishName,
-    string? RestaurantName, short[] TagIds, bool DifferentFromPlan = false, long? RestaurantId = null);
+    string? RestaurantName, short[] TagIds, bool DifferentFromPlan = false, long? RestaurantId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] int? DishId = null);
 
 /// <summary>Computes inheritance and provenance without mutating a profile or unrelated scope.</summary>
 public static class AgentScopedPlanning
@@ -29,10 +34,12 @@ public static class AgentScopedPlanning
     {
         var applicable = state.MealRequests.Where(x => (!x.DayNumber.HasValue || x.DayNumber == day) &&
             (x.MealSlot is null || x.MealSlot == meal)).OrderBy(x => x.DayNumber.HasValue).ThenBy(x => x.MealSlot is not null).ToArray();
-        return new(day, meal, applicable.LastOrDefault(x => x.DishName is not null)?.DishName,
+        // A picked dish's id belongs to the request that names it, so it never joins another request's name.
+        var named = applicable.LastOrDefault(x => x.DishName is not null);
+        return new(day, meal, named?.DishName,
             applicable.LastOrDefault(x => x.RestaurantName is not null)?.RestaurantName,
             applicable.SelectMany(x => x.TagIds).Distinct().Order().ToArray(), applicable.Any(x => x.DifferentFromPlan),
-            applicable.LastOrDefault(x => x.RestaurantName is not null)?.RestaurantId);
+            applicable.LastOrDefault(x => x.RestaurantName is not null)?.RestaurantId, named?.DishId);
     }
 
     /// <summary>Identifies effective ranking inputs without unrelated scope or timestamp metadata.</summary>
@@ -43,21 +50,51 @@ public static class AgentScopedPlanning
         var vector = Vector(state, day, meal);
         var named = request with { DishName = Normalize(request.DishName), RestaurantName = Normalize(request.RestaurantName) };
         // Ngày có nơi đến riêng được xếp hạng riêng. Ngày không có thì giữ nguyên chuỗi băm cũ để bản nháp đã lưu trước đây vẫn xác nhận được.
+        // Vùng nhiều nơi thêm các vòng tròn vào chuỗi băm; ngày một nơi giữ nguyên chuỗi cũ.
         var json = state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
-            ? AgentJson.Write(new { targets, vector, request = named, area = new { place.Latitude, place.Longitude, place.RadiusKm } })
+            ? place.Zone is { Length: > 0 } zone
+                ? AgentJson.Write(new { targets, vector, request = named, area = new { place.Latitude, place.Longitude, place.RadiusKm, zone } })
+                : AgentJson.Write(new { targets, vector, request = named, area = new { place.Latitude, place.Longitude, place.RadiusKm } })
             : AgentJson.Write(new { targets, vector, request = named });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
     /// <summary>The circle a day's dishes must fall in: the day's own place when the itinerary names one, otherwise the whole trip's origin and radius.</summary>
+    /// <remarks>A zone read as several places is every one of its circles.</remarks>
     public static NearbyArea? Area(AgentState state, short day) => state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
-        ? new(place.Latitude, place.Longitude, place.RadiusKm)
-        : state.RadiusKm is { } radius && state.OriginLatitude is { } latitude && state.OriginLongitude is { } longitude ? new(latitude, longitude, radius) : null;
+        ? Circles(place.Zone, place.Latitude, place.Longitude, place.RadiusKm)
+        : state.RadiusKm is { } radius && state.OriginLatitude is { } latitude && state.OriginLongitude is { } longitude
+            ? Circles(state.OriginMode == "pinned" ? state.OriginZone : null, latitude, longitude, radius) : null;
+
+    /// <summary>
+    /// The circle of a point, with the zone's other circles when the zone still starts at this point; a zone left behind by a later origin (a point on
+    /// the map, GPS) is ignored. Each place keeps its own radius until the radius changes, which then applies to every place of the zone.
+    /// </summary>
+    public static NearbyArea Circles(AgentZoneCircle[]? zone, decimal latitude, decimal longitude, decimal radiusKm)
+    {
+        if (zone is not { Length: > 1 } || zone[0].Latitude != latitude || zone[0].Longitude != longitude) return new(latitude, longitude, radiusKm);
+        var area = new NearbyArea(latitude, longitude, zone[0].RadiusKm) { Also = zone[1..].Select(circle => new NearbyArea(circle.Latitude, circle.Longitude, circle.RadiusKm)).ToArray() };
+        return radiusKm == zone[0].RadiusKm ? area : area.WithRadius(radiusKm);
+    }
+
+    /// <summary>True when the whole trip searches a zone of several places rather than around one point.</summary>
+    public static bool HasZoneOrigin(AgentState state) => state.OriginMode == "pinned" && state.RadiusKm is { } radius && state.OriginLatitude is { } latitude &&
+        state.OriginLongitude is { } longitude && Circles(state.OriginZone, latitude, longitude, radius).Also is { Length: > 0 };
+
+    /// <summary>
+    /// Where a day starts: the place the user named for that day, otherwise their current location or the point they pinned on the map; null when the
+    /// trip searches the whole province, and null for a zone, whose first place is no more the start than any other, so its meals are not pulled there.
+    /// </summary>
+    public static (double Latitude, double Longitude)? StartPoint(AgentState state, short day) =>
+        state.DayAreas?.FirstOrDefault(area => area.DayNumber == day) is { } place ? place.Zone is { Length: > 1 } ? null : ((double)place.Latitude, (double)place.Longitude)
+        : HasZoneOrigin(state) ? null
+        : state.OriginMode is "gps" or "pinned" && state.OriginLatitude is { } latitude && state.OriginLongitude is { } longitude ? ((double)latitude, (double)longitude)
+        : null;
 
     /// <summary>The circle one meal's dish must fall in: its day's circle, or the wider one when that meal had nothing nearer.</summary>
     public static NearbyArea? MealArea(AgentState state, short day, string meal) =>
         Area(state, day) is { } area && state.WidenedMeals?.FirstOrDefault(x => x.DayNumber == day && x.MealSlot == meal) is { } widened
-            ? area with { RadiusKm = widened.RadiusKm } : Area(state, day);
+            ? area.WithRadius(widened.RadiusKm) : Area(state, day);
 
     /// <summary>Records how far a meal's search reached on these days; a null radius means the meal found dishes without widening.</summary>
     public static AgentState WithWidenedMeal(AgentState state, IEnumerable<short> days, string meal, decimal? radius)
@@ -73,7 +110,7 @@ public static class AgentScopedPlanning
     /// and for an origin from GPS or the map, whose search order stays as it was.
     /// </summary>
     public static NearbyArea? NamedArea(AgentState state, short day) => state.DayAreas?.FirstOrDefault(x => x.DayNumber == day) is { } place
-        ? new(place.Latitude, place.Longitude, place.RadiusKm)
+        ? Circles(place.Zone, place.Latitude, place.Longitude, place.RadiusKm)
         : state.NamedAreaLabel is not null && state.NamedAreaLabel == state.OriginLabel ? Area(state, day) : null;
 
     /// <summary>Detects affected existing meals, preserving explicit future-only taste changes.</summary>
@@ -179,10 +216,21 @@ public static class AgentScopedPlanning
     public static bool FitsName(string requested, string dishName, bool ignoreAccents = true)
     {
         if (Normalize(requested) == Normalize(dishName)) return true;
+        requested = DishWords(requested);
         var wanted = Words(requested);
+        if (wanted.Trim().Length == 0) return false;
+        // A short word with its accents ("gà", "bò", "cá") is a kind of dish the user means, matched as a whole word: "thêm món gà" was refused as too broad and
+        // sent the user a list of unfiltered catalog dishes to pick from (conversation 15). Without accents a short word is too loose ("ca" is in "cà phê").
+        if (Words(dishName).Contains(wanted, StringComparison.Ordinal)) return true;
         if (wanted.Trim().Length < 3) return false;
-        return Words(dishName).Contains(wanted, StringComparison.Ordinal) ||
-            ignoreAccents && Words(WithoutAccents(dishName)).Contains(Words(WithoutAccents(requested)), StringComparison.Ordinal);
+        return ignoreAccents && Words(WithoutAccents(dishName)).Contains(Words(WithoutAccents(requested)), StringComparison.Ordinal);
+    }
+
+    /// <summary>A dish name without a leading "món", which only says "a dish" ("món bò" is the kind "bò"); only "món" is dropped, since "đồ uống" without "đồ" means something else.</summary>
+    public static string DishWords(string name)
+    {
+        var trimmed = name.Trim();
+        return trimmed.StartsWith("món ", StringComparison.OrdinalIgnoreCase) && trimmed[4..].Trim() is { Length: > 0 } rest ? rest : trimmed;
     }
 
     private static string Words(string text) => " " + string.Join(' ', System.Text.RegularExpressions.Regex.Split(text.ToLowerInvariant(), @"[^\p{L}\p{N}]+")

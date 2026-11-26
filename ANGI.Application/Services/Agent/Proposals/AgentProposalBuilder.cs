@@ -32,6 +32,11 @@ public sealed class AgentProposalBuilder
         // STEP-04: When output.Action is "create_proposal", run the branch below.
         if (output.Action == "create_proposal")
         {
+            // STEP-04a: With no plan yet, the first draft is the whole trip: a draft of one meal of a three-day trip was shown as "the plan" (conversation 12).
+            // A one-day trip may name its day. The model is sent back to fetch the whole trip, with the dishes the user named in mealRequests.
+            if (original.Length == 0 && (output.Scope.MealSlot is not null || output.Scope.DayNumber.HasValue && context.State.NumDays > 1))
+                throw Invalid("Chưa có lịch nào: lịch đầu tiên phải lập cho cả chuyến (scope dayNumber=null, mealSlot=null) với đủ các bữa. Gọi get_recommendation scope=full, " +
+                    "giữ các món người dùng nêu trong mealRequests, rồi trả create_proposal cho cả chuyến.");
             // STEP-05: Throw the error from Invalid when context.AlternativeScopes.Count > 0, context.Request.Command is not "alternative" and more.
             // A complete scoped selection is a payload shape, not permission to discard the current trip.
             // The backend merges it into the owned source and derives the actual delta below.

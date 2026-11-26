@@ -134,7 +134,7 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
     /// <summary>Reprices only from the backend and returns blocking errors separately from uncertainty warnings.</summary>
     public async Task<(AgentSnapshot Snapshot, AgentValidation Validation)> ValidateAsync(AgentSnapshot snapshot,
         AgentSnapshot? source, bool confirm, bool calculateRoutes, CancellationToken ct,
-        IReadOnlyList<AgentCandidateGrant>? freshGrants = null, IReadOnlyList<AgentCandidateGrant>? spareGrants = null)
+        IReadOnlyList<AgentCandidateGrant>? freshGrants = null, IReadOnlyList<AgentCandidateGrant>? spareGrants = null, IReadOnlyCollection<AgentItem>? placed = null)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -187,10 +187,15 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
             if (item.SourceItemId.HasValue && (!unchanged || item.SourceItemId != kept?.SourceItemId)) errors.Add("Không được gắn ID item nguồn cho món khác.");
             var tagSet = dish.DishTags.Select(x => x.TagId).ToHashSet();
             var requested = AgentScopedPlanning.Request(state, item.DayNumber, item.MealSlot);
-            if (requested.DishName is not null && !AgentScopedPlanning.FitsName(requested.DishName, dish.Name) ||
+            // A dish kept in a meal that only gained a dish is not what the meal request names: the request names the added dish ("thêm buffet vào ngày 2",
+            // conversation 13 showed "Món 956 không đáp ứng…" on the card for the lunch that was kept).
+            var keptBesideAdded = unchanged && OnlyGained(snapshot, original, item);
+            // A dish edit_plan put on this meal was found for that op, not for the meal's earlier request; it sits next to the dish that request named.
+            var placedHere = placed?.Any(put => put.DayNumber == item.DayNumber && put.MealSlot == item.MealSlot && put.DishId == item.DishId) == true;
+            if (!keptBesideAdded && !placedHere && (requested.DishName is not null && !AgentScopedPlanning.FitsName(requested.DishName, dish.Name) ||
                 requested.RestaurantName is not null && AgentScopedPlanning.Normalize(requested.RestaurantName) != AgentScopedPlanning.Normalize(dish.Restaurant.Name) ||
                 requested.RestaurantId.HasValue && requested.RestaurantId != dish.RestaurantId ||
-                !AgentScopedPlanning.FitsTags(tagSet, requested.TagIds, allTags))
+                !AgentScopedPlanning.FitsTags(tagSet, requested.TagIds, allTags)))
                 errors.Add($"Món {item.DishId} không đáp ứng món/quán hoặc tag được yêu cầu cho ngày/bữa.");
             if (!confirm && requested.DifferentFromPlan && source?.Items.Any(old => old.DishId == item.DishId) == true &&
                 (!unchanged || refreshed)) errors.Add($"Món {item.DishId} đã có trong lịch nguồn; cần phương án khác.");
@@ -212,7 +217,11 @@ public sealed class AgentProposalValidator(IDishRepository dishes, ITagRepositor
                     AgentScopedPlanning.MealArea(applied, item.DayNumber, item.MealSlot) is { } issued && !issued.Contains(dish.Restaurant.Latitude, dish.Restaurant.Longitude))
                     errors.Add($"Món {item.DishId} không còn đáp ứng điều kiện lúc lấy ứng viên.");
             }
-            if (!FitsMeal(dish, item.MealSlot)) errors.Add($"Món {item.DishId} không phù hợp bữa đã chọn.");
+            // A dish the user put on this meal goes there even when its tags list another meal (user decision 2026-11-11): only dishes the backend picked are
+            // checked, so "iced tea vào bữa sáng" no longer shows "không phù hợp bữa đã chọn" on the card (conversation 16). A dish edit_plan put where the user said is theirs too.
+            var asked = requested.DishId == item.DishId || requested.DishName is not null && AgentScopedPlanning.FitsName(requested.DishName, dish.Name) ||
+                placedHere;
+            if (!asked && !FitsMeal(dish, item.MealSlot)) errors.Add($"Món {item.DishId} không phù hợp bữa đã chọn.");
             // Checked on the trip day's weekday once the start date is known, otherwise on any day of the week; a restaurant without hours passes.
             if (!MealHours.IsOpen([.. dish.Restaurant.BusinessHours], item.MealSlot, MealHours.Weekdays(state.StartDate, [item.DayNumber])))
                 errors.Add($"Món {item.DishId} {ClosedMarker} {item.MealSlot} ngày {item.DayNumber} theo giờ mở cửa quán đã khai.");

@@ -250,8 +250,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
             context.History.Add(new("user", "ngân sách 500000 đồng"));
             if (context.Exchanges.Count == 0)
                 return new(Enumerable.Range(1, 3).Select(day => new AgentToolCall($"day-{day}", "get_recommendation",
-                    JsonSerializer.SerializeToElement(new AgentRecommendationInput(State: day == 1 ? state : null, Scope: "day", DayNumber: (short)day,
-                        TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12), AgentJson.Options))).ToArray(), null);
+                    ModelArgs(new AgentRecommendationInput(State: day == 1 ? state : null, Scope: "day", DayNumber: (short)day,
+                        TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)))).ToArray(), null);
             var items = new List<AgentItem>();
             for (short day = 1; day <= 3; day++)
             {
@@ -311,8 +311,8 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
                 var state = recovering ? initialState with { TasteOverrides = [new(1, null, [new("sweet", .5, "ngọt vừa")])],
                     MealRequests = [new(2, null, null, null, [drinkTag])] } : initialState;
                 return new(Enumerable.Range(1, 3).Select(day => new AgentToolCall($"day-{day}", "get_recommendation",
-                    JsonSerializer.SerializeToElement(new AgentRecommendationInput(State: day == 1 ? state : null,
-                        Scope: "day", DayNumber: (short)day, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12), AgentJson.Options))).ToArray(), null);
+                    ModelArgs(new AgentRecommendationInput(State: day == 1 ? state : null,
+                        Scope: "day", DayNumber: (short)day, TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [], TopK: 12)))).ToArray(), null);
             }
             var items = new List<AgentItem>();
             for (short day = 1; day <= 3; day++)
@@ -364,10 +364,10 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
         // STEP-01: Get scenario from SetupAsync, derive host from scenario.Host, derive client from scenario.Client and set scenario.Llm.Override to a test condition.
         var scenario = await SetupAsync(); using var host = scenario.Host; using var client = scenario.Client;
         scenario.Llm.Override = context => context.Exchanges.Count == 0
-            ? new([new("named", "get_recommendation", JsonSerializer.SerializeToElement(new AgentRecommendationInput(
+            ? new([new("named", "get_recommendation", ModelArgs(new AgentRecommendationInput(
                 State: new() { Province = "Ho Chi Minh City", NumDays = 1, StartDate = TripStart, BudgetAmount = 500000, BudgetQuote = "500000 đồng",
                     MealRequests = [new(null, null, "Món tuyệt đối không có trong catalog", null, [])] },
-                TagIds: [], ExcludeTagIds: [], ExcludeDishIds: []), AgentJson.Options))], null)
+                TagIds: [], ExcludeTagIds: [], ExcludeDishIds: [])))], null)
             : new([], new AgentOutput { Action = "clarify", Reply = "Mình chưa tìm thấy món này trên ANGI. Bạn muốn chọn món khác không?", Clarification = "catalog_choice" });
         // STEP-02: Obtain conversation through OpenAsync and result through SendPromptAsync; assert result.Proposal is null and result.Reply is the model's question as written.
         var conversation = await OpenAsync(client);
@@ -2357,6 +2357,17 @@ public sealed class AgentConversationsHttpTests(PostgresApiFactory factory) : IC
     /// <summary>Confirms a displayed proposal and reads the durable commit result.</summary>
     private static async Task<AgentCommitDto> ConfirmAsync(HttpClient client, long id, ConfirmAgentProposalRequestDto request)
     { using var response = await client.PostAsJsonAsync($"{Path}/{id}/confirm", request); return await DataAsync<AgentCommitDto>(response); }
+    /// <summary>
+    /// Serializes get_recommendation arguments as the model sends them under the strict schema: a meal request's dishId is left out of stored JSON when
+    /// null (saved drafts keep their fingerprints), but the model always sends it, so it is added back here.
+    /// </summary>
+    private static JsonElement ModelArgs(AgentRecommendationInput input)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(input, AgentJson.Options))!;
+        foreach (var request in node["state"]?["mealRequests"]?.AsArray() ?? [])
+            if (request is System.Text.Json.Nodes.JsonObject entry && !entry.ContainsKey("dishId")) entry["dishId"] = null;
+        return JsonSerializer.SerializeToElement(node, AgentJson.Options);
+    }
     /// <summary>Reports failure response details before decoding a successful envelope.</summary>
     private static async Task<T> DataAsync<T>(HttpResponseMessage response)
     {

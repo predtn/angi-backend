@@ -21,7 +21,7 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         var state = request.ConfirmedState is { } confirmed
             ? confirmed with { SourceRoadmapUpdatedAt = stored.SourceRoadmapUpdatedAt, HistoryStartSequence = stored.HistoryStartSequence, TranscriptStartSequence = stored.TranscriptStartSequence,
                 Preferences = stored.Preferences, PendingPlanningRequest = stored.PendingPlanningRequest, PendingSave = null, DishOffered = null, PlanningIntake = stored.PlanningIntake,
-                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, WidenedMeals = stored.WidenedMeals,
+                DayAreas = stored.DayAreas, PendingDayArea = stored.PendingDayArea, NamedAreaLabel = stored.NamedAreaLabel, OriginZone = stored.OriginZone, WidenedMeals = stored.WidenedMeals,
                 OfferedDishes = stored.OfferedDishes, CatalogChoices = stored.CatalogChoices, BudgetOffer = stored.BudgetOffer, LastSuggestion = stored.LastSuggestion, OfferedLists = stored.OfferedLists }
             : stored;
         // Roadmap đã gắn có thể bị xóa hay sửa tay ở trang lịch trong lúc chat còn bản nháp. Lượt này vẫn đi qua model thay vì trả 404/409
@@ -71,6 +71,9 @@ public sealed class AgentContextBuilder(IAgentRepository repository, IRoadmapRep
         // STEP-01: Prepare current through StateFromRoadmap, retainGps, latitude, longitude and 1 more.
         var current = StateFromRoadmap(roadmap);
         var retainGps = current.OriginMode == "gps" && state.OriginMode == "gps";
+        // A roadmap cannot hold a zone, so it was saved with no origin: that empty origin keeps the conversation's zone. A pin set on the roadmap page replaces it.
+        var retainZone = current.OriginMode == "none" && AgentScopedPlanning.HasZoneOrigin(state);
+        if (retainZone) current = current with { OriginMode = state.OriginMode, OriginLatitude = state.OriginLatitude, OriginLongitude = state.OriginLongitude, OriginLabel = state.OriginLabel };
         var latitude = retainGps ? state.OriginLatitude : current.OriginLatitude;
         var longitude = retainGps ? state.OriginLongitude : current.OriginLongitude;
         var focus = state.FocusDay <= current.NumDays ? state.FocusDay : null;
