@@ -598,7 +598,7 @@ public sealed class OpenAiAgentLlmServiceTests
             messages[0].GetProperty("content").GetString().Should().Contain("Take these steps in this order").And.Contain("A province alone means the whole province").And.Contain("plan at once, with no question about taste").And.NotContain("clarification=preferences")
                 .And.Contain("When budgetAmount=null, say plainly that the plan has no budget").And.Contain("Call locate_places once").And.Contain("Dùng vị trí hiện tại").And.Contain("catalogProvinces")
                 .And.Contain("gợi ý code giúp tôi trang giao diện").And.Contain("tôi muốn ăn ngọt").And.Contain("nhà tôi ở Cầu Giấy").And.Contain("Mention a plan only when hasPlan=true")
-                .And.NotContain("clarification=place_scope").And.Contain("budgetFits=false").And.Contain("whether it is per day or for the whole trip")
+                .And.NotContain("clarification=place_scope").And.Contain("budgetFits=false").And.Contain("read in the unit the conversation last used for the budget")
                 .And.NotContain("because the backend asks for them when the user saves");
             using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("hasPlan").GetBoolean().Should().BeFalse();
@@ -648,7 +648,7 @@ public sealed class OpenAiAgentLlmServiceTests
             var messages = body.RootElement.GetProperty("messages");
             messages[0].GetProperty("content").GetString().Should().Contain("With planMatchesTrip=false the plan was made before the trip values changed, so nothing is saved")
                 .And.Contain("With saveNeedsStartDate=true nothing is saved yet either: ask which day the trip starts")
-                .And.Contain("is ambiguous: ask once, with clarification=budget, whether it is per day or for the whole trip")
+                .And.Contain("applied now and stated in the reply; never ask about it")
                 .And.Contain("never ask them to confirm a change they clearly stated").And.NotContain("the backend stages the change and asks");
             using var data = JsonDocument.Parse(messages[3].GetProperty("content").GetString()!);
             data.RootElement.GetProperty("planMatchesTrip").GetBoolean().Should().Be(matches);

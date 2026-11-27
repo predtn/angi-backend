@@ -259,10 +259,11 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     output = output with { Action = "patch_proposal", Clarification = null, State = null, Items = [], EditMeals = [], Scope = new AgentScope(),
                         BaseProposalVersion = context.ProposalVersion, Changes = [.. prepared] };
                 }
-                // Place, duration and budget are known and no plan exists, yet the model asks for trip details again, mostly the start date
-                // (AI-D04, AI-D05: about a third of V3.x runs in the 2026-11-19 and 2026-11-22 evaluations stopped at such a question).
-                // The start date is asked when saving, so the question is dropped: after reading, the turn plans; after a tool result, the model is asked once for the plan.
-                if (output is { Action: "clarify", Clarification: "trip_details" } && !AgentIntakePolicy.HasPlan(context) && TripKnown(context, output.State))
+                // Place and duration are known and no plan exists, yet the model asks for trip details again, mostly the start date or the budget
+                // (AI-D04, AI-D05: about a third of V3.x runs in the 2026-11-19 and 2026-11-22 evaluations stopped at such a question; conversation 32 asked
+                // the budget three times). The start date is asked when saving and a missing budget plans with none, so the question is dropped:
+                // after reading, the turn plans; after a tool result, the model is asked once for the plan.
+                if (output is { Action: "clarify", Clarification: "trip_details" or "budget" } && !AgentIntakePolicy.HasPlan(context) && TripKnown(context, output.State))
                 {
                     telemetry.Record("trip_details_known", context.ConversationId, context.TurnId, context.AttemptId, new { phase = phase.ToString() });
                     if (phase == AgentTurnPhase.Read)
@@ -276,7 +277,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     if (phase == AgentTurnPhase.Act && context.Exchanges.Count > 0 && !tripRepaired && calls + 1 < limits.MaxLlmCalls)
                     {
                         context.RejectedOutput = output;
-                        context.RepairFeedback = "Place, duration and budget are already known, so do not ask about them, the start date or the meals. " +
+                        context.RepairFeedback = "Place and duration are already known, so do not ask about them, the budget, the start date or the meals: " +
+                            "with no budget the plan has none and the reply says they can give one. " +
                             "Return create_proposal from the candidates above now; the start date is asked when the user saves.";
                         tripRepaired = repaired = sameRead = true;
                         continue;
@@ -735,8 +737,8 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     private static bool TripKnown(AgentContext context, AgentState? read)
     {
         var state = AgentContextBuilder.KeepKnown(read, context.State) ?? context.State;
-        return !string.IsNullOrWhiteSpace(state.Province) && state.NumDays.HasValue &&
-            (state.BudgetAmount.HasValue || state.BudgetUnrestricted || context.State.PlanningIntake == AgentIntakePolicy.Details);
+        // A missing budget no longer holds the plan back: the plan is made with none and the reply invites one (user decision 2026-11-27, "vừa làm vừa hỏi").
+        return !string.IsNullOrWhiteSpace(state.Province) && state.NumDays.HasValue;
     }
 
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)

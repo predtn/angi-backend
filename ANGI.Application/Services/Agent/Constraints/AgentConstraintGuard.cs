@@ -59,6 +59,8 @@ public sealed class AgentConstraintGuard
             proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer || proposed.LastSuggestion != current.LastSuggestion || proposed.OfferedLists != current.OfferedLists)
             proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered,
                 OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer, LastSuggestion = current.LastSuggestion, OfferedLists = current.OfferedLists };
+        // The plan wish is set by the backend from get_recommendation's wish argument, never through a state the model writes.
+        if (proposed.PlanWish != current.PlanWish) proposed = proposed with { PlanWish = current.PlanWish };
         // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)

@@ -33,6 +33,14 @@ public static class AgentModule
             client.Timeout = TimeSpan.FromSeconds(Math.Min(limits.LlmTimeoutSeconds, limits.TimeoutSeconds));
             client.MaxResponseContentBufferSize = 2_000_000;
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        // The dish-pick step of suggest_dish: same provider settings, its own short call; repeated picks are kept in memory.
+        services.AddMemoryCache();
+        services.AddHttpClient<IAgentDishPicker, OpenAiAgentDishPicker>(client =>
+        {
+            if (Uri.TryCreate(ai.BaseUrl, UriKind.Absolute, out var address)) client.BaseAddress = address;
+            client.Timeout = TimeSpan.FromSeconds(Math.Min(limits.LlmTimeoutSeconds, limits.TimeoutSeconds));
+            client.MaxResponseContentBufferSize = 2_000_000;
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHostedService<AgentCleanupWorker>();
         return services;
     }

@@ -759,7 +759,7 @@ public sealed class AgentOrchestratorTests
         // STEP-01: Create state as AgentState and get result from Create().RunAsync.
         var state = new AgentState { Province = "Hà Nội", NumDays = 7, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
 
-        var result = await Create(Scripted(Asks("trip_details", "Ngân sách của bạn khoảng bao nhiêu?")).Object, intakeCatalog: IntakeCatalog(), places: Places())
+        var result = await Create(Scripted(Asks("general", "Bạn muốn ăn ở khu nào trong Hà Nội?")).Object, intakeCatalog: IntakeCatalog(), places: Places())
             .RunAsync(IntakeContext("lập lịch cho tôi", state), default);
 
         // STEP-02: Assert result.State.RadiusKm is null.
@@ -817,7 +817,8 @@ public sealed class AgentOrchestratorTests
         context.Exchanges.Should().ContainSingle();
     }
 
-    // TEST-34b: A trip-details question about a trip whose place, duration and budget are known is dropped and the turn plans; with the budget not yet asked it is shown.
+    // TEST-34b: A trip-details question about a trip whose place and duration are known is dropped and the turn plans, with or without a budget:
+    // a missing budget plans with none and the reply invites one (user decision 2026-11-27, conversation 32 asked the budget three times).
     /// <summary>After "lập lịch luôn" the model kept asking for the start date, so no plan was made (AI-D04, AI-D05).</summary>
     [Theory]
     [InlineData(true)]
@@ -833,13 +834,9 @@ public sealed class AgentOrchestratorTests
         // STEP-02: Run the turn.
         var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(context, default);
 
-        // STEP-03: Assert the known trip goes on to a forced get_recommendation call, and the open budget keeps the question.
-        if (budgetKnown) seen.Take(2).Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "get_recommendation"));
-        else
-        {
-            seen.Should().Equal((AgentTurnPhase.Read, null));
-            result.Reply.Should().Be("Bạn muốn bắt đầu ngày nào?");
-        }
+        // STEP-03: Assert the known trip goes on to a forced get_recommendation call whether or not a budget is known.
+        seen.Take(2).Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "get_recommendation"));
+        result.Reply.Should().NotBe("Bạn muốn bắt đầu ngày nào?");
     }
 
     // TEST-56: The state the read step gave reaches the forced call and is gone once the tool has run.
@@ -1194,7 +1191,8 @@ public sealed class AgentOrchestratorTests
     public async Task RunAsync_DurationUpToMaximum_IsAccepted(string content, int days, bool accepted)
     {
         // STEP-01: Get result from Create().RunAsync.
-        var llm = Scripted(Asks("trip_details", "Ngân sách của bạn khoảng bao nhiêu?", new AgentState { Province = "Hà Nội", NumDays = (short)days }));
+        // A general question: a trip-details question on a known trip now plans instead (TEST-34b), which is not what this test is about.
+        var llm = Scripted(Asks("general", "Bạn muốn ăn ở khu nào trong Hà Nội?", new AgentState { Province = "Hà Nội", NumDays = (short)days }));
         var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(IntakeContext(content, new AgentState()), default);
 
         // STEP-02: Assert result.State.NumDays is days when accepted and null otherwise.

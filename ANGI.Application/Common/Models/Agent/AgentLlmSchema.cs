@@ -84,7 +84,8 @@ public static class AgentLlmSchema
             ["tagIds"] = ArrayOf(Scalar("integer")), ["excludeTagIds"] = ArrayOf(Scalar("integer")), ["excludeDishIds"] = ArrayOf(Scalar("integer")),
             ["maxPricePerMeal"] = Nullable(Scalar("number")), ["radiusKm"] = Nullable(Scalar("number")), ["topK"] = Scalar("integer"),
             ["alternative"] = Scalar("boolean"), ["maxLegKm"] = Nullable(Scalar("number")), ["fromOffered"] = Scalar("boolean"),
-            ["priceTier"] = Nullable(Choice("high", "low")), ["offeredListIds"] = Nullable(ArrayOf(Scalar("integer"))), ["offeredMeals"] = Nullable(ArrayOf(Scope))
+            ["priceTier"] = Nullable(Choice("high", "low")), ["offeredListIds"] = Nullable(ArrayOf(Scalar("integer"))), ["offeredMeals"] = Nullable(ArrayOf(Scope)),
+            ["wish"] = Nullable(Scalar("string"))
         }),
         ["estimate_day_route"] = Obj(new()
         {
@@ -101,7 +102,8 @@ public static class AgentLlmSchema
             ["budgetShare"] = Scalar("boolean"), ["sortBy"] = Nullable(Choice("likes", "rating")), ["now"] = Scalar("boolean"),
             ["dishNames"] = Nullable(ArrayOf(Scalar("string"))),
             ["mealSlots"] = Nullable(ArrayOf(Choice("breakfast", "lunch", "dinner", "snack", "late_night"))),
-            ["areaKind"] = Nullable(Choice(PlaceKinds)), ["areaParts"] = Nullable(ArrayOf(Scalar("string")))
+            ["areaKind"] = Nullable(Choice(PlaceKinds)), ["areaParts"] = Nullable(ArrayOf(Scalar("string"))),
+            ["wish"] = Nullable(Scalar("string"))
         }),
         // Adds, replaces or removes dishes of the plan. Each op targets a dish by itemKey or by day and meal, and names the new dish (add: exactly one,
         // replace: at most one) by id from a list the chat showed, by name, or as a kind by catalog tags. The backend finds and checks every dish.
