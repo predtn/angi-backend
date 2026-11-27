@@ -33,7 +33,7 @@ dotnet user-secrets set "Ai:ApiKey" "<value>" --project ANGI.WebApi
 dotnet user-secrets list --project ANGI.WebApi    # check what is set
 ```
 
-Use the port and password from your `.env` in the connection string if you changed them. On Render the same keys are environment variables with `__` instead of `:` ([deploy](deploy.md)).
+Use the port and password from your `.env` in the connection string if you changed them. In production the same keys are environment variables with `__` instead of `:`, in `backend.env` on the server ([deploy](deploy.md)).
 
 ## Non-secret defaults
 
@@ -41,7 +41,7 @@ Use the port and password from your `.env` in the connection string if you chang
 
 - `Brevo:BaseUrl`, `Brevo:SenderName` (`ANGI`), `Brevo:TimeoutMilliseconds`.
 - `Brevo:SenderEmail` (`angi.sep490.g71@gmail.com`), the team's verified Brevo sender. Override it only if your Brevo account uses another verified sender.
-- `Frontend:BaseUrl` (`http://localhost:3000`), the base of the links in the emails (`/verify-email?token=...`, `/reset-password?token=...`). On Render set `Frontend__BaseUrl` to the Vercel URL.
+- `Frontend:BaseUrl` (`http://localhost:3000`), the base of the links in the emails (`/verify-email?token=...`, `/reset-password?token=...`). In production set `Frontend__BaseUrl` to the public URL of the frontend.
 
 ## Checking the Brevo key
 

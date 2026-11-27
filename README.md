@@ -87,7 +87,7 @@ docs/                    Design documents (API Design, Data Dictionary, Jira pla
 
 ## Deployment
 
-Production runs on Render as a Docker web service with migrations applied by a pre-deploy step and a single instance. See [deploy](docs/deploy.md).
+Production is self-hosted with Docker Compose (Postgres, backend, frontend and reco in one project behind Caddy and a Cloudflare Tunnel), with migrations applied by running `efbundle` before each release and a single instance. See [deploy](docs/deploy.md).
 
 ## Documentation
 
@@ -100,7 +100,7 @@ Production runs on Render as a Docker web service with migrations applied by a p
 | Configuration and secrets | [docs/configuration.md](docs/configuration.md) |
 | Local database | [docs/local-database.md](docs/local-database.md) |
 | Testing and CI | [docs/testing.md](docs/testing.md) |
-| Deploy (Render) | [docs/deploy.md](docs/deploy.md) |
+| Deploy (self-hosted) | [docs/deploy.md](docs/deploy.md) |
 | AI food assistant (Agent) | [docs/agent.md](docs/agent.md) |
 
 The design documents in `docs/` are the source of truth: when code and documents disagree, the documents win, and both change in the same pull request.
