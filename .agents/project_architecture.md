@@ -39,7 +39,7 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 | Auth | JWT Bearer, rotating refresh token, BCrypt, Google sign-in |
 | API docs | OpenAPI + Scalar at `/scalar`, Development only |
 | Tests | xUnit, Moq, FluentAssertions 7.x (never 8.x: paid for commercial use); `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) for HTTP contract tests. `ANGI.UnitTests` is isolated; `ANGI.IntegrationTests` also runs against PostgreSQL, only on a dedicated database whose name contains `test` (a service container in CI) |
-| Hosting | Render (backend, reco, PostgreSQL), Vercel (frontend) |
+| Hosting | Self-hosted server: one Docker Compose project (frontend, backend, reco, PostgreSQL) behind Caddy and a Cloudflare Tunnel; see `docs/deploy.md` |
 
 Do not add another framework or library for a concern this table already covers.
 
