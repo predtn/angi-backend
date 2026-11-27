@@ -40,7 +40,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
         var filter = fixture.Filters.Should().ContainSingle().Subject;
         filter.Should().BeEquivalentTo(new { Province = "Huế", MaxPrice = 60000m, Area = (NearbyArea?)null });
         filter.ExcludeTagIds.Should().Equal(12);
-        fixture.Recommendation.Verify(value => value.RecommendAsync(12, It.IsAny<IReadOnlyList<int>>(), 200, RecommendationContext.RoadmapAi, It.IsAny<CancellationToken>()));
+        fixture.Recommendation.Verify(value => value.RecommendAsync(12, It.IsAny<IReadOnlyList<int>>(), ProcessRoadmapGenerationJobUseCase.MaxRanked, RecommendationContext.RoadmapAi, It.IsAny<CancellationToken>()));
 
         var job = fixture.Tracked;
         (job.Status, job.ModelName, job.PromptVersion, job.RecoRequestId, job.FinishedAt).Should()
@@ -282,7 +282,7 @@ public sealed class ProcessRoadmapGenerationJobUseCaseTests
             Dishes.Setup(value => value.GetCardDishesAsync(It.IsAny<IReadOnlyList<int>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((IReadOnlyList<int> ids, CancellationToken _) => ids.Select(id => dishes[id]).ToArray());
             Recommendation.Setup(value => value.RecommendAsync(
-                    12, It.IsAny<IReadOnlyList<int>>(), 200, RecommendationContext.RoadmapAi, It.IsAny<CancellationToken>()))
+                    12, It.IsAny<IReadOnlyList<int>>(), ProcessRoadmapGenerationJobUseCase.MaxRanked, RecommendationContext.RoadmapAi, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((int? _, IReadOnlyList<int> ids, int? _, RecommendationContext _, CancellationToken _) =>
                     new RecommendationResult(RequestId, ids, []));
             Planner.SetupGet(value => value.PromptVersion).Returns("rm10-v1");

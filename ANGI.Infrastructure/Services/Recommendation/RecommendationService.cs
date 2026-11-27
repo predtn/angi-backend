@@ -16,9 +16,9 @@ namespace ANGI.Infrastructure.Services.Recommendation
     /// </summary>
     public sealed class RecommendationService : IRecommendationService
     {
-        // RECO-05 accepts at most 2000 candidates and returns at most 200 dishes; RECO-06 takes at most 200 ids.
+        // RECO-05 accepts at most 2000 candidates and returns at most 2000 dishes; RECO-06 takes at most 200 ids.
         internal const int MaxCandidates = 2000;
-        internal const int MaxTopK = 200;
+        internal const int MaxTopK = 2000;
         internal const int DefaultTopK = 50;
         internal const int MaxImpressionDishes = 200;
         internal const int MaxSurveyAnswers = 50;

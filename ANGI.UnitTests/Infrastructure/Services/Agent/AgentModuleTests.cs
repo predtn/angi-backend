@@ -22,7 +22,7 @@ public sealed class AgentModuleTests
     [InlineData("MaxHistoryMessages", "0")][InlineData("MaxHistoryMessages", "101")]
     [InlineData("MaxTranscriptMessages", "19")][InlineData("MaxTranscriptMessages", "5001")]
     [InlineData("MaxCandidates", "0")][InlineData("MaxCandidates", "2001")]
-    [InlineData("MaxRanked", "0")][InlineData("MaxRanked", "201")]
+    [InlineData("MaxRanked", "0")][InlineData("MaxRanked", "2001")]
     [InlineData("TimeoutSeconds", "0")][InlineData("TimeoutSeconds", "301")]
     [InlineData("LlmTimeoutSeconds", "0")][InlineData("LlmTimeoutSeconds", "301")]
     [InlineData("LeaseSeconds", "90")][InlineData("LeaseSeconds", "601")]
@@ -49,9 +49,9 @@ public sealed class AgentModuleTests
         // STEP-01: Create services as ServiceCollection, call services.AddAgentInfrastructure, create provider through services.BuildServiceProvider and 1 more.
         var services = new ServiceCollection(); services.AddAgentInfrastructure(new ConfigurationBuilder().Build());
         using var provider = services.BuildServiceProvider();
-        // STEP-02: Assert limits.LeaseSeconds is greater than limits.TimeoutSeconds, limits.MaxCandidates is 2000, limits.MaxRanked is 200 and 3 more.
+        // STEP-02: Assert limits.LeaseSeconds is greater than limits.TimeoutSeconds, limits.MaxCandidates is 2000, limits.MaxRanked is 2000 and 3 more.
         var limits = provider.GetRequiredService<AgentLimits>(); limits.LeaseSeconds.Should().BeGreaterThan(limits.TimeoutSeconds);
-        limits.MaxCandidates.Should().Be(2000); limits.MaxRanked.Should().Be(200); limits.RetentionDays.Should().Be(30);
+        limits.MaxCandidates.Should().Be(2000); limits.MaxRanked.Should().Be(2000); limits.RetentionDays.Should().Be(30);
         limits.MaxOutputTokens.Should().Be(16000); limits.ReasoningEffort.Should().BeNull();
     }
 

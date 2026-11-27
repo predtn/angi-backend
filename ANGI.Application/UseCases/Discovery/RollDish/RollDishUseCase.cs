@@ -13,13 +13,13 @@ using FluentValidation;
 namespace ANGI.Application.UseCases.Discovery.RollDish;
 
 /// <summary>
-/// Implements DISH-03: filter the candidates, let reco rank its top 10 (context = roll), pick one at random weighted by
+/// Implements DISH-03: filter the candidates, let reco rank its top 200 (context = roll), pick one at random weighted by
 /// recommend_score (evenly when reco gave no usable score), store the roll and report the shown dish to reco.
 /// </summary>
 public sealed class RollDishUseCase : IRollDishUseCase
 {
     public const int MaxCandidates = 2000;
-    public const int TopK = 10;
+    public const int TopK = 200;
     public const decimal DefaultRadiusKm = 3;
 
     private const string NoCandidateCode = "NO_CANDIDATE";
