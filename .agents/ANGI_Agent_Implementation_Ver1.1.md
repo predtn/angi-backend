@@ -148,7 +148,7 @@ Thực hiện:
 1. Merge tham số tool với state; tham số không được âm thầm nới điều kiện đã chốt.
 2. Lọc catalog theo ràng buộc và trạng thái nghiệp vụ.
 3. Giới hạn tối đa 2.000 candidate IDs trước RECO-05, theo API hiện tại.
-4. Gọi Recommendation với top_k trong giới hạn 1..200. Nếu phạm vi cần quá nhiều món, chia nhỏ phạm vi hoặc hỏi giảm kế hoạch.
+4. Gọi Recommendation với top_k trong giới hạn 1..2000. Nếu phạm vi cần quá nhiều món, chia nhỏ phạm vi hoặc hỏi giảm kế hoạch.
 5. Kiểm tra response schema, requestId, score hữu hạn và tập ID trả về là tập con của đầu vào. Loại trùng hoặc từ chối response sai hợp đồng.
 6. Ghép thông tin quán/giá/tọa độ từ backend. Có thể gom cụm theo logic RM-10 rồi trả ứng viên theo ngày.
 

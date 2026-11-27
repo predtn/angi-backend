@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 if (!builder.Environment.IsDevelopment())
 {
-    // One JSON object per line, so the host's log viewer (Render) can search by level, category and exception.
+    // One JSON object per line, so `docker compose logs` can be filtered by level, category and exception.
     builder.Logging.ClearProviders();
     builder.Logging.AddJsonConsole(options =>
     {

@@ -277,11 +277,11 @@ namespace ANGI.UnitTests.Infrastructure.Services.Recommendation
             await act.Should().ThrowExactlyAsync<InvalidOperationException>();
         }
 
-        // TEST-15: Reject a top_k outside 1..200.
+        // TEST-15: Reject a top_k outside 1..2000.
         /// <summary>Ensures top_k stays within reco's accepted range.</summary>
         [Theory]
         [InlineData(0)]
-        [InlineData(201)]
+        [InlineData(2001)]
         public async Task RecommendAsync_WithTopKOutOfRange_ShouldThrowArgumentOutOfRange(int topK)
         {
             var service = CreateService(new StubHttpMessageHandler(_ => Json(HttpStatusCode.OK, "{}")));

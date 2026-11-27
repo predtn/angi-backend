@@ -27,7 +27,7 @@ namespace ANGI.WebApi.Configs
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
                 options.ForwardLimit = settings.ForwardLimit;
 
-                // Render's proxy addresses are not published; the app is reachable only through it, so trust any proxy.
+                // Enabled only when the API sits behind a proxy whose addresses are not fixed, so trust any proxy.
                 options.KnownIPNetworks.Clear();
                 options.KnownProxies.Clear();
             });

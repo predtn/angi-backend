@@ -23,7 +23,7 @@ namespace ANGI.Application.UseCases.Roadmap.Generate;
 public sealed class ProcessRoadmapGenerationJobUseCase : IProcessRoadmapGenerationJobUseCase
 {
     public const int MaxCandidates = 2000;
-    public const int MaxRanked = 200;
+    public const int MaxRanked = 1000;
 
     /// <summary>roadmap_generation_jobs.model_name and a day's plannedBy when the job built the schedule itself.</summary>
     public const string FallbackPlanner = "fallback";

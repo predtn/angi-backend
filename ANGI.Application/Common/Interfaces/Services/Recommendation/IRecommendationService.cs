@@ -29,7 +29,7 @@ namespace ANGI.Application.Common.Interfaces.Services.Recommendation
         /// only the first 2000 are sent. When reco fails, returns the candidates in that order with requestId = null.
         /// </summary>
         /// <param name="userId">Null for a Guest.</param>
-        /// <param name="topK">1..200; null uses reco's default of 50.</param>
+        /// <param name="topK">1..2000; null uses reco's default of 50.</param>
         Task<RecommendationResult> RecommendAsync(
             int? userId,
             IReadOnlyList<int> candidateDishIds,

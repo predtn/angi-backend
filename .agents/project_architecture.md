@@ -39,7 +39,7 @@ The design documents decide; these `.agents` files summarize them for coding. Al
 | Auth | JWT Bearer, rotating refresh token, BCrypt, Google sign-in |
 | API docs | OpenAPI + Scalar at `/scalar`, Development only |
 | Tests | xUnit, Moq, FluentAssertions 7.x (never 8.x: paid for commercial use); `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) for HTTP contract tests. `ANGI.UnitTests` is isolated; `ANGI.IntegrationTests` also runs against PostgreSQL, only on a dedicated database whose name contains `test` (a service container in CI) |
-| Hosting | Render (backend, reco, PostgreSQL), Vercel (frontend) |
+| Hosting | Self-hosted server: one Docker Compose project (frontend, backend, reco, PostgreSQL) behind Caddy and a Cloudflare Tunnel; see `docs/deploy.md` |
 
 Do not add another framework or library for a concern this table already covers.
 
@@ -226,7 +226,7 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Jwt` | `Issuer`, `Audience`, `SecretKey` (≥ 32 bytes, validated at startup), `AccessTokenMinutes`, `RefreshTokenDays` |
 | `Cors` | `AllowedOrigins` |
 | `RateLimit` | `GeneralPermitLimit`, `GeneralWindowSeconds`, `LoginPermitLimit`, `LoginWindowMinutes`, `SensitiveAuthPermitLimit`, `SensitiveAuthWindowSeconds` |
-| `ForwardedHeaders` | `Enabled` (`false`; `true` on Render), `ForwardLimit` (1) |
+| `ForwardedHeaders` | `Enabled` (`false`, also in production: only the frontend container calls the API), `ForwardLimit` (1) |
 | `Cloudinary` | `CloudName`, `ApiKey`, `ApiSecret` |
 | `Recommendation` | `BaseUrl`, `ApiKey` (same value as `RECO_API_KEY` of angi-reco), `TimeoutMilliseconds` (800) |
 | `Google` | `ClientId` |
@@ -236,12 +236,12 @@ Composition: `Program.cs` calls only `AddApplication()`, `AddInfrastructure(conf
 | `Outbox` | `PollSeconds` (2), `BatchSize` (50), `MaxAttempts` (10), `TimeoutSeconds` (10) |
 | `RoadmapGeneration` | `PollSeconds` (2) |
 | `Ai` | `BaseUrl` (`https://api.openai.com/v1/`), `ApiKey`, `Model` (`gpt-5.6-luna`), `TimeoutSeconds` (30) |
-| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (8), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20 tin chat gửi cho model, không tính dòng tool), `MaxTranscriptMessages` (1000 tin chat trả về màn hình), `MaxCandidates` (2000), `MaxRanked` (200), `LlmTimeoutSeconds` (60), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (60), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
+| `Agent` | `MaxToolRounds` (3), `MaxToolCalls` (6), `MaxLlmCalls` (8), `MaxMessageLength` (4000), `MaxContextCharacters` (120000), `MaxHistoryMessages` (20 tin chat gửi cho model, không tính dòng tool), `MaxTranscriptMessages` (1000 tin chat trả về màn hình), `MaxCandidates` (2000), `MaxRanked` (2000), `LlmTimeoutSeconds` (60), `TimeoutSeconds` (90), `LeaseSeconds` (120), `MessagesPerMinute` (60), `MessagesPerDay` (100), `ActiveDays` (7), `RetentionDays` (30), `CleanupSeconds` (3600), `MaxOutputTokens` (8000) |
 
 - Never commit a secret. A secret key stays empty in `appsettings.json`.
 - Local values: `dotnet user-secrets set "<Section>:<Key>" "<value>" --project ANGI.WebApi`. The app needs `ConnectionStrings:Default` and `Jwt:SecretKey` to start.
-- Render: environment variables with `__`, e.g. `ConnectionStrings__Default`.
-- Behind Render's proxy every connection comes from the proxy, so the per-IP limits (anonymous requests, login failures per email + IP) would count all clients as one. Set `ForwardedHeaders__Enabled=true` there: the app then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Keep it off locally, where the header would let a client choose its IP. Requests the frontend relays through its own Next.js server reach the backend with that server's IP; they count per client only if the frontend passes the browser IP in `X-Forwarded-For` and `ForwardLimit` is raised to 2, which also lets a direct caller forge one hop.
+- Production (self-hosted Docker Compose): environment variables with `__` in `backend.env`, e.g. `ConnectionStrings__Default`.
+- `ForwardedHeaders__Enabled` stays `false` in production: the API is reached only from the frontend container, never through a proxy, so `X-Forwarded-For` would only let a caller choose its IP. Turn it on only behind a proxy that rewrites the header; it then takes the client IP from `X-Forwarded-For`, trusting `ForwardLimit` proxies from the right. Browser IPs reach the per-IP limits (anonymous requests, login failures per email + IP) through `TrustedClientIp` instead: the frontend sends `X-Angi-Client-Ip` with `X-Angi-Proxy-Key`, and the API trusts it only when the key matches `TrustedClientIp__ProxyKey`.
 
 Agent stabilization follows section XX of ANGI_Agent_Implementation_Ver1.1.md and the scoped-planning design: return ordered full previews, regenerate after explicit constraint consent with the exact accepted state, preserve scoped edits and explicit save authorization, allow one repair each for schema, proposal and unsupported coverage within the shared call/deadline budget, retry only temporary HTTP failures within that budget, and report provider rate/quota limits as HTTP 429 AGENT_UNAVAILABLE. Preserve safe diagnostics, Retry-After and caller cancellation; never retry daily quota exhaustion.
 

@@ -42,7 +42,7 @@ public static class AgentModule
         limits.MaxLlmCalls >= 2 && limits.MaxLlmCalls <= 20 && limits.MaxMessageLength is >= 1 and <= 4000 &&
         limits.MaxContextCharacters is >= 4000 and <= 500000 && limits.MaxHistoryMessages is >= 1 and <= 100 &&
         limits.MaxTranscriptMessages >= limits.MaxHistoryMessages && limits.MaxTranscriptMessages <= 5000 &&
-        limits.MaxCandidates is >= 1 and <= 2000 && limits.MaxRanked is >= 1 and <= 200 &&
+        limits.MaxCandidates is >= 1 and <= 2000 && limits.MaxRanked is >= 1 and <= 2000 &&
         limits.LlmTimeoutSeconds is >= 1 and <= 300 && limits.TimeoutSeconds is >= 1 and <= 300 &&
         limits.LeaseSeconds > limits.TimeoutSeconds && limits.LeaseSeconds <= 600 &&
         limits.MessagesPerMinute > 0 && limits.MessagesPerDay >= limits.MessagesPerMinute && limits.ActiveDays > 0 &&

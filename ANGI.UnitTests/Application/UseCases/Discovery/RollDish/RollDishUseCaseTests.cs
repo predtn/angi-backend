@@ -66,10 +66,10 @@ public sealed class RollDishUseCaseTests
         Restaurant = new Domain.Entities.Restaurant { Id = 7, Name = "Quán", Latitude = 16.0678m, Longitude = 108.2208m }
     };
 
-    // TEST-01: Build the candidate filter from the request (3 km default radius), ask reco for its top 10 with context = roll.
+    // TEST-01: Build the candidate filter from the request (3 km default radius), ask reco for its top RollDishUseCase.TopK (200) with context = roll.
     /// <summary>Ensures the roll uses the documented filter, default radius and reco roll context.</summary>
     [Fact]
-    public async Task ExecuteAsync_ShouldFilterCandidatesAndAskRecoForTopTenRoll()
+    public async Task ExecuteAsync_ShouldFilterCandidatesAndAskRecoForRollTopK()
     {
         RecoReturns(Guid.NewGuid(), [2], [0.5]);
         DishCandidateFilter? filter = null;
@@ -101,7 +101,7 @@ public sealed class RollDishUseCaseTests
             Area = new NearbyArea(16.0678m, 108.2208m, 3)
         });
         _recommendationService.Verify(x => x.RecommendAsync(
-            UserId, It.Is<IReadOnlyList<int>>(ids => ids.SequenceEqual(new[] { 1, 2, 3 })), 10, RecommendationContext.Roll,
+            UserId, It.Is<IReadOnlyList<int>>(ids => ids.SequenceEqual(new[] { 1, 2, 3 })), RollDishUseCase.TopK, RecommendationContext.Roll,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

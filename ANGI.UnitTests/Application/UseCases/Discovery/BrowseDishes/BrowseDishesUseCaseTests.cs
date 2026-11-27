@@ -49,7 +49,7 @@ public sealed class BrowseDishesUseCaseTests
     /// <summary>Makes reco return the given ranking and request id for the list context.</summary>
     private void Ranked(Guid? requestId, params int[] ids) =>
         _recommendationService.Setup(x => x.RecommendAsync(
-                It.IsAny<int?>(), It.IsAny<IReadOnlyList<int>>(), 200, RecommendationContext.List, It.IsAny<CancellationToken>()))
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<int>>(), BrowseDishesUseCase.MaxRanked, RecommendationContext.List, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RecommendationResult(requestId, ids, []));
 
     /// <summary>Every requested id that is still a candidate comes back as a dish.</summary>
@@ -102,7 +102,7 @@ public sealed class BrowseDishesUseCaseTests
             Area = new NearbyArea(16.06m, 108.22m, 5m)
         });
         _recommendationService.Verify(x => x.RecommendAsync(
-            TravelerId, It.Is<IReadOnlyList<int>>(ids => ids.SequenceEqual(new[] { 1, 2, 3 })), 200,
+            TravelerId, It.Is<IReadOnlyList<int>>(ids => ids.SequenceEqual(new[] { 1, 2, 3 })), BrowseDishesUseCase.MaxRanked,
             RecommendationContext.List, It.IsAny<CancellationToken>()), Times.Once);
         result.RequestId.Should().Be(requestId);
         result.Items.Select(item => (item.Id, item.Rank)).Should().Equal((3, 1), (1, 2));
@@ -150,7 +150,7 @@ public sealed class BrowseDishesUseCaseTests
         var second = await CreateUseCase().ExecuteAsync(new BrowseDishesRequestDto { Cursor = first.NextCursor }, CancellationToken.None);
 
         _recommendationService.Verify(x => x.RecommendAsync(
-            null, It.IsAny<IReadOnlyList<int>>(), 200, RecommendationContext.List, It.IsAny<CancellationToken>()), Times.Once);
+            null, It.IsAny<IReadOnlyList<int>>(), BrowseDishesUseCase.MaxRanked, RecommendationContext.List, It.IsAny<CancellationToken>()), Times.Once);
         first.RequestId.Should().BeNull();
         second.Items.Select(item => item.Id).Should().Equal(2);
     }
