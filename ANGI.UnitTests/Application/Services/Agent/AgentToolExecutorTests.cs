@@ -980,7 +980,7 @@ public sealed class AgentToolExecutorTests
     }
 
     // TEST-20: Malformed recommendation arguments from the model come back as invalid_arguments with the reason, without ranking or failing
-    // the turn; covers topK 0 and 201, missing day, missing meal, another province, radius, fractional price, a negative
+    // the turn; covers topK 0 and 2001, missing day, missing meal, another province, radius, fractional price, a negative
     // excluded ID, an unknown tag and a day beyond the trip.
     /// <summary>Lets the model correct a bad tool call within the turn instead of turning the chat into HTTP 503 or 409.</summary>
     [Theory]
@@ -995,7 +995,7 @@ public sealed class AgentToolExecutorTests
         var context = AgentTestData.Context();
         var input = area switch
         {
-            "top-zero" => Input() with { TopK = 0 }, "top-large" => Input() with { TopK = 201 },
+            "top-zero" => Input() with { TopK = 0 }, "top-large" => Input() with { TopK = 2001 },
             "day-missing" => Input() with { Scope = "day" },
             "slot-missing" => Input() with { Scope = "slot", DayNumber = 1 }, "province" => Input() with { Province = "Other" },
             "radius" => Input() with { RadiusKm = 51 }, "price" => Input() with { MaxPricePerMeal = 1.5m },

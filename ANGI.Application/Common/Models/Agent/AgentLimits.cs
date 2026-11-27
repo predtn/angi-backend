@@ -14,7 +14,7 @@ public sealed class AgentLimits
     /// <summary>User and assistant messages returned to the chat screen; it only bounds the response size, so a reload restores the conversation.</summary>
     public int MaxTranscriptMessages { get; set; } = 1000;
     public int MaxCandidates { get; set; } = 2000;
-    public int MaxRanked { get; set; } = 200;
+    public int MaxRanked { get; set; } = 2000;
     public int LlmTimeoutSeconds { get; set; } = 60;
     public int TimeoutSeconds { get; set; } = 90;
     public int LeaseSeconds { get; set; } = 120;

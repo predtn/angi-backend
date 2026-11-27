@@ -16,12 +16,12 @@ namespace ANGI.Application.UseCases.Discovery.BrowseDishes;
 
 /// <summary>
 /// Implements DISH-01: filter the candidates (at most 2000, by restaurant rating then like_count), let reco rank at most
-/// 200 of them once, cache that list for 30 minutes, and page through it with a cursor.
+/// 2000 of them once, cache that list for 30 minutes, and page through it with a cursor.
 /// </summary>
 public sealed class BrowseDishesUseCase : IBrowseDishesUseCase
 {
     public const int MaxCandidates = 2000;
-    public const int MaxRanked = 200;
+    public const int MaxRanked = 2000;
     public const int DefaultLimit = 20;
     public const decimal DefaultRadiusKm = 5;
 
