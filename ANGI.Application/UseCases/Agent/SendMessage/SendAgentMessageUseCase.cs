@@ -140,16 +140,20 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
         try
         {
             // STEP-30: Prepare prepared, context and control from the button command.
-            // Chỉ nút bấm đi thẳng; câu "bỏ nháp"/"làm lại" người dùng gõ luôn do model đọc, kể cả khi roadmap đã gắn bị xóa.
+            // control chỉ có giá trị khi người dùng BẤM NÚT "Bỏ nháp" (discard) hoặc "Làm lại" (reset) trên giao diện.
+            // Nếu người dùng GÕ chữ "bỏ nháp", "làm lại" thì request.Command vẫn là "chat": câu đó đi qua model như mọi tin nhắn khác.
             AgentPreparedTurn prepared;
             AgentContext? context = null;
             var control = request.Command is "discard" or "reset" ? request.Command : null;
             // STEP-31: When control is "discard" or "reset", prepare state through AgentJson.Read, check whether control is "reset" and more.
             if (control is "discard" or "reset")
             {
-                // Lệnh rõ ràng từ request được xử lý trực tiếp, không cần LLM diễn giải.
-                // discard giữ yêu cầu chuyến đi; reset bắt đầu kế hoạch mới và tách roadmap đã gắn.
-                // Cả hai chỉ bỏ proposal, không xóa hoặc sửa roadmap chính thức.
+                // ĐƯỜNG TẮT, KHÔNG GỌI LLM: nút bấm đã nói rõ người dùng muốn gì, không có gì để model phải hiểu,
+                // nên backend trả luôn một câu xác nhận cố định (tiết kiệm một lần gọi LLM có tính phí).
+                // - discard: bỏ bản nháp, GIỮ điều kiện chuyến đi (tỉnh, số ngày, ngân sách...).
+                // - reset:   bỏ bản nháp VÀ điều kiện chuyến đi, bắt đầu kế hoạch mới (ResetStateAsync), tách khỏi roadmap đang gắn.
+                // Cả hai chỉ đụng tới bản nháp trong hội thoại; roadmap đã lưu không bị sửa hay xóa.
+                // Các câu hỏi đang chờ (PendingQuestion...) và ngày/bữa đang tập trung (FocusDay, FocusMeal) được xóa để lượt sau bắt đầu sạch.
                 var state = AgentJson.Read<AgentState>(conversation.State);
                 if (control == "reset") state = await ResetStateAsync(conversation, message.SequenceNo, ct);
                 prepared = new(control == "reset" ? "Đã bắt đầu kế hoạch mới. Bạn muốn ăn ở đâu, trong mấy ngày và với ngân sách bao nhiêu? Lịch đã lưu vẫn được giữ nguyên."
@@ -158,48 +162,61 @@ public sealed class SendAgentMessageUseCase(IValidator<SendAgentMessageRequestDt
             }
             else
             {
-                // Nạp state, proposal hiện hành, roadmap mới nhất (nếu có) và history completed.
-                // Ví dụ prompt chỉ nói "sửa roadmap cho tôi": model được hướng dẫn hỏi rõ phần cần sửa.
-                // ContextBuilder chỉ nạp roadmap đã gắn; luồng này chưa có tool tìm/chọn roadmap khác.
+                // ĐƯỜNG CHÍNH, CÓ GỌI LLM: mọi tin nhắn người dùng gõ (và các nút khác) đều đi đường này.
+                // (a) Nạp ngữ cảnh cho model đọc: state chuyến đi, bản nháp hiện tại, roadmap đang gắn (nếu có), các tin nhắn gần nhất.
+                //     Chỉ nạp roadmap đang gắn với hội thoại; Agent chưa có tool tìm hay chọn roadmap khác.
                 context = await contextBuilder.BuildAsync(conversation, request, ct);
                 context.TurnId = message.TurnId;
                 context.AttemptId = attemptId;
-                // Câu hỏi lưu chỉ sống đúng một lượt: mọi tin nhắn không trả lời nó đều kết thúc việc chờ, để "ok" về sau không lưu nhầm.
+                // (b) Lấy ra hai "lời mời" lượt trước để lại, rồi xóa chúng khỏi state. Mỗi lời mời chỉ có hiệu lực cho đúng lượt ngay sau nó:
+                //     - pendingSave: lượt trước Agent vừa hỏi "Bạn có muốn lưu lịch không?" (hoặc "lưu từ ngày nào?").
+                //     - DishOffered: lượt trước Agent vừa gợi ý thêm món.
+                //     Xóa đi để một câu "ok" vài lượt sau không bị hiểu nhầm thành "đồng ý lưu". Bên dưới sẽ giữ lại khi cần.
                 var pendingSave = context.State.PendingSave;
-                // Lời mời thêm món cũng chỉ sống một lượt.
                 context.DishOffered = context.State.DishOffered == true;
                 context.State = context.State with { PendingSave = null, DishOffered = null };
                 var today = AgentConfirmationPolicy.Today(clock);
-                // Orchestrator gọi LLM/tools rồi build + validate; kết quả ở đây vẫn chưa được lưu.
-                // Câu lưu đầy đủ và ngày viết bằng số không phụ thuộc cách nói, nên không cần gọi LLM: chỉ backend được quyết định ghi roadmap.
-                // Câu lưu và ngày viết bằng số không được đọc bằng regex; mọi tin nhắn đi qua model.
                 {
-                    // Model đọc mọi cách nói; backend chỉ cho câu trả lời đó có hiệu lực khi đang có đúng câu hỏi này.
+                    // (c) Báo cho model biết backend đang chờ câu trả lời cho câu hỏi nào (lưu? ngày nào? đổi điều kiện?), hoặc không chờ gì (null).
+                    //     Model đọc câu người dùng theo mọi cách nói, không dùng regex. Nhưng câu trả lời chỉ có hiệu lực khi backend đang chờ đúng câu hỏi đó.
                     context.AwaitedAnswer = AgentConfirmationPolicy.Awaited(context.State, context.CurrentProposal, pendingSave);
-                    var asked = context.State;
+                    var asked = context.State; // state lúc câu hỏi đang chờ, dùng để so sánh trong AnswerTurnAsync
+                    // (d) Chạy vòng LLM + tool. Kết quả `prepared` chỉ là bản chuẩn bị: CHƯA ghi gì vào DB (ghi ở FinishAsync).
                     prepared = await orchestrator.RunAsync(context, ct);
+                    // (e) Xử lý tiếp theo loại kết quả model trả về. Chỉ một trong ba nhánh sau chạy:
+                    // Nhánh 1: model xác định tin này là câu TRẢ LỜI cho câu hỏi đang chờ (prepared.Answer khác null),
+                    //          ví dụ "ừ lưu đi", "không", "từ thứ 7". AnswerTurnAsync quyết định lưu, bỏ hay áp thay đổi.
                     if (prepared.Answer is { } answer)
                         prepared = await AnswerTurnAsync(conversation, userId, context, asked, pendingSave, answer, today, ct, prepared.Reply);
+                    // Nhánh 2: người dùng chủ động muốn lưu ("lưu lịch này cho tôi") mà backend chưa hỏi.
                     else if (prepared.Action == "request_save")
                     {
-                        // Muốn lưu nghĩa là không còn cần câu hỏi làm rõ đang mở, nên về đúng điều kiện của bản đề xuất. Việc này chưa ghi gì: bước sau vẫn hỏi trước khi lưu.
+                        // Muốn lưu thì câu hỏi làm rõ đang mở (nếu có) không cần nữa: quay về đúng điều kiện của bản nháp.
                         context.State = context.AwaitedAnswer == AgentConfirmationPolicy.AwaitingQuestion ? context.CurrentProposal!.Snapshot.State with { PendingQuestion = null } : asked;
-                        // Chỉ lưu khi lịch còn khớp điều kiện chuyến đi. Lệch thì không ghi gì và giữ câu model viết:
-                        // model đã được báo planMatchesTrip=false nên tự nói lịch chưa theo điều kiện mới, thay vì người dùng nhận lỗi 409.
-                        // Có ngày bắt đầu thì lưu ngay; chưa có thì chờ ngày (model được báo saveNeedsStartDate=true nên tự hỏi), "để sau" vẫn lưu được không ngày.
+                        // Chỉ chuẩn bị lưu khi bản nháp còn khớp điều kiện chuyến đi.
+                        // - Khớp: SaveTurnAsync chuẩn bị lệnh ghi roadmap. Đã có ngày bắt đầu thì lưu luôn; chưa có thì model tự hỏi ngày
+                        //   (model được báo saveNeedsStartDate=true). Người dùng nói "để sau" thì vẫn lưu được, không cần ngày.
+                        // - Không khớp: không ghi gì, giữ câu model viết. Model đã được báo planMatchesTrip=false nên tự giải thích
+                        //   là lịch chưa theo điều kiện mới, thay vì người dùng nhận lỗi 409.
                         if (AgentConfirmationPolicy.PlanMatchesTrip(context.State, context.CurrentProposal))
                             prepared = await SaveTurnAsync(conversation, userId, context, AgentConfirmationPolicy.SaveWish(context, today), ct, prepared.Reply);
                         else telemetry.Record("save_skipped", id, message.TurnId, attemptId, new { reason = context.CurrentProposal?.Status == "ready" ? "plan_mismatch" : "no_ready_plan" });
                     }
-                    // Lời chào, câu ngoài phạm vi hay một câu trả lời model chưa hiểu ("ok" cho câu hỏi ngày nào) không trả lời câu hỏi lưu nhưng cũng không hủy nó.
-                    // Vừa gợi ý món thì khác: "ok" tiếp theo là đáp lời mời đó, không được hiểu thành đồng ý lưu lịch.
+                    // Nhánh 3: backend đang hỏi "lưu không?" nhưng người dùng nói chuyện khác: chào hỏi, hỏi về món, câu ngoài phạm vi,
+                    //          hoặc trả lời mà model chưa hiểu (SaveUnclear, ví dụ "ok" khi đang hỏi ngày nào).
+                    //          Câu đó không trả lời câu hỏi lưu nhưng cũng không hủy nó, nên giữ lại pendingSave cho lượt sau.
+                    //          Ngoại lệ: nếu lượt này Agent vừa gợi ý món (DishOffered) thì "ok" kế tiếp là đáp lời gợi ý món,
+                    //          không được hiểu thành đồng ý lưu lịch, nên không giữ pendingSave.
                     else if (pendingSave is not null && prepared.State.DishOffered != true && prepared.Action is "chat" or "food_info" or "out_of_scope" or AgentOrchestrator.SaveUnclear)
                         prepared = prepared with { State = prepared.State with { PendingSave = pendingSave } };
-                    // Lời mời gợi ý món cũng còn qua một câu chat, câu hỏi về món hay câu ngoài phạm vi chen giữa (hội thoại 220: "sở thích của tôi là gì"
-                    // rồi "tôi thích ăn cay"), để khẩu vị nói sau đó vẫn là về món vừa gợi ý. Lập lịch hay sửa lịch thì lời mời kết thúc.
+                    // (f) Tương tự cho lời mời gợi ý món: nếu người dùng chen vào một câu chat, hỏi về món hay câu ngoài phạm vi,
+                    //     lời mời vẫn còn. Ví dụ hội thoại 220: "sở thích của tôi là gì" rồi "tôi thích ăn cay"; câu sau vẫn là
+                    //     khẩu vị cho món vừa gợi ý. Nếu người dùng chuyển sang lập lịch hay sửa lịch thì lời mời kết thúc.
                     if (context.DishOffered && prepared.Answer is null && prepared.Action is "chat" or "food_info" or "out_of_scope" && prepared.State.DishOffered != true)
                         prepared = prepared with { State = prepared.State with { DishOffered = true } };
                 }
+                // (g) Người dùng GÕ "làm lại" hay "bỏ nháp" và model hiểu đúng ý (action reset/discard): làm giống hệt khi bấm nút ở trên,
+                //     chỉ khác là câu trả lời do model viết chứ không phải câu cố định.
                 if (prepared.Action == "reset") prepared = prepared with { State = await ResetStateAsync(conversation, message.SequenceNo, ct) };
                 else if (prepared.Action == "discard") prepared = prepared with
                     { State = context.State with { PendingQuestion = null, PendingStateChange = null, PendingPlanningRequest = null, PlanningIntake = null, FocusDay = null, FocusMeal = null } };
