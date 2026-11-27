@@ -4,10 +4,13 @@ namespace ANGI.WebApi.Configs
     {
         public const string SectionName = "ForwardedHeaders";
 
-        /// <summary>True only behind a proxy that sets X-Forwarded-For (Render); off locally, where clients connect directly.</summary>
+        /// <summary>
+        /// True only behind a proxy that sets X-Forwarded-For. Off locally and in the self-hosted deployment, where only
+        /// the frontend container calls the API (the browser IP comes through TrustedClientIp instead).
+        /// </summary>
         public bool Enabled { get; set; }
 
-        /// <summary>How many proxies to trust from the right of X-Forwarded-For: 1 for Render alone.</summary>
+        /// <summary>How many proxies to trust from the right of X-Forwarded-For: 1 for a single proxy.</summary>
         public int ForwardLimit { get; set; } = 1;
     }
 }

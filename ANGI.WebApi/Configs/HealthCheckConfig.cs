@@ -17,7 +17,7 @@ namespace ANGI.WebApi.Configs
         }
 
         /// <summary>
-        /// OPS-03 GET /health for the host (Render health check path): 200 with data.status = "Healthy" when PostgreSQL
+        /// OPS-03 GET /health for deployment checks (docs/deploy.md): 200 with data.status = "Healthy" when PostgreSQL
         /// answers, 503 SERVICE_UNAVAILABLE otherwise, both in ApiResponse. Outside /api, so it is neither rate limited nor
         /// authenticated, and it reveals nothing beyond the status.
         /// </summary>

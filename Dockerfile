@@ -1,8 +1,8 @@
-# ANGI Web API image for Render (or any Docker host).
+# ANGI Web API image, run by the self-hosted Docker Compose project (docs/deploy.md).
 #   docker build -t angi-backend .
-#   docker run -p 8080:8080 --env-file .env.production angi-backend
-# Settings come from environment variables (Jwt__SecretKey, ConnectionStrings__Default, ...), see README "Deploy".
-# The image also holds /app/efbundle, which applies the EF migrations: run it as the pre-deploy command.
+#   docker run -p 8080:8080 --env-file backend.env angi-backend
+# Settings come from environment variables (Jwt__SecretKey, ConnectionStrings__Default, ...), see docs/deploy.md.
+# The image also holds /app/efbundle, which applies the EF migrations: run it before starting a new image.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
