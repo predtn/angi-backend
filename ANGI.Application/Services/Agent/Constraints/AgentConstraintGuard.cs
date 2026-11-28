@@ -65,37 +65,37 @@ public sealed class AgentConstraintGuard
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
             proposed = proposed with { FocusDay = current.FocusDay, FocusMeal = current.FocusMeal };
-        // STEP-06: When proposed.Preferences is not current.Preferences, set proposed.
+        // STEP-05: When proposed.Preferences is not current.Preferences, set proposed.
         // Provider and client state can only change targets; trusted vectors always come from reco.
         if (proposed.Preferences != current.Preferences) proposed = proposed with { Preferences = current.Preferences };
-        // STEP-07: When ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) does not hold or ReferenceEquals(proposed.SkippedMeals and more.
+        // STEP-06: When ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) does not hold or ReferenceEquals(proposed.SkippedMeals and more.
         if (!ReferenceEquals(proposed.ReplacedDishNames, current.ReplacedDishNames) || !ReferenceEquals(proposed.SkippedMeals, current.SkippedMeals))
             proposed = proposed with { ReplacedDishNames = current.ReplacedDishNames, SkippedMeals = current.SkippedMeals };
-        // STEP-08: Prepare movedProvince from Trim, numDays and areas from current.DayAreas ?? [].Where.
+        // STEP-07: Prepare movedProvince from Trim, numDays and areas from current.DayAreas ?? [].Where.
         // Nơi đến theo ngày do backend đọc từ lời người dùng, model không được ghi. Đổi tỉnh hoặc rút ngắn chuyến thì bỏ các nơi đến không còn áp dụng.
         var movedProvince = current.Province is not null && !ProvinceSearch.Same(current.Province, proposed.Province);
         var numDays = proposed.NumDays;
         var areas = movedProvince ? [] : (current.DayAreas ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
-        // STEP-09: When areas.SequenceEqual(...) does not hold, set proposed.
+        // STEP-08: When areas.SequenceEqual(...) does not hold, set proposed.
         if (!areas.SequenceEqual(proposed.DayAreas ?? [])) proposed = proposed with { DayAreas = areas.Length > 0 ? areas : null };
-        // STEP-10: Prepare widened from current.WidenedMeals ?? [].Where.
+        // STEP-09: Prepare widened from current.WidenedMeals ?? [].Where.
         var widened = movedProvince ? [] : (current.WidenedMeals ?? []).Where(x => !numDays.HasValue || x.DayNumber <= numDays).ToArray();
-        // STEP-11: When widened.SequenceEqual(...) does not hold, set proposed.
+        // STEP-10: When widened.SequenceEqual(...) does not hold, set proposed.
         if (!widened.SequenceEqual(proposed.WidenedMeals ?? [])) proposed = proposed with { WidenedMeals = widened.Length > 0 ? widened : null };
-        // STEP-12: When proposed.PendingDayArea is not current.PendingDayArea or proposed.NamedAreaLabel is not current.NamedAreaLabel, set proposed.
+        // STEP-11: When proposed.PendingDayArea is not current.PendingDayArea or proposed.NamedAreaLabel is not current.NamedAreaLabel, set proposed.
         if (proposed.PendingDayArea != current.PendingDayArea || proposed.NamedAreaLabel != current.NamedAreaLabel || !ReferenceEquals(proposed.OriginZone, current.OriginZone))
             proposed = proposed with { PendingDayArea = current.PendingDayArea, NamedAreaLabel = current.NamedAreaLabel, OriginZone = current.OriginZone };
-        // STEP-12b: The point of a zone the backend located is the backend's: a model copying it back rounded (21.0287 → 21.03) would silently drop the
+        // STEP-11b: The point of a zone the backend located is the backend's: a model copying it back rounded (21.0287 → 21.03) would silently drop the
         // zone to one circle. Its radius stays the model's to narrow, and leaving the pin (none or gps) stays possible.
         if (AgentScopedPlanning.HasZoneOrigin(current) && proposed.OriginMode == "pinned" &&
             (proposed.OriginLatitude != current.OriginLatitude || proposed.OriginLongitude != current.OriginLongitude || proposed.OriginLabel != current.OriginLabel))
             proposed = proposed with { OriginLatitude = current.OriginLatitude, OriginLongitude = current.OriginLongitude, OriginLabel = current.OriginLabel };
-        // STEP-13: Validate proposed.
+        // STEP-12: Validate proposed.
         new AgentStateValidator(roadmapDays).ValidateAndThrow(proposed);
-        // STEP-14: When proposed.Preferences.Initialized is true, set proposed.
+        // STEP-13: When proposed.Preferences.Initialized is true, set proposed.
         if (proposed.Preferences?.Initialized == true)
             proposed = proposed with { Preferences = AgentTasteOntology.Apply(proposed.Preferences, proposed.TasteTargets) };
-        // STEP-15: Prepare confirmed and relaxed from AgentScopedPlanning.Slots.
+        // STEP-14: Prepare confirmed and relaxed from AgentScopedPlanning.Slots.
         var confirmed = baseline ?? current;
         var relaxed = confirmed.Province is not null && !ProvinceSearch.Same(confirmed.Province, proposed.Province)
             || confirmed.NumDays.HasValue && proposed.NumDays != confirmed.NumDays
@@ -115,12 +115,12 @@ public sealed class AgentConstraintGuard
             })
             || confirmed.RadiusKm.HasValue && (!proposed.RadiusKm.HasValue || proposed.RadiusKm > confirmed.RadiusKm)
             || confirmed.OriginMode != "none" && (proposed.OriginMode != confirmed.OriginMode || proposed.OriginLatitude != confirmed.OriginLatitude || proposed.OriginLongitude != confirmed.OriginLongitude);
-        // STEP-16: Throw AgentStateChangeRequiredException when relaxed is true.
+        // STEP-15: Throw AgentStateChangeRequiredException when relaxed is true.
         if (relaxed) throw new AgentStateChangeRequiredException(proposed);
-        // STEP-17: Return proposed early when proposed.PendingStateChange is current.PendingStateChange and more.
+        // STEP-16: Return proposed early when proposed.PendingStateChange is current.PendingStateChange and more.
         if (proposed.PendingStateChange == current.PendingStateChange && proposed.SourceRoadmapUpdatedAt == current.SourceRoadmapUpdatedAt &&
             proposed.HistoryStartSequence == current.HistoryStartSequence && proposed.TranscriptStartSequence == current.TranscriptStartSequence) return proposed;
-        // STEP-18: Return a copy of proposed with updated fields.
+        // STEP-17: Return a copy of proposed with updated fields.
         return proposed with { PendingStateChange = current.PendingStateChange, SourceRoadmapUpdatedAt = current.SourceRoadmapUpdatedAt,
             HistoryStartSequence = current.HistoryStartSequence, TranscriptStartSequence = current.TranscriptStartSequence };
     }

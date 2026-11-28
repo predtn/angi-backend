@@ -15,28 +15,28 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     AgentProposalBuilder builder, AgentProposalValidator validator, AgentLimits limits, IAgentTelemetry telemetry,
     Common.Interfaces.Repositories.Agent.IAgentCatalogRepository? catalog = null, AgentPlaceResolver? places = null)
 {
-    /// <summary>Bounds schema, proposal and unsupported-coverage repairs within the same call and timeout limits.</summary>
+    /// <summary>Bounds schema, empty-reply and proposal repairs within the same call and timeout limits.</summary>
     public async Task<AgentPreparedTurn> RunAsync(AgentContext context, CancellationToken ct)
     {
         // STEP-01: Call ct.ThrowIfCancellationRequested.
         ct.ThrowIfCancellationRequested();
         // STEP-02: Call UsePinnedAreaAsync.
         await UsePinnedAreaAsync(context, ct);
-        // STEP-03: Return the result of StartIntakeAsync early when the place of a new trip already has its fixed answer.
-        // Lịch mới: model đọc câu trả lời và viết câu hỏi; backend chỉ giữ thứ tự địa điểm, số ngày và ngân sách, rồi khẩu vị/yêu cầu.
-        if (await StartIntakeAsync(context, ct) is { } intake) return intake;
+        // STEP-03: Call StartIntakeAsync: a new trip takes its province from shared coordinates or the roadmap title.
+        // Lịch mới: model đọc câu trả lời và tự quyết hỏi gì; backend chỉ điền những gì không cần đọc chữ.
+        await StartIntakeAsync(context, ct);
         // STEP-04: Prepare turnState.
         // Giữ state đầu lượt: lời chào hoặc câu ngoài phạm vi không được làm mất câu hỏi đang mở hay lọt vào yêu cầu lập lịch.
         var turnState = context.State;
-        // STEP-06: When context.State.PendingPlanningRequest exists, set context.State.
+        // STEP-05: When context.State.PendingPlanningRequest exists, set context.State.
         if (context.State.PendingPlanningRequest is { } pendingRequest)
             context.State = context.State with { PendingPlanningRequest = AgentIntakePolicy.CaptureRequest(pendingRequest, context.Request.Content) };
-        // STEP-08: Prepare timeout, then call timeout.CancelAfter.
+        // STEP-06: Prepare timeout, then call timeout.CancelAfter.
         // Timeout áp dụng cho toàn bộ vòng LLM/tools của lượt chat; ct vẫn giữ quyền hủy từ caller.
         // Use case đã commit bước claim trước khi vào đây nên không giữ transaction DB trong lúc chờ AI.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(limits.TimeoutSeconds));
-        // STEP-09: Prepare toolRounds, toolCalls, repaired, schemaRepaired and 11 more.
+        // STEP-07: Prepare toolRounds, toolCalls, repaired, schemaRepaired and 11 more.
         var toolRounds = 0;
         var toolCalls = 0;
         var repaired = false;
@@ -45,7 +45,6 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var assembled = false;
         // Đề xuất rỗng có lượt sửa riêng để không tiêu mất lượt sửa lỗi validation của lịch đủ món sau đó.
         var emptyRepaired = false;
-        var coverageRepaired = false;
         var tripRepaired = false;
         var transientRetries = 0;
         var executedTools = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal);
@@ -54,10 +53,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         string CallKey(AgentToolCall call) => call.Name + ":" + call.Arguments.GetRawText() + ":" + AgentJson.Write(context.State);
         var turnStarted = Stopwatch.GetTimestamp();
         var confirmedState = context.ConstraintBaseline = context.State;
-        // STEP-10: When no plan exists, set context.ConstraintBaseline.
+        // STEP-08: When no plan exists, set context.ConstraintBaseline.
         // Chưa có lịch nào bị ảnh hưởng: nêu hay sửa địa điểm, số ngày, ngân sách, kể cả để ngân sách mở, không cần hỏi xác nhận thêm.
         if (AgentIntakePolicy.Eligible(context)) context.ConstraintBaseline = AgentIntakePolicy.Baseline(context.State);
-        // STEP-11: Update context: PromptSource.
+        // STEP-09: Update context: PromptSource.
         context.PromptSource = AgentProposalBuilder.PromptSource(context);
         // Model đang có tool trong tay hay gọi tool kể cả khi không cái nào phù hợp, nên một tin nhắn chat được đọc trước khi có tool. Nút bấm, form và lập lại lịch đã rõ việc nên không cần bước này.
         var phase = context.Request.Command == "chat" && context.Request.ConfirmedState is null && !context.ReplanAfterConfirmation ? AgentTurnPhase.Read : AgentTurnPhase.Act;
@@ -78,32 +77,32 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (context.DishSuggestion is not null) context.ToolsClosed = true;
                 telemetry.Record("starter", context.ConversationId, context.TurnId, context.AttemptId, new { context.Request.Command, starter.Name });
             }
-            // STEP-13: Repeat while calls < limits.MaxLlmCalls.
+            // STEP-10: Repeat while calls < limits.MaxLlmCalls.
             for (var calls = 0; calls < limits.MaxLlmCalls; calls++)
             {
-                // STEP-14: Call timeout.Token.ThrowIfCancellationRequested.
+                // STEP-11: Call timeout.Token.ThrowIfCancellationRequested.
                 // Mỗi vòng có thể là một lần model xin tools hoặc trả output cuối; đều tính vào MaxLlmCalls.
                 timeout.Token.ThrowIfCancellationRequested();
                 // Sửa lỗi cấu trúc hay thử lại do provider vẫn là cùng một lần đọc; các lần sửa khác có thể cần tool nên có đủ tool.
                 if (phase == AgentTurnPhase.Read && repaired && !sameRead) phase = AgentTurnPhase.Act;
                 sameRead = false;
                 context.Phase = phase;
-                // STEP-15: Throw the error from Unavailable when AgentJson.Write().Length > limits.MaxContextCharacters.
+                // STEP-12: Throw the error from Unavailable when AgentJson.Write().Length > limits.MaxContextCharacters.
                 // Vượt giới hạn thì thu gọn phần model đọc trước khi bỏ cuộc; người dùng vẫn thấy lịch và lịch sử đầy đủ.
                 if (ContextSize(context) > limits.MaxContextCharacters) Shrink(context);
                 if (ContextSize(context) > limits.MaxContextCharacters)
                     throw Unavailable();
-                // STEP-16: Prepare started through Stopwatch.GetTimestamp and step.
+                // STEP-13: Prepare started through Stopwatch.GetTimestamp and step.
                 var started = Stopwatch.GetTimestamp();
                 // ĐÂY LÀ DÒNG GỌI LLM qua IAgentLlmService (DI nối tới OpenAiAgentLlmService).
                 // Adapter dựng system prompt + context + strict schema rồi gửi HTTP tới provider.
                 // API key được gắn vào Authorization header trong adapter, không nằm trong AgentContext.
                 AgentLlmStep? step;
-                // STEP-17: Call llm.RunAsync and keep step.
+                // STEP-14: Call llm.RunAsync and keep step.
                 try { step = await llm.RunAsync(context, repaired, timeout.Token); }
                 catch (OperationCanceledException)
                 {
-                    // STEP-18: On OperationCanceledException, call telemetry.Record and rethrow the caught exception.
+                    // STEP-15: On OperationCanceledException, call telemetry.Record and rethrow the caught exception.
                     telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
                     {
                         elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, callNumber = calls + 1,
@@ -111,15 +110,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     });
                     throw;
                 }
-                // STEP-19: When step is missing or (step.Failure is missing and (step.Tools is missing, (step.Tools.Length is 0 and more.
+                // STEP-16: When step is missing or (step.Failure is missing and (step.Tools is missing, (step.Tools.Length is 0 and more.
                 if (step is null || step.Failure is null && (step.Tools is null || step.Tools.Length == 0 && step.Output is null || step.Tools.Length > 0 && step.Output is not null))
                     step = AgentLlmStep.Failed(AgentLlmFailureKind.InvalidResponse);
-                // STEP-20: Call telemetry.Record.
+                // STEP-17: Call telemetry.Record.
                 telemetry.Record("llm", context.ConversationId, context.TurnId, context.AttemptId, new
                 {
                     elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, step.Tokens, step.CachedTokens, callNumber = calls + 1,
                     repair = repaired, limits.MaxOutputTokens, limits.ReasoningEffort,
-                    schemaRepaired, proposalRepaired, emptyRepaired, coverageRepaired,
+                    schemaRepaired, proposalRepaired, emptyRepaired,
                     failureKind = step.Failure?.Kind.ToString(), step.Failure?.HttpStatus, step.Failure?.RetryAfterSeconds,
                     step.Failure?.ProviderCode, step.Failure?.Reason
                 });
@@ -129,10 +128,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     callNumber = calls + 1, repair = repaired, context.RepairFeedback,
                     tools = step.Tools.Select(tool => new { tool.Name, tool.Arguments }), step.Output, rawContent = step.RawContent
                 });
-                // STEP-21: Return the result of SuggestionTurnAsync early when context.DishSuggestion exists.
-                // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng đều dùng câu cố định, không gọi thêm và không báo lỗi cho người dùng.
+                // STEP-18: Return the result of SuggestionTurnAsync early when context.DishSuggestion exists.
+                // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng không gọi thêm, không báo lỗi cho người dùng; SuggestionTurnAsync dùng câu cố định.
                 if (context.DishSuggestion is { } suggestion) return await SuggestionTurnAsync(context, suggestion, step.Output, turnState, timeout.Token);
-                // STEP-22: When step.Failure exists, skip this round when failure.Kind is InvalidSchema and schemaRepaired is false and more.
+                // STEP-19: When step.Failure exists, skip this round when failure.Kind is InvalidSchema and schemaRepaired is false and more.
                 // Repair a malformed schema once; planning repairs have independent bounded attempts under the same deadline.
                 if (step.Failure is { } failure)
                 {
@@ -173,7 +172,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     telemetry.Record("tools_after_edit", context.ConversationId, context.TurnId, context.AttemptId, new { tools = step.Tools.Select(tool => tool.Name).ToArray() });
                     step = new([], new AgentOutput { Action = "patch_proposal", Reply = EditReply }, step.Tokens);
                 }
-                // STEP-23: When step.Tools.Length > 0, throw the error from Unavailable when context.ToolsClosed is true, ++toolRounds > limits.MaxToolRounds and more.
+                // STEP-20: When step.Tools.Length > 0, throw the error from Unavailable when context.ToolsClosed is true, ++toolRounds > limits.MaxToolRounds and more.
                 if (step.Tools.Length > 0)
                 {
                     // Tool call không phải action cuối: model đang xin dữ liệu để tiếp tục suy luận.
@@ -212,9 +211,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         repaired = false;
                         continue;
                     }
-                    // Model xin gợi ý khi còn thiếu tỉnh/số ngày/ngân sách: hỏi ngay bằng câu cố định, giữ state vừa nhận
-                    // (kể cả khẩu vị người dùng vừa trả lời) và không gọi thêm LLM.
-                    // Thiếu thông tin chuyến đi không có câu hỏi cố định: model đọc status của tool và tự hỏi.
+                    // Thiếu tỉnh hoặc số ngày: get_recommendation trả status missing_trip_details, model đọc status đó và tự hỏi.
                     // Hội thoại 94 tốn thêm 2 lần gọi LLM vì model xin tiếp ứng viên dù đã đủ món cho mọi bữa.
                     // Backend không tự đóng tool khi thấy đã đủ món; model quyết định khi nào trả output cuối.
                     // Một tool call hợp lệ chứng tỏ output trước đã được sửa; không gửi lại thông báo "output không hợp lệ"
@@ -229,15 +226,15 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     step = new([], longPlan with { Reply = LongTripReply }, step.Tokens);
                     assembled = true;
                 }
-                // STEP-24: Prepare output.
+                // STEP-21: Prepare output.
                 var output = step.Output!;
                 lastReply = output.Reply;
-                // STEP-25: When output.Reply is missing, output.Reply.Length > limits.MaxMessageLength, (output.Clarification exists and more.
+                // STEP-22: When output.Reply is missing, output.Reply.Length > limits.MaxMessageLength, (output.Clarification exists and more.
                 // Action do LLM chọn theo Instructions trong adapter; hợp đồng chỉ cho phép các action
                 // được khai báo ở AgentLlmSchema.Output, đồng thời kiểm tra lại allowlist tại đây.
                 // Đây là quy tắc xử lý của ANGI, không có điểm số confidence/threshold phân loại intent riêng.
-                // Reply rỗng không phải lỗi: backend có câu cố định cho mọi action. Model hay để rỗng với out_of_scope vì câu từ chối là của backend;
-                // từng coi đó là output hỏng khiến "hướng dẫn tôi" tốn 2-4 lần gọi LLM rồi trả 503 cho người dùng.
+                // Reply rỗng không bị coi là output sai hợp đồng ở đây (từng khiến "hướng dẫn tôi" tốn 2-4 lần gọi LLM rồi trả 503);
+                // nó có bước sửa riêng ngay dưới.
                 if (output.Reply is null || output.Reply.Length > limits.MaxMessageLength ||
                     output.Clarification is not null && !AgentReplyBuilder.Clarifications.Contains(output.Clarification) ||
                     output.Items is null || output.Changes is null || output.Scope is null ||
@@ -355,7 +352,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     return new(output.Reply, turnState, null, null, "request_save");
                 }
                 // Câu model viết không bị kiểm hay bắt viết lại.
-                // STEP-26: When output.Action is one of the listed values, call telemetry.Record and return the model reply as it is.
+                // STEP-23: When output.Action is one of the listed values, call telemetry.Record and return the model reply as it is.
                 // Dừng trước khi nhận state của model: câu lạc đề không được đổi điều kiện chuyến đi, và mọi items/changes kèm theo đều bị bỏ qua.
                 if (output.Action is "chat" or "food_info" or "out_of_scope")
                 {
@@ -366,9 +363,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     // nó vẫn nằm trong lịch sử model đọc và model tự quyết có hỏi lại không.
                     return new(social, turnState with { PendingQuestion = null }, null, null, output.Action);
                 }
-                // STEP-27: Return the new result early when output.Action is one of the listed values.
-                // Model có thể bổ sung/siết điều kiện, nhưng không được tự nới ràng buộc đã chốt.
-                // Cờ ConstraintsChangeConfirmed không cấp quyền; backend giữ pending change để người dùng xác nhận.
+                // STEP-24: Return the new result early when output.Action is one of the listed values.
                 if (output.Action is "discard_proposal" or "reset_conversation")
                 {
                     if (output.Items.Length != 0 || output.Changes.Length != 0 || output.State is not null) return Misunderstood(context, turnState, output.Reply);
@@ -376,15 +371,11 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         output.Action == "discard_proposal" ? "discard" : "reset");
                 }
                 // Ở đây không kiểm levelQuote/budgetQuote; hai bằng chứng này chỉ được kiểm trên đường gọi get_recommendation.
-                // Model chỉ hỏi lại và không đề xuất state nào: chưa có gì để áp, nên chưa hỏi xác nhận các con số đang giữ, tránh chen ngang câu hỏi của model.
+                // Model chỉ hỏi lại và không đề xuất state nào: chưa có gì để áp.
+                // AcceptRaw áp cả điều kiện bị nới (Guard báo, AcceptRaw ghi log state_change_unstaged rồi áp luôn); cờ constraintsChangeConfirmed model gửi không được đọc.
                 if (!context.ReplanAfterConfirmation && !(output.Action == "clarify" && output.State is null))
                     context.State = AcceptRaw(context, output.State);
-                // STEP-29: Handle the early exits in order: an unknown province, the preferences question, then the new result.
-                // Tỉnh ANGI chưa có dữ liệu: nói rõ rồi hỏi lại, chữ của model có thể đã coi nơi đó là được.
-                // Chuyến đi đã đủ thông tin mà model định lập lịch hoặc hỏi lại chuyện đã biết: câu hỏi khẩu vị vẫn phải đến trước, nên không bước nào bị bỏ qua.
-                // Backend không ép thứ tự hỏi; model tự quyết hỏi gì trước.
-                // Mức khẩu vị người dùng chưa nêu do model đọc, không dùng regex.
-                // STEP-30: When output.Action is "clarify" or "answer", check whether output.Items.Length is not 0 or output.Changes.Length is not 0 and more.
+                // STEP-25: When output.Action is "clarify" or "answer", check whether output.Items.Length is not 0 or output.Changes.Length is not 0 and more.
                 if (output.Action is "clarify" or "answer")
                 {
                     // clarify: thiếu tỉnh/ngày/ngân sách, chưa rõ món hoặc nội dung cần sửa thì hỏi lại.
@@ -397,7 +388,6 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         telemetry.Record("ignored_items", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, itemCount = output.Items.Length, changeCount = output.Changes.Length });
                         output = output with { Items = [], Changes = [] };
                     }
-                    // Câu hỏi của model không bị gửi lại để sửa theo thứ tự thu thập thông tin.
                     // Tên món/quán catalog chưa xác nhận (không thấy, nhiều kết quả, ngoài tỉnh) chưa phải ràng buộc: không giữ trong state,
                     // nếu không lượt sau người dùng chọn quán khác sẽ bị hỏi "xác nhận thay đổi yêu cầu món/quán".
                     if (context.CatalogNotice is not null) context.State = AgentConstraintGuard.WithoutUnsettledNames(context.State, confirmedState);
@@ -428,7 +418,6 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                             return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, checkedKept.Snapshot, keptSource)), kept.State,
                                 checkedKept.Snapshot with { Notes = AgentReplyBuilder.PlanNotes(checkedKept.Snapshot with { State = kept.State }) }, checkedKept.Validation);
                     }
-                    // Các câu hỏi trước khi lập lịch đi theo thứ tự: chưa rõ địa điểm, số ngày, ngân sách thì chưa hỏi phạm vi hay khẩu vị.
                     // Không ép thứ tự hỏi, không kiểm câu; chỉ điền ô {plan} bằng lịch thật.
                     var reply = Raw(output.Action == "answer" && context.Source is not null
                         ? output.Reply.Replace("{plan}", AgentReplyBuilder.Plan(context) ?? "", StringComparison.Ordinal) : output.Reply);
@@ -448,23 +437,21 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         context.State = context.State with { PlanningIntake = stage, PendingPlanningRequest = context.State.PendingPlanningRequest ?? AgentIntakePolicy.CaptureRequest(null, context.Request.Content) };
                         telemetry.Record("intake", context.ConversationId, context.TurnId, context.AttemptId, new { stage });
                     }
-                    // Nơi backend vừa định vị được nói kèm câu hỏi: người dùng thấy ngay nếu bị hiểu sai trước khi có món nào được chọn.
-                    // Backend không chèn ghi chú địa điểm trước câu hỏi của model.
                     return new(reply, context.State, null, null);
                 }
-                // STEP-31: Update context: State.
+                // STEP-26: Update context: State.
                 // create_proposal supplies a scoped selection; backend creates or updates from the owned source.
                 // patch_proposal supplies explicit add/replace/remove/move operations on that source.
                 // Builder kiểm tra nguồn, scope và baseProposalVersion; Validator kiểm tra catalog,
                 // nguồn candidate, giá, ngân sách và tuyến. Action hợp lệ chưa có nghĩa proposal hợp lệ.
                 context.State = context.State with { PendingQuestion = null, PendingPlanningRequest = null };
-                // STEP-32: Call telemetry.Record.
+                // STEP-27: Call telemetry.Record.
                 telemetry.Record("proposal_output", context.ConversationId, context.TurnId, context.AttemptId,
                     new { output.Action, output.Scope, output.BaseProposalVersion, itemCount = output.Items.Length,
                         changeCount = output.Changes.Length, sourceItemCount = context.Source?.Items.Length });
-                // STEP-33: Prepare snapshot.
+                // STEP-28: Prepare snapshot.
                 AgentSnapshot snapshot;
-                // STEP-34: Set snapshot.
+                // STEP-29: Set snapshot.
                 try { snapshot = builder.Build(context, output); }
                 catch (ConflictException error) when (error.ErrorCode == "PROPOSAL_NOT_COMMITTABLE")
                 {
@@ -483,16 +470,16 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 }
                 if (context.RestoredMeals.Length > 0)
                     telemetry.Record("out_of_edit_meals_restored", context.ConversationId, context.TurnId, context.AttemptId, new { output.EditMeals, restored = context.RestoredMeals });
-                // STEP-39: When context.Source exists and output.Changes.Any matches the filter, set context.State and set snapshot.
+                // STEP-30: When context.Source exists and output.Changes.Any matches the filter, set context.State and set snapshot.
                 // Model xóa một bữa theo yêu cầu người dùng: bữa đó được phép trống, nếu không luật đủ bữa sẽ từ chối đúng điều người dùng vừa yêu cầu.
                 if (context.Source is { } removalSource && output.Changes.Any(change => change.Type == "remove"))
                 {
                     context.State = AgentConstraintGuard.WithSkippedMeals(context.State, removalSource, snapshot.Items);
                     snapshot = snapshot with { State = snapshot.State with { SkippedMeals = context.State.SkippedMeals } };
                 }
-                // STEP-40: Run validator.ValidateAsync and keep validated.
+                // STEP-31: Run validator.ValidateAsync and keep validated.
                 var validated = await validator.ValidateAsync(snapshot, context.Source, false, Routes(context), timeout.Token, context.Grants, context.ReserveGrants, context.PreparedChanges?.Select(change => change.Item).OfType<AgentItem>().ToArray());
-                // STEP-41: Call telemetry.Record.
+                // STEP-32: Call telemetry.Record.
                 telemetry.Record("validation", context.ConversationId, context.TurnId, context.AttemptId, new { validated.Validation.Errors, validated.Validation.Warnings });
                 // A broken plan shape (conversation 593: ten meals sent as day 0) is never shown as a draft, because it could not be saved: the model fixes it once
                 // from the named items, and a second broken draft ends with the controlled error while the previous draft stays.
@@ -571,18 +558,18 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                         ? validated.Validation.Warnings.Append(AgentProposalValidator.BudgetExceeded).Distinct().ToArray() : validated.Validation.Warnings;
                     validated = (filled, validated.Validation with { Errors = [], Warnings = shown, TotalCost = validated.Validation.TotalCost > 0 ? validated.Validation.TotalCost : total });
                 }
-                // STEP-48: Update context: PreviewOutput.
+                // STEP-33: Update context: PreviewOutput.
                 // Mới là kết quả chuẩn bị. SendAgentMessageUseCase còn kiểm tra lease rồi mới lưu proposal;
                 // chỉ writer chung của confirm/chat-save mới áp dụng proposal sau xác nhận rõ ràng.
                 context.PreviewOutput = output;
-                // STEP-49: Prepare reviewedState from AgentConstraintGuard.Uncovered.
+                // STEP-34: Prepare reviewedState from AgentConstraintGuard.Uncovered.
                 // The total of an over-budget draft is the budget the reply offers; a "có" may set exactly this amount without quoting it.
                 var draftTotal = validated.Snapshot.Items.Sum(item => item.Price);
                 var reviewedState = context.State with { FocusDay = null, FocusMeal = null, PlanningIntake = null,
                     BudgetOffer = context.State.BudgetAmount is { } limit && draftTotal > limit ? draftTotal : null,
                     ReplacedDishNames = AgentScopedPlanning.Replaced(context.State, context.Source, validated.Snapshot),
                     SkippedMeals = AgentConstraintGuard.Uncovered(context.State.SkippedMeals ?? [], validated.Snapshot.Items) };
-                // STEP-50: Return the new result.
+                // STEP-35: Return the new result.
                 // Chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
                 var reviewed = validated.Snapshot with { State = reviewedState };
                 // An over-budget plan is shown by the card's budget warning; no sentence is glued onto the model's reply any more (user decision 2026-11-28:
@@ -590,29 +577,30 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source)), reviewedState,
                     reviewed with { Notes = AgentReplyBuilder.PlanNotes(reviewed) }, validated.Validation);
             }
-            // STEP-51: Throw the error from Unavailable.
+            // STEP-36: Throw the error from Unavailable.
             // Đã dùng hết số lần gọi cho phép mà chưa có kết quả cuối hợp lệ.
             throw Unavailable();
         }
         catch (AgentStateChangeRequiredException change)
-        // STEP-52: On AgentStateChangeRequiredException, return the result of AgentConfirmationPolicy.StageChange.
+        // STEP-37: On AgentStateChangeRequiredException, return the result of AgentConfirmationPolicy.StageChange.
+        // Lưới an toàn: hai chỗ gọi AgentConstraintGuard.Accept (AcceptRaw và get_recommendation) tự bắt exception này và áp luôn thay đổi,
+        // nên luồng hiện tại không tới được đây.
         { return AgentConfirmationPolicy.StageChange(confirmedState, change.Proposed, context.Source is not null || context.Roadmap is not null); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested && context.DishSuggestion is not null)
-        // STEP-53: On OperationCanceledException when ct.IsCancellationRequested is false and context.DishSuggestion exists, return the result of SuggestionTurnAsync.
+        // STEP-38: On OperationCanceledException when ct.IsCancellationRequested is false and context.DishSuggestion exists, return the result of SuggestionTurnAsync.
         { return await SuggestionTurnAsync(context, context.DishSuggestion, null, turnState, ct); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        // STEP-54: On OperationCanceledException when ct.IsCancellationRequested is false, throw AgentProviderException.
+        // STEP-39: On OperationCanceledException when ct.IsCancellationRequested is false, throw AgentProviderException.
         { throw new AgentProviderException(new(AgentLlmFailureKind.TurnTimeout)); }
-        // State do model đề xuất sai luật: lỗi của model, không phải của người dùng. Giữ state đầu lượt và hỏi lại.
-        // STEP-55: On FluentValidation.ValidationException for a new trip, return the validator's message.
-        // Người dùng vừa nêu một giá trị không hợp lệ ("145 ngày"): nói rõ giới hạn, không hỏi lại như chưa nghe gì.
+        // State do model đề xuất sai luật: lỗi của model, không phải của người dùng. Giữ state đầu lượt và hiện câu model đã viết.
+        // STEP-40: On FluentValidation.ValidationException for a new trip, record it and return the model's last reply.
+        // Người dùng vừa nêu một giá trị không hợp lệ ("145 ngày"): model đã đọc giá trị đó và tự nói giới hạn trong câu của nó.
         catch (FluentValidation.ValidationException error) when (context.CatalogProvinces is not null && AgentIntakePolicy.Eligible(context))
         {
-            var problem = error.Errors.FirstOrDefault()?.ErrorMessage ?? "Thông tin chuyến đi chưa hợp lệ.";
             StateRejected(context, error, "intake_last_reply", lastReply);
             return new(Raw(lastReply), turnState, null, null);
         }
-        // STEP-56: On any other FluentValidation.ValidationException, return the result of Misunderstood.
+        // STEP-41: On any other FluentValidation.ValidationException, return the result of Misunderstood.
         catch (FluentValidation.ValidationException error)
         {
             StateRejected(context, error, "misunderstood", lastReply);
@@ -711,16 +699,16 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     }
 
     /// <summary>
-    /// Prepares a new trip's turn from what carries no language: shared coordinates become a province, and a point with no restaurant around it gets its fixed answer.
-    /// The message itself is the model's to read; null means the turn goes on to it.
+    /// Prepares a new trip's turn from what carries no language: the provinces ANGI has restaurants in, a province for shared coordinates, and the
+    /// province an empty roadmap names in its title. The message itself is the model's to read.
     /// </summary>
-    private async Task<AgentPreparedTurn?> StartIntakeAsync(AgentContext context, CancellationToken ct)
+    private async Task StartIntakeAsync(AgentContext context, CancellationToken ct)
     {
-        // STEP-01: Return null early when catalog is missing or AgentIntakePolicy.Eligible(context) does not hold.
-        if (catalog is null || !AgentIntakePolicy.Eligible(context)) return null;
+        // STEP-01: Stop here when catalog is missing or AgentIntakePolicy.Eligible(context) does not hold.
+        if (catalog is null || !AgentIntakePolicy.Eligible(context)) return;
         // STEP-02: Load provinces through catalog.GetProvincesAsync.
         var provinces = context.CatalogProvinces = await catalog.GetProvincesAsync(ct);
-        // STEP-03: When the turn shares coordinates, set the nearest province, or return the fixed answer and drop them when none is near.
+        // STEP-03: When the turn shares coordinates, set the nearest province within reach.
         if (AgentIntakePolicy.NeedsNearby(context))
         {
             var state = context.State;
@@ -732,24 +720,20 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         if (string.IsNullOrWhiteSpace(context.State.Province) && context.Roadmap is not null &&
             AgentIntakePolicy.ProvinceInTitle(context.State.Title, provinces) is { } titled)
             context.State = context.State with { Province = titled };
-        // STEP-04: Return the fixed answer early when a pinned point has no restaurant around it.
-        // Quanh điểm đã chọn không có quán thì không trả câu cố định; lượt chat đi tiếp tới model.
-        // STEP-05: Update context: IntakeComplete, then return null.
+        // STEP-04: Update context: IntakeComplete.
         context.IntakeComplete = context.State.PlanningIntake == AgentIntakePolicy.Preferences;
-        return null;
     }
 
     /// <summary>Same wording as the new-plan template in the system prompt; slots are filled after validation.</summary>
     internal const string LongTripReply = "Lịch {numDays} ngày ở {place} xong rồi nè, tổng khoảng {total}. Bạn xem thử, ưng thì bảo mình chốt nhé!";
 
-    // Người dùng chỉ thấy câu model viết; backend không có câu thay thế.
-    // A model sometimes escapes its line breaks twice, and the chat then shows "\n" as text (conversation 597): those become real line breaks.
     /// <summary>The action of a turn that left an open save question unanswered; the use case keeps that question for the next turn.</summary>
     public const string SaveUnclear = "save_unclear";
 
+    // Người dùng chỉ thấy câu model viết; backend không có câu thay thế.
+    // A model sometimes escapes its line breaks twice, and the chat then shows "\n" as text (conversation 597): those become real line breaks.
     private static string Raw(string? reply) => (reply ?? "").Replace("\\r\\n", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal).Trim();
 
-    /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
     /// <summary>The reply of an edit when the model's own reply names no change; the backend fills {changes} and {total} from the draft.</summary>
     private const string EditReply = "Mình đã sửa lịch: {changes}. Tổng giờ khoảng {total}; bạn xem lại, ổn thì bảo mình chốt nhé!";
 
@@ -764,6 +748,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         return !string.IsNullOrWhiteSpace(state.Province) && state.NumDays.HasValue;
     }
 
+    /// <summary>
+    /// Takes the state the model wrote: normalizes the province and a per-day budget, keeps the dish requests the backend placed and the fields it owns,
+    /// and runs the state rules. A loosened constraint on an existing plan is applied as read here (no confirmation question).
+    /// </summary>
     private AgentState AcceptRaw(AgentContext context, AgentState? proposed)
     {
         // A province with no restaurants on ANGI never enters the trip: the model words why, the state stays without it.
@@ -779,15 +767,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         }
     }
 
-    /// <summary>Ends a suggest_dish turn with the model's checked wording, or the fixed reply when it wrote none; the plan and state stay as the turn began.</summary>
+    /// <summary>
+    /// Ends a suggest_dish turn with the model's wording, its slots filled from the picked dishes. A suggestion by meal, or a turn where the model
+    /// wrote no reply, shows the fixed reply the backend built from the same dishes. The plan and state stay as the turn began.
+    /// </summary>
     private async Task<AgentPreparedTurn> SuggestionTurnAsync(AgentContext context, AgentDishSuggestion suggestion, AgentOutput? output, AgentState turnState, CancellationToken ct)
     {
-        // STEP-02: Prepare reply through AgentDishSuggestionPolicy.Worded, call telemetry.Record and RecordReplaced when output exists.
-        // Chỉ điền các ô {name1}…; không kiểm câu. Câu cố định chỉ dùng khi lần gọi viết câu thất bại.
-        var reply = suggestion.ByMeal ? suggestion.FixedReply : Raw(AgentDishSuggestionPolicy.FillSlots(output?.Reply, suggestion));
-        telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
-        // Câu hiển thị đã được điền dữ kiện nên không còn giống chữ model viết; chỉ tính là bị thay khi phải dùng câu cố định.
-        // STEP-03: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
+        // STEP-01: Prepare reply, then call telemetry.Record.
+        // Chỉ điền các ô {name1}…; không kiểm câu. Không có câu model (provider lỗi, hết giờ hay hết lượt gọi đúng lúc viết câu, hoặc câu rỗng) thì dùng
+        // câu cố định dựng từ cùng các món: trước đây lượt đó chỉ còn danh sách món trơn, hoặc tin nhắn rỗng khi có 0 hay 1 món.
+        var fixedReply = suggestion.ByMeal || string.IsNullOrWhiteSpace(output?.Reply);
+        var reply = fixedReply ? suggestion.FixedReply : Raw(AgentDishSuggestionPolicy.FillSlots(output!.Reply, suggestion));
+        telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized, fixedReply });
+        // STEP-02: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
         // The shown dishes are remembered past this turn, so a later "thêm món đó vào bữa tối ngày 2" or "3 món này vào bữa sáng" knows which dishes are meant.
         var offered = suggestion.Dishes.Where(dish => dish.DishId > 0).Select(dish => new AgentOfferedDish(dish.DishId, dish.Name, dish.RestaurantId, dish.Restaurant)).ToArray();
         // Each list shown is kept with its conditions (at most five), so a later "dựa vào các món like nhiều nhất" can name that list (conversation 597).
@@ -800,7 +792,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             LastSuggestion = context.Suggested ?? turnState.LastSuggestion, OfferedLists = lists.Length > 0 ? lists.TakeLast(AgentOfferedList.MaxKept).ToArray() : null }, null, null, "chat");
     }
 
-    /// <summary>A fixed question for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>
+    /// <summary>Returns the model's own reply for output the backend cannot use; the turn state is unchanged and the user is never shown a service error for it.</summary>
     private AgentPreparedTurn Misunderstood(AgentContext context, AgentState state, string? reply)
     {
         telemetry.Record("misunderstood", context.ConversationId, context.TurnId, context.AttemptId);

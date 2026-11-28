@@ -69,12 +69,12 @@ public static class AgentReplyBuilder
         // Nêu rõ mức và phạm vi đã áp dụng để người dùng thấy ngay nếu hệ thống hiểu sai ngày/bữa.
         if (TasteScopes(snapshot.State) is { } tastes) notes.Add($"Mình ưu tiên khẩu vị {tastes}, {TasteNote}.");
         // Không còn ghi chú "Theo yêu cầu của bạn: … ở … ngày …": món nằm ngay trong lịch, và một lịch dựng từ danh sách món đã gợi ý thành chín dòng lặp lại (user decision 2026-11-12).
-        // STEP-10: When Where(filtered).GroupBy(filtered).Any matches the filter, call notes.Add.
+        // STEP-09: When Where(filtered).GroupBy(filtered).Any matches the filter, call notes.Add.
         // Lặp còn lại sau khi backend đã thay các món lặp tránh được; món người dùng gọi tên không tính.
         if (snapshot.Items.Where(item => AgentScopedPlanning.Request(snapshot.State, item.DayNumber, item.MealSlot) is { DishName: null, RestaurantName: null })
                 .GroupBy(item => AgentScopedPlanning.Normalize(item.DishName)).Any(group => group.Key is not null && group.Count() > 1))
             notes.Add(RepeatNote);
-        // STEP-11: Return notes.
+        // STEP-10: Return notes.
         return [.. notes];
     }
 
@@ -204,21 +204,6 @@ public static class AgentReplyBuilder
         return string.Join(' ', parts);
     }
 
-    /// <summary>Confirms a completed save with the dates the roadmap now holds, or says the date is still open.</summary>
-    public static string Saved(short? numDays, DateOnly? startDate)
-    {
-        // STEP-01: Prepare days.
-        var days = numDays ?? 1;
-        // STEP-02: Return the formatted text early when startDate is not { } start.
-        if (startDate is not { } start) return $"Mình đã lưu lịch {days} ngày của bạn. Khi chọn được ngày đi, bạn cập nhật sau cũng được nhé.";
-        // STEP-03: Prepare when from Day.
-        var when = days > 1 ? $"từ {Day(start)} đến {Day(start.AddDays(days - 1))}" : $"vào {Day(start)}";
-        // STEP-04: Return the formatted text.
-        return $"Mình đã lưu lịch {days} ngày của bạn, {when}. Muốn chỉnh gì cứ nhắn mình nhé.";
-    }
-
-    private static string Day(DateOnly date) => date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-
     /// <summary>Lists a saved itinerary by day and meal in chat, for a user who asked to see it while no proposal card is on screen.</summary>
     public static string Itinerary(AgentSnapshot snapshot)
     {
@@ -272,8 +257,8 @@ public static class AgentReplyBuilder
         var missing = new List<string>();
         // STEP-03: When state.NumDays has no value, call missing.Add.
         if (!state.NumDays.HasValue) missing.Add("số ngày");
-        // STEP-04: Budget is optional: a trip with no stated budget is planned with none.
-        // STEP-05: Return one of two results depending on missing.Count is 0.
+        // Ngân sách không bắt buộc: chuyến đi chưa nêu ngân sách được lập lịch không ngân sách.
+        // STEP-04: Return one of two results depending on missing.Count is 0.
         return missing.Count == 0 ? null : $"Bạn cho mình biết {string.Join(", ", missing)} để lập lịch nhé?";
     }
 

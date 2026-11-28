@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Text;
-using System.Text.RegularExpressions;
 using ANGI.Application.Common.Models.Agent;
 using ANGI.Application.DTOs.Agent;
 using ANGI.Application.UseCases.Agent;
@@ -19,7 +17,7 @@ public sealed record AgentSaveDecision(string? Reply, AgentPendingSave? Pending 
 
 /// <summary>
 /// Holds every question the backend waits on and what may follow it: which question is open, whether the model's reading of the reply fits it, the steps of saving
-/// and a staged change of conditions. The model reads how the user answers; only a complete save sentence, plain draft controls and a date written in digits are recognized here, because none of them depends on how people talk.
+/// and a staged change of conditions. The model reads how the user answers; nothing here reads the user's wording.
 /// </summary>
 public static class AgentConfirmationPolicy
 {
@@ -159,10 +157,7 @@ public static class AgentConfirmationPolicy
 
     private static string Short(DateOnly date) => $"{date.Day}/{date.Month}";
 
-    // Start dates
-
-    private const string Month = @"(?:/|-|\s*thang\s*)(?<{0}>\d{{1,2}})";
-    private const string Year = @"(?:(?:/|-|\s*nam\s*)(?<{0}>\d{{4}}|\d{{2}}))?";
+    // Dates
 
     /// <summary>Today's calendar date for a Vietnam-based traveler; stored instants remain UTC.</summary>
     public static DateOnly Today(TimeProvider clock) => DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(7)).DateTime);
@@ -195,20 +190,6 @@ public static class AgentConfirmationPolicy
         return Enumerable.Range(0, Math.Min((int)days, 62)).Select(offset => start.AddDays(offset))
             .Select((date, index) => (object)new { dayNumber = index + 1, date = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), weekday = Weekdays[(int)date.DayOfWeek] })
             .ToArray();
-    }
-
-    private static DateOnly? Date(Match match, string day, string month, string year, DateOnly notBefore)
-    {
-        // STEP-01: Prepare d through int.Parse, m through int.Parse, stated from int.Parse and y.
-        var d = int.Parse(match.Groups[day].Value, CultureInfo.InvariantCulture);
-        var m = int.Parse(match.Groups[month].Value, CultureInfo.InvariantCulture);
-        var stated = match.Groups[year] is { Success: true } group ? int.Parse(group.Value, CultureInfo.InvariantCulture) : (int?)null;
-        var y = stated is { } value ? value < 100 ? 2000 + value : value : notBefore.Year;
-        // STEP-02: Return null early when DateOnly.TryParseExact(CultureInfo.InvariantCulture, DateTimeStyles.None, ...) does not hold.
-        if (!DateOnly.TryParseExact($"{y:D4}-{m:D2}-{d:D2}", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) return null;
-        // STEP-03: Return one of two results depending on stated is missing, date < notBefore and DateOnly.TryParseExact(CultureInfo.InvariantCulture, DateTimeStyles.None, ...) holds.
-        // Không nêu năm thì là lần gần nhất sắp tới; năm người dùng nêu thì giữ nguyên để báo "đã qua" thay vì tự đổi.
-        return stated is null && date < notBefore && DateOnly.TryParseExact($"{y + 1:D4}-{m:D2}-{d:D2}", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var next) ? next : date;
     }
 
     // Wording and staged changes
@@ -265,13 +246,5 @@ public static class AgentConfirmationPolicy
             else if (!before.ContainsKey(key)) yield return $"thêm yêu cầu món/quán cho {scope}";
             else if (AgentJson.Write(before[key]) != AgentJson.Write(after[key])) yield return $"đổi yêu cầu món/quán cho {scope}";
         }
-    }
-
-    /// <summary>Normalizes Vietnamese accents and terminal emphasis without removing negation, quotes or question marks.</summary>
-    private static string Normalize(string content)
-    {
-        var text = new string(content.Normalize(NormalizationForm.FormD).Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark).ToArray())
-            .Normalize(NormalizationForm.FormC).ToLowerInvariant().Replace('đ', 'd').Trim().TrimEnd('.', '!').Trim();
-        return Regex.Replace(text, @"\s+", " ");
     }
 }

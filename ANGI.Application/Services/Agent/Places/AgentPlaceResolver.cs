@@ -138,7 +138,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
                 wholeProvince.AddRange(stop.Days);
                 continue;
             }
-            // STEP-05a: A zone read as several places: its days search every located place, or the whole province when none was found.
+            // STEP-04a: A zone read as several places: its days search every located place, or the whole province when none was found.
             if (IsZone(stop.Kind, stop.Parts))
             {
                 var (zone, report) = await ZoneAsync(stop.Place, stop.Parts!, stop.Days, province, provinces, restaurants, ct);
@@ -205,20 +205,20 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         // "phố Huế" là con đường ở Hà Nội; "Huế" là thành phố khác.
         var lowered = place.Trim().ToLowerInvariant();
         var street = StreetWords.FirstOrDefault(word => lowered.StartsWith(word, StringComparison.Ordinal));
-        // STEP-07: Prepare addressed through AddressMatches.
+        // STEP-06: Prepare addressed through AddressMatches.
         var addressed = AddressMatches(term, inProvince);
-        // STEP-08: When addressed.Length is 0 and street exists, set addressed.
+        // STEP-07: When addressed.Length is 0 and street exists, set addressed.
         if (addressed.Length == 0 && street is not null) addressed = AddressMatches(AgentIntakePolicy.Plain(lowered[street.Length..]), inProvince);
-        // STEP-09: When addressed.Length > 0, prepare latitude through Median, prepare longitude through Median and 1 more action(s).
+        // STEP-08: When addressed.Length > 0, prepare latitude through Median, prepare longitude through Median and 1 more action(s).
         if (addressed.Length > 0)
         {
             var latitude = Median(addressed.Select(x => x.Latitude));
             var longitude = Median(addressed.Select(x => x.Longitude));
             return Sized(label, latitude, longitude, inProvince);
         }
-        // STEP-10: Return null early when searchMap is false or search is missing.
+        // STEP-09: Return null early when searchMap is false or search is missing.
         if (!searchMap || search is null) return null;
-        // STEP-11: Prepare nearLatitude, nearLongitude, catalogProvinces and searchIn, then load candidates through search.SearchAsync.
+        // STEP-10: Prepare nearLatitude, nearLongitude, catalogProvinces and searchIn, then load candidates through search.SearchAsync.
         var nearLatitude = inProvince.Length > 0 ? Median(inProvince.Select(x => x.Latitude)) : (decimal?)null;
         var nearLongitude = inProvince.Length > 0 ? Median(inProvince.Select(x => x.Longitude)) : (decimal?)null;
         // ANGI chỉ có dữ liệu ở một tỉnh thì tra trong tỉnh đó: "Hòa Lạc, Việt Nam" có thể ra nơi trùng tên ở tỉnh khác.
@@ -229,7 +229,7 @@ public sealed class AgentPlaceResolver(IAgentCatalogRepository catalog, IPlaceSe
         foreach (var query in queries)
         {
             var candidates = await search.SearchAsync($"{query}, {searchIn}", nearLatitude, nearLongitude, ct);
-            // STEP-12: Return the located place when Verified() exists.
+            // STEP-11: Return the located place when Verified() exists.
             // Bản đồ luôn trả về thứ gì đó; chỉ tin khi tên hoặc địa chỉ chứa nguyên cụm người dùng viết.
             if (Verified(candidates, term, province) is { } found) return Sized(label, found.Latitude, found.Longitude, inProvince);
         }
