@@ -30,7 +30,6 @@ public static class AgentIntakePolicy
     /// <summary>True only for a chat turn with no plan yet; editing an existing plan or answering a staged change stays with the existing flow.</summary>
     public static bool Eligible(AgentContext context) => context.Request.Command == "chat" && context.State.PendingStateChange is null && !HasPlan(context);
 
-    /// <summary>A plan exists once a ready proposal or a saved item exists; an empty roadmap is still only a trip frame.</summary>
     /// <summary>
     /// True once the user is planning in this conversation: a plan exists, a planning question was asked, or a planning request is being
     /// clarified. Trip values loaded from the roadmap the chat was opened on do not count, so a bare taste there is still a dish idea.
@@ -38,6 +37,7 @@ public static class AgentIntakePolicy
     public static bool PlanningStarted(AgentContext context) =>
         HasPlan(context) || context.State.PlanningIntake is not null || context.State.PendingPlanningRequest is not null;
 
+    /// <summary>A plan exists once a ready proposal or a saved item exists; an empty roadmap is still only a trip frame.</summary>
     public static bool HasPlan(AgentContext context) => context.CurrentProposal?.Status == "ready" || context.Source is { Items.Length: > 0 };
 
     /// <summary>True when the turn supplies coordinates that still need a province.</summary>

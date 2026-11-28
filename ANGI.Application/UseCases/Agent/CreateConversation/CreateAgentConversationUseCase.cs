@@ -63,21 +63,20 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                     existing.Status = AgentConversationStatus.Active;
                     // STEP-14: Call AgentConversationRules.ClearLease.
                     AgentConversationRules.ClearLease(existing);
-                    // STEP-15: Increment existing.Version.
-                    // STEP-16: Update existing: ExpiresAt.
+                    // STEP-15: Increment existing.Version and update existing.ExpiresAt.
                     existing.Version++; existing.ExpiresAt = now.AddDays(limits.ActiveDays);
-                    // STEP-17: Save the pending changes.
+                    // STEP-16: Save the pending changes.
                     await unitOfWork.SaveChangesAsync(ct);
                 }
-                // STEP-18: Prepare current, then load history through repository.GetCompletedHistoryAsync.
+                // STEP-17: Prepare current, then load history through repository.GetCompletedHistoryAsync.
                 var current = AgentJson.Read<AgentState>(existing.State);
                 var history = await repository.GetCompletedHistoryAsync(existing.Id, limits.MaxTranscriptMessages, ct);
-                // STEP-19: Prepare proposal from repository.GetProposalSnapshotAsync.
+                // STEP-18: Prepare proposal from repository.GetProposalSnapshotAsync.
                 var proposal = existing.CurrentProposalId is { } currentId
                     ? await repository.GetProposalSnapshotAsync(existing.Id, currentId, ct) : null;
-                // STEP-20: Commit the transaction.
+                // STEP-19: Commit the transaction.
                 await transaction.CommitAsync(ct);
-                // STEP-21: Return the new result.
+                // STEP-20: Return the new result.
                 return new(existing.Id, existing.Version, AgentJson.Name(existing.Status), current,
                     AgentConversationRules.Busy(existing, now), history.Where(x => x.Role != AgentMessageRole.Tool &&
                         x.SequenceNo >= (current.TranscriptStartSequence ?? 0)).Select(x => new AgentTranscript(
@@ -86,16 +85,16 @@ public sealed class CreateAgentConversationUseCase(IValidator<CreateAgentConvers
                 { Reused = true, Quota = await AgentConversationRules.QuotaAsync(repository, userId, now, limits, ct) };
             }
         }
-        // STEP-22: Prepare conversation as AgentConversation.
+        // STEP-21: Prepare conversation as AgentConversation.
         var conversation = new AgentConversation { UserId = userId, RoadmapId = request.RoadmapId,
             State = AgentJson.Write(state), ExpiresAt = clock.GetUtcNow().UtcDateTime.AddDays(limits.ActiveDays) };
-        // STEP-23: Queue conversation through repository.AddConversation.
+        // STEP-22: Queue conversation through repository.AddConversation.
         repository.AddConversation(conversation);
-        // STEP-24: Save the pending changes.
+        // STEP-23: Save the pending changes.
         await unitOfWork.SaveChangesAsync(ct);
-        // STEP-25: Commit the transaction.
+        // STEP-24: Commit the transaction.
         await transaction.CommitAsync(ct);
-        // STEP-26: Return the new result.
+        // STEP-25: Return the new result.
         return new(conversation.Id, conversation.Version, "active", state, false, [], null)
         { Quota = await AgentConversationRules.QuotaAsync(repository, userId, clock.GetUtcNow().UtcDateTime, limits, ct) };
     }

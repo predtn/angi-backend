@@ -54,7 +54,7 @@ public static class AgentDishSuggestionPolicy
         return $"{start} vài món{near} nhé:\n{string.Join('\n', lines)}\n{next}";
     }
 
-    /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply to fall back on.</summary>
+    /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply a suggestion by meal shows.</summary>
     /// <param name="distanceKm">Around a place the user named: each dish's straight-line distance from it, added to the address so the user sees how near it is.</param>
     public static AgentDishSuggestion Suggestion(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false,
         Func<Dish, double>? distanceKm = null) => new(
