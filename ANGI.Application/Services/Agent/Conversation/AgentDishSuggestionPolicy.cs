@@ -7,7 +7,7 @@ using ANGI.Domain.Enums;
 
 namespace ANGI.Application.Services.Agent.Conversation;
 
-/// <summary>Holds the facts of a dish idea, which needs no trip: the model words the reply around slots the backend fills, and a failed check shows the fixed one.</summary>
+/// <summary>Holds the facts of a dish idea, which needs no trip: the model words the reply around slots the backend fills, and a missing reply shows the fixed one.</summary>
 public static class AgentDishSuggestionPolicy
 {
     public const string NothingFound = "Mình chưa tìm thấy món nào phù hợp trên ANGI. Bạn thử bỏ bớt điều kiện hoặc chọn nơi khác nhé.";
@@ -54,7 +54,7 @@ public static class AgentDishSuggestionPolicy
         return $"{start} vài món{near} nhé:\n{string.Join('\n', lines)}\n{next}";
     }
 
-    /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply a suggestion by meal shows.</summary>
+    /// <summary>Packs the chosen dishes with the facts a reply may state and the fixed reply shown for a suggestion by meal or when the model wrote no reply.</summary>
     /// <param name="distanceKm">Around a place the user named: each dish's straight-line distance from it, added to the address so the user sees how near it is.</param>
     public static AgentDishSuggestion Suggestion(IReadOnlyList<Dish> dishes, bool aroundPin, bool personalized, bool hasPlan = false, string? area = null, string? areaNotFound = null, bool mealAsked = false,
         Func<Dish, double>? distanceKm = null) => new(

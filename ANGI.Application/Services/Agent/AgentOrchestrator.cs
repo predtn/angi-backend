@@ -129,7 +129,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     tools = step.Tools.Select(tool => new { tool.Name, tool.Arguments }), step.Output, rawContent = step.RawContent
                 });
                 // STEP-18: Return the result of SuggestionTurnAsync early when context.DishSuggestion exists.
-                // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng không gọi thêm và không báo lỗi cho người dùng (xem SuggestionTurnAsync).
+                // Món đã được chọn xong, lần gọi này chỉ để viết câu: lỗi hay output hỏng không gọi thêm, không báo lỗi cho người dùng; SuggestionTurnAsync dùng câu cố định.
                 if (context.DishSuggestion is { } suggestion) return await SuggestionTurnAsync(context, suggestion, step.Output, turnState, timeout.Token);
                 // STEP-19: When step.Failure exists, skip this round when failure.Kind is InvalidSchema and schemaRepaired is false and more.
                 // Repair a malformed schema once; planning repairs have independent bounded attempts under the same deadline.
@@ -768,15 +768,17 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     }
 
     /// <summary>
-    /// Ends a suggest_dish turn with the model's wording, its slots filled from the picked dishes; a suggestion by meal uses its fixed reply.
-    /// The plan and state stay as the turn began.
+    /// Ends a suggest_dish turn with the model's wording, its slots filled from the picked dishes. A suggestion by meal, or a turn where the model
+    /// wrote no reply, shows the fixed reply the backend built from the same dishes. The plan and state stay as the turn began.
     /// </summary>
     private async Task<AgentPreparedTurn> SuggestionTurnAsync(AgentContext context, AgentDishSuggestion suggestion, AgentOutput? output, AgentState turnState, CancellationToken ct)
     {
         // STEP-01: Prepare reply, then call telemetry.Record.
-        // Chỉ điền các ô {name1}…; không kiểm câu. Không có câu model (lần gọi viết câu lỗi) thì từ 2 món trở lên chỉ còn danh sách món, 1 món thì câu rỗng.
-        var reply = suggestion.ByMeal ? suggestion.FixedReply : Raw(AgentDishSuggestionPolicy.FillSlots(output?.Reply, suggestion));
-        telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized });
+        // Chỉ điền các ô {name1}…; không kiểm câu. Không có câu model (provider lỗi, hết giờ hay hết lượt gọi đúng lúc viết câu, hoặc câu rỗng) thì dùng
+        // câu cố định dựng từ cùng các món: trước đây lượt đó chỉ còn danh sách món trơn, hoặc tin nhắn rỗng khi có 0 hay 1 món.
+        var fixedReply = suggestion.ByMeal || string.IsNullOrWhiteSpace(output?.Reply);
+        var reply = fixedReply ? suggestion.FixedReply : Raw(AgentDishSuggestionPolicy.FillSlots(output!.Reply, suggestion));
+        telemetry.Record("dish_suggestion", context.ConversationId, context.TurnId, context.AttemptId, new { provider = true, suggestion.Personalized, fixedReply });
         // STEP-02: Return the new result. The user moved on, so an earlier question no longer waits; the plan being built stays in the state and the question in the history.
         // The shown dishes are remembered past this turn, so a later "thêm món đó vào bữa tối ngày 2" or "3 món này vào bữa sáng" knows which dishes are meant.
         var offered = suggestion.Dishes.Where(dish => dish.DishId > 0).Select(dish => new AgentOfferedDish(dish.DishId, dish.Name, dish.RestaurantId, dish.Restaurant)).ToArray();

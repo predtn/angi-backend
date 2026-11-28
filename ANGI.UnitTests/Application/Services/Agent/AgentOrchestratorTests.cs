@@ -1273,6 +1273,7 @@ public sealed class AgentOrchestratorTests
     /// <summary>Only the backend's deadline falls back; a client that left must not get a reply stored for it.</summary>
     [Theory]
     [InlineData(true)]
+    [InlineData(false)]
     public async Task RunAsync_SuggestionWordingCancelled_FallsBackOnlyOnTimeout(bool callerCancelled)
     {
         // STEP-01: Get context from IntakeContext and create source as CancellationTokenSource.
@@ -1296,6 +1297,7 @@ public sealed class AgentOrchestratorTests
     /// <summary>The one case with no facts is where a model could offer a dish ANGI does not have.</summary>
     [Theory]
     [InlineData("Trên ANGI chưa có món nào hợp, bạn thử bỏ bớt điều kiện nhé.", true)]
+    [InlineData(null, false)]
     public async Task RunAsync_NothingFound_ShowsCheckedWordingOrFixedReply(string? reply, bool shown)
     {
         // STEP-01: Get context from IntakeContext and create second.
@@ -1309,6 +1311,28 @@ public sealed class AgentOrchestratorTests
 
         // STEP-04: Assert result.Reply is the expected value.
         result.Reply.Should().Be(shown ? reply : AgentDishSuggestionPolicy.NothingFound);
+    }
+
+    // TEST-60: When the wording call fails or returns an empty reply after dishes were found, the turn shows the backend's fixed reply for those dishes, never an empty message.
+    /// <summary>Before this fix one dish gave an empty reply and several dishes a bare list with no sentence.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RunAsync_SuggestionWithoutWording_ShowsFixedReply(string? reply)
+    {
+        // STEP-01: Get context from IntakeContext and create second: a provider failure for null, otherwise an answer with a blank reply.
+        var context = IntakeContext("gợi ý món cay dưới 60k", new AgentState());
+        var second = reply is null ? AgentLlmStep.Failed(AgentLlmFailureKind.ProviderUnavailable, 500) : new AgentLlmStep([], new AgentOutput { Action = "answer", Reply = reply });
+        // STEP-02: Get llm from WordingLlm.
+        var llm = WordingLlm(context, second);
+
+        // STEP-03: Get result from Suggesting().RunAsync.
+        var result = await Suggesting(llm.Object).RunAsync(context, default);
+
+        // STEP-04: Assert the reply is the fixed sentence naming the found dish and the suggestion is remembered for the next turn.
+        result.Reply.Should().StartWith("Mình gợi ý").And.Contain("Dish 1");
+        result.State.DishOffered.Should().BeTrue();
     }
 
     // TEST-49: A question about the user's own favourites is worded by the model; in an answer, a guess at a dish in lower case is replaced because an answer states facts of the plan.
