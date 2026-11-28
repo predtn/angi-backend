@@ -338,7 +338,7 @@ public sealed record AgentPriceTierRange(decimal From, decimal To, decimal Lowes
 /// <summary>A dish a suggestion showed: enough for the model to put it on a day and meal later without searching again.</summary>
 public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId, string Restaurant);
 
-/// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply a suggestion by meal shows.</summary>
+/// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply shown for a suggestion by meal or when the model wrote no reply.</summary>
 /// <param name="Area">The place the user named that the search stayed around.</param>
 /// <param name="AreaNotFound">The place the user named that could not be located, so the search was not narrowed to it.</param>
 /// <param name="PriceBelow">When nothing fits the asked price: the nearest catalog price under it for the same search, else null.</param>
