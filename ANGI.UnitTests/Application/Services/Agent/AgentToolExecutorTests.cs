@@ -187,23 +187,189 @@ public sealed class AgentToolExecutorTests
         meats.Should().BeEquivalentTo("Phở bò", "Cơm gà");
     }
 
-    // TEST-01c2e: The specialty button shows only dishes tagged as specialties, and without that tag runs as chat instead of showing any main dish.
-    /// <summary>Filters on local_sf_specialty alone; a catalogue without it produces no tool call.</summary>
+    // TEST-01c2e: The specialty button asks for the province's specialties as a wish, never the specialty tag, even when the catalogue has that tag
+    // (user decision 2026-11-27); its arguments still pass the strict tool schema.
+    /// <summary>Sends suggest_dish with a wish naming the province and no tag.</summary>
     [Fact]
-    public async Task StarterCallAsync_Specialty_UsesSpecialtyTagOnly()
+    public async Task StarterCallAsync_Specialty_SendsWishNotTag()
     {
         var fixture = AgentTestData.Validator();
         fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
-        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(),
+            picker: Mock.Of<IAgentDishPicker>());
         var context = AgentTestData.Context();
         context.Request.Command = "suggest_specialty";
 
         var call = await tools.StarterCallAsync(context, CancellationToken.None);
-        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync([ProdTags.Main]);
-        var withoutTag = await tools.StarterCallAsync(context, CancellationToken.None);
 
-        call!.Arguments.GetProperty("tagIds").EnumerateArray().Select(id => id.GetInt16()).Should().Equal(ProdTags.Specialty.Id);
-        withoutTag.Should().BeNull();
+        call!.Name.Should().Be("suggest_dish");
+        call.Arguments.GetProperty("tagIds").GetArrayLength().Should().Be(0);
+        call.Arguments.GetProperty("wish").GetString().Should().Contain(context.State.Province!);
+        AgentLlmSchema.IsValid(call.Arguments, AgentLlmSchema.Tools[call.Name]).Should().BeTrue();
+    }
+
+    // TEST-01c2e2: Without a pick step a wish cannot be applied: the list is the ordinary ranking and the result says wishApplied=false, so the reply
+    // never calls those dishes specialties.
+    /// <summary>suggest_dish with a wish and no picker returns dishes with wishApplied=false.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestWishWithoutPicker_IsNotApplied()
+    {
+        var fixture = AgentTestData.Validator(WishDishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WishDishes.Select(dish => dish.Id).ToArray());
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Count: 5,
+            Wish: "món đặc trưng Hà Nội"), AgentJson.Options));
+
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+
+        DishNames(result).Should().HaveCount(5);
+        result.GetProperty("wishApplied").GetBoolean().Should().BeFalse();
+    }
+
+    /// <summary>Six main dishes for the wish tests: ids 11-16.</summary>
+    private static readonly ANGI.Domain.Entities.Dish[] WishDishes =
+        Enumerable.Range(11, 6).Select(id => Named(id, $"Món {id}", ProdTags.Main)).ToArray();
+
+    /// <summary>Runs suggest_dish with a wish over WishDishes, the picker answering as given; returns the result, the picker and the request it saw.</summary>
+    private static async Task<(JsonElement Result, Mock<IAgentDishPicker> Picker, AgentDishPickRequest? Seen)> SuggestWish(AgentDishPick? pick, string? wish = "món đặc trưng Hà Nội")
+    {
+        var fixture = AgentTestData.Validator(WishDishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WishDishes.Select(dish => dish.Id).ToArray());
+        AgentDishPickRequest? seen = null;
+        var picker = new Mock<IAgentDishPicker>();
+        picker.Setup(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentDishPickRequest, CancellationToken>((request, _) => seen = request).ReturnsAsync(pick);
+        var context = AgentTestData.Context();
+        context.State = new AgentState();
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(),
+            picker: picker.Object);
+        var call = new AgentToolCall("s", "suggest_dish", JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: [], Count: 5, Wish: wish), AgentJson.Options));
+        var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
+        return (result, picker, seen);
+    }
+
+    private static string?[] DishNames(JsonElement result) => result.GetProperty("dishes").EnumerateArray().Select(dish => dish.GetProperty("name").GetString()).ToArray();
+
+    // TEST-01c2e3: A wish is answered only with dishes the picker chose from the filtered list: ids it invented are dropped, a repeated id counts once,
+    // clear matches come first, and nothing that did not fit is added to fill the count ("món đặc trưng Hà Nội" once showed abalone and ramen).
+    /// <summary>Shows best then good picks, drops unknown and repeated ids, and reports the wish as applied.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestWish_ShowsOnlyValidPicks()
+    {
+        var (result, _, seen) = await SuggestWish(new AgentDishPick([14, 999, 12], [12, 15, 15]));
+
+        seen!.Wish.Should().Be("món đặc trưng Hà Nội");
+        seen.Candidates.Select(dish => dish.Id).Should().BeEquivalentTo([11, 12, 13, 14, 15, 16]);
+        seen.MaxPicks.Should().Be(5);
+        DishNames(result).Should().Equal("Món 14", "Món 12", "Món 15");
+        result.GetProperty("wishApplied").GetBoolean().Should().BeTrue();
+        result.GetProperty("wish").GetString().Should().Be("món đặc trưng Hà Nội");
+    }
+
+    // TEST-01c2e4: When no dish fits the wish the answer is nothing found, never the plain ranking; when the pick step fails the list is ranked as
+    // before and the reply is told the wish was not applied, so it cannot call those dishes specialties.
+    /// <summary>An empty pick gives nothing_found with wishApplied=true; a failed pick gives the ranked list with wishApplied=false.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestWish_EmptyOrFailedPick()
+    {
+        var (empty, _, _) = await SuggestWish(new AgentDishPick([], []));
+        var (failed, _, _) = await SuggestWish(null);
+
+        empty.GetProperty("status").GetString().Should().Be("nothing_found");
+        empty.GetProperty("wishApplied").GetBoolean().Should().BeTrue();
+        failed.GetProperty("status").GetString().Should().Be("suggested");
+        DishNames(failed).Should().HaveCount(5);
+        failed.GetProperty("wishApplied").GetBoolean().Should().BeFalse();
+    }
+
+    /// <summary>Plans lunch for the 2-day test trip over WishDishes with the picker answering as given; returns the result and the tools for further calls.</summary>
+    private static async Task<(JsonElement Result, AgentContext Context, AgentToolExecutor Tools, Mock<IAgentDishPicker> Picker)> PlanWish(AgentDishPick? pick, string? wish)
+    {
+        var fixture = AgentTestData.Validator(WishDishes);
+        fixture.Tags.Setup(x => x.GetTagsAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(ProdTags.All);
+        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WishDishes.Select(dish => dish.Id).ToArray());
+        var picker = new Mock<IAgentDishPicker>();
+        picker.Setup(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(pick);
+        var context = AgentTestData.Context();
+        context.State = context.State with { MealSlots = ["lunch"] };
+        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(),
+            picker: picker.Object);
+        var result = await tools.ExecuteAsync(context, Call(Input() with { Wish = wish }), CancellationToken.None);
+        return (result, context, tools, picker);
+    }
+
+    // TEST-01c2e6: A plan wish ("món đặc trưng Hà Nội") limits each meal to the dishes picked for it when they are enough for its days, is kept on the trip
+    // for later replans, and is dropped only by an empty wish (feedback 2026-11-27: "đổi lịch sang món đặc trưng Hà Nội" kept sushi).
+    /// <summary>Lunch offers only the picks; the wish stays in state for a call without one and is cleared by an empty one.</summary>
+    [Fact]
+    public async Task ExecuteAsync_PlanWish_LimitsMealsAndPersists()
+    {
+        var (result, context, tools, picker) = await PlanWish(new AgentDishPick([14, 999], [12]), "món đặc trưng Hà Nội");
+
+        result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).Should().BeEquivalentTo([14, 12]);
+        result.GetProperty("wishApplied").GetBoolean().Should().BeTrue();
+        result.GetProperty("wishShortMeals").ValueKind.Should().Be(JsonValueKind.Null);
+        context.State.PlanWish.Should().Be("món đặc trưng Hà Nội");
+
+        // Next turn: one day ranked again with no wish keeps the trip's wish.
+        context.FirstRecommendation = null;
+        await tools.ExecuteAsync(context, Call(Input() with { Scope = "day", DayNumber = 1 }), CancellationToken.None);
+        context.State.PlanWish.Should().Be("món đặc trưng Hà Nội");
+        // Next turn: the whole trip ranked with no wish means none ("không cần theo đặc trưng Hà Nội" sent none and the old wish stayed).
+        context.FirstRecommendation = null;
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+        context.State.PlanWish.Should().BeNull();
+        picker.Verify(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-01c2e6b: Within one turn the first accepted ranking call decides earlier suggestions and the wish: a later call cannot switch the plan to
+    // them (replay 110 of conversation 109: "vậy lập lịch cho tôi, tôi muốn ăn cay" was planned from the specialties suggested just before).
+    /// <summary>A second call of the same turn asking for offered dishes and a wish gets neither.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SecondRankingOfTurn_KeepsFirstChoice()
+    {
+        var (_, context, tools, picker) = await PlanWish(new AgentDishPick([14], [12]), null);
+
+        await tools.ExecuteAsync(context, Call(Input() with { FromOffered = true, Wish = "món đặc trưng Hà Nội" }), CancellationToken.None);
+
+        context.State.PlanWish.Should().BeNull();
+        context.FirstRecommendation!.FromOffered.Should().BeFalse();
+        picker.Verify(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // TEST-01c2e7: Too few dishes fit the wish for a meal's days: the meal keeps every dish with the fitting one first, so no day is left empty, and the
+    // result names the meal for the reply.
+    /// <summary>One pick for a 2-day lunch: the pick leads, other dishes stay, and lunch is in wishShortMeals.</summary>
+    [Fact]
+    public async Task ExecuteAsync_PlanWishShort_KeepsOtherDishesAfterPicks()
+    {
+        var (result, _, _, _) = await PlanWish(new AgentDishPick([15], []), "món đặc trưng Hà Nội");
+
+        var ids = result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("dishId").GetInt32()).ToArray();
+        ids.Should().HaveCountGreaterThan(1);
+        ids[0].Should().Be(15);
+        result.GetProperty("wishShortMeals").EnumerateArray().Select(meal => meal.GetString()).Should().Equal("lunch");
+    }
+
+    // TEST-01c2e5: A request with no wish never calls the pick step, so ordinary suggestions cost no extra model call (measured 2026-11-27: picking
+    // for every request from the raw message passed 31/36 scenarios against 34/36 for this).
+    /// <summary>The picker is not called and the result carries no wish fields.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SuggestWithoutWish_SkipsPicker()
+    {
+        var (result, picker, _) = await SuggestWish(new AgentDishPick([11], []), wish: null);
+
+        picker.Verify(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        DishNames(result).Should().HaveCount(5);
+        result.GetProperty("wishApplied").ValueKind.Should().Be(JsonValueKind.Null);
+        result.GetProperty("wish").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     // TEST-01c2f: A planned meal follows the same rules as a suggestion.
@@ -899,31 +1065,6 @@ public sealed class AgentToolExecutorTests
         // STEP-07: Verify GetCandidateIdsAsync is never called and reco receives no other calls.
         fixture.Dishes.Verify(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         reco.VerifyNoOtherCalls();
-    }
-
-    // TEST-17: A whole-day taste the model proposes for "bữa 2 ngày 1" is narrowed to lunch of day 1 before the meal is ranked.
-    /// <summary>Checks the backend binds a meal-specific taste to that meal even when the model widens it to the whole day.</summary>
-    [Fact]
-    public async Task ExecuteAsync_MealSpecificTasteWidenedByModel_IsNarrowedBeforeRanking()
-    {
-        // STEP-01: Create fixture through AgentTestData.Validator.
-        var fixture = AgentTestData.Validator(AgentTestData.Dish());
-        // STEP-02: Stub fixture.GetCandidateIdsAsync.
-        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
-        // STEP-03: Get context from AgentTestData.Context, set context.State to a copy of context.State, derive input from a copy of Input() and 1 more.
-        var context = AgentTestData.Context();
-        context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
-            PendingPlanningRequest = new(["Tôi muốn ăn ở Hà Nội 2 ngày, tôi thích ăn chua", "Vừa, áp dụng cho bữa 2 ngày 1"]) };
-        // Model không gửi được pendingPlanningRequest (ngoài schema tool); backend tự giữ bản đã lưu.
-        var input = Input() with { State = context.State with { PendingPlanningRequest = null, TasteOverrides = [new(1, null, [new("sour", .5, "Vừa")])] } };
-        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
-
-        // STEP-04: Run tools.ExecuteAsync with context.
-        await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
-
-        // STEP-05: Assert context.State.TasteOverrides.Select(filtered) equals ((short)1, "lunch") and context.TripDetailsMissing is false.
-        context.State.TasteOverrides.Select(x => (x.DayNumber, x.MealSlot)).Should().Equal(((short)1, "lunch"));
-        context.TripDetailsMissing.Should().BeFalse();
     }
 
     // TEST-18: A per-meal search grants the meal quota to the model and keeps the rest of the ranked distinct names as a reserve grant
@@ -1634,7 +1775,7 @@ public sealed class AgentToolExecutorTests
         context.Request.Content = "tôi thích ăn cay";
         var before = context.State;
         // STEP-02: Derive input from a copy of Input() and create tools as AgentToolExecutor.
-        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", .75, quote)] } };
+        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", 1, quote)] } };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
 
         // STEP-03: Run tools.ExecuteAsync with context and keep result.
@@ -2333,11 +2474,11 @@ public sealed class AgentToolExecutorTests
         // STEP-04: Run tools.ExecuteAsync with context and call and keep result.
         var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
 
-        // STEP-05: Assert the vector carries the stated values, the rest come from the profile, and the off-scale level is dropped.
+        // STEP-05: Assert the vector carries the stated values, the rest come from the profile at half weight, and the off-scale level is dropped.
         var values = sent!.UserVectorOverride!;
         values[Array.IndexOf(AgentTasteOntology.Dimensions, "spicy")].Should().Be(.75);
         values[Array.IndexOf(AgentTasteOntology.Dimensions, "sour")].Should().Be(.5);
-        values[Array.IndexOf(AgentTasteOntology.Dimensions, "sweet")].Should().Be(hasProfile ? 0.2 : 0);
+        values[Array.IndexOf(AgentTasteOntology.Dimensions, "sweet")].Should().Be(hasProfile ? 0.1 : 0);
         // STEP-06: Assert result.personalized follows the profile and context.State is unchanged.
         result.GetProperty("personalized").GetBoolean().Should().Be(hasProfile);
         context.State.Should().BeSameAs(before);

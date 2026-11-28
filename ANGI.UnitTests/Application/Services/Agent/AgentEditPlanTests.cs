@@ -21,21 +21,39 @@ public sealed class AgentEditPlanTests
     private static readonly Tag Drink = new() { Id = 40, Name = "Đồ uống", Code = "drink", TagType = TagType.Category };
     private static readonly Tag Main = new() { Id = 41, Name = "Món chính", Code = AgentScopedPlanning.MainTagCode, TagType = TagType.Category };
 
-    // TEST-01: A kind on a day with no meal named is asked, never put on a meal the backend picks (conversation 17 put the drink on breakfast).
-    /// <summary>Nothing is prepared and nothing is granted; the result lists the day's meals to ask about.</summary>
+    // TEST-01: A kind on a day with no meal named goes on one meal of that day, main meals first, instead of a question (user decision 2026-11-27,
+    // "vừa làm vừa hỏi"); the reply says which meal so the user can move it. Conversation 17 had put the drink on breakfast: lunch comes first.
+    /// <summary>One addition, on lunch of that day, with every other dish kept.</summary>
     [Fact]
-    public async Task Add_KindWithoutMeal_AsksWhichMeal()
+    public async Task Add_KindWithoutMeal_GoesOnOneMainMeal()
     {
         var (tools, context) = Setup();
 
         var result = await tools.ExecuteAsync(context, Call(new AgentEditOp("add", DayNumber: 1, KindTagIds: [40])), CancellationToken.None);
 
-        result.GetProperty("status").GetString().Should().Be("needs_input");
-        var first = result.GetProperty("results")[0];
-        first.GetProperty("status").GetString().Should().Be("needs_meal");
-        first.GetProperty("meals").EnumerateArray().Select(meal => meal.GetString()).Should().Equal("breakfast", "lunch", "dinner");
-        context.PreparedChanges.Should().BeNull();
-        context.Grants.Should().BeEmpty();
+        result.GetProperty("status").GetString().Should().Be("ready");
+        var change = context.PreparedChanges.Should().ContainSingle().Subject;
+        change.Type.Should().Be("add");
+        change.Item.Should().Match<AgentItem>(item => item.DayNumber == 1 && item.MealSlot == "lunch" && item.DishId == 5);
+    }
+
+    // TEST-01b: A replacement described in words no tag or name covers ("món Hàn") is picked for those words by the meal's pick step; sent as a plain
+    // main dish it got chả ốc hấp lá bưởi (conversation 131, 2026-11-28).
+    /// <summary>The pick step reads the op's wish and the replacement is the dish it picked.</summary>
+    [Fact]
+    public async Task Replace_WithWish_PicksForTheWish()
+    {
+        AgentDishPickRequest? seen = null;
+        var picker = new Mock<IAgentDishPicker>();
+        picker.Setup(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentDishPickRequest, CancellationToken>((request, _) => seen = request).ReturnsAsync(new AgentDishPick([6], []));
+        var (tools, context) = Setup(picker: picker.Object);
+
+        var result = await tools.ExecuteAsync(context, Call(new AgentEditOp("replace", TargetItemKey: "l", Wish: "món Hàn")), CancellationToken.None);
+
+        result.GetProperty("status").GetString().Should().Be("ready");
+        seen!.Wish.Should().Be("món Hàn");
+        context.PreparedChanges.Should().ContainSingle().Which.Item!.DishId.Should().Be(6);
     }
 
     // TEST-02: A kind on a named meal is the best dish of that kind there, added next to the meal's dish with a grant under the unchanged state.
@@ -145,7 +163,7 @@ public sealed class AgentEditPlanTests
     }
 
     /// <summary>A two-day trip with breakfast 1, lunch 2 (a main dish) and dinner 3 on day 1; dish 5 is a drink, dish 6 a main dish serving lunch and dinner.</summary>
-    private static (AgentToolExecutor Tools, AgentContext Context) Setup(bool withPlan = true, AgentItem? extra = null)
+    private static (AgentToolExecutor Tools, AgentContext Context) Setup(bool withPlan = true, AgentItem? extra = null, IAgentDishPicker? picker = null)
     {
         var drink = AgentTestData.Dish(5); drink.Name = "Trà đá"; drink.DishTags.Add(new() { TagId = Drink.Id, Tag = Drink });
         var main = AgentTestData.Dish(6); main.Name = "Cơm thố"; main.DishTags.Add(new() { TagId = Main.Id, Tag = Main });
@@ -160,13 +178,13 @@ public sealed class AgentEditPlanTests
         var context = AgentTestData.Context(withPlan ? AgentTestData.Snapshot(items) : null);
         context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"] };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(),
-            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>().Object);
+            new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>(), catalogSearch: new Mock<ANGI.Application.Common.Interfaces.Repositories.Agent.IAgentCatalogRepository>().Object, picker: picker);
         return (tools, context);
     }
 
     /// <summary>Serializes the strict edit_plan call: every op field present, kindTagIds an empty array when unused.</summary>
     private static AgentToolCall Call(params AgentEditOp[] ops) => new("e", "edit_plan", JsonSerializer.SerializeToElement(new
     {
-        ops = ops.Select(op => new { op = op.Op, targetItemKey = op.TargetItemKey, dayNumber = op.DayNumber, mealSlot = op.MealSlot, dishId = op.DishId, dishName = op.DishName, kindTagIds = op.KindTagIds ?? [] })
+        ops = ops.Select(op => new { op = op.Op, targetItemKey = op.TargetItemKey, dayNumber = op.DayNumber, mealSlot = op.MealSlot, dishId = op.DishId, dishName = op.DishName, kindTagIds = op.KindTagIds ?? [], wish = op.Wish })
     }));
 }

@@ -154,9 +154,6 @@ public static class AgentScopedPlanning
     /// <summary>Catalog category code of a main dish; drinks, desserts, starters and snacks are side items.</summary>
     public const string MainTagCode = "local_sf_main";
 
-    /// <summary>Catalog category of the dishes reviewed as regional specialties.</summary>
-    public const string SpecialtyTagCode = "local_sf_specialty";
-
     // Kinds of dish that are a meal themselves: asking for one still means its main dishes, so "Cơm &amp; xôi" for lunch is not a side of plain rice.
     private static readonly HashSet<string> MainKindCodes = ["form.mon_com_va_ngu_coc", "form.mon_soi", "form.banh_mi_va_banh_kep", "form.lau", "form.chao",
         "form.banh_bot_va_mon_nhan", "form.muc_menu_nhieu_cau_phan", "form.khac_cho_duyet"];

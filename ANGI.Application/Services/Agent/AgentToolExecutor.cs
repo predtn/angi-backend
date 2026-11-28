@@ -25,7 +25,8 @@ namespace ANGI.Application.Services.Agent;
 /// <summary>Executes allowlisted read-only tools using backend-owned identity, catalog and scoped provenance.</summary>
 public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tags, IRecommendationService recommendation,
     AgentConstraintGuard statePolicy, AgentRouteEstimator routes, AgentLimits limits, IAgentTelemetry telemetry,
-    AgentPreferenceService? preferences = null, IAgentCatalogRepository? catalogSearch = null, AgentPlaceResolver? places = null, TimeProvider? clock = null)
+    AgentPreferenceService? preferences = null, IAgentCatalogRepository? catalogSearch = null, AgentPlaceResolver? places = null, TimeProvider? clock = null,
+    IAgentDishPicker? picker = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -134,7 +135,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             // Tools cung cấp dữ liệu để LLM lên lịch, không tool nào được ghi roadmap.
             // Recommendation có thể có log riêng theo hợp đồng dịch vụ hiện có.
             // Planning, a place or a catalog lookup means the chat moved on from the last dish suggestion: a budget said later belongs to the trip again.
-            if (call.Name is "get_recommendation" or "locate_places" or "search_catalog" && context.State.LastSuggestion is not null)
+            if (call.Name is "get_recommendation" or "locate_places" or "search_catalog" or "edit_plan" && context.State.LastSuggestion is not null)
                 context.State = context.State with { LastSuggestion = null };
             object result = call.Name switch
             {
@@ -194,10 +195,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 }
                 return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, "lunch", [], [], StarterMealBudget(state), StarterSuggestionCount, [], null, BudgetShare: true));
             case "suggest_specialty":
-                // Chỉ món đã được gắn tag đặc sản mới được gọi là đặc sản; không có tag hay không có món thì model nói thật là chưa có dữ liệu.
-                var specialty = (await tags.GetTagsAsync(null, ct)).FirstOrDefault(tag => tag.Code == AgentScopedPlanning.SpecialtyTagCode);
-                return specialty is null ? null
-                    : StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, null, [specialty.Id], [], null, StarterSuggestionCount, [], null));
+                // Specialties are a wish, never the specialty tag, even once dishes carry it (user decision 2026-11-27): the model picks the province's
+                // specialties from the filtered dishes, and the pick is kept in memory, so every user pressing it shares one call. When the pick step
+                // fails the result says wishApplied=false and the reply does not call the dishes specialties.
+                return StarterCall("suggest_dish", new AgentSuggestionInput(state.Province, null, [], [], null, StarterSuggestionCount, [], null,
+                    Wish: $"món đặc trưng, đặc sản nên thử ở {state.Province}"));
             default:
                 return null;
         }
@@ -245,11 +247,26 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     {
         // A per-day budget copied without multiplying by the days is the trip's budget (conversation 573).
         input = input with { State = AgentConstraintGuard.WithDailyBudget(input.State, context.State) };
+        // Within one turn the first accepted ranking call decides whether earlier suggestions and a wish shape the plan; a later call of the same turn
+        // keeps that choice. After reading "vậy lập lịch cho tôi, tôi muốn ăn cay" right after a list of specialties, the model called again with
+        // fromOffered and the list's wish and planned the specialties (conversation 109 and its replay 110, 2026-11-28).
+        string? keptChoice = null;
+        if (context.FirstRecommendation is { } first)
+        {
+            // Told nothing, the model asked the user whether to use the earlier suggestions (final-43x2, conversation 40); the result says why.
+            if (input.FromOffered != first.FromOffered || input.Wish != first.Wish)
+                keptChoice = "fromOffered và wish giữ như lần gọi đầu của lượt này: người dùng không yêu cầu dùng các món đã gợi ý. Dùng kết quả này, không hỏi lại.";
+            input = input with { FromOffered = first.FromOffered, OfferedListIds = first.OfferedListIds, OfferedMeals = first.OfferedMeals, Wish = first.Wish };
+        }
+        // The plan wish: a whole-trip ranking states it every time, so none means none ("không cần theo đặc trưng Hà Nội" sent none and the old wish
+        // stayed); a ranking of one day or meal keeps the trip's wish when it sends none; an empty one clears it.
+        var planWish = input.Wish is null ? (input.Scope == "full" ? null : context.State.PlanWish) : string.IsNullOrWhiteSpace(input.Wish) ? null : input.Wish.Trim();
+        if (planWish?.Length > MaxPlaceName * 2) return ArgumentError(context, "wish là một câu ngắn nói người dùng muốn gì ở các món.");
         // STEP-01: Return the result of ArgumentError early when AgentConstraintGuard.UnbackedTastes() has items, otherwise when context.ReplanAfterConfirmation is false, set context.State.
-        // Khẩu vị người dùng không hề viết thì không được xếp hạng. Khẩu vị họ viết mà không nêu mức thì dùng mức vừa (0.5), không hỏi lại (user decision 2026-11-12).
+        // Khẩu vị người dùng không hề viết thì không được xếp hạng. Khẩu vị họ viết mà không nêu mức thì dùng mức nhiều (0.75), không hỏi lại (user decision 2026-11-28; vừa trước đó).
         if (AgentConstraintGuard.UnbackedTastes(context, input.State) is { Length: > 0 } unbacked)
             return ArgumentError(context, $"Khẩu vị {string.Join(", ", unbacked)} chưa có nguyên văn người dùng trong levelQuote. Chép đúng chữ người dùng đã viết cho vị đó vào levelQuote; " +
-                "nếu họ không nêu mức thì dùng target=0.5 (vừa) rồi gọi lại, không hỏi người dùng. Nếu họ chưa hề nói vị đó thì bỏ nó khỏi state.");
+                "nếu họ không nêu mức thì dùng target=0.75 (nhiều) rồi gọi lại, không hỏi người dùng. Nếu họ chưa hề nói vị đó thì bỏ nó khỏi state.");
         // Ngân sách mới chưa có nguyên văn người dùng thì chưa được dùng để chọn món.
         if (AgentConstraintGuard.HasUnbackedBudget(context, input.State))
             // No "keep the old value" way out here: in conversation 596 the model took it, dropped the budget the user had just given and still said the plan followed it.
@@ -261,7 +278,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         if (!context.ReplanAfterConfirmation)
         {
             var proposedState = AgentConstraintGuard.RetainPlacements(
-                AgentMealScopePolicy.Narrow(AgentConstraintGuard.WithoutErased(AgentIntakePolicy.WithCatalogProvince(AgentIntakePolicy.WithoutUnstatedProvince(AgentContextBuilder.KeepKnown(input.State, context.State), context), context), context.State, context.Request.Content), context.State, AgentMealScopePolicy.Evidence(context)), context.PlacedRequests);
+                // Which meals a taste covers is the model's reading (tasteOverrides); the regex that rewrote a whole-day taste into the meals it found in the
+                // user's words was removed (user decision 2026-11-28: no regex reads the user's wording).
+                AgentConstraintGuard.WithoutErased(AgentIntakePolicy.WithCatalogProvince(AgentIntakePolicy.WithoutUnstatedProvince(AgentContextBuilder.KeepKnown(input.State, context.State), context), context), context.State, context.Request.Content), context.PlacedRequests);
             try { context.State = statePolicy.Accept(context.State, proposedState, context.ConstraintBaseline, context.Roadmap?.NumDays); }
             catch (AgentStateChangeRequiredException change)
             {
@@ -283,6 +302,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                     "Sửa state rồi gọi lại; nếu người dùng chưa nêu thông tin còn thiếu (ví dụ bữa đó thuộc ngày nào), hãy hỏi lại họ thay vì tự chọn.");
             }
         }
+        context.State = context.State with { PlanWish = planWish };
+        context.FirstRecommendation ??= new AgentPlanChoice(input.FromOffered, input.OfferedListIds, input.OfferedMeals, input.Wish);
         // STEP-02: When AgentScopedPlanning.IsLongTrip(context.State) holds, context.State.MealSlots.Length is 0 and context.Source is not { Items.Length: > 0 }, set context.State.
         // Backend tự ghép chuyến dài theo bữa, nên phải biết các bữa ngay cả khi model không ghi mealSlots.
         if (AgentScopedPlanning.IsLongTrip(context.State) && context.State.MealSlots.Length == 0 && context.Source is not { Items.Length: > 0 })
@@ -291,6 +312,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var state = context.State;
         _rankedMeals.Clear();
         context.PriceTiers.Clear();
+        context.PlanWishApplied = null;
+        context.WishShortMeals.Clear();
         // STEP-04: Return the anonymous result early when AgentReplyBuilder.TripDetailsQuestion() exists or AgentIntakePolicy.PreferencesDue(context) holds.
         // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
         // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
@@ -413,7 +436,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             {
                 rankingMode = personalized ? "personalized" : "rating_fallback",
                 selectionScope = new { scope.DayNumber, scope.MealSlot },
-                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits, priceTiers,
+                candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits, priceTiers, keptChoice,
+                wish = state.PlanWish, wishApplied = context.PlanWishApplied, wishShortMeals = context.WishShortMeals.Count > 0 ? context.WishShortMeals.Distinct().ToArray() : null,
                 suggestedDays, items = Items(rankings[0])
             };
         // STEP-24: Return the anonymous result.
@@ -422,7 +446,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         {
             rankingMode = personalized ? "personalized" : "rating_fallback",
             selectionScope = new { scope.DayNumber, scope.MealSlot },
-            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits, priceTiers,
+            candidateCount, ignoredCount, returnedCount = returned, mealCoverage, coverageWarning, warnings, budgetPerMeal, suggestedTotal, budgetFits, priceTiers, keptChoice,
+            wish = state.PlanWish, wishApplied = context.PlanWishApplied, wishShortMeals = context.WishShortMeals.Count > 0 ? context.WishShortMeals.Distinct().ToArray() : null,
             suggestedDays, scopedResults = rankings.Select(x => new { selectionScope = new { x.Scope.DayNumber, x.Scope.MealSlot }, items = Items(x) })
         };
     }
@@ -674,7 +699,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     /// Adds, replaces or removes dishes of the plan. The model reads the message into ops; the backend finds each target and each new dish (the id the chat
     /// showed, the dish of that name, the best dish of that kind for the meal, or for a bare replacement another dish for that meal, by taste, area, hours and
     /// budget, through the same ranking as planning) and builds the changes itself, so no dish of the plan moves unless an op names it. What is missing
-    /// (the day, the meal of a kind, which of several dishes to replace) is not guessed: the result says what to ask. Nothing changes unless every op is ready;
+    /// (the day, which of several dishes to replace) is not guessed: the result says what to ask; a kind on a day goes on one meal that serves it. Nothing changes unless every op is ready;
     /// the turn's draft is then exactly these changes (context.PreparedChanges), whatever the model returns next. Replaces the draft-guessing layers that
     /// conversations 13 to 20 kept breaking.
     /// </summary>
@@ -700,11 +725,15 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var kind = (op.KindTagIds ?? []).Distinct().ToArray();
             var name = string.IsNullOrWhiteSpace(op.DishName) ? null : op.DishName.Trim();
             var named = (op.DishId is null ? 0 : 1) + (name is null ? 0 : 1) + (kind.Length > 0 ? 1 : 0);
+            // What the new dish should be in words no catalog tag or name covers ("món Hàn"): the meal's pick step reads it. Sent as a plain main dish,
+            // "thay bánh xèo bằng món Hàn" got chả ốc hấp lá bưởi (conversation 131, 2026-11-28).
+            var wish = string.IsNullOrWhiteSpace(op.Wish) ? null : op.Wish.Trim();
             // STEP-02: Check the op's shape: add names exactly one new dish, replace at most one, remove none; tags are real; a kind written as a dish name
             // is pointed back to its tag (compared with catalog tag names, not with the user's wording: conversation 20 searched "đồ uống" as a dish).
             if (op.Op is not ("add" or "replace" or "remove"))
                 return ArgumentError(context, $"ops[{index}]: op là add, replace hoặc remove.");
-            if (op.Op == "add" && named != 1 || op.Op == "replace" && named > 1 || op.Op == "remove" && named > 0)
+            if (op.Op == "add" && !(named == 1 || named == 0 && wish is not null) || op.Op == "replace" && named > 1 || op.Op == "remove" && (named > 0 || wish is not null) ||
+                wish?.Length > MaxPlaceName * 2)
                 return ArgumentError(context, $"ops[{index}]: add điền đúng một trong dishId, dishName, kindTagIds; replace điền tối đa một (để trống là đổi sang món khác); remove không điền món.");
             if (kind.Any(id => !tagIds.Contains(id)))
                 return ArgumentError(context, $"ops[{index}]: kindTagIds chỉ dùng ID có trong catalogTags.");
@@ -754,9 +783,21 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 }
                 target = inThatMeal[0];
             }
-            // STEP-06: Read the meal of an addition. A kind ("đồ uống") on a day has no meal to choose: asked (conversation 17 put the drink on breakfast).
-            // A named dish goes to the meal it suits on that day, main meals first.
-            if (mealSlot is null && kind.Length > 0) { waiting = true; results.Add(new { op = index, status = "needs_meal", dayNumber, meals = dayMeals }); continue; }
+            // STEP-06: Read the meal of an addition. A named dish goes to the meal it suits on that day, main meals first. A kind on a day ("kèm đồ uống
+            // ngày 1") goes on one meal of that day where a dish of that kind is served, main meals first, and the reply says which so the user can move it
+            // (user decision 2026-11-27, "vừa làm vừa hỏi"). Asking first cost a turn, and the model kept filling every meal itself instead (scenario c20).
+            if (mealSlot is null && kind.Length > 0)
+            {
+                var (allTags, anyTags) = AgentScopedPlanning.SplitTags(kind.Select(id => (short)id), catalogTags);
+                var served = new List<string>();
+                foreach (var meal in dayMeals)
+                {
+                    var filter = new DishCandidateFilter { Province = state.Province, TagIds = allTags, TagAnyGroups = anyTags, RequireAllTags = true,
+                        CompatibleMealTimeCode = meal, OpenForMeal = meal };
+                    if (await dishes.GetCandidateIdsAsync(filter, 1, ct) is { Count: > 0 }) served.Add(meal);
+                }
+                mealSlot = AddMealOrder.FirstOrDefault(served.Contains) ?? AddMealOrder.FirstOrDefault(dayMeals.Contains) ?? "lunch";
+            }
             if (mealSlot is null)
             {
                 var fitting = await FittingMealsAsync(context, state, new AgentMealRequest(dayNumber, null, name, null, [], DishId: op.DishId), ct) ?? dayMeals;
@@ -781,6 +822,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var inMeal = source.Items.Where(item => item.DayNumber == dayNumber && item.MealSlot == mealSlot).Select(item => item.DishId)
                 .Concat(changes.Where(change => change.Item is { } put && put.DayNumber == dayNumber && put.MealSlot == mealSlot).Select(change => change.Item!.DishId)).ToArray();
             var ranked = state with { MealRequests = [.. state.MealRequests.Where(old => !(old.DayNumber == dayNumber && old.MealSlot == mealSlot)), .. named > 0 || request.DishName is not null || request.TagIds.Length > 0 || request.DishId is not null || request.RestaurantName is not null ? [request] : Array.Empty<AgentMealRequest>()] };
+            // The op's wish replaces the trip's for this one meal, so "món Hàn" is not picked as a Hà Nội specialty.
+            if (wish is not null) ranked = ranked with { PlanWish = wish };
             var grants = context.Grants.Count;
             var reserves = context.ReserveGrants.Count;
             ScopedRanking ranking;
@@ -1064,6 +1107,33 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 if (widenedKm is { } reached)
                     telemetry.Record("meal_area_widened", context.ConversationId, context.TurnId, context.AttemptId, new { day, mealSlot, reached });
             }
+            // STEP-12b: The plan wish ("món đặc trưng Hà Nội"): the model picks this meal's dishes that fit it, from the dishes the filters kept, and only
+            // ids of that list count. With enough of them for the meal's days the meal is ranked among them alone; with too few the meal keeps every
+            // dish, the fitting ones first, and the reply is told which meals fell short. A plan never leaves a meal empty for a wish (feedback 2026-11-27:
+            // "đổi lịch sang món đặc trưng Hà Nội" kept sushi). A meal reused from an earlier ranking already holds its pick.
+            HashSet<int>? wishBest = null, wishGood = null;
+            if (state.PlanWish is not null && picker is null) context.PlanWishApplied = false;
+            if (state.PlanWish is { } wish && picker is not null && known is null && namedDishIds.Length == 0 && restaurantId is null && poolIds.Length == 0 && eligible.Length > 0)
+            {
+                var mealDays = mealSlot is null ? 1 : slots.Where(x => x.Meal == mealSlot).Select(x => x.Day).Distinct().Count();
+                var offered = eligible.Take(MaxPickCandidates).ToArray();
+                var offeredIds = offered.Select(dish => dish.Id).ToHashSet();
+                var pick = await picker.PickAsync(new(wish, offered.Select(dish => new AgentPickCandidate(dish.Id, dish.Name, dish.Restaurant?.Name ?? "", dish.Price)).ToArray(),
+                    Math.Clamp(mealDays * 2, 6, AgentDishSuggestionPolicy.MaxCount)), ct);
+                context.PlanWishApplied = (context.PlanWishApplied ?? true) && pick is not null;
+                if (pick is not null)
+                {
+                    wishBest = pick.Best.Where(offeredIds.Contains).ToHashSet();
+                    var best = wishBest;
+                    wishGood = pick.Good.Where(id => offeredIds.Contains(id) && !best.Contains(id)).ToHashSet();
+                    var good = wishGood;
+                    var fitting = eligible.Where(dish => best.Contains(dish.Id) || good.Contains(dish.Id)).ToArray();
+                    if (fitting.Length >= mealDays) eligible = fitting;
+                    else context.WishShortMeals.Add(mealSlot ?? "all");
+                }
+                telemetry.Record("dish_pick", context.ConversationId, context.TurnId, context.AttemptId, new { source = "plan", day, meal = mealSlot, offered = offered.Length,
+                    applied = pick is not null, best = wishBest?.Count, good = wishGood?.Count, mealDays, tokens = pick?.Tokens });
+            }
             // STEP-13: Prepare candidates through eligible.Select(filtered).Take().ToArray.
             IReadOnlyList<int> candidates = eligible.Select(dish => dish.Id).Take(limits.MaxCandidates).ToArray();
             // STEP-14: Set candidateTotal.
@@ -1151,6 +1221,12 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
                 var scoreById = new Dictionary<int, double>();
                 for (var index = 0; index < ranked.DishIds.Count; index++) scoreById.TryAdd(ranked.DishIds[index], rankedScores[index]);
                 distinct = OrderNearby(distinct, scoreById, namedCenter);
+            }
+            // Dishes that clearly fit the plan wish come first, then those that fit less, then the rest; the taste ranking orders each group.
+            if (wishBest is not null && wishGood is not null)
+            {
+                var (best, good) = (wishBest, wishGood);
+                distinct = distinct.OrderBy(dish => best.Contains(dish.Id) ? 0 : good.Contains(dish.Id) ? 1 : 2).ToArray();
             }
             // STEP-31: Prepare chosen.
             var chosen = distinct;
@@ -1271,7 +1347,7 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         input = meals.Length > 1 ? input with { MealSlot = null, MealSlots = meals, Count = Math.Clamp(input.Count, 1, AgentDishSuggestionPolicy.MaxCount) } : input with { MealSlots = null };
         context.Suggested = new AgentLastSuggestion(input.MealSlot, input.TagIds, input.ExcludeTagIds, input.MinPrice, input.BudgetShare ? null : input.MaxPrice,
             input.Count, input.NameQuery, input.DishForm, input.Area, input.BudgetShare, input.SortBy, input.Now, input.DishNames is { Length: > 0 } ? input.DishNames : null, input.MealSlots,
-            input.AreaKind, input.AreaParts is { Length: > 0 } ? input.AreaParts : null);
+            input.AreaKind, input.AreaParts is { Length: > 0 } ? input.AreaParts : null, string.IsNullOrWhiteSpace(input.Wish) ? null : input.Wish.Trim());
         context.SuggestionZone = null; context.SuggestionSearchedKm = null; context.SuggestionWidenedKm = null; context.SuggestionNoDataProvince = false; context.SuggestionProvince = null;
         // STEP-02: Prepare suggestion, record what was searched and return the result.
         var suggestion = context.DishSuggestion = meals.Length > 1 ? await SuggestByMealAsync(context, input, meals, chosen, ct) : await SuggestAsync(context, input, ct, chosen);
@@ -1295,6 +1371,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             perMealCap = input.BudgetShare ? input.MaxPrice : null, fromTripBudget = input.BudgetShare ? true : (bool?)null,
             // The order the list follows when it is not the taste ranking: dish likes, or the restaurant's review score.
             sortedBy = input.SortBy,
+            // The wish the dishes were picked for; wishApplied=false means the pick step failed and the list is not filtered by it.
+            wish = suggestion.WishApplied is null ? null : input.Wish, suggestion.WishApplied,
             // "Right now": the Vietnam time the backend searched at and the meal it chose, so the reply can say "giờ là 23h nên mình gợi ý món khuya".
             now = input.Now ? NowFacts(input) : null,
             // A zone read as several places: which of them the search covered and which were not found, for the reply to state.
@@ -1489,10 +1567,36 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var above = prices.Where(price => price > high).ToArray();
             return nothing with { PriceBelow = below.Length > 0 ? below.Max() : null, PriceAbove = above.Length > 0 ? above.Min() : null };
         }
+        var count = Math.Clamp(input.Count, 1, AgentDishSuggestionPolicy.MaxCount);
+        // STEP-04b: A wish no filter can express ("đặc trưng Hà Nội", "độc lạ", "no", "mời sếp"): the model picks from the filtered dishes and only ids of
+        // that list are kept. Ranked by taste alone, "món đặc trưng Hà Nội" showed abalone and ramen (feedback 2026-11-27). Dishes that fit are never
+        // padded with ones that do not; when the pick step fails, the list is ranked as before and the reply is told the wish was not applied.
+        // Measured 2026-11-27 against picking for every request from the raw message (36 scenarios: 34/36 for this, 31/36 for that), so only a wish picks.
+        int[]? best = null, good = null;
+        bool? wishApplied = null;
+        // Without a pick step the wish cannot be applied: the list is ranked as usual and the reply is told so.
+        if (!string.IsNullOrWhiteSpace(input.Wish) && picker is null) wishApplied = false;
+        if (!string.IsNullOrWhiteSpace(input.Wish) && picker is not null)
+        {
+            var offered = candidates.Take(MaxPickCandidates).ToArray();
+            var pick = await picker.PickAsync(new(input.Wish.Trim(),
+                offered.Select(dish => new AgentPickCandidate(dish.Id, dish.Name, dish.Restaurant?.Name ?? "", dish.Price)).ToArray(), count), ct);
+            var offeredIds = offered.Select(dish => dish.Id).ToHashSet();
+            wishApplied = pick is not null;
+            if (pick is not null)
+            {
+                best = pick.Best.Where(offeredIds.Contains).Distinct().ToArray();
+                good = pick.Good.Where(id => offeredIds.Contains(id) && !best.Contains(id)).Distinct().ToArray();
+                candidates = offered.Where(dish => best.Contains(dish.Id) || good.Contains(dish.Id)).ToArray();
+            }
+            telemetry.Record("dish_pick", context.ConversationId, context.TurnId, context.AttemptId, new { offered = offered.Length, applied = pick is not null,
+                best = best?.Length, good = good?.Length, invalid = pick is null ? 0 : pick.Best.Concat(pick.Good).Count(id => !offeredIds.Contains(id)), tokens = pick?.Tokens });
+            if (pick is not null && candidates.Length == 0)
+                return AgentDishSuggestionPolicy.Suggestion([], aroundPin, false, hasPlan, named?.Label, areaNotFound, mealAsked) with { WishApplied = true };
+        }
         // STEP-05: Check the rule in the computed value.EnsureAsync.
         var taste = await (preferences ?? new AgentPreferenceService(recommendation)).EnsureAsync(state, context.UserId, ct);
-        // STEP-06: Prepare count through Math.Clamp, ids through candidates.Select(filtered).ToArray, targets, vector from AgentTasteOntology.Apply, result, ranked and order.
-        var count = Math.Clamp(input.Count, 1, AgentDishSuggestionPolicy.MaxCount);
+        // STEP-06: Prepare ids through candidates.Select(filtered).ToArray, targets, vector from AgentTasteOntology.Apply, result, ranked and order.
         var ids = candidates.Select(dish => dish.Id).ToArray();
         // Khẩu vị nói trong câu gợi ý chỉ áp cho lần xếp hạng này, đè lên khẩu vị của chuyến đi và không ghi vào state.
         var targets = state.TasteTargets.Concat((input.TasteTargets ?? []).Where(target => AgentTasteOntology.Scale.Contains(target.Target))).ToArray();
@@ -1510,6 +1614,15 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             for (var index = 0; index < result.DishIds.Count && index < scores.Count; index++) scoreById.TryAdd(result.DishIds[index], scores[index]);
             order = OrderNearby(ranked.Select(id => candidates.First(dish => dish.Id == id)).ToArray(), scoreById, area).Select(dish => dish.Id).ToArray();
         }
+        // Picked for a wish: dishes that clearly match come before those that fit less; the taste ranking orders dishes within each group, and with no
+        // taste ranking the model's own order stands.
+        if (best is not null && good is not null)
+        {
+            var rank = new Dictionary<int, int>();
+            if (ranked.Length > 0) for (var index = 0; index < order.Length; index++) rank.TryAdd(order[index], index);
+            int[] Within(int[] group) => group.OrderBy(id => rank.GetValueOrDefault(id, int.MaxValue)).ThenBy(id => Array.IndexOf(group, id)).ToArray();
+            order = [.. Within(best), .. Within(good)];
+        }
         // STEP-07: Prepare personalized, then return the result of AgentDishSuggestionPolicy.Suggestion.
         // Chỉ tính là theo khẩu vị khi người dùng có hồ sơ khẩu vị và reco xác nhận đã xếp bằng vector: reco bỏ qua vector của người chưa có tương tác nào, nên khẩu vị vừa nói một mình chưa đủ.
         var personalized = taste.Preferences?.BaselineVector?.Any(value => value != 0) == true && vector is not null && ranked.Length > 0 && result?.VectorSource == "conversation";
@@ -1519,8 +1632,13 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         var varied = ordered.Where(dish => (perRestaurant[dish.RestaurantId] = perRestaurant.GetValueOrDefault(dish.RestaurantId) + 1) <= AgentDishSuggestionPolicy.MaxPerRestaurant).Take(count).ToList();
         varied.AddRange(ordered.Where(dish => !varied.Contains(dish)).Take(count - varied.Count));
         return AgentDishSuggestionPolicy.Suggestion(varied, aroundPin, personalized, hasPlan, named?.Label, areaNotFound, mealAsked,
-            distance);
+            distance) with { WishApplied = wishApplied };
     }
+
+    /// <summary>
+    /// The most dishes one pick step reads. The whole production catalog of main dishes (624 in Hà Nội on 2026-11-27) costs about 10,700 prompt tokens.
+    /// </summary>
+    private const int MaxPickCandidates = 800;
 
     /// <summary>Suggests for each meal in turn under the same conditions, keeping a dish of one meal out of the next ones.</summary>
     private async Task<AgentDishSuggestion> SuggestByMealAsync(AgentContext context, AgentSuggestionInput input, string[] meals, IReadOnlyList<int>? chosen, CancellationToken ct)
@@ -1533,7 +1651,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             found.Add((meal, suggestion));
             used.UnionWith(suggestion.Dishes.Select(dish => AgentScopedPlanning.Normalize(dish.Name)!));
         }
-        return AgentDishSuggestionPolicy.ByMeal(found);
+        // A wish counts as applied only when every meal's pick step ran.
+        var wishes = found.Select(meal => meal.Found.WishApplied).Where(applied => applied is not null).ToArray();
+        return AgentDishSuggestionPolicy.ByMeal(found) with { WishApplied = wishes.Length == 0 ? null : wishes.All(applied => applied == true) };
     }
 
     /// <summary>Restaurants with fewer reviews than this are ranked after the rest, so one five-star review does not top "đánh giá tốt nhất".</summary>
@@ -1625,7 +1745,8 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         // Nhóm món là dữ kiện cho model, không phải câu hỏi chọn món cho người dùng.
         else if (result.Status != "family") context.ToolNotice = context.CatalogNotice = Describe(result);
         // STEP-07: Return the anonymous result.
-        if (result.Status == "near_names") return new { result.Status, result.Message, result.Matches, nearNames = NearNames(result.Near), instruction = NearPlanInstruction };
+        if (result.Status == "near_names") return new { result.Status, result.Message, result.Matches, nearNames = NearNames(result.Near),
+            instruction = AgentIntakePolicy.HasPlan(context) ? NearEditInstruction : NearPlanInstruction };
         return new { result.Status, result.Message, Matches = result.Matches.Take(20) };
     }
 
@@ -1633,6 +1754,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
     private const string NearPlanInstruction = "ANGI has no dish with this name; nearNames are dishes whose names share words with it. When some of them are the same dish the user means " +
         "(\"cà phê sữa đá\" is \"Cà Phê Nâu Đá\"; another regional or everyday name for the same drink or food counts as the same dish), put one exact name from nearNames in that meal's mealRequests.dishName and call the tool again, and say in the reply what ANGI calls it. " +
         "When none is the same dish, never plan around it silently: tell the user ANGI does not have it and ask whether they want one of the close dishes or another choice.";
+    private const string NearEditInstruction = "ANGI has no dish with this name; nearNames are dishes whose names share words with it. When one of them is the same dish the user means " +
+        "(\"cà phê sữa đá\" is \"Cà Phê Nâu Đá\"), call edit_plan with that exact name as dishName and say in the reply what ANGI calls it. " +
+        "When none is the same dish, change nothing: tell the user ANGI does not have it and offer the close dishes.";
     private const string NearSuggestInstruction = "ANGI has no dish with this name; nearNames are dishes whose names share words with it. Pick at most 3 that are the same dish the user means " +
         "(\"cà phê sữa đá\" is \"Cà Phê Nâu Đá\"; another regional or everyday name for the same drink or food counts as the same dish) and call suggest_dish again with dishNames set to those exact names and the same other conditions; the reply says what ANGI calls it. " +
         "When none is the same dish, call no more tools: tell the user ANGI does not have it and offer to suggest something close. Never present another dish as the one they asked for.";
@@ -1696,7 +1820,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             var familySource = input.Kind == "dish" && matches.Length >= 21 ? await catalogSearch.SearchAsync(input.Kind, input.Name, input.Province, MaxFamilyDishes, ct) : matches;
             if (input.Kind == "dish" && !input.SelectedId.HasValue && Family(familySource, input.Name) is { Length: > 0 } family)
                 return family.Any(x => x.Available)
-                    ? new("family", $"Có {family.Length} món thuộc nhóm “{AgentReplyBuilder.Safe(input.Name)}”. Người dùng chưa nêu món cụ thể thì giữ nguyên tên nhóm trong mealRequests.dishName: backend chọn món hợp khẩu vị và gần các bữa khác nhất, không cần hỏi chọn.", family)
+                    // Over a plan the dish goes in through edit_plan: told to keep the name in mealRequests, the model replanned the meal with
+                    // get_recommendation and replaced its dish, or hand-wrote a patch that failed twice (eval run edit-root-x3, 2026-11-28).
+                    ? new("family", AgentIntakePolicy.HasPlan(context)
+                        ? $"Có {family.Length} món thuộc nhóm “{AgentReplyBuilder.Safe(input.Name)}”. Lịch đã có: thêm hay đổi món thì gọi edit_plan với dishName “{AgentReplyBuilder.Safe(input.Name)}” (tên nhóm); backend chọn món hợp nhất cho bữa đó, không cần hỏi chọn và không dùng get_recommendation."
+                        : $"Có {family.Length} món thuộc nhóm “{AgentReplyBuilder.Safe(input.Name)}”. Người dùng chưa nêu món cụ thể thì giữ nguyên tên nhóm trong mealRequests.dishName: backend chọn món hợp khẩu vị và gần các bữa khác nhất, không cần hỏi chọn.", family)
                     : new("unavailable", "Món/quán có trong hệ thống nhưng hiện chưa khả dụng. Bạn có muốn xem lựa chọn khác không?", family);
             var elsewhere = input.Province is null ? [] : await catalogSearch.SearchAsync(input.Kind, input.Name, null, 21, ct);
             var outside = elsewhere.Any(x => AgentScopedPlanning.Normalize(x.Name) == AgentScopedPlanning.Normalize(input.Name));
@@ -1888,18 +2016,18 @@ public sealed record AgentEditInput(AgentEditOp[]? Ops = null);
 /// of a dish id, a dish name or a kind of dish as catalog tags.
 /// </summary>
 public sealed record AgentEditOp(string Op = "add", short? DayNumber = null, string? MealSlot = null, string? TargetItemKey = null, int? DishId = null,
-    string? DishName = null, int[]? KindTagIds = null);
+    string? DishName = null, int[]? KindTagIds = null, string? Wish = null);
 
 /// <summary>Allowlisted recommendation arguments; caller identity is deliberately absent.</summary>
 public sealed record AgentRecommendationInput(AgentState? State = null, string? Province = null, string Scope = "full",
     short? DayNumber = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null,
     int[]? ExcludeDishIds = null, decimal? MaxPricePerMeal = null, decimal? RadiusKm = null, int TopK = 50, bool Alternative = false,
-    decimal? MaxLegKm = null, bool FromOffered = false, string? PriceTier = null, int[]? OfferedListIds = null, AgentScope[]? OfferedMeals = null);
+    decimal? MaxLegKm = null, bool FromOffered = false, string? PriceTier = null, int[]? OfferedListIds = null, AgentScope[]? OfferedMeals = null, string? Wish = null);
 
 /// <summary>What a dish suggestion is limited to; every value comes from the user's own request.</summary>
 public sealed record AgentSuggestionInput(string? Province = null, string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MaxPrice = null, int Count = 1, AgentTasteTarget[]? TasteTargets = null, string? Area = null,
     decimal? MinPrice = null, string? NameQuery = null, string? DishForm = null, bool BudgetShare = false, string? SortBy = null, bool Now = false, string[]? DishNames = null, string[]? MealSlots = null,
-    string? AreaKind = null, string[]? AreaParts = null);
+    string? AreaKind = null, string[]? AreaParts = null, string? Wish = null);
 
 /// <summary>The places of a new trip as the model read them; a stop with no place is a day with no fixed place.</summary>
 public sealed record AgentLocateInput(string? TripArea = null, AgentLocateStop[]? Stops = null, string? TripAreaKind = null, string[]? TripAreaParts = null);

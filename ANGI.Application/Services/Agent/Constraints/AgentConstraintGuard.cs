@@ -59,6 +59,8 @@ public sealed class AgentConstraintGuard
             proposed.OfferedDishes != current.OfferedDishes || proposed.CatalogChoices != current.CatalogChoices || proposed.BudgetOffer != current.BudgetOffer || proposed.LastSuggestion != current.LastSuggestion || proposed.OfferedLists != current.OfferedLists)
             proposed = proposed with { PendingPlanningRequest = current.PendingPlanningRequest, PendingSave = current.PendingSave, PlanningIntake = current.PlanningIntake, DishOffered = current.DishOffered,
                 OfferedDishes = current.OfferedDishes, CatalogChoices = current.CatalogChoices, BudgetOffer = current.BudgetOffer, LastSuggestion = current.LastSuggestion, OfferedLists = current.OfferedLists };
+        // The plan wish is set by the backend from get_recommendation's wish argument, never through a state the model writes.
+        if (proposed.PlanWish != current.PlanWish) proposed = proposed with { PlanWish = current.PlanWish };
         // STEP-04: When proposed.FocusDay is not current.FocusDay or proposed.FocusMeal is not current.FocusMeal, set proposed.
         // Taste scopes belong to overrides/requests, not navigation focus. A model cannot invent or clear a UI pin.
         if (proposed.FocusDay != current.FocusDay || proposed.FocusMeal != current.FocusMeal)
@@ -125,8 +127,8 @@ public sealed class AgentConstraintGuard
 
     // Taste evidence
 
-    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): vừa.</summary>
-    public const double DefaultTasteLevel = 0.5;
+    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): nhiều, so the plan leans toward it (user decision 2026-11-28; vừa before).</summary>
+    public const double DefaultTasteLevel = 0.75;
 
     // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu, nên chỉ được dùng mức mặc định.
     private static readonly HashSet<string> NoLevelWords = ["thich", "an", "mon", "vi", "do", "khau", "muon", "uu", "tien", "toi", "minh", "em", "la", "va", "ma"];

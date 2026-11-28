@@ -17,7 +17,8 @@ namespace ANGI.UnitTests.Application.Services.Agent;
 public sealed class AgentOrchestratorTests
 {
 
-    // TEST-01: An identical tool request in the same turn returns a duplicate notice, is not executed again and closes tools for the final call.
+    // TEST-01: An identical tool request in the same turn gets the earlier result again, is not executed again and closes tools for the final call;
+    // a bare "already answered" notice made the model reply that nothing could be updated (2026-11-27, 2 of 5 runs).
     /// <summary>A repeated identical tool request is answered from the turn, not re-executed, and closes tools for the final call.</summary>
     [Fact]
     public async Task RunAsync_RepeatedIdenticalTool_IsNotReexecutedAndClosesTools()
@@ -37,12 +38,36 @@ public sealed class AgentOrchestratorTests
         // STEP-04: Call Create().RunAsync.
         await Create(llm.Object).RunAsync(context, CancellationToken.None);
 
-        // STEP-05: Assert context.ToolsClosed is true, context.Exchanges has 2 item(s) and context.Exchanges[1].Results.Single().status is "duplicate_request".
+        // STEP-05: Assert tools closed, two exchanges, and the repeated call got exactly the earlier result.
         context.ToolsClosed.Should().BeTrue();
         context.Exchanges.Should().HaveCount(2);
-        context.Exchanges[1].Results.Single().GetProperty("status").GetString().Should().Be("duplicate_request");
+        context.Exchanges[1].Results.Single().GetRawText().Should().Be(context.Exchanges[0].Results.Single().GetRawText());
         // STEP-06: Verify RunAsync is called 3 times.
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+    }
+
+    // TEST-01b: The same arguments after the trip state changed are a new request: answered with the result from before locate_places
+    // set the day areas, the draft failed validation with 9 errors (eval run final-43x2, conversation 31).
+    /// <summary>A repeated call runs again when the state changed in between and does not close tools.</summary>
+    [Fact]
+    public async Task RunAsync_SameArgumentsAfterStateChange_RunsAgain()
+    {
+        // STEP-01: Mock IAgentLlmService; the second step comes after the state changed.
+        var llm = new Mock<IAgentLlmService>();
+        var arguments = System.Text.Json.JsonSerializer.SerializeToElement(new { roadmapId = 88 });
+        var context = new AgentContext { ConversationId = 7, UserId = 3, State = AgentTestData.State(), Request = new() { Content = "Explain" },
+            Roadmap = new ANGI.Domain.Entities.Roadmap { Id = 88 } };
+        llm.SetupSequence(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentLlmStep([new("a", "get_roadmap", arguments)], null))
+            .ReturnsAsync(() => { context.State = context.State with { NumDays = (short)(context.State.NumDays + 1) }; return new AgentLlmStep([new("b", "get_roadmap", arguments)], null); })
+            .ReturnsAsync(new AgentLlmStep([], AgentTestData.Answer()));
+
+        // STEP-02: Call Create().RunAsync.
+        await Create(llm.Object).RunAsync(context, CancellationToken.None);
+
+        // STEP-03: Assert both calls ran and tools stayed open.
+        context.ToolsClosed.Should().BeFalse();
+        context.Exchanges.Should().HaveCount(2);
     }
 
     // TEST-02: The invalid-output notice and schema path are sent only on the call after a schema failure, not after a successful tool round.
@@ -92,7 +117,7 @@ public sealed class AgentOrchestratorTests
         llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
-    // TEST-04: Two identical calls in one provider step execute once; the second gets the duplicate notice and tools close.
+    // TEST-04: Two identical calls in one provider step execute once; the second gets the same result and tools close.
     /// <summary>Covers duplicates inside a single step, not only across rounds.</summary>
     [Fact]
     public async Task RunAsync_IdenticalCallsInOneStep_ExecuteOnce()
@@ -112,9 +137,8 @@ public sealed class AgentOrchestratorTests
         await Create(llm.Object).RunAsync(context, CancellationToken.None);
 
         var results = context.Exchanges.Single().Results;
-        // STEP-05: Assert results[0].TryGetProperty() is false, results[1].status is "duplicate_request" and context.ToolsClosed is true.
-        results[0].TryGetProperty("status", out _).Should().BeFalse();
-        results[1].GetProperty("status").GetString().Should().Be("duplicate_request");
+        // STEP-05: Assert the second call got exactly the first result and tools closed.
+        results[1].GetRawText().Should().Be(results[0].GetRawText());
         context.ToolsClosed.Should().BeTrue();
     }
 
@@ -759,7 +783,7 @@ public sealed class AgentOrchestratorTests
         // STEP-01: Create state as AgentState and get result from Create().RunAsync.
         var state = new AgentState { Province = "Hà Nội", NumDays = 7, OriginMode = "pinned", OriginLatitude = 21.03m, OriginLongitude = 105.85m };
 
-        var result = await Create(Scripted(Asks("trip_details", "Ngân sách của bạn khoảng bao nhiêu?")).Object, intakeCatalog: IntakeCatalog(), places: Places())
+        var result = await Create(Scripted(Asks("general", "Bạn muốn ăn ở khu nào trong Hà Nội?")).Object, intakeCatalog: IntakeCatalog(), places: Places())
             .RunAsync(IntakeContext("lập lịch cho tôi", state), default);
 
         // STEP-02: Assert result.State.RadiusKm is null.
@@ -817,7 +841,8 @@ public sealed class AgentOrchestratorTests
         context.Exchanges.Should().ContainSingle();
     }
 
-    // TEST-34b: A trip-details question about a trip whose place, duration and budget are known is dropped and the turn plans; with the budget not yet asked it is shown.
+    // TEST-34b: A trip-details question about a trip whose place and duration are known is dropped and the turn plans, with or without a budget:
+    // a missing budget plans with none and the reply invites one (user decision 2026-11-27, conversation 32 asked the budget three times).
     /// <summary>After "lập lịch luôn" the model kept asking for the start date, so no plan was made (AI-D04, AI-D05).</summary>
     [Theory]
     [InlineData(true)]
@@ -833,13 +858,9 @@ public sealed class AgentOrchestratorTests
         // STEP-02: Run the turn.
         var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(context, default);
 
-        // STEP-03: Assert the known trip goes on to a forced get_recommendation call, and the open budget keeps the question.
-        if (budgetKnown) seen.Take(2).Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "get_recommendation"));
-        else
-        {
-            seen.Should().Equal((AgentTurnPhase.Read, null));
-            result.Reply.Should().Be("Bạn muốn bắt đầu ngày nào?");
-        }
+        // STEP-03: Assert the known trip goes on to a forced get_recommendation call whether or not a budget is known.
+        seen.Take(2).Should().Equal((AgentTurnPhase.Read, null), (AgentTurnPhase.Forced, "get_recommendation"));
+        result.Reply.Should().NotBe("Bạn muốn bắt đầu ngày nào?");
     }
 
     // TEST-56: The state the read step gave reaches the forced call and is gone once the tool has run.
@@ -1194,7 +1215,8 @@ public sealed class AgentOrchestratorTests
     public async Task RunAsync_DurationUpToMaximum_IsAccepted(string content, int days, bool accepted)
     {
         // STEP-01: Get result from Create().RunAsync.
-        var llm = Scripted(Asks("trip_details", "Ngân sách của bạn khoảng bao nhiêu?", new AgentState { Province = "Hà Nội", NumDays = (short)days }));
+        // A general question: a trip-details question on a known trip now plans instead (TEST-34b), which is not what this test is about.
+        var llm = Scripted(Asks("general", "Bạn muốn ăn ở khu nào trong Hà Nội?", new AgentState { Province = "Hà Nội", NumDays = (short)days }));
         var result = await Create(llm.Object, intakeCatalog: IntakeCatalog()).RunAsync(IntakeContext(content, new AgentState()), default);
 
         // STEP-02: Assert result.State.NumDays is days when accepted and null otherwise.
@@ -1494,6 +1516,81 @@ public sealed class AgentOrchestratorTests
         // STEP-03: Assert no repair call, and the kept dish was replaced only when a dish was issued for its meal.
         llm.Verify(x => x.RunAsync(context, true, It.IsAny<CancellationToken>()), Times.Never);
         result.Snapshot!.Items.Select(item => item.DishId).Should().Equal(issued ? 1 : 3);
+    }
+
+    // TEST-58b: In an edit the draft is exactly the edit_plan changes: a kept dish of the same meal that no longer passes is never swapped for the dish issued
+    // for that meal. Replacing one of two dinner dishes swapped the other for the same new dish, twice (conversation 128, 2026-11-28).
+    /// <summary>The replaced dish changes, the other dish of the meal stays as it was.</summary>
+    [Fact]
+    public async Task RunAsync_EditOfOneDish_KeepsTheMealsOtherDish()
+    {
+        // STEP-01: A saved lunch holding dish 3 (gone from the catalog) and dish 2; the edit replaces dish 2 with dish 1, issued for that lunch.
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var kept = new AgentItem("a", 77, 1, "lunch", 0, 3);
+        var other = new AgentItem("b", 78, 1, "lunch", 1, 2);
+        var context = AgentTestData.Context(new AgentSnapshot(state, [kept, other], []));
+        context.State = state;
+        context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        context.PreparedChanges = [new AgentChange("replace", "b", other with { DishId = 1, SourceItemId = null })];
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "patch_proposal", Reply = "Mình đổi {changes} nhé, tổng khoảng {total}.", Scope = new(), BaseProposalVersion = context.ProposalVersion }));
+
+        // STEP-02: Run the turn.
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2)]).RunAsync(context, default);
+
+        // STEP-03: Assert only the named dish changed.
+        result.Snapshot!.Items.OrderBy(item => item.ItemKey).Select(item => item.DishId).Should().Equal(3, 1);
+    }
+
+    // TEST-58c: When the edit is ready but the model answers with a chat line of its own that names no change, the reply says the change from the draft
+    // ("Ừ, mình hiểu rồi nhé" over a correct edit, replay of conversation 128).
+    /// <summary>The fixed edit sentence names the new dish; the model's line is not shown.</summary>
+    [Fact]
+    public async Task RunAsync_EditReadyWithModelChatLine_SaysTheChange()
+    {
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var kept = new AgentItem("a", 77, 1, "lunch", 0, 3);
+        var other = new AgentItem("b", 78, 1, "lunch", 1, 2);
+        var context = AgentTestData.Context(new AgentSnapshot(state, [kept, other], []));
+        context.State = state;
+        context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        context.PreparedChanges = [new AgentChange("replace", "b", other with { DishId = 1, SourceItemId = null })];
+        // The model's last call of the turn, after the edit tool ran: an act step, not the reading of the message.
+        context.Request.ConfirmedState = state;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep([],
+            new AgentOutput { Action = "chat", Reply = "Ừ, mình hiểu rồi nhé." }));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3)]).RunAsync(context, default);
+
+        result.Reply.Should().NotContain("Ừ, mình hiểu rồi").And.Contain("Dish 1");
+        result.Snapshot!.Items.OrderBy(item => item.ItemKey).Select(item => item.DishId).Should().Equal(3, 1);
+    }
+
+    // TEST-58d: A tool call after a ready edit runs nothing and spends no model call: the turn ends with the edit and the backend's edit sentence.
+    // suggest_dish after a ready edit_plan turned the turn into a dish suggestion and dropped the edit (eval run edit-root-x3, conversation 6).
+    /// <summary>The draft holds the change, the reply names it, and the model was called once.</summary>
+    [Fact]
+    public async Task RunAsync_ToolCallAfterReadyEdit_EndsWithTheEdit()
+    {
+        var state = AgentTestData.State() with { NumDays = 1, MealSlots = ["lunch"] };
+        var kept = new AgentItem("a", 77, 1, "lunch", 0, 3);
+        var other = new AgentItem("b", 78, 1, "lunch", 1, 2);
+        var context = AgentTestData.Context(new AgentSnapshot(state, [kept, other], []));
+        context.State = state;
+        context.Grants.Add(new(1, "lunch", [1], Guid.NewGuid(), state));
+        context.PreparedChanges = [new AgentChange("replace", "b", other with { DishId = 1, SourceItemId = null })];
+        context.Request.ConfirmedState = state;
+        var llm = new Mock<IAgentLlmService>();
+        llm.Setup(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AgentLlmStep(
+            [new("s", "suggest_dish", System.Text.Json.JsonSerializer.SerializeToElement(new AgentSuggestionInput(TagIds: [], ExcludeTagIds: [], TasteTargets: []), AgentJson.Options))], null));
+
+        var result = await Create(llm.Object, catalog: [AgentTestData.Dish(1), AgentTestData.Dish(2), AgentTestData.Dish(3)]).RunAsync(context, default);
+
+        result.Snapshot!.Items.OrderBy(item => item.ItemKey).Select(item => item.DishId).Should().Equal(3, 1);
+        result.Reply.Should().StartWith("Mình đã sửa lịch").And.Contain("Dish 1");
+        llm.Verify(x => x.RunAsync(context, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // TEST-59: An edit that swaps in a made-up dish with nothing issued for that meal keeps the meal's dish from the saved plan instead of leaving it empty.

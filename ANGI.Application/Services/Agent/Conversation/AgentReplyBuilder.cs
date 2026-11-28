@@ -78,23 +78,6 @@ public static class AgentReplyBuilder
         return [.. notes];
     }
 
-    /// <summary>
-    /// Ends the reply with the over-budget fact when this turn made the plan cost more than the budget and the reply never mentions the budget.
-    /// The model was told to say it but skipped it in 2 of 3 live runs (S1, AG-19), so the user saw a plan presented as fine. A plan already over
-    /// the same budget before this turn, or a reply already saying it is over ("vượt"), gets no repeat; "ngân sách mới" alone does not count (S1). The question names the total, so a "có" can set it as the new budget.
-    /// </summary>
-    public static string WithBudgetNote(string reply, AgentSnapshot snapshot, decimal? budget, AgentSnapshot? source)
-    {
-        // STEP-01: Return reply early when there is no budget or the plan fits it.
-        var total = snapshot.Items.Sum(item => item.Price);
-        if (budget is not { } limit || total <= limit) return reply;
-        // STEP-02: Return reply early when the plan was already over the same budget or the reply already speaks of the budget.
-        if (source is not null && source.State.BudgetAmount == limit && source.Items.Sum(item => item.Price) > limit) return reply;
-        if (AgentIntakePolicy.Plain(reply).Contains("vuot", StringComparison.Ordinal)) return reply;
-        // STEP-03: Return reply with the fixed note.
-        return $"{reply.TrimEnd()} Lịch này tổng khoảng {Money(total)} đồng/người, vượt ngân sách {Money(limit)} đồng bạn đặt. Mình nâng ngân sách lên {Money(total)} đồng nhé; bạn có muốn mình chọn lại món cho hợp ngân sách không, hay giữ nguyên lịch này?".Trim();
-    }
-
     /// <summary>Điền các ô của model bằng dữ kiện lịch đã kiểm, không kiểm câu và không viết nối phần thiếu.</summary>
     public static string FillSlots(string? reply, AgentSnapshot snapshot, AgentSnapshot? source)
     {
