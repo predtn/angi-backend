@@ -238,7 +238,7 @@ public sealed class AgentContext
     public string? CatalogAnswer { get; set; }
     /// <summary>Set after a repeated identical tool request; the next provider call must return a final output.</summary>
     public bool ToolsClosed { get; set; }
-    /// <summary>Set when a recommendation was requested before province, duration and budget were known; the turn asks for them.</summary>
+    /// <summary>Set when a recommendation was requested before the province and duration were known; the model asks for them.</summary>
     public bool TripDetailsMissing { get; set; }
     /// <summary>Set when the preferences question was asked before this message; once the model reads an answer in it, this turn plans.</summary>
     public bool IntakeComplete { get; set; }
@@ -338,7 +338,7 @@ public sealed record AgentPriceTierRange(decimal From, decimal To, decimal Lowes
 /// <summary>A dish a suggestion showed: enough for the model to put it on a day and meal later without searching again.</summary>
 public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId, string Restaurant);
 
-/// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply shown when the model's wording fails its check.</summary>
+/// <summary>The dishes picked for a suggestion, whether they were really ranked by the user's taste, and the fixed reply a suggestion by meal shows.</summary>
 /// <param name="Area">The place the user named that the search stayed around.</param>
 /// <param name="AreaNotFound">The place the user named that could not be located, so the search was not narrowed to it.</param>
 /// <param name="PriceBelow">When nothing fits the asked price: the nearest catalog price under it for the same search, else null.</param>

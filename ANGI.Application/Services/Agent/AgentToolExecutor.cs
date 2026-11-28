@@ -314,10 +314,9 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         context.PriceTiers.Clear();
         context.PlanWishApplied = null;
         context.WishShortMeals.Clear();
-        // STEP-04: Return the anonymous result early when AgentReplyBuilder.TripDetailsQuestion() exists or AgentIntakePolicy.PreferencesDue(context) holds.
-        // Chỉ ranking khi đã rõ tỉnh, số ngày và ngân sách (hoặc người dùng đã chấp nhận không giới hạn). Thiếu chúng là câu hỏi
-        // cho người dùng, không phải lỗi hợp đồng: không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi.
-        // Orchestrator hỏi lại bằng câu cố định mà không gọi thêm LLM. Câu hỏi khẩu vị cũng phải đến trước khi ranking, kể cả khi model vừa đọc xong câu trả lời.
+        // STEP-04: Return the missing_trip_details result early when AgentReplyBuilder.TripDetailsQuestion() exists.
+        // Chỉ ranking khi đã rõ tỉnh và số ngày (ngân sách không bắt buộc). Thiếu chúng là câu hỏi cho người dùng, không phải lỗi hợp đồng:
+        // không throw để lượt chat không thành 503 và mất câu trả lời vừa gửi. Model đọc status này và tự hỏi.
         if (AgentReplyBuilder.TripDetailsQuestion(state) is not null)
         {
             context.TripDetailsMissing = true;
@@ -538,10 +537,6 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         return [.. all.Where(dish => dish.Price <= cap), .. all.Where(dish => dish.Price > cap).OrderBy(dish => dish.Price)];
     }
 
-    /// <summary>
-    /// The dishes "dựa vào các món trên" means: the suggestion lists the model named by id (conversation 597 meant the most-liked list, not the latest one),
-    /// or the latest suggestion when it named none. Ids are checked against the stored lists before this runs.
-    /// </summary>
     /// <summary>The dish with this id in any suggestion the chat showed; null when none showed it, so a model cannot pass an id of its own.</summary>
     private static AgentOfferedDish? OfferedDish(AgentState state, int dishId) =>
         (state.OfferedDishes ?? []).Concat((state.OfferedLists ?? []).SelectMany(list => list.Dishes)).FirstOrDefault(dish => dish.DishId == dishId);
@@ -663,29 +658,29 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
             if (restaurant.Status != "found") return null;
             restaurantId = restaurant.Matches.Single().RestaurantId;
         }
-        // STEP-04: When request.DishName exists and no dish was picked by id, run the branch below.
+        // STEP-03: When request.DishName exists and no dish was picked by id, run the branch below.
         if (request.DishId is null && request.DishName is { } dishName)
         {
-            // STEP-05: Call LookupAsync and keep lookup.
+            // STEP-04: Call LookupAsync and keep lookup.
             var lookup = await LookupAsync(context, new("dish", dishName, state.Province), ct);
-            // STEP-06: Return null early when lookup.Status is not "found" or "family".
+            // STEP-05: Return null early when lookup.Status is not "found" or "family".
             if (lookup.Status is not ("found" or "family")) return null;
-            // STEP-07: Set dishIds.
+            // STEP-06: Set dishIds.
             dishIds = lookup.Matches.Where(match => match.Available && (!restaurantId.HasValue || match.RestaurantId == restaurantId))
                 .Select(match => checked((int)match.Id)).ToArray();
-            // STEP-08: Return null early when dishIds.Length is 0.
+            // STEP-07: Return null early when dishIds.Length is 0.
             if (dishIds.Length == 0) return null;
         }
-        // STEP-09: Prepare fitting as List<string>.
+        // STEP-08: Prepare fitting as List<string>.
         var fitting = new List<string>();
-        // STEP-10: For each meal in meals, prepare filter as DishCandidateFilter, prepare ids through dishes.GetCandidateIdsAsync and 1 more action(s).
+        // STEP-09: For each meal in meals, prepare filter as DishCandidateFilter, prepare ids through dishes.GetCandidateIdsAsync and 1 more action(s).
         foreach (var meal in meals)
         {
             var filter = new DishCandidateFilter { Province = state.Province, RestaurantId = restaurantId, DishIds = dishIds, RequireAllTags = true, CompatibleMealTimeCode = meal, OpenForMeal = meal };
             var ids = await dishes.GetCandidateIdsAsync(filter, 1, ct);
             if (ids is { Count: > 0 }) fitting.Add(meal);
         }
-        // STEP-11: Return one of two results depending on fitting.Count > 0.
+        // STEP-10: Return one of two results depending on fitting.Count > 0.
         // Không bữa nào hợp: vẫn xếp vào bữa ưu tiên để bước xếp hạng báo thiếu đúng bữa đó.
         return fitting.Count > 0 ? [.. fitting] : meals;
     }
@@ -1848,11 +1843,11 @@ public sealed class AgentToolExecutor(IDishRepository dishes, ITagRepository tag
         return new("found", "Mình tìm thấy đúng món/quán bạn hỏi trên ANGI.", exact);
     }
 
-    /// <summary>Returns a model-argument error to the model as a tool result so it can correct the call; never a user-visible notice.</summary>
     /// <summary>Sends a price written in thousands back to the model; run as given it would only report that nothing fits.</summary>
     private object PriceUnitError(AgentContext context, decimal price) =>
         ArgumentError(context, $"Giá tối đa {price} quá thấp. Tiền tính bằng đồng: 50k là 50000. Hãy gọi lại với đúng số đồng.");
 
+    /// <summary>Returns a model-argument error to the model as a tool result so it can correct the call; never a user-visible notice.</summary>
     private object ArgumentError(AgentContext context, string message)
     {
         telemetry.Record("tool_argument_error", context.ConversationId, context.TurnId, context.AttemptId, new { message });
