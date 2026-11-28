@@ -113,7 +113,8 @@ public static class AgentLlmSchema
             {
                 ["op"] = Choice("add", "replace", "remove"), ["targetItemKey"] = Nullable(Scalar("string")),
                 ["dayNumber"] = Nullable(Scalar("integer")), ["mealSlot"] = Nullable(Choice("breakfast", "lunch", "dinner", "snack", "late_night")),
-                ["dishId"] = Nullable(Scalar("integer")), ["dishName"] = Nullable(Scalar("string")), ["kindTagIds"] = ArrayOf(Scalar("integer"))
+                ["dishId"] = Nullable(Scalar("integer")), ["dishName"] = Nullable(Scalar("string")), ["kindTagIds"] = ArrayOf(Scalar("integer")),
+                ["wish"] = Nullable(Scalar("string"))
             }))
         }),
         ["locate_places"] = Obj(new()

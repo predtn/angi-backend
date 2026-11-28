@@ -127,8 +127,8 @@ public sealed class AgentConstraintGuard
 
     // Taste evidence
 
-    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): vừa.</summary>
-    public const double DefaultTasteLevel = 0.5;
+    /// <summary>The level of a taste the user named without one ('ưu tiên đồ cay'): nhiều, so the plan leans toward it (user decision 2026-11-28; vừa before).</summary>
+    public const double DefaultTasteLevel = 0.75;
 
     // Các từ này chỉ nói về sở thích, không nêu mức: "thích ăn cay" chưa cho biết cay bao nhiêu, nên chỉ được dùng mức mặc định.
     private static readonly HashSet<string> NoLevelWords = ["thich", "an", "mon", "vi", "do", "khau", "muon", "uu", "tien", "toi", "minh", "em", "la", "va", "ma"];

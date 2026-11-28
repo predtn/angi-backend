@@ -301,6 +301,11 @@ public sealed class AgentContext
     public bool? PlanWishApplied { get; set; }
     /// <summary>Meals whose dishes fitting the plan wish were fewer than their days, so the rest of their days use the ordinary taste ranking.</summary>
     public List<string> WishShortMeals { get; } = [];
+    /// <summary>
+    /// The first accepted get_recommendation call of this turn: later calls of the same turn keep its fromOffered, offered lists and wish, so the model
+    /// cannot switch a plan to earlier suggestions after the user's message was read as a plain plan.
+    /// </summary>
+    public AgentPlanChoice? FirstRecommendation { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>
@@ -343,6 +348,9 @@ public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId
 /// was ranked without it, so the reply must not claim they match the wish.</param>
 public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null,
     decimal? PriceBelow = null, decimal? PriceAbove = null, bool ByMeal = false, bool? WishApplied = null);
+
+/// <summary>What the first ranking call of a turn chose about earlier suggestions and the plan wish.</summary>
+public sealed record AgentPlanChoice(bool FromOffered, int[]? OfferedListIds, AgentScope[]? OfferedMeals, string? Wish);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);

@@ -318,11 +318,30 @@ public sealed class AgentToolExecutorTests
         result.GetProperty("wishShortMeals").ValueKind.Should().Be(JsonValueKind.Null);
         context.State.PlanWish.Should().Be("món đặc trưng Hà Nội");
 
-        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
+        // Next turn: one day ranked again with no wish keeps the trip's wish.
+        context.FirstRecommendation = null;
+        await tools.ExecuteAsync(context, Call(Input() with { Scope = "day", DayNumber = 1 }), CancellationToken.None);
         context.State.PlanWish.Should().Be("món đặc trưng Hà Nội");
-        await tools.ExecuteAsync(context, Call(Input() with { Wish = "" }), CancellationToken.None);
+        // Next turn: the whole trip ranked with no wish means none ("không cần theo đặc trưng Hà Nội" sent none and the old wish stayed).
+        context.FirstRecommendation = null;
+        await tools.ExecuteAsync(context, Call(Input()), CancellationToken.None);
         context.State.PlanWish.Should().BeNull();
         picker.Verify(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    // TEST-01c2e6b: Within one turn the first accepted ranking call decides earlier suggestions and the wish: a later call cannot switch the plan to
+    // them (replay 110 of conversation 109: "vậy lập lịch cho tôi, tôi muốn ăn cay" was planned from the specialties suggested just before).
+    /// <summary>A second call of the same turn asking for offered dishes and a wish gets neither.</summary>
+    [Fact]
+    public async Task ExecuteAsync_SecondRankingOfTurn_KeepsFirstChoice()
+    {
+        var (_, context, tools, picker) = await PlanWish(new AgentDishPick([14], [12]), null);
+
+        await tools.ExecuteAsync(context, Call(Input() with { FromOffered = true, Wish = "món đặc trưng Hà Nội" }), CancellationToken.None);
+
+        context.State.PlanWish.Should().BeNull();
+        context.FirstRecommendation!.FromOffered.Should().BeFalse();
+        picker.Verify(x => x.PickAsync(It.IsAny<AgentDishPickRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // TEST-01c2e7: Too few dishes fit the wish for a meal's days: the meal keeps every dish with the fitting one first, so no day is left empty, and the
@@ -1048,31 +1067,6 @@ public sealed class AgentToolExecutorTests
         reco.VerifyNoOtherCalls();
     }
 
-    // TEST-17: A whole-day taste the model proposes for "bữa 2 ngày 1" is narrowed to lunch of day 1 before the meal is ranked.
-    /// <summary>Checks the backend binds a meal-specific taste to that meal even when the model widens it to the whole day.</summary>
-    [Fact]
-    public async Task ExecuteAsync_MealSpecificTasteWidenedByModel_IsNarrowedBeforeRanking()
-    {
-        // STEP-01: Create fixture through AgentTestData.Validator.
-        var fixture = AgentTestData.Validator(AgentTestData.Dish());
-        // STEP-02: Stub fixture.GetCandidateIdsAsync.
-        fixture.Dishes.Setup(x => x.GetCandidateIdsAsync(It.IsAny<DishCandidateFilter>(), 2000, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { 1 });
-        // STEP-03: Get context from AgentTestData.Context, set context.State to a copy of context.State, derive input from a copy of Input() and 1 more.
-        var context = AgentTestData.Context();
-        context.State = context.State with { MealSlots = ["breakfast", "lunch", "dinner"],
-            PendingPlanningRequest = new(["Tôi muốn ăn ở Hà Nội 2 ngày, tôi thích ăn chua", "Vừa, áp dụng cho bữa 2 ngày 1"]) };
-        // Model không gửi được pendingPlanningRequest (ngoài schema tool); backend tự giữ bản đã lưu.
-        var input = Input() with { State = context.State with { PendingPlanningRequest = null, TasteOverrides = [new(1, null, [new("sour", .5, "Vừa")])] } };
-        var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
-
-        // STEP-04: Run tools.ExecuteAsync with context.
-        await tools.ExecuteAsync(context, Call(input), CancellationToken.None);
-
-        // STEP-05: Assert context.State.TasteOverrides.Select(filtered) equals ((short)1, "lunch") and context.TripDetailsMissing is false.
-        context.State.TasteOverrides.Select(x => (x.DayNumber, x.MealSlot)).Should().Equal(((short)1, "lunch"));
-        context.TripDetailsMissing.Should().BeFalse();
-    }
-
     // TEST-18: A per-meal search grants the meal quota to the model and keeps the rest of the ranked distinct names as a reserve grant
     // for the same position, which is never returned to the model.
     /// <summary>Keeps unused ranked dishes available for backend repeat repair without enlarging the model's payload.</summary>
@@ -1781,7 +1775,7 @@ public sealed class AgentToolExecutorTests
         context.Request.Content = "tôi thích ăn cay";
         var before = context.State;
         // STEP-02: Derive input from a copy of Input() and create tools as AgentToolExecutor.
-        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", .75, quote)] } };
+        var input = Input() with { State = context.State with { TasteTargets = [new("spicy", 1, quote)] } };
         var tools = new AgentToolExecutor(fixture.Dishes.Object, fixture.Tags.Object, Mock.Of<IRecommendationService>(), new(), new(fixture.Routes.Object), new(), Mock.Of<IAgentTelemetry>());
 
         // STEP-03: Run tools.ExecuteAsync with context and keep result.
@@ -2480,11 +2474,11 @@ public sealed class AgentToolExecutorTests
         // STEP-04: Run tools.ExecuteAsync with context and call and keep result.
         var result = await tools.ExecuteAsync(context, call, CancellationToken.None);
 
-        // STEP-05: Assert the vector carries the stated values, the rest come from the profile, and the off-scale level is dropped.
+        // STEP-05: Assert the vector carries the stated values, the rest come from the profile at half weight, and the off-scale level is dropped.
         var values = sent!.UserVectorOverride!;
         values[Array.IndexOf(AgentTasteOntology.Dimensions, "spicy")].Should().Be(.75);
         values[Array.IndexOf(AgentTasteOntology.Dimensions, "sour")].Should().Be(.5);
-        values[Array.IndexOf(AgentTasteOntology.Dimensions, "sweet")].Should().Be(hasProfile ? 0.2 : 0);
+        values[Array.IndexOf(AgentTasteOntology.Dimensions, "sweet")].Should().Be(hasProfile ? 0.1 : 0);
         // STEP-06: Assert result.personalized follows the profile and context.State is unchanged.
         result.GetProperty("personalized").GetBoolean().Should().Be(hasProfile);
         context.State.Should().BeSameAs(before);

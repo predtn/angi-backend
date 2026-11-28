@@ -48,7 +48,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
         var coverageRepaired = false;
         var tripRepaired = false;
         var transientRetries = 0;
-        var executedTools = new HashSet<string>(StringComparer.Ordinal);
+        var executedTools = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal);
+        // A call is the same request when the tool, its arguments and the trip state match. The state is read after the call ran: the call's own
+        // state change does not make the next identical call new (eval run final2-43x2, conversation 84, ran it twice and then gave up).
+        string CallKey(AgentToolCall call) => call.Name + ":" + call.Arguments.GetRawText() + ":" + AgentJson.Write(context.State);
         var turnStarted = Stopwatch.GetTimestamp();
         var confirmedState = context.ConstraintBaseline = context.State;
         // STEP-10: When no plan exists, set context.ConstraintBaseline.
@@ -67,7 +70,7 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
             if (await tools.StarterCallAsync(context, timeout.Token) is { } starter)
             {
                 var starterResult = await tools.ExecuteAsync(context, starter, timeout.Token);
-                executedTools.Add(starter.Name + ":" + starter.Arguments.GetRawText());
+                executedTools[CallKey(starter)] = starterResult;
                 context.Exchanges.Add(new([starter], [starterResult]));
                 toolRounds++;
                 toolCalls++;
@@ -162,6 +165,14 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     }
                     throw new AgentProviderException(failure);
                 }
+                // An edit that is ready ends the turn's tool rounds: the draft is exactly its changes. A further call (suggest_dish after a ready edit_plan)
+                // turned the turn into a dish suggestion and dropped the edit (eval run edit-root-x3, conversation 6). No call runs and no model call is spent:
+                // the backend's edit sentence says the changes.
+                if (step.Tools.Length > 0 && context.PreparedChanges is { Count: > 0 } && phase != AgentTurnPhase.Read)
+                {
+                    telemetry.Record("tools_after_edit", context.ConversationId, context.TurnId, context.AttemptId, new { tools = step.Tools.Select(tool => tool.Name).ToArray() });
+                    step = new([], new AgentOutput { Action = "patch_proposal", Reply = EditReply }, step.Tokens);
+                }
                 // STEP-23: When step.Tools.Length > 0, throw the error from Unavailable when context.ToolsClosed is true, ++toolRounds > limits.MaxToolRounds and more.
                 if (step.Tools.Length > 0)
                 {
@@ -173,17 +184,19 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     var results = new System.Text.Json.JsonElement[step.Tools.Length];
                     for (var index = 0; index < step.Tools.Length; index++)
                     {
-                        // Cùng tool + cùng tham số trong một lượt chỉ trả lại dữ liệu đã có. Không chạy lại và đóng tools để
-                        // lần gọi LLM kế tiếp phải dùng kết quả hiện có, tránh vòng lặp gọi lại cùng một gợi ý làm tốn quota.
-                        if (!executedTools.Add(step.Tools[index].Name + ":" + step.Tools[index].Arguments.GetRawText()))
+                        // Cùng tool + cùng tham số trong một lượt không chạy lại; tools đóng để lần gọi LLM kế tiếp là lần cuối. Kết quả cũ được
+                        // trả lại nguyên vẹn: chỉ báo "đã trả lời ở trên" thì model viết "chưa cập nhật được" thay vì dùng dữ liệu đó (2026-11-27, 2 trên 5 lần).
+                        // The trip state is part of the key: after locate_places set the day areas, the same get_recommendation arguments are a new
+                        // request, and answering it with the result from before made the draft fail validation (eval run final-43x2, conversation 31).
+                        if (executedTools.TryGetValue(CallKey(step.Tools[index]), out var earlier))
                         {
                             context.ToolsClosed = true;
                             telemetry.Record("duplicate_tool", context.ConversationId, context.TurnId, context.AttemptId, new { step.Tools[index].Name });
-                            results[index] = System.Text.Json.JsonSerializer.SerializeToElement(new { status = "duplicate_request",
-                                message = "Identical request already answered above in this turn. Reuse those candidates and return the final output." });
+                            results[index] = earlier;
                             continue;
                         }
                         results[index] = await tools.ExecuteAsync(context, step.Tools[index], timeout.Token);
+                        executedTools[CallKey(step.Tools[index])] = results[index];
                     }
                     // Giữ liên kết call ID -> result để lần gọi LLM kế tiếp nhận đúng dữ liệu vừa lấy.
                     context.Exchanges.Add(new(step.Tools, results));
@@ -256,7 +269,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 if (context.PreparedChanges is { Count: > 0 } prepared && output.Action != "use_tool" && phase != AgentTurnPhase.Read)
                 {
                     telemetry.Record("prepared_changes", context.ConversationId, context.TurnId, context.AttemptId, new { output.Action, changes = prepared.Count });
-                    output = output with { Action = "patch_proposal", Clarification = null, State = null, Items = [], EditMeals = [], Scope = new AgentScope(),
+                    // The draft is exactly these changes, so the reply must say them: a reply of the model's own that names no change ("Ừ, mình hiểu rồi nhé",
+                    // "lịch chưa khớp…" over a correct edit, replay of conversation 128) gives way to the fixed sentence, which the backend fills from the draft.
+                    var reply = output.Reply?.Contains("{changes}", StringComparison.Ordinal) == true ? output.Reply : EditReply;
+                    output = output with { Action = "patch_proposal", Reply = reply, Clarification = null, State = null, Items = [], EditMeals = [], Scope = new AgentScope(),
                         BaseProposalVersion = context.ProposalVersion, Changes = [.. prepared] };
                 }
                 // Place and duration are known and no plan exists, yet the model asks for trip details again, mostly the start date or the budget
@@ -510,7 +526,10 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                     }
                 }
                 var invented = fabricated.Select(AgentProposalValidator.FabricatedDish).OfType<int>().ToHashSet();
-                var stale = validated.Validation.Errors.Select(AgentProposalValidator.FabricatedDish).OfType<int>().Where(keptDishes.Contains).ToHashSet();
+                // In an edit (the turn's draft is exactly the edit_plan changes) a kept dish the user did not name is never swapped: replacing one of two
+                // dinner dishes swapped the other for the same new dish, twice (conversation 128, 2026-11-28). It stays with a warning, as below.
+                var stale = context.PreparedChanges is { Count: > 0 } ? []
+                    : validated.Validation.Errors.Select(AgentProposalValidator.FabricatedDish).OfType<int>().Where(keptDishes.Contains).ToHashSet();
                 if (invented.Count > 0 || stale.Count > 0)
                 {
                     var used = snapshot.Items.Select(item => item.DishId).ToHashSet();
@@ -566,8 +585,9 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
                 // STEP-50: Return the new result.
                 // Chỉ điền các ô model viết ({total}, {numDays}, {place}, {changes}); không kiểm câu, không viết nối dữ kiện.
                 var reviewed = validated.Snapshot with { State = reviewedState };
-                return new(Raw(AgentReplyBuilder.WithBudgetNote(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source),
-                        validated.Snapshot, reviewedState.BudgetAmount, context.Source)), reviewedState,
+                // An over-budget plan is shown by the card's budget warning; no sentence is glued onto the model's reply any more (user decision 2026-11-28:
+                // the glued question repeated what the reply had just said, conversation 40).
+                return new(Raw(AgentReplyBuilder.FillSlots(output.Reply, validated.Snapshot, context.Source)), reviewedState,
                     reviewed with { Notes = AgentReplyBuilder.PlanNotes(reviewed) }, validated.Validation);
             }
             // STEP-51: Throw the error from Unavailable.
@@ -730,8 +750,11 @@ public sealed class AgentOrchestrator(IAgentLlmService llm, AgentToolExecutor to
     private static string Raw(string? reply) => (reply ?? "").Replace("\\r\\n", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal).Trim();
 
     /// <summary>Nhận state của model như nó viết. Chỉ chuẩn hóa tên tỉnh, ngân sách theo ngày, các trường backend sở hữu và chạy FluentValidation; không hỏi xác nhận khi nới điều kiện.</summary>
+    /// <summary>The reply of an edit when the model's own reply names no change; the backend fills {changes} and {total} from the draft.</summary>
+    private const string EditReply = "Mình đã sửa lịch: {changes}. Tổng giờ khoảng {total}; bạn xem lại, ổn thì bảo mình chốt nhé!";
+
     /// <summary>
-    /// True when the trip has a place and a duration, and its budget is known or was already asked for: nothing a trip-details question asks is still needed.
+    /// True when the trip has a place and a duration: nothing a trip-details question asks is still needed (a missing budget plans with none).
     /// The model's own reading of this message counts, so "2 ngày ở Hà Nội, 1 triệu" in the first message is known before the state is accepted.
     /// </summary>
     private static bool TripKnown(AgentContext context, AgentState? read)

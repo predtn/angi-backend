@@ -29,8 +29,8 @@ public sealed class AgentPreferenceServiceTests
         var state = await service.EnsureAsync(new() { TasteTargets = [new("spicy", .75)] }, 3, default);
         // STEP-05: Assert state.Preferences.EffectiveVector[5] is .75, state.Preferences.EffectiveVector[8] is 1.4 and 2 more.
         state.Preferences!.EffectiveVector![5].Should().Be(.75);
-        state.Preferences.EffectiveVector[8].Should().Be(1.4);
-        state.Preferences.EffectiveVector[10].Should().Be(-.2);
+        state.Preferences.EffectiveVector[8].Should().Be(.7); // unstated tastes count half once another is stated
+        state.Preferences.EffectiveVector[10].Should().Be(-.1);
         profile[5].Should().Be(.25);
         // STEP-06: Set profile[5] to 1 and set state to service.EnsureAsync().
         profile[5] = 1;
@@ -79,7 +79,7 @@ public sealed class AgentPreferenceServiceTests
         var accepted = new AgentConstraintGuard().Accept(current, proposed);
         // STEP-02: Assert accepted.Preferences.EffectiveVector[0] is .5, accepted.Preferences.EffectiveVector[5] is .25 and 1 more.
         accepted.Preferences!.EffectiveVector![0].Should().Be(.5);
-        accepted.Preferences.EffectiveVector[5].Should().Be(.25);
+        accepted.Preferences.EffectiveVector[5].Should().Be(.125);
         accepted.Preferences.BaselineVector.Should().BeSameAs(baseline);
     }
 
