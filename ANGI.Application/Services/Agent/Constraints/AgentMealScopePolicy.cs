@@ -43,43 +43,6 @@ public static class AgentMealScopePolicy
         return new([.. meals.Distinct()], days, outOfRange);
     }
 
-    /// <summary>User wording that may scope a taste this turn: the retained clarification messages, or the current message when it states a taste.</summary>
-    public static string[] Evidence(AgentContext context) => context.State.PendingPlanningRequest?.Messages
-        ?? (AgentTasteClarificationPolicy.StatesTaste(context.Request.Content) ? [context.Request.Content] : []);
-
-    /// <summary>Turns a whole-day taste the model newly proposed into the meal overrides the user named for that day.</summary>
-    public static AgentState? Narrow(AgentState? proposed, AgentState current, IEnumerable<string> messages)
-    {
-        // STEP-01: Return proposed early when proposed is missing or proposed.TasteOverrides.Length is 0.
-        if (proposed is null || proposed.TasteOverrides.Length == 0) return proposed;
-        // STEP-02: Prepare references through messages.Select(filtered).ToArray, meals through SelectMany(filtered).Distinct().ToArray and more.
-        var references = messages.Select(message => Read(message, proposed)).ToArray();
-        var meals = references.SelectMany(x => x.Meals).Distinct().ToArray();
-        var days = references.SelectMany(x => x.Days).ToHashSet();
-        var overrides = new List<AgentTasteOverride>();
-        var changed = false;
-        // STEP-03: Go through each item in proposed.TasteOverrides.
-        foreach (var item in proposed.TasteOverrides)
-        {
-            // STEP-04: Prepare named through Where(filtered).Select(filtered).ToArray.
-            var named = meals.Where(x => x.DayNumber == item.DayNumber).Select(x => x.MealSlot!).ToArray();
-            // STEP-05: Skip this round when item.MealSlot exists, named.Length is 0, days contains item.DayNumber or 2 more condition(s).
-            // Chỉ sửa phạm vi model vừa đề xuất ở lượt này. Ngày cũng được nhắc riêng ("cả ngày 1") hoặc bữa đã có khẩu vị riêng thì giữ nguyên.
-            if (item.MealSlot is not null || named.Length == 0 || days.Contains(item.DayNumber) || current.TasteOverrides.Any(x => Same(x, item)) ||
-                named.Any(meal => proposed.TasteOverrides.Any(x => x.DayNumber == item.DayNumber && x.MealSlot == meal)))
-            {
-                overrides.Add(item);
-                continue;
-            }
-            // STEP-06: Add the built entries to overrides.
-            overrides.AddRange(named.Select(meal => item with { MealSlot = meal }));
-            // STEP-07: Set changed.
-            changed = true;
-        }
-        // STEP-08: Return one of two results depending on changed is true.
-        return changed ? proposed with { TasteOverrides = [.. overrides] } : proposed;
-    }
-
     // "Bữa N" đếm theo các bữa đã khai báo, sắp theo thứ tự sáng → khuya; chưa khai báo thì mặc định sáng, trưa, tối.
     private static string[] Slots(AgentState state) => state.MealSlots.Length > 0
         ? AgentStateValidator.Meals.Where(state.MealSlots.Contains).ToArray() : DefaultMeals;
@@ -108,9 +71,6 @@ public static class AgentMealScopePolicy
         // STEP-05: Return one of two results depending on number >= 1 and number <= slots.Length.
         return number >= 1 && number <= slots.Length ? slots[number - 1] : null;
     }
-
-    private static bool Same(AgentTasteOverride left, AgentTasteOverride right) =>
-        left.DayNumber == right.DayNumber && left.MealSlot == right.MealSlot && left.Targets.SequenceEqual(right.Targets);
 
     private static string Normalize(string text)
     {

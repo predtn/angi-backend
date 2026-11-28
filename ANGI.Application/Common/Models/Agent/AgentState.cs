@@ -90,6 +90,12 @@ public sealed record AgentState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentLastSuggestion? LastSuggestion { get; init; }
     /// <summary>
+    /// Backend-owned: what the user wants from the whole plan beyond the filters ("món đặc trưng Hà Nội", "món độc lạ"), set from get_recommendation's wish
+    /// and kept for later replans of this trip until a call clears it with an empty wish. Each meal's dishes are picked for it before the taste ranking.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PlanWish { get; init; }
+    /// <summary>
     /// Backend-owned: the latest suggestion lists (at most <see cref="AgentOfferedList.MaxKept"/>), each with the conditions that made it, so "dựa vào các món
     /// like nhiều nhất" can mean an earlier list than the last one (conversation 597). OfferedDishes stays the latest list.
     /// </summary>
@@ -291,6 +297,15 @@ public sealed class AgentContext
     public AgentState? ReadState { get; set; }
     /// <summary>Meals of this turn's rankings that the suggested dishes could not fill, filled from the whole catalog instead; told to the model as a warning.</summary>
     public List<string> OfferedShortfall { get; } = [];
+    /// <summary>Null when this turn's ranking had no plan wish; true when every meal's pick step ran; false when one failed and that meal was ranked without it.</summary>
+    public bool? PlanWishApplied { get; set; }
+    /// <summary>Meals whose dishes fitting the plan wish were fewer than their days, so the rest of their days use the ordinary taste ranking.</summary>
+    public List<string> WishShortMeals { get; } = [];
+    /// <summary>
+    /// The first accepted get_recommendation call of this turn: later calls of the same turn keep its fromOffered, offered lists and wish, so the model
+    /// cannot switch a plan to earlier suggestions after the user's message was read as a plain plan.
+    /// </summary>
+    public AgentPlanChoice? FirstRecommendation { get; set; }
 }
 
 /// <summary>Scoped evidence from actual recommendation results, never a model's claim of missing dishes.</summary>
@@ -308,7 +323,7 @@ public sealed record AgentSuggestedDish(string Name, string Restaurant, decimal 
 /// </summary>
 public sealed record AgentLastSuggestion(string? MealSlot = null, short[]? TagIds = null, short[]? ExcludeTagIds = null, decimal? MinPrice = null, decimal? MaxPrice = null,
     int Count = 10, string? NameQuery = null, string? DishForm = null, string? Area = null, bool BudgetShare = false, string? SortBy = null, bool Now = false,
-    string[]? DishNames = null, string[]? MealSlots = null, string? AreaKind = null, string[]? AreaParts = null);
+    string[]? DishNames = null, string[]? MealSlots = null, string? AreaKind = null, string[]? AreaParts = null, string? Wish = null);
 
 /// <summary>One suggestion list the chat showed: its id, the conditions that made it and its dishes.</summary>
 public sealed record AgentOfferedList(int Id, AgentLastSuggestion? Conditions, AgentOfferedDish[] Dishes)
@@ -329,8 +344,13 @@ public sealed record AgentOfferedDish(int DishId, string Name, long RestaurantId
 /// <param name="PriceBelow">When nothing fits the asked price: the nearest catalog price under it for the same search, else null.</param>
 /// <param name="PriceAbove">When nothing fits the asked price: the nearest catalog price over it for the same search, else null.</param>
 /// <param name="ByMeal">The dishes of several meals, shown as the fixed reply grouped by meal, so no model call is needed to word it.</param>
+/// <param name="WishApplied">Null when no wish was asked; true when the dishes were picked for the wish; false when the pick step failed and the list
+/// was ranked without it, so the reply must not claim they match the wish.</param>
 public sealed record AgentDishSuggestion(AgentSuggestedDish[] Dishes, bool Personalized, bool AroundPin, string FixedReply, bool HasPlan = false, string? Area = null, string? AreaNotFound = null,
-    decimal? PriceBelow = null, decimal? PriceAbove = null, bool ByMeal = false);
+    decimal? PriceBelow = null, decimal? PriceAbove = null, bool ByMeal = false, bool? WishApplied = null);
+
+/// <summary>What the first ranking call of a turn chose about earlier suggestions and the plan wish.</summary>
+public sealed record AgentPlanChoice(bool FromOffered, int[]? OfferedListIds, AgentScope[]? OfferedMeals, string? Wish);
 
 /// <summary>Completed user and assistant text suitable for a bounded context window.</summary>
 public sealed record AgentTranscript(string Role, string Content);

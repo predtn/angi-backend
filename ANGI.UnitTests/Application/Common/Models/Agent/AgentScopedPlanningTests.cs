@@ -30,7 +30,7 @@ public sealed class AgentScopedPlanningTests
         // STEP-02: Assert AgentScopedPlanning.Vector()[5] is 1, AgentScopedPlanning.Vector()[5] is 0, AgentScopedPlanning.Vector()[5] is .25 and 2 more.
         AgentScopedPlanning.Vector(state, 1, "lunch")![5].Should().Be(1);
         AgentScopedPlanning.Vector(state, 1, "dinner")![5].Should().Be(0);
-        AgentScopedPlanning.Vector(state, 2, "lunch")![5].Should().Be(.25);
+        AgentScopedPlanning.Vector(state, 2, "lunch")![5].Should().Be(.125); // unstated tastes count half once another is stated
         AgentScopedPlanning.Vector(state, 2, "lunch")![0].Should().Be(.5);
         baseline.Should().OnlyContain(x => x == .25);
     }
